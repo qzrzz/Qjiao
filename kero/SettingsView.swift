@@ -90,6 +90,15 @@ struct SettingsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
+                Picker("Package manager", selection: $settings.packageManagerCommand) {
+                    ForEach(PackageManagerCommand.allCases) { command in
+                        Text(command.rawValue).tag(command)
+                    }
+                }
+                Text("Used for package scripts launched from the Info panel.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
                 Toggle(
                     "Restore session history on relaunch",
                     isOn: $settings.restoreTerminalHistory
@@ -127,7 +136,8 @@ struct SettingsView: View {
                         && settings.theme == .system
                         && !settings.wrapLines
                         && !settings.restoreTerminalHistory
-                        && !settings.directClickMovesCursor)
+                        && !settings.directClickMovesCursor
+                        && settings.packageManagerCommand == .npm)
                 }
             }
         }

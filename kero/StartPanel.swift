@@ -1,0 +1,451 @@
+//
+//  StartPanel.swift
+//  kero
+//
+
+import AppKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// Project-local launchers edited directly inside one continuous list.
+struct StartPanel: View {
+    @ObservedObject var project: Project
+    let runCommand: (ProjectLaunchCommand) -> Void
+    let runAllCommands: () -> Void
+
+    @State private var expandedCommandID: UUID?
+    @State private var draggedCommandID: UUID?
+    @State private var dropTargetCommandID: UUID?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            if project.launchCommands.isEmpty {
+                emptyState
+            } else {
+                commandList
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "play.circle")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color(nsColor: Theme.cursor))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Start")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Project launchers")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Button(action: runAllCommands) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 28)
+                    .background(Color(nsColor: Theme.cursor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(project.launchCommands.isEmpty)
+            .help("Run all launchers in order")
+            Button(action: addCommand) {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .medium))
+                    .frame(width: 18, height: 18)
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .help("Add Launcher")
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+
+    private var commandList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(project.launchCommands.enumerated()), id: \.element.id) { index, command in
+                    VStack(spacing: 0) {
+                        StartCommandRow(
+                            command: command,
+                            isExpanded: expandedCommandID == command.id,
+                            isDropTarget: dropTargetCommandID == command.id,
+                            run: { runCommand(command) },
+                            toggleExpanded: { toggleExpanded(command.id) },
+                            startDrag: {
+                                draggedCommandID = command.id
+                                return NSItemProvider(object: command.id.uuidString as NSString)
+                            }
+                        )
+                        .onDrop(
+                            of: [.plainText],
+                            delegate: StartCommandDropDelegate(
+                                targetID: command.id,
+                                project: project,
+                                draggedCommandID: $draggedCommandID,
+                                dropTargetCommandID: $dropTargetCommandID
+                            )
+                        )
+
+                        if expandedCommandID == command.id {
+                            StartCommandInlineEditor(
+                                command: binding(for: command.id),
+                                delete: { delete(command.id) }
+                            )
+                        }
+
+                        if index < project.launchCommands.count - 1 {
+                            Divider().padding(.leading, 12)
+                        }
+                    }
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.primary.opacity(0.045))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
+        }
+        .animation(.easeInOut(duration: 0.15), value: expandedCommandID)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "play.circle")
+                .font(.system(size: 24, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text("No project launchers")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text("Add a terminal command, application, folder, or webpage.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+            Button("Add Launcher", action: addCommand)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func addCommand() {
+        let command = ProjectLaunchCommand()
+        project.addLaunchCommand(command)
+        expandedCommandID = command.id
+    }
+
+    private func toggleExpanded(_ id: UUID) {
+        expandedCommandID = expandedCommandID == id ? nil : id
+    }
+
+    private func delete(_ id: UUID) {
+        guard let index = project.launchCommands.firstIndex(where: { $0.id == id }) else { return }
+        if expandedCommandID == id { expandedCommandID = nil }
+        project.removeLaunchCommands(at: IndexSet(integer: index))
+    }
+
+    private func binding(for id: UUID) -> Binding<ProjectLaunchCommand> {
+        Binding {
+            project.launchCommands.first(where: { $0.id == id }) ?? ProjectLaunchCommand(id: id)
+        } set: { updated in
+            project.updateLaunchCommand(updated)
+        }
+    }
+}
+
+private struct StartCommandRow: View {
+    let command: ProjectLaunchCommand
+    let isExpanded: Bool
+    let isDropTarget: Bool
+    let run: () -> Void
+    let toggleExpanded: () -> Void
+    let startDrag: () -> NSItemProvider
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: 22, height: 24)
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+                .onDrag(startDrag) {
+                    StartCommandDragPreview(command: command)
+                }
+
+            StartCommandIcon(command: command)
+                .frame(width: 18, height: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(command.displayTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(command.type.title)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(commandTooltip)
+
+            Button(action: run) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Color(nsColor: Theme.cursor))
+                    .frame(width: 22, height: 22)
+                    .contentShape(RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+            .help("Run \(command.displayTitle)")
+
+            Button(action: toggleExpanded) {
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Hide Options" : "Show Options")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .overlay(alignment: .top) {
+            if isDropTarget {
+                Capsule()
+                    .fill(Color(nsColor: Theme.cursor))
+                    .frame(height: 2)
+                    .padding(.horizontal, 8)
+            }
+        }
+    }
+
+    private var commandTooltip: String {
+        switch command.type {
+        case .application:
+            let arguments = command.content.isEmpty ? "No arguments" : command.content
+            return "\(command.target)\n\(arguments)"
+        default:
+            return command.content
+        }
+    }
+}
+
+private struct StartCommandInlineEditor: View {
+    @Binding var command: ProjectLaunchCommand
+    let delete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Divider()
+            Picker("Type", selection: $command.type) {
+                ForEach(ProjectLaunchCommandType.allCases) { type in
+                    Label(type.title, systemImage: type.systemImage).tag(type)
+                }
+            }
+
+            TextField(
+                command.type == .terminal ? "Terminal title" : "Name",
+                text: $command.title,
+                prompt: Text(command.type == .terminal ? "Optional fixed title" : "Optional name")
+            )
+            typeEditor
+
+            HStack {
+                Spacer()
+                Button("Delete", role: .destructive, action: delete)
+                    .controlSize(.small)
+            }
+        }
+        .font(.system(size: 11))
+        .padding(.horizontal, 12)
+        .padding(.top, 2)
+        .padding(.bottom, 10)
+        .background(Color.primary.opacity(0.025))
+    }
+
+    @ViewBuilder
+    private var typeEditor: some View {
+        switch command.type {
+        case .terminal:
+            TextField("Command", text: $command.content, axis: .vertical)
+                .lineLimit(2...4)
+            Picker("Split", selection: $command.split) {
+                ForEach(ProjectLaunchSplit.allCases) { split in
+                    Text(split.title).tag(split)
+                }
+            }
+            Text("Runs in a new terminal at the project directory.")
+                .foregroundStyle(.secondary)
+
+        case .application:
+            HStack {
+                TextField("Application", text: $command.target)
+                Button("Choose…", action: chooseApplication)
+                    .controlSize(.small)
+            }
+            HStack(spacing: 5) {
+                Text("Templates")
+                    .foregroundStyle(.secondary)
+                Button("VS Code") { command.target = "/Applications/Visual Studio Code.app" }
+                Button("WebStorm") { command.target = "/Applications/WebStorm.app" }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            TextField("Arguments", text: $command.content, axis: .vertical)
+                .lineLimit(1...3)
+            Text("Argument text is passed to the application as one argument.")
+                .foregroundStyle(.secondary)
+
+        case .finderFolder:
+            HStack {
+                TextField("Folder", text: $command.content)
+                Button("Choose…", action: chooseFolder)
+                    .controlSize(.small)
+            }
+            Text("Opens this folder in Finder.")
+                .foregroundStyle(.secondary)
+
+        case .web:
+            TextField("URL", text: $command.content)
+            Text("A scheme is optional; https:// is used when omitted.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func chooseApplication() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.applicationBundle]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        command.target = url.path
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        command.content = url.path
+    }
+
+}
+
+/// An opaque, compact drag image avoids the translucent snapshot AppKit makes
+/// from an entire sidebar row (which looks especially muddy over materials).
+private struct StartCommandDragPreview: View {
+    let command: ProjectLaunchCommand
+
+    var body: some View {
+        HStack(spacing: 7) {
+            StartCommandIcon(command: command)
+                .frame(width: 16, height: 16)
+            Text(command.displayTitle)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(width: 210, alignment: .leading)
+        .background(Color(nsColor: Theme.sidebar))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+        }
+    }
+}
+
+private struct StartCommandDropDelegate: DropDelegate {
+    let targetID: UUID
+    let project: Project
+    @Binding var draggedCommandID: UUID?
+    @Binding var dropTargetCommandID: UUID?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedCommandID != nil && draggedCommandID != targetID
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedCommandID else { return }
+        dropTargetCommandID = targetID
+        project.moveLaunchCommand(id: draggedCommandID, before: targetID)
+    }
+
+    func dropExited(info: DropInfo) {
+        if dropTargetCommandID == targetID { dropTargetCommandID = nil }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedCommandID = nil
+        dropTargetCommandID = nil
+        return true
+    }
+}
+
+private struct StartCommandIcon: View {
+    let command: ProjectLaunchCommand
+
+    var body: some View {
+        switch command.type {
+        case .terminal:
+            Image(systemName: command.type.systemImage)
+                .foregroundStyle(Color(nsColor: Theme.cursor))
+
+        case .application:
+            if !command.target.isEmpty {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: command.target))
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: command.type.systemImage)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .finderFolder:
+            Image(systemName: command.type.systemImage)
+                .foregroundStyle(Color(nsColor: .systemBlue))
+
+        case .web:
+            if let url = faviconURL(for: command.content) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: {
+                    Image(systemName: command.type.systemImage)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Image(systemName: command.type.systemImage)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func faviconURL(for text: String) -> URL? {
+        let rawURL = text.contains("://") ? text : "https://\(text)"
+        guard let url = URL(string: rawURL), let host = url.host else { return nil }
+        var components = URLComponents()
+        components.scheme = url.scheme ?? "https"
+        components.host = host
+        components.path = "/favicon.ico"
+        return components.url
+    }
+}

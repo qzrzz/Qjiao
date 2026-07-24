@@ -40,6 +40,9 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private var lastScrollbar: TerminalScrollbar?
     private var lastHistorySnapshot: String?
     private var isTerminating = false
+    /// A launcher-provided tab title. When set, shell title escape sequences
+    /// cannot replace it for the lifetime of this session.
+    private var fixedTitle: String?
 
     init(initialDirectory: String? = nil, restoredHistory: String? = nil) {
         let shellPath = Self.loginShell()
@@ -56,7 +59,11 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         self.launchCommand = launchCommand
         launchDirectoryURL = artifacts.directoryURL
         shellPidFileURL = artifacts.pidFileURL
-        title = (shellPath as NSString).lastPathComponent
+        // 未收到 Shell 主动设置的标题前，使用终端启动目录的最后一级名称。
+        let directoryName = URL(fileURLWithPath: directory).lastPathComponent
+        title = directoryName.isEmpty
+            ? (shellPath as NSString).lastPathComponent
+            : directoryName
 
         controller = TerminalController(
             configSource: .none,
@@ -194,6 +201,42 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         terminalView.sendText(text)
     }
 
+    func setFixedTitle(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        fixedTitle = trimmed.isEmpty ? nil : trimmed
+        if let fixedTitle { title = fixedTitle }
+    }
+
+    /// Queues an automated command until this surface has been attached and
+    /// its login shell has started. New tabs are mounted asynchronously by
+    /// SwiftUI; sending immediately would otherwise be discarded before the
+    /// exec-backed PTY exists.
+    func sendCommandWhenReady(_ text: String) {
+        sendCommandWhenReady(text, attempt: 0)
+    }
+
+    private func sendCommandWhenReady(_ text: String, attempt: Int) {
+        guard !hasExited else { return }
+        if terminalView.window != nil, shellPid != nil {
+            // The PID file is written immediately before the login shell is
+            // exec'd. Give the shell one short run-loop turn to install its
+            // prompt before inserting the command.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self, !self.hasExited else { return }
+                self.sendCommand(text)
+            }
+            return
+        }
+
+        // A slow first launch may need a little time to attach its Metal
+        // surface. Stop retrying after five seconds rather than retaining a
+        // command for a terminal that failed to start.
+        guard attempt < 100 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.sendCommandWhenReady(text, attempt: attempt + 1)
+        }
+    }
+
     /// Clears the emulator's visible screen and scrollback, then asks the
     /// foreground shell to repaint its prompt at the top.
     func clear() {
@@ -245,6 +288,22 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         else { return nil }
         cachedShellPid = value
         return value
+    }
+
+    /// Whether a child process currently owns this terminal's foreground
+    /// process group. An idle prompt keeps the login shell in the foreground.
+    var isForegroundCommandRunning: Bool {
+        guard !hasExited,
+              let shellPid,
+              let foregroundPid = terminalView.foregroundPid
+        else { return false }
+        // `foregroundPid` is the terminal's foreground *process group* ID
+        // (`tcgetpgrp`), which is not necessarily the shell's process ID.
+        // Comparing it directly to `shellPid` marked every idle shell whose
+        // group leader differed as busy.
+        let shellProcessGroup = getpgid(shellPid)
+        let idleProcessGroup = shellProcessGroup > 0 ? shellProcessGroup : shellPid
+        return foregroundPid > 0 && foregroundPid != idleProcessGroup
     }
 
     /// 终端 shell 自会话创建以来的运行时长。
@@ -506,7 +565,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
 extension TerminalSession: TerminalSurfaceTitleDelegate {
     func terminalDidChangeTitle(_ title: String) {
-        guard !title.isEmpty else { return }
+        guard !title.isEmpty, fixedTitle == nil else { return }
         self.title = title
     }
 }

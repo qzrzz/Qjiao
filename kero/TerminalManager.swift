@@ -10,6 +10,7 @@ import SwiftUI
 
 /// Panels available in the right sidebar.
 enum RightPanel {
+    case start
     case files
     case cwd
     case git
@@ -26,6 +27,10 @@ enum FindAction {
     case next
     case previous
     case useSelection
+}
+
+private func shellQuote(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
 /// Owns the list of projects and the current selection. Each project holds
@@ -258,6 +263,87 @@ final class TerminalManager: nonisolated ObservableObject {
         project.newSession()
     }
 
+    /// Opens a fresh terminal in the selected project's root and runs one
+    /// package script using the package manager selected in Settings.
+    func runPackageScript(_ scriptName: String) {
+        guard let project = selectedProject, !scriptName.isEmpty else { return }
+        let directory = project.projectDirectory.isEmpty
+            ? selectedSession?.currentDirectoryPath
+            : project.projectDirectory
+        let session = project.newSession(directory: directory)
+        let command = AppSettings.shared.packageManagerCommand.rawValue
+        session.sendCommandWhenReady("\(command) \(shellQuote(scriptName))\n")
+    }
+
+    /// Runs one saved project launcher from the Start sidebar panel.
+    func runLaunchCommand(_ command: ProjectLaunchCommand) {
+        guard let project = selectedProject else { return }
+        switch command.type {
+        case .terminal:
+            runTerminalLaunch(command, in: project)
+
+        case .application:
+            let path = command.target.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty else { return }
+            let configuration = NSWorkspace.OpenConfiguration()
+            let argument = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            configuration.arguments = argument.isEmpty ? [] : [argument]
+            NSWorkspace.shared.openApplication(
+                at: URL(fileURLWithPath: path),
+                configuration: configuration
+            ) { _, error in
+                if let error { NSLog("qjiao: failed to open application: \(error)") }
+            }
+
+        case .finderFolder:
+            let path = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty else { return }
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+
+        case .web:
+            let rawURL = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            let url = URL(string: rawURL.contains("://") ? rawURL : "https://\(rawURL)")
+            if let url { NSWorkspace.shared.open(url) }
+        }
+    }
+
+    /// Starts the project's configured launchers in list order. The first
+    /// terminal always establishes a new tab; later terminal commands with a
+    /// Split direction join that tab as panes.
+    func runAllLaunchCommands() {
+        guard let project = selectedProject else { return }
+        var hasStartedTerminal = false
+        for command in project.launchCommands {
+            guard command.type == .terminal else {
+                runLaunchCommand(command)
+                continue
+            }
+            runTerminalLaunch(command, in: project, forceNewTab: !hasStartedTerminal)
+            hasStartedTerminal = true
+        }
+    }
+
+    private func runTerminalLaunch(
+        _ command: ProjectLaunchCommand,
+        in project: Project,
+        forceNewTab: Bool = false
+    ) {
+        let text = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let directory = project.projectDirectory.isEmpty
+            ? selectedSession?.currentDirectoryPath
+            : project.projectDirectory
+        let session: TerminalSession
+        if !forceNewTab, let edge = command.split.edge,
+           let splitSession = project.newSplitSession(directory: directory, toward: edge) {
+            session = splitSession
+        } else {
+            session = project.newSession(directory: directory)
+        }
+        session.setFixedTitle(command.title)
+        session.sendCommandWhenReady(text + "\n")
+    }
+
     /// Brings `session` to the foreground: selects its project and tab, then
     /// focuses its pane. Backs the command palette's session switcher; a no-op
     /// if the session is no longer open anywhere.
@@ -324,6 +410,11 @@ final class TerminalManager: nonisolated ObservableObject {
         } else {
             project.closeFocusedPane()
         }
+    }
+
+    /// Closes the pane that initiated a terminal context-menu action.
+    func closePane(_ content: PaneContent) {
+        selectedProject?.closeContent(content)
     }
 
     // MARK: - Panes
@@ -581,7 +672,8 @@ final class TerminalManager: nonisolated ObservableObject {
                         customName: project.customName,
                         description: project.description,
                         icon: project.icon,
-                        projectDirectory: project.projectDirectory
+                        projectDirectory: project.projectDirectory,
+                        launchCommands: project.launchCommands
                     ),
                     for: project.id
                 )
@@ -626,20 +718,28 @@ final class TerminalManager: nonisolated ObservableObject {
             project.description = config?.description ?? saved.description
             project.icon = config?.icon ?? saved.icon
             project.projectDirectory = config?.projectDirectory ?? saved.projectDirectory ?? ""
+            project.launchCommands = config?.launchCommands ?? []
             for tab in saved.tabs {
-                project.restoreTab(from: tab, histories: Self.pendingHistories)
+                project.restoreTab(
+                    from: tab,
+                    histories: Self.pendingHistories,
+                    sessionDirectory: project.projectDirectory.isEmpty
+                        ? nil
+                        : project.projectDirectory
+                )
             }
             if project.projectDirectory.isEmpty {
                 project.projectDirectory = project.sessions.first?.currentDirectoryPath ?? ""
             }
             // 旧版快照中的项目配置在首次恢复时迁移到独立配置文件。
-            if config == nil || config?.projectDirectory == nil {
+            if config == nil || config?.projectDirectory == nil || config?.launchCommands == nil {
                 ProjectConfigStore.save(
                     ProjectConfig(
                         customName: project.customName,
                         description: project.description,
                         icon: project.icon,
-                        projectDirectory: project.projectDirectory
+                        projectDirectory: project.projectDirectory,
+                        launchCommands: project.launchCommands
                     ),
                     for: project.id
                 )

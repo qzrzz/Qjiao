@@ -12,6 +12,9 @@ struct ProjectConfig: Codable {
     var icon: ProjectIcon?
     /// 可选，兼容添加项目目录字段前创建的配置文件。
     var projectDirectory: String?
+    /// Optional so project configuration written before Start existed keeps
+    /// decoding without migration.
+    var launchCommands: [ProjectLaunchCommand]?
 }
 
 /// 项目配置文件存储。每个项目使用稳定 UUID 对应一个 JSON 文件。

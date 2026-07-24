@@ -44,7 +44,11 @@ struct ContentView: View {
                     }
                     Group {
                         if let tab = manager.selectedProject?.selectedTab {
-                            PaneLayoutView(tab: tab, onSplit: { manager.split(toward: $0) })
+                            PaneLayoutView(
+                                tab: tab,
+                                onSplit: { manager.split(toward: $0) },
+                                onClosePane: { manager.closePane($0) }
+                            )
                         } else {
                             emptyState
                         }
@@ -335,10 +339,11 @@ private struct TabListRow: View {
     var body: some View {
         Button(action: select) {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: tab.focusedContent?.systemImage ?? "terminal")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(isSelected ? Color(nsColor: Theme.cursor) : .secondary)
-                    .frame(width: 16, height: 18)
+                TabContentIcon(
+                    content: tab.focusedContent,
+                    tint: isSelected ? Color(nsColor: Theme.cursor) : .secondary
+                )
+                .frame(width: 16, height: 18)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(tab.focusedContent?.title ?? "Untitled Tab")
@@ -653,14 +658,19 @@ private struct SessionTabLabel: View {
     let close: () -> Void
 
     var body: some View {
-        TabItemChrome(
-            systemImage: "terminal",
-            title: session.title,
-            paneCount: paneCount,
-            isSelected: isSelected,
-            select: select,
-            close: close
-        )
+        // Ghostty does not publish foreground-process changes as SwiftUI
+        // state. A lightweight timeline refreshes just the visible tab icon.
+        TimelineView(.periodic(from: .now, by: 0.3)) { _ in
+            TabItemChrome(
+                systemImage: "terminal",
+                title: session.title,
+                paneCount: paneCount,
+                isSelected: isSelected,
+                isTerminalRunning: session.isForegroundCommandRunning,
+                select: select,
+                close: close
+            )
+        }
     }
 }
 
@@ -691,6 +701,7 @@ private struct TabItemChrome: View {
     var paneCount: Int = 1
     let isSelected: Bool
     var isDirty = false
+    var isTerminalRunning = false
     let select: () -> Void
     let close: () -> Void
 
@@ -699,9 +710,17 @@ private struct TabItemChrome: View {
     var body: some View {
         Button(action: select) {
             HStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: Theme.cursor)) : AnyShapeStyle(.tertiary))
+                if isTerminalRunning {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(isSelected ? Color(nsColor: Theme.cursor) : .secondary)
+                        .frame(width: 11, height: 11)
+                        .accessibilityLabel("Command running")
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: Theme.cursor)) : AnyShapeStyle(.tertiary))
+                }
                 Text(title)
                     .font(.system(size: 11.5))
                     .foregroundStyle(isSelected ? .primary : .secondary)
@@ -748,5 +767,26 @@ private struct TabItemChrome: View {
                 .fill(isSelected ? Color.primary.opacity(0.09) : (isHovering ? Color.primary.opacity(0.04) : .clear))
         )
         .onHover { isHovering = $0 }
+    }
+}
+
+/// Terminal items switch from the idle terminal glyph to a native spinner
+/// while their foreground process is busy. Non-terminal content keeps its
+/// regular icon.
+private struct TabContentIcon: View {
+    let content: PaneContent?
+    let tint: Color
+
+    var body: some View {
+        if case .session(let session)? = content, session.isForegroundCommandRunning {
+            ProgressView()
+                .controlSize(.small)
+                .tint(tint)
+                .accessibilityLabel("Command running")
+        } else {
+            Image(systemName: content?.systemImage ?? "terminal")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(tint)
+        }
     }
 }

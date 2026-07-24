@@ -11,6 +11,13 @@ import Foundation
 /// under it and any TCP ports those processes are listening on.
 @MainActor
 final class SessionInfoModel: nonisolated ObservableObject {
+    struct PackageScript: Identifiable, Equatable {
+        let name: String
+        let command: String
+
+        var id: String { name }
+    }
+
     struct ProcessItem: Identifiable, Equatable {
         var id: pid_t { pid }
         let pid: pid_t
@@ -44,18 +51,26 @@ final class SessionInfoModel: nonisolated ObservableObject {
     @Published private(set) var shellPid: pid_t = 0
     @Published private(set) var processes: [ProcessItem] = []
     @Published private(set) var ports: [PortItem] = []
+    @Published private(set) var packageScripts: [PackageScript] = []
 
     private var isRefreshing = false
+    private var packageRoot = ""
+    private var packageFileState: PackageFileState?
+    private var packageLoadID = UUID()
 
     func sync(root: String, shellName: String, shellPid: pid_t?) {
         if rootPath != root { rootPath = root }
         if self.shellName != shellName { self.shellName = shellName }
         let pid = shellPid ?? 0
         if self.shellPid != pid { self.shellPid = pid }
-        refresh()
+        syncPackageScripts(root: root)
+        refresh(reloadPackageScripts: false)
     }
 
-    func refresh() {
+    func refresh(reloadPackageScripts: Bool = true) {
+        if reloadPackageScripts {
+            syncPackageScripts(root: rootPath, force: true)
+        }
         let pid = shellPid
         guard pid > 0 else {
             if !processes.isEmpty { processes = [] }
@@ -85,6 +100,69 @@ final class SessionInfoModel: nonisolated ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.refresh()
         }
+    }
+
+    // MARK: - Package scripts
+
+    /// Reads only `<project root>/package.json`; child directories are never
+    /// searched. File metadata avoids decoding JSON again on each panel poll.
+    private func syncPackageScripts(root: String, force: Bool = false) {
+        guard !root.isEmpty else {
+            packageRoot = ""
+            packageFileState = nil
+            if !packageScripts.isEmpty { packageScripts = [] }
+            return
+        }
+
+        let url = URL(fileURLWithPath: root).appendingPathComponent("package.json")
+        let state = Self.packageFileState(at: url)
+        guard force || packageRoot != root || packageFileState != state else { return }
+
+        packageRoot = root
+        packageFileState = state
+        let loadID = UUID()
+        packageLoadID = loadID
+        guard state.exists else {
+            if !packageScripts.isEmpty { packageScripts = [] }
+            return
+        }
+
+        Task.detached(priority: .utility) { [weak self] in
+            let scripts = Self.loadPackageScripts(at: url)
+            await MainActor.run {
+                guard let self, self.packageLoadID == loadID else { return }
+                if self.packageScripts != scripts { self.packageScripts = scripts }
+            }
+        }
+    }
+
+    private struct PackageFileState: Equatable {
+        let exists: Bool
+        let modificationDate: Date?
+        let size: UInt64?
+    }
+
+    private nonisolated static func packageFileState(at url: URL) -> PackageFileState {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return PackageFileState(exists: false, modificationDate: nil, size: nil)
+        }
+        return PackageFileState(
+            exists: true,
+            modificationDate: attributes[.modificationDate] as? Date,
+            size: (attributes[.size] as? NSNumber)?.uint64Value
+        )
+    }
+
+    private nonisolated static func loadPackageScripts(at url: URL) -> [PackageScript] {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let package = object as? [String: Any],
+              let scripts = package["scripts"] as? [String: String]
+        else { return [] }
+
+        return scripts
+            .map { PackageScript(name: $0.key, command: $0.value) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     // MARK: - Polling

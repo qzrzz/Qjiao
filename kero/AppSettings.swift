@@ -7,6 +7,17 @@ import AppKit
 import Combine
 import Foundation
 
+/// Command prefix used when running a package script from the Info panel.
+enum PackageManagerCommand: String, CaseIterable, Identifiable {
+    case bun = "bun run"
+    case npm = "npm run"
+    case pnpm = "pnpm run"
+    case vp = "vp run"
+    case nub = "nub run"
+
+    var id: String { rawValue }
+}
+
 /// User-configurable settings, persisted to `$HOME/.config/qjiao/config.toml`.
 /// Views observe this directly; `TerminalManager` re-themes live sessions on
 /// any change.
@@ -73,6 +84,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// The command prefix used by the Info panel's package script launcher.
+    @Published var packageManagerCommand: PackageManagerCommand {
+        didSet { save() }
+    }
+
     private init() {
         let existing = TOML.parse(at: Self.configURL)
         let toml = existing ?? Self.legacyDefaults()
@@ -84,6 +100,8 @@ final class AppSettings: nonisolated ObservableObject {
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
+        packageManagerCommand = toml["terminal.package-manager"]?.string
+            .flatMap(PackageManagerCommand.init(rawValue:)) ?? .npm
         applyAppearance()
         if existing == nil { save() }
     }
@@ -107,6 +125,7 @@ final class AppSettings: nonisolated ObservableObject {
         wrapLines = false
         restoreTerminalHistory = false
         directClickMovesCursor = false
+        packageManagerCommand = .npm
     }
 
     private func save() {
@@ -129,6 +148,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if directClickMovesCursor {
             lines.append("terminal.direct-click-moves-cursor = true")
+        }
+        if packageManagerCommand != .npm {
+            lines.append("terminal.package-manager = \(TOML.quote(packageManagerCommand.rawValue))")
         }
         let dir = Self.configURL.deletingLastPathComponent()
         do {

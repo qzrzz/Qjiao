@@ -43,32 +43,41 @@ struct SidebarView: View {
                             }
                         }
                     }
+                    // 只在项目行下方的空白区域拖动窗口，避免和项目排序手势冲突。
+                    WindowDragArea()
+                        .frame(maxWidth: .infinity, minHeight: 300)
                 }
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
             }
 
-            HStack(spacing: 2) {
-                SidebarFooterButton(
-                    systemImage: "plus",
-                    tooltip: "New Project (⌘N)"
-                ) { manager.newProject() }
-                Spacer()
-                SidebarFooterButton(
-                    systemImage: "exclamationmark.bubble",
-                    tooltip: "Send Feedback",
-                    tooltipAlignment: .trailing
-                ) {
-                    NSWorkspace.shared.open(
-                        URL(string: "https://github.com/egoist/kero/issues/new")!
-                    )
+            ZStack {
+                // 底部按钮之间的空白区域可用于拖动窗口，按钮本身仍保持可点击。
+                WindowDragArea()
+
+                HStack(spacing: 2) {
+                    SidebarFooterButton(
+                        systemImage: "plus",
+                        tooltip: "New Project (⌘N)"
+                    ) { manager.newProject() }
+                    Spacer()
+                    SidebarFooterButton(
+                        systemImage: "exclamationmark.bubble",
+                        tooltip: "Send Feedback",
+                        tooltipAlignment: .trailing
+                    ) {
+                        NSWorkspace.shared.open(
+                            URL(string: "https://github.com/egoist/kero/issues/new")!
+                        )
+                    }
+                    SidebarFooterButton(
+                        systemImage: "gearshape",
+                        tooltip: "Settings (⌘,)",
+                        tooltipAlignment: .trailing
+                    ) { openSettings() }
                 }
-                SidebarFooterButton(
-                    systemImage: "gearshape",
-                    tooltip: "Settings (⌘,)",
-                    tooltipAlignment: .trailing
-                ) { openSettings() }
             }
+            .frame(height: 24)
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .overlay(alignment: .top) {

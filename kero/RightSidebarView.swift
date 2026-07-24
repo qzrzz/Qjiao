@@ -38,6 +38,14 @@ struct RightSidebarView: View {
                 VStack(spacing: 0) {
                     tabBar
                     switch manager.panelTab {
+                    case .start:
+                        if let project = manager.selectedProject {
+                            StartPanel(
+                                project: project,
+                                runCommand: { manager.runLaunchCommand($0) },
+                                runAllCommands: { manager.runAllLaunchCommands() }
+                            )
+                        }
                     case .files:
                         FileTreePanel(
                             model: fileTree,
@@ -73,11 +81,17 @@ struct RightSidebarView: View {
                             }
                         )
                     case .info:
-                        InfoPanel(model: info, session: manager.selectedSession)
+                        InfoPanel(
+                            model: info,
+                            session: manager.selectedSession,
+                            runPackageScript: { manager.runPackageScript($0) }
+                        )
                     }
                 }
                 .frame(width: width)
                 .background(Color(nsColor: Theme.sidebar))
+                // 面板内容的空白区域可拖动窗口，前景控件仍优先接收点击和滚动。
+                .background(WindowDragArea())
             }
         }
         .overlay(alignment: .leading) {
@@ -107,6 +121,7 @@ struct RightSidebarView: View {
             WindowDragArea()
 
             HStack(spacing: 4) {
+                tabButton(.start, systemImage: "play.circle", title: "Start", help: "Start")
                 tabButton(.info, systemImage: "info.circle", title: "Info", help: "Info (⇧⌘I)")
                 tabButton(.files, systemImage: "folder", title: "Files", help: "Files (⇧⌘E)")
                 if showsCWD {
@@ -149,12 +164,11 @@ struct RightSidebarView: View {
     }
 
     private func syncModels() {
-        guard let project = manager.selectedProject,
-              let session = manager.selectedSession,
-              manager.isPanelVisible
-        else { return }
+        guard let project = manager.selectedProject, manager.isPanelVisible else { return }
+        guard manager.panelTab != .start else { return }
+        guard let session = manager.selectedSession else { return }
         let cwdVisible = showsCWD
-        if cwdVisible, !wasCWDVisible {
+        if manager.panelTab == .files, cwdVisible, !wasCWDVisible {
             manager.panelTab = .cwd
         }
         wasCWDVisible = cwdVisible
@@ -164,11 +178,17 @@ struct RightSidebarView: View {
             return
         }
         switch manager.panelTab {
+        case .start:
+            break
         case .files: fileTree.sync(root: projectRoot(for: project, fallback: session))
         case .cwd: fileTree.sync(root: session.currentDirectoryPath)
         case .git: git.sync(root: session.currentDirectoryPath)
         case .info:
-            info.sync(root: session.currentDirectoryPath, shellName: session.shellName, shellPid: session.shellPid)
+            info.sync(
+                root: projectRoot(for: project, fallback: session),
+                shellName: session.shellName,
+                shellPid: session.shellPid
+            )
         }
     }
 
@@ -1805,8 +1825,10 @@ private struct GitEntryRow: View {
 private struct InfoPanel: View {
     @ObservedObject var model: SessionInfoModel
     let session: TerminalSession?
+    let runPackageScript: (String) -> Void
 
     @State private var directoryCollapsed = false
+    @State private var packageScriptsCollapsed = false
     @State private var processesCollapsed = false
     @State private var portsCollapsed = false
 
@@ -1819,6 +1841,7 @@ private struct InfoPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     directorySection
+                    packageScriptsSection
                     processesSection
                     portsSection
                 }
@@ -1928,6 +1951,46 @@ private struct InfoPanel: View {
         }
         .buttonStyle(.plain)
         .help(title == "Copy" ? "Copy Path" : "Open in \(title)")
+    }
+
+    // MARK: Processes
+
+    @ViewBuilder
+    private var packageScriptsSection: some View {
+        GitSectionHeader(
+            title: "NPM SCRIPTS",
+            count: model.packageScripts.count,
+            isCollapsed: $packageScriptsCollapsed,
+            actions: []
+        )
+        if !packageScriptsCollapsed {
+            if model.packageScripts.isEmpty {
+                emptyRow("No package scripts in package.json")
+            } else {
+                ForEach(model.packageScripts) { script in
+                    Button {
+                        runPackageScript(script.name)
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 12)
+                            Text(script.name)
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                    .help(script.command)
+                }
+            }
+        }
     }
 
     // MARK: Processes

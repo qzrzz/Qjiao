@@ -18,6 +18,8 @@ struct TerminalHostView: NSViewRepresentable {
     var onFocused: () -> Void = {}
     /// Splits this pane on the given edge — wired to the context-menu items.
     var onSplit: (PaneDropEdge) -> Void = { _ in }
+    /// Closes this pane when the terminal is part of a split layout.
+    var onClose: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -28,6 +30,7 @@ struct TerminalHostView: NSViewRepresentable {
         let terminal = session.terminalView
         terminal.onBecomeFirstResponder = onFocused
         terminal.splitTarget.onSplit = onSplit
+        terminal.splitTarget.onClose = onClose
         let scrollbar = session.overlayScrollbar
         terminal.translatesAutoresizingMaskIntoConstraints = false
         scrollbar.translatesAutoresizingMaskIntoConstraints = false
@@ -50,6 +53,7 @@ struct TerminalHostView: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         session.terminalView.onBecomeFirstResponder = onFocused
         session.terminalView.splitTarget.onSplit = onSplit
+        session.terminalView.splitTarget.onClose = onClose
         let container = view as? TerminalContainerView
         container?.focusOnAppear = isFocused
         // Take focus only on the unfocused→focused edge (keyboard navigation,

@@ -364,14 +364,20 @@ private final class KeroTerminalProgressBarView: NSView {
 /// validation so these actions remain enabled even when there is no selection.
 final class SplitMenuTarget: NSObject {
     var onSplit: ((PaneDropEdge) -> Void)?
+    var onClose: (() -> Void)?
 
     func menuItems() -> [NSMenuItem] {
-        [
+        var items = [
             item("Split Right", #selector(splitRight)),
             item("Split Left", #selector(splitLeft)),
             item("Split Up", #selector(splitUp)),
             item("Split Down", #selector(splitDown)),
         ]
+        if onClose != nil {
+            items.append(.separator())
+            items.append(item("Close Pane", #selector(closePane)))
+        }
+        return items
     }
 
     private func item(_ title: String, _ action: Selector) -> NSMenuItem {
@@ -384,4 +390,5 @@ final class SplitMenuTarget: NSObject {
     @objc private func splitLeft() { onSplit?(.left) }
     @objc private func splitUp() { onSplit?(.top) }
     @objc private func splitDown() { onSplit?(.bottom) }
+    @objc private func closePane() { onClose?() }
 }

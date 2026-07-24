@@ -13,6 +13,114 @@ enum ProjectIcon: Codable, Equatable {
     case emoji(String)
 }
 
+/// A reusable project launch target shown in the Start panel.
+enum ProjectLaunchCommandType: String, Codable, CaseIterable, Identifiable {
+    case terminal
+    case application
+    case finderFolder
+    case web
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .terminal: return "Terminal"
+        case .application: return "Application"
+        case .finderFolder: return "Finder Folder"
+        case .web: return "Webpage"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .terminal: return "terminal"
+        case .application: return "app"
+        case .finderFolder: return "folder"
+        case .web: return "globe"
+        }
+    }
+}
+
+/// How a terminal launcher is inserted into the current terminal tab.
+enum ProjectLaunchSplit: String, Codable, CaseIterable, Identifiable {
+    case none
+    case left
+    case right
+    case top
+    case bottom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return "New Tab"
+        case .left: return "Split Left"
+        case .right: return "Split Right"
+        case .top: return "Split Above"
+        case .bottom: return "Split Below"
+        }
+    }
+
+    var edge: PaneDropEdge? {
+        switch self {
+        case .none: return nil
+        case .left: return .left
+        case .right: return .right
+        case .top: return .top
+        case .bottom: return .bottom
+        }
+    }
+}
+
+/// One user-configured project launcher. `target` is used only by application
+/// launchers; `content` is the terminal command, app argument, folder path,
+/// or webpage URL for the corresponding type.
+struct ProjectLaunchCommand: Codable, Identifiable, Equatable {
+    var id: UUID
+    var type: ProjectLaunchCommandType
+    var title: String
+    var target: String
+    var content: String
+    var split: ProjectLaunchSplit
+
+    init(
+        id: UUID = UUID(),
+        type: ProjectLaunchCommandType = .terminal,
+        title: String = "",
+        target: String = "",
+        content: String = "",
+        split: ProjectLaunchSplit = .none
+    ) {
+        self.id = id
+        self.type = type
+        self.title = title
+        self.target = target
+        self.content = content
+        self.split = split
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, type, title, target, content, split
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        type = try container.decodeIfPresent(ProjectLaunchCommandType.self, forKey: .type) ?? .terminal
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        target = try container.decodeIfPresent(String.self, forKey: .target) ?? ""
+        content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
+        split = try container.decodeIfPresent(ProjectLaunchSplit.self, forKey: .split) ?? .none
+    }
+
+    var displayTitle: String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        let content = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return content.isEmpty ? type.title : content
+    }
+}
+
 /// A project groups tabs and appears as one row in the left sidebar. Each tab
 /// is a niri-style layout of panes (terminal sessions and open files); see
 /// `PaneTab`. It always starts with one session; closing the last tab leaves
@@ -31,6 +139,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     @Published var projectDirectory = ""
     /// 项目列表的可选自定义图标；未设置时显示默认文件夹图标。
     @Published var icon: ProjectIcon?
+    /// User-configured actions displayed in the right sidebar's Start panel.
+    @Published var launchCommands: [ProjectLaunchCommand] = []
     @Published var tabs: [PaneTab] = []
     @Published var selectedTabID: UUID?
     /// 终端直接拖入文件夹时由项目转交给窗口管理器创建新项目。
@@ -122,6 +232,53 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         return session
     }
 
+    /// Adds a fresh terminal next to the focused pane in the selected tab.
+    /// Returns nil when there is no terminal-capable tab to split.
+    func newSplitSession(
+        directory: String? = nil, toward edge: PaneDropEdge
+    ) -> TerminalSession? {
+        guard let tab = selectedTab, tab.canSplit else { return nil }
+        let session = makeSession(directory: directory)
+        tab.split(Pane(content: .session(session)), toward: edge)
+        return session
+    }
+
+    func addLaunchCommand(_ command: ProjectLaunchCommand) {
+        launchCommands.append(command)
+    }
+
+    func updateLaunchCommand(_ command: ProjectLaunchCommand) {
+        guard let index = launchCommands.firstIndex(where: { $0.id == command.id }) else { return }
+        launchCommands[index] = command
+    }
+
+    func removeLaunchCommands(at offsets: IndexSet) {
+        for index in offsets.sorted(by: >) {
+            launchCommands.remove(at: index)
+        }
+    }
+
+    func moveLaunchCommands(from offsets: IndexSet, to destination: Int) {
+        let moved = offsets.map { launchCommands[$0] }
+        for index in offsets.sorted(by: >) {
+            launchCommands.remove(at: index)
+        }
+        let removedBeforeDestination = offsets.filter { $0 < destination }.count
+        let insertionIndex = destination - removedBeforeDestination
+        launchCommands.insert(contentsOf: moved, at: insertionIndex)
+    }
+
+    func moveLaunchCommand(id: UUID, before targetID: UUID) {
+        guard id != targetID,
+              let sourceIndex = launchCommands.firstIndex(where: { $0.id == id }),
+              let targetIndex = launchCommands.firstIndex(where: { $0.id == targetID })
+        else { return }
+
+        let command = launchCommands.remove(at: sourceIndex)
+        let insertionIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+        launchCommands.insert(command, at: insertionIndex)
+    }
+
     /// Builds a session wired for exit + change observation, without placing
     /// it in a tab — shared by new tabs and splits. `restoredHistory` seeds the
     /// scrollback when reopening a saved session.
@@ -129,7 +286,9 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         directory: String? = nil, restoredHistory: String? = nil
     ) -> TerminalSession {
         let session = TerminalSession(
-            initialDirectory: directory ?? selectedSession?.currentDirectoryPath,
+            initialDirectory: directory
+                ?? selectedSession?.currentDirectoryPath
+                ?? (projectDirectory.isEmpty ? nil : projectDirectory),
             restoredHistory: restoredHistory
         )
         configureProjectDirectoryDrop(for: session)
@@ -491,7 +650,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// Skips panes whose content can't be rebuilt; a tab with none is dropped.
     func restoreTab(
         from snap: SessionSnapshot.ProjectSnapshot.TabSnapshot,
-        histories: [String: String] = [:]
+        histories: [String: String] = [:],
+        sessionDirectory: String? = nil
     ) {
         var columns: [PaneColumn] = []
         for columnSnap in snap.columns {
@@ -499,7 +659,11 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             for paneSnap in columnSnap.panes {
                 let restoredHistory = paneSnap.historyKey.flatMap { histories[$0] }
                 panes.append(Pane(
-                    content: makeContent(from: paneSnap.content, restoredHistory: restoredHistory),
+                    content: makeContent(
+                        from: paneSnap.content,
+                        restoredHistory: restoredHistory,
+                        sessionDirectory: sessionDirectory
+                    ),
                     weight: CGFloat(paneSnap.weight)
                 ))
             }
@@ -514,11 +678,17 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
 
     private func makeContent(
         from snap: SessionSnapshot.ProjectSnapshot.PaneContentSnapshot,
-        restoredHistory: String? = nil
+        restoredHistory: String? = nil,
+        sessionDirectory: String? = nil
     ) -> PaneContent {
         switch snap {
         case .session(let workingDirectory):
-            return .session(makeSession(directory: workingDirectory, restoredHistory: restoredHistory))
+            return .session(
+                makeSession(
+                    directory: sessionDirectory ?? workingDirectory,
+                    restoredHistory: restoredHistory
+                )
+            )
         case .file(let path, let editorState):
             let file = FileTab(path: path)
             if let editorState { file.editorState = editorState }

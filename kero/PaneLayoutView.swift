@@ -14,6 +14,8 @@ struct PaneLayoutView: View {
     @ObservedObject var tab: PaneTab
     /// Splits the focused pane on the given edge — from a pane's context menu.
     var onSplit: (PaneDropEdge) -> Void = { _ in }
+    /// Closes the pane that owns a context menu action.
+    var onClosePane: ((PaneContent) -> Void)?
 
     /// Gap between tiles, which doubles as the divider hit area. The same
     /// value insets the whole grid from the parent, so the spacing around the
@@ -75,7 +77,8 @@ struct PaneLayoutView: View {
                     dropEdge: nil,
                     onMove: { _ in },
                     onMoveEnded: {},
-                    onSplit: onSplit
+                    onSplit: onSplit,
+                    onClosePane: onClosePane
                 )
             } else {
                 grid
@@ -162,7 +165,8 @@ struct PaneLayoutView: View {
                     dropEdge: paneDrag?.targetID == pane.id ? paneDrag?.edge : nil,
                     onMove: { updateDropTarget(source: pane.id, location: $0) },
                     onMoveEnded: { commitPaneMove() },
-                    onSplit: onSplit
+                    onSplit: onSplit,
+                    onClosePane: tab.hasMultiplePanes ? onClosePane : nil
                 )
                 .frame(width: width, height: heights[paneIndex])
                 if paneIndex < column.panes.count - 1 {
@@ -422,6 +426,8 @@ private struct PaneView: View {
     /// Splits the focused pane on the given edge (from the content's context
     /// menu).
     let onSplit: (PaneDropEdge) -> Void
+    /// Closes this pane from the terminal context menu when the tab is split.
+    let onClosePane: ((PaneContent) -> Void)?
 
     /// Height of the grab strip at the pane's top.
     private let handleHeight: CGFloat = 8
@@ -471,7 +477,15 @@ private struct PaneView: View {
     private var content: some View {
         switch pane.content {
         case .session(let session):
-            TerminalHostView(session: session, isFocused: isFocused, onFocused: focus, onSplit: splitFromMenu)
+            TerminalHostView(
+                session: session,
+                isFocused: isFocused,
+                onFocused: focus,
+                onSplit: splitFromMenu,
+                onClose: onClosePane.map { close in
+                    { focus(); close(pane.content) }
+                }
+            )
                 .background(Color(nsColor: Theme.background))
                 .overlay(alignment: .topTrailing) {
                     TerminalFindOverlay(find: session.find)
