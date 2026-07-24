@@ -12,10 +12,11 @@ import CoreText
 enum TerminalFont {
     static let defaultSize: CGFloat = 13
     static let bundledFamily = "JetBrains Mono"
+    static let bundledChineseFamily = "Source Han Sans CN VF Mono1200"
     private static let symbolsFontName = "SymbolsNFM"
 
     /// Registers the bundled JetBrains Mono faces (Regular/Bold/Italic/
-    /// BoldItalic) and the Symbols Nerd Font for this process only, so
+    /// BoldItalic), Source Han Sans CN, and the Symbols Nerd Font for this process only, so
     /// nothing is installed system-wide. Must run before the first
     /// terminal view is created.
     static func registerBundledFonts() {
@@ -29,17 +30,25 @@ enum TerminalFont {
     @MainActor
     static func current() -> NSFont {
         let settings = AppSettings.shared
-        return resolve(family: settings.fontFamily, size: CGFloat(settings.fontSize))
+        return resolve(
+            family: settings.fontFamily,
+            size: CGFloat(settings.fontSize),
+            useBundledChineseFallback: settings.useBundledChineseTerminalFont
+        )
     }
 
     /// Resolves a family name to a terminal-ready font. Empty family means
     /// the bundled default; an unknown family falls back to it too.
     ///
-    /// The bundled Symbols Nerd Font is attached as a CoreText cascade
-    /// entry so PUA icon glyphs (file-type symbols, git glyphs, nf-md-*)
-    /// render without a user-installed patched font. JetBrains Mono covers
-    /// Powerline separators itself, so those never hit the fallback.
-    static func resolve(family: String, size: CGFloat) -> NSFont {
+    /// The bundled Chinese font and Symbols Nerd Font are attached as CoreText
+    /// cascade entries. They cover CJK text and PUA icon glyphs without a
+    /// user-installed patched font. JetBrains Mono covers Powerline separators
+    /// itself, so those never hit the fallback.
+    static func resolve(
+        family: String,
+        size: CGFloat,
+        useBundledChineseFallback: Bool
+    ) -> NSFont {
         let base: NSFont
         if !family.isEmpty, family != bundledFamily,
            let chosen = NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: size) {
@@ -49,9 +58,12 @@ enum TerminalFont {
         } else {
             return .monospacedSystemFont(ofSize: size, weight: .regular)
         }
-        let descriptor = base.fontDescriptor.addingAttributes([
-            .cascadeList: [NSFontDescriptor(name: symbolsFontName, size: size)]
-        ])
+        var cascade = [NSFontDescriptor]()
+        if useBundledChineseFallback {
+            cascade.append(NSFontDescriptor(name: bundledChineseFamily, size: size))
+        }
+        cascade.append(NSFontDescriptor(name: symbolsFontName, size: size))
+        let descriptor = base.fontDescriptor.addingAttributes([.cascadeList: cascade])
         return NSFont(descriptor: descriptor, size: size) ?? base
     }
 

@@ -59,6 +59,14 @@ struct SettingsView: View {
                     )
                     .labelsHidden()
                 }
+
+                Toggle(
+                    "Use bundled Chinese terminal font",
+                    isOn: $settings.useBundledChineseTerminalFont
+                )
+                Text("Source Han Sans CN VF Mono1200 is used as the terminal CJK fallback.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Preview") {
@@ -107,6 +115,7 @@ struct SettingsView: View {
                     }
                     .disabled(settings.fontFamily.isEmpty
                         && settings.fontSize == AppSettings.defaultFontSize
+                        && settings.useBundledChineseTerminalFont
                         && settings.theme == .system
                         && !settings.wrapLines
                         && !settings.restoreTerminalHistory)
@@ -118,7 +127,11 @@ struct SettingsView: View {
     }
 
     private var previewFont: NSFont {
-        TerminalFont.resolve(family: settings.fontFamily, size: CGFloat(settings.fontSize))
+        TerminalFont.resolve(
+            family: settings.fontFamily,
+            size: CGFloat(settings.fontSize),
+            useBundledChineseFallback: settings.useBundledChineseTerminalFont
+        )
     }
 }
 

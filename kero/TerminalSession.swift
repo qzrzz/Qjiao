@@ -253,6 +253,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             ? TerminalFont.bundledFamily : settings.fontFamily
         return TerminalConfiguration { builder in
             builder.withFontFamily(family)
+            if settings.useBundledChineseTerminalFont {
+                // 中文字符优先回退到随应用打包的等宽思源黑体。
+                builder.withCustom("font-family", TerminalFont.bundledChineseFamily)
+            }
             // Keep Kero's bundled icon font as a fallback after the selected
             // primary face. Repeated font-family entries form Ghostty's list.
             builder.withCustom("font-family", "Symbols Nerd Font Mono")
