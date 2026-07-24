@@ -4,6 +4,8 @@
 //
 
 import AppKit
+import Combine
+import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -55,8 +57,10 @@ struct StartPanel: View {
             Button(action: addCommand) {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .medium))
-                    .frame(width: 18, height: 18)
-                    .contentShape(RoundedRectangle(cornerRadius: 4))
+                    .frame(width: 30, height: 28)
+                    .background(Color.primary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
             .help("Add Launcher")
@@ -426,12 +430,7 @@ private struct StartCommandIcon: View {
 
         case .web:
             if let url = faviconURL(for: command.content) {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: {
-                    Image(systemName: command.type.systemImage)
-                        .foregroundStyle(.secondary)
-                }
+                CachedFavicon(url: url)
             } else {
                 Image(systemName: command.type.systemImage)
                     .foregroundStyle(.secondary)
@@ -447,5 +446,81 @@ private struct StartCommandIcon: View {
         components.host = host
         components.path = "/favicon.ico"
         return components.url
+    }
+}
+
+/// Reuses webpage favicons across row redraws and application launches. The
+/// disk layer intentionally shares the project's existing config root so dev
+/// and release builds keep separate caches along with their settings.
+private struct CachedFavicon: View {
+    let url: URL
+    @StateObject private var loader: FaviconLoader
+
+    init(url: URL) {
+        self.url = url
+        _loader = StateObject(wrappedValue: FaviconLoader(url: url))
+    }
+
+    var body: some View {
+        Group {
+            if let image = loader.image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: "globe")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+@MainActor
+private final class FaviconLoader: ObservableObject {
+    private static let memoryCache = NSCache<NSURL, NSImage>()
+
+    @Published private(set) var image: NSImage?
+
+    init(url: URL) {
+        if let cached = Self.memoryCache.object(forKey: url as NSURL) {
+            image = cached
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let data: Data?
+            if let cached = Self.loadFromDisk(url: url) {
+                data = cached
+            } else {
+                data = try? await URLSession.shared.data(from: url).0
+                if let data { Self.saveToDisk(data, url: url) }
+            }
+            guard let data, let image = NSImage(data: data) else { return }
+            Self.memoryCache.setObject(image, forKey: url as NSURL)
+            self.image = image
+        }
+    }
+
+    private static func loadFromDisk(url: URL) -> Data? {
+        try? Data(contentsOf: fileURL(for: url))
+    }
+
+    private static func saveToDisk(_ data: Data, url: URL) {
+        let directory = AppSettings.configURL.deletingLastPathComponent()
+            .appendingPathComponent("favicons", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true
+        )
+        try? data.write(to: fileURL(for: url), options: .atomic)
+    }
+
+    private static func fileURL(for url: URL) -> URL {
+        let key = url.absoluteString.utf8.reduce(UInt64(14_695_981_039_346_656_037)) {
+            ($0 ^ UInt64($1)) &* 1_099_511_628_211
+        }
+        let directory = AppSettings.configURL.deletingLastPathComponent()
+            .appendingPathComponent("favicons", isDirectory: true)
+        return directory.appendingPathComponent(String(key, radix: 16) + ".ico")
     }
 }
