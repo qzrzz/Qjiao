@@ -197,7 +197,7 @@ private struct MainHeaderView: View {
             }
             .frame(height: geo.size.height)
         }
-        .frame(height: 38)
+        .frame(height: 42)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.primary.opacity(0.06))

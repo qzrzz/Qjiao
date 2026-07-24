@@ -105,6 +105,7 @@ struct RightSidebarView: View {
             .padding(.top, 12)
             .padding(.bottom, 4)
         }
+        .frame(height: 41)
     }
 
     private func tabButton(_ panel: RightPanel, systemImage: String, title: String, help: String) -> some View {
@@ -118,7 +119,8 @@ struct RightSidebarView: View {
                 Text(title)
                     .font(.system(size: 11, weight: isActive ? .medium : .regular))
             }
-            .foregroundStyle(isActive ? .primary : .tertiary)
+            // 未选中的面板标签使用次级文字色，避免在浅色模式下过于发白。
+            .foregroundStyle(isActive ? .primary : .secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 5)
             .background(
@@ -159,7 +161,8 @@ private struct PanelHeader: View {
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    // PID 作为辅助信息显示，但在浅色模式下保持足够对比度。
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.head)
             }
@@ -1485,11 +1488,12 @@ private struct GitSectionHeader: View {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 7, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isCollapsed ? 0 : 90))
                     Text(title)
                         .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                        // 分组标题使用次级文字色，提升浅色模式下的可读性。
+                        .foregroundStyle(.secondary)
                 }
                 .contentShape(Rectangle())
             }
@@ -1931,7 +1935,8 @@ private struct InfoPanel: View {
     private func emptyRow(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11))
-            .foregroundStyle(.tertiary)
+            // 空状态提示不再使用过浅的三级文字色。
+            .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
     }
@@ -1956,7 +1961,7 @@ private struct InfoProcessRow: View {
                 .help(process.executable)
             Text(String(process.pid))
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
             Spacer(minLength: 0)
             if isHovering {
                 Button {
