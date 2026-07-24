@@ -137,6 +137,28 @@ final class TerminalManager: nonisolated ObservableObject {
 
     func newProject() {
         let project = makeProject()
+        insert(project)
+    }
+
+    /// 将指定文件夹作为一个新项目打开，并让首个终端从该文件夹启动。
+    @discardableResult
+    func addProject(at directoryURL: URL) -> Bool {
+        let directoryURL = directoryURL.standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: directoryURL.path, isDirectory: &isDirectory
+        ), isDirectory.boolValue
+        else { return false }
+
+        let project = makeProject(createInitialSession: false)
+        project.customName = directoryURL.lastPathComponent
+        project.newSession(directory: directoryURL.path)
+        insert(project)
+        return true
+    }
+
+    /// 将项目插入当前项目之后，并把它设为当前项目。
+    private func insert(_ project: Project) {
         // Open the new project next to the current one rather than at the end.
         // Falls back to appending when nothing is selected yet.
         if let selectedProjectID,
@@ -154,6 +176,10 @@ final class TerminalManager: nonisolated ObservableObject {
             fallbackName: "Project \(projectCounter)",
             createInitialSession: createInitialSession
         )
+        // 文件夹拖到任意终端时，通过所属项目转发到管理器统一创建项目。
+        project.onOpenProjectDirectory = { [weak self] directoryURL in
+            self?.addProject(at: directoryURL) ?? false
+        }
         projectObservations[project.id] = project.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
@@ -546,6 +572,7 @@ final class TerminalManager: nonisolated ObservableObject {
                 }
                 return ProjectSnapshot(
                     customName: project.customName,
+                    icon: project.icon,
                     tabs: tabs,
                     selectedTabIndex: project.tabs.firstIndex { $0.id == project.selectedTabID }
                 )
@@ -577,6 +604,7 @@ final class TerminalManager: nonisolated ObservableObject {
         for saved in snapshot.projects where !saved.tabs.isEmpty {
             let project = makeProject(createInitialSession: false)
             project.customName = saved.customName
+            project.icon = saved.icon
             for tab in saved.tabs {
                 project.restoreTab(from: tab, histories: Self.pendingHistories)
             }

@@ -30,6 +30,8 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
     private let shellPath: String
     private let launchWorkingDirectory: String
+    /// 会话创建时刻，用于 Tab 总览显示已运行时间。
+    private let startedAt = Date()
     private let controller: TerminalController
     private let launchCommand: String
     private let launchDirectoryURL: URL?
@@ -243,6 +245,55 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         else { return nil }
         cachedShellPid = value
         return value
+    }
+
+    /// 终端 shell 自会话创建以来的运行时长。
+    func runningDurationLabel(at date: Date = .now) -> String {
+        let seconds = max(0, Int(date.timeIntervalSince(startedAt)))
+        let hours = seconds / 3_600
+        let minutes = (seconds % 3_600) / 60
+        let remainingSeconds = seconds % 60
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        if minutes > 0 { return "\(minutes)m \(remainingSeconds)s" }
+        return "\(remainingSeconds)s"
+    }
+
+    /// 供 Tab 总览后台查询使用的已知目录；不触发内核进程查询。
+    var tabListFallbackDirectory: String {
+        if let dir = workingDirectory {
+            if let url = URL(string: dir), url.isFileURL { return url.path }
+            if dir.hasPrefix("/") { return dir }
+        }
+        return launchWorkingDirectory
+    }
+
+    /// Tab 总览所需的后台查询结果。
+    struct TabListDetails: Sendable {
+        let directory: String
+        let memoryLabel: String
+    }
+
+    /// 在后台读取 shell 的工作目录和常驻内存，避免影响弹出面板的首帧。
+    nonisolated static func loadTabListDetails(
+        shellPid: pid_t?, fallbackDirectory: String
+    ) -> TabListDetails {
+        let directory = shellPid.flatMap(processWorkingDirectory) ?? fallbackDirectory
+        guard let shellPid else {
+            return TabListDetails(directory: directory, memoryLabel: "—")
+        }
+        var taskInfo = proc_taskinfo()
+        let expectedSize = Int32(MemoryLayout<proc_taskinfo>.size)
+        guard proc_pidinfo(
+            shellPid, PROC_PIDTASKINFO, 0, &taskInfo, expectedSize
+        ) == expectedSize else {
+            return TabListDetails(directory: directory, memoryLabel: "—")
+        }
+        return TabListDetails(
+            directory: directory,
+            memoryLabel: ByteCountFormatter.string(
+                fromByteCount: Int64(taskInfo.pti_resident_size), countStyle: .memory
+            )
+        )
     }
 
     // MARK: - Ghostty configuration

@@ -3,6 +3,7 @@
 //  kero
 //
 
+import AppKit
 import SwiftUI
 
 /// Vertical tab strip listing projects, otty-style. Each row is a project;
@@ -150,6 +151,7 @@ private struct SidebarProjectRow: View {
 
     @State private var isHovering = false
     @State private var isRenaming = false
+    @State private var isIconPickerPresented = false
     @State private var renameDraft = ""
     @FocusState private var renameFocused: Bool
 
@@ -185,17 +187,27 @@ private struct SidebarProjectRow: View {
                 }
             }
             Divider()
+            Button("Change Icon…") {
+                isIconPickerPresented = true
+            }
+            if project.icon != nil {
+                Button("Clear Icon") {
+                    project.icon = nil
+                }
+            }
+            Divider()
             Button("Close Project") {
                 close()
             }
+        }
+        .sheet(isPresented: $isIconPickerPresented) {
+            ProjectIconPicker(project: project)
         }
     }
 
     private var rowContent: some View {
         HStack(spacing: 8) {
-            Image(systemName: "folder")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(isSelected ? Color(nsColor: Theme.cursor) : .secondary)
+            ProjectIconView(icon: project.icon, isSelected: isSelected)
 
             VStack(alignment: .leading, spacing: 1) {
                 if isRenaming {
@@ -265,6 +277,200 @@ private struct SidebarProjectRow: View {
         } else if let session = project.selectedSession {
             SessionDirectoryLabel(session: session)
         }
+    }
+}
+
+/// 项目行的图标：没有自定义图标时沿用文件夹样式。
+private struct ProjectIconView: View {
+    let icon: ProjectIcon?
+    let isSelected: Bool
+
+    var body: some View {
+        switch icon {
+        case .sfSymbol(let name):
+            Image(systemName: name)
+                // 与 Emoji 使用相同字号和图标区域，避免项目列表中两类图标大小不一致。
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 24, height: 24)
+        case .emoji(let emoji):
+            Text(emoji)
+                // 彩色 Emoji 的实际字形通常比标称字号更宽、更高；保留
+                // 额外边距并禁止压缩，避免肤色、组合 Emoji 等被裁掉。
+                .font(.system(size: 17))
+                .lineLimit(1)
+                .fixedSize()
+                .frame(width: 24, height: 24)
+        case nil:
+            Image(systemName: "folder")
+                // 默认文件夹图标也保持与自定义 Emoji 相同的尺寸。
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 24, height: 24)
+        }
+    }
+
+    private var iconColor: Color {
+        isSelected ? Color(nsColor: Theme.cursor) : .secondary
+    }
+}
+
+/// 为项目选择 SF Symbol 或 Emoji 的面板。
+private struct ProjectIconPicker: View {
+    private enum Source: String, CaseIterable, Identifiable {
+        case sfSymbols = "SF Symbols"
+        case emoji = "Emoji"
+
+        var id: Self { self }
+    }
+
+    /// 来自 SF Symbols 官方名称目录，随应用打包以支持离线完整浏览。
+    private static let symbols: [String] = {
+        guard let url = Bundle.main.url(
+            forResource: "SFSymbolCatalog", withExtension: "json"
+        ), let data = try? Data(contentsOf: url),
+              let catalog = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [] }
+        return catalog.keys.sorted()
+    }()
+
+    @ObservedObject var project: Project
+    @Environment(\.dismiss) private var dismiss
+    @State private var source: Source = .sfSymbols
+    @State private var symbolName = "folder"
+    @State private var symbolSearch = ""
+    @State private var emoji = ""
+    @FocusState private var emojiFieldFocused: Bool
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Project Icon")
+                .font(.headline)
+
+            Picker("Icon type", selection: $source) {
+                ForEach(Source.allCases) { source in
+                    Text(source.rawValue).tag(source)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if source == .sfSymbols {
+                sfSymbolPicker
+            } else {
+                emojiPicker
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+    }
+
+    private var sfSymbolPicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 22))
+                    .frame(width: 28)
+                TextField("SF Symbol name", text: $symbolName)
+                    .textFieldStyle(.roundedBorder)
+                Button("Use") {
+                    select(.sfSymbol(symbolName))
+                }
+                .disabled(symbolName.isEmpty)
+            }
+
+            TextField("Search all SF Symbols", text: $symbolSearch)
+                .textFieldStyle(.roundedBorder)
+
+            Text("\(filteredSymbols.count) of \(Self.symbols.count) SF Symbols")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(filteredSymbols, id: \.self) { symbol in
+                        iconButton(label: symbol) {
+                            select(.sfSymbol(symbol))
+                        } content: {
+                            Image(systemName: symbol)
+                                .font(.system(size: 18))
+                        }
+                    }
+                }
+            }
+            .frame(height: 260)
+        }
+    }
+
+    private var emojiPicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Use the macOS Character Viewer to browse and search every Emoji and symbol.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TextField("Emoji", text: $emoji)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($emojiFieldFocused)
+                    .onSubmit { selectEmoji() }
+                Button("Use") { selectEmoji() }
+                    .disabled(emoji.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            HStack {
+                Text(emoji.isEmpty ? "😀" : emoji)
+                    .font(.system(size: 34))
+                    .frame(width: 46, height: 46)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                Button("Browse All Emoji & Symbols…") {
+                    emojiFieldFocused = true
+                    DispatchQueue.main.async {
+                        NSApp.orderFrontCharacterPalette(nil)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 当前检索匹配的 SF Symbols；空检索时显示完整目录。
+    private var filteredSymbols: [String] {
+        let query = symbolSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return Self.symbols }
+        return Self.symbols.filter {
+            $0.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func iconButton<Content: View>(
+        label: String, action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Button(action: action) {
+            content()
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func select(_ icon: ProjectIcon) {
+        project.icon = icon
+        dismiss()
+    }
+
+    /// 采用输入框或 macOS 字符检视器写入的 Emoji。
+    private func selectEmoji() {
+        let value = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        select(.emoji(value))
     }
 }
 

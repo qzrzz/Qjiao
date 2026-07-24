@@ -7,6 +7,12 @@ import AppKit
 import Combine
 import Foundation
 
+/// 项目列表中显示的自定义图标。
+enum ProjectIcon: Codable, Equatable {
+    case sfSymbol(String)
+    case emoji(String)
+}
+
 /// A project groups tabs and appears as one row in the left sidebar. Each tab
 /// is a niri-style layout of panes (terminal sessions and open files); see
 /// `PaneTab`. It always starts with one session; closing the last tab leaves
@@ -19,8 +25,18 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// User-assigned name; when nil the project title follows the
     /// selected session's terminal title.
     @Published var customName: String?
+    /// 项目列表的可选自定义图标；未设置时显示默认文件夹图标。
+    @Published var icon: ProjectIcon?
     @Published var tabs: [PaneTab] = []
     @Published var selectedTabID: UUID?
+    /// 终端直接拖入文件夹时由项目转交给窗口管理器创建新项目。
+    var onOpenProjectDirectory: ((URL) -> Bool)? {
+        didSet {
+            for session in sessions {
+                configureProjectDirectoryDrop(for: session)
+            }
+        }
+    }
 
     private let fallbackName: String
     /// Sessions publish their own changes (title, directory); re-publish them
@@ -110,6 +126,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             initialDirectory: directory ?? selectedSession?.currentDirectoryPath,
             restoredHistory: restoredHistory
         )
+        configureProjectDirectoryDrop(for: session)
         session.onExited = { [weak self] session in
             // Already dead — just drop its pane, no second terminate.
             self?.closeContent(.session(session), terminate: false)
@@ -118,6 +135,13 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             self?.objectWillChange.send()
         }
         return session
+    }
+
+    /// 让每个终端会话使用项目统一的文件夹拖放处理器。
+    private func configureProjectDirectoryDrop(for session: TerminalSession) {
+        session.terminalView.onOpenProjectDirectory = { [weak self] directoryURL in
+            self?.onOpenProjectDirectory?(directoryURL) ?? false
+        }
     }
 
     func terminateAll() {

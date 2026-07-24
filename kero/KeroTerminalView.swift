@@ -11,6 +11,8 @@ import GhosttyTerminal
 final class KeroTerminalView: AppTerminalView {
     /// Fired whenever direct interaction makes this pane the active one.
     var onBecomeFirstResponder: (() -> Void)?
+    /// 文件夹拖入终端时创建项目；文件仍按原行为粘贴绝对路径。
+    var onOpenProjectDirectory: ((URL) -> Bool)?
     let splitTarget = SplitMenuTarget()
 
     private let progressBar = KeroTerminalProgressBarView(frame: .zero)
@@ -202,8 +204,15 @@ final class KeroTerminalView: AppTerminalView {
     /// the active prompt exactly as a paste would.
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard let urls = fileURLs(sender), !urls.isEmpty else { return false }
+        let directoryURLs = urls.filter(Self.isDirectory)
+        let openedDirectories = directoryURLs.filter { url in
+            onOpenProjectDirectory?(url) ?? false
+        }
+        let fileURLs = urls.filter { !Self.isDirectory($0) }
+        // 文件夹被窗口接收为项目后，不再把它的路径输入到当前命令行。
+        guard !fileURLs.isEmpty else { return !openedDirectories.isEmpty }
         focusForInteraction()
-        let text = urls.map { Self.shellToken(for: $0.path) }.joined(separator: " ")
+        let text = fileURLs.map { Self.shellToken(for: $0.path) }.joined(separator: " ")
         sendText(text + " ")
         return true
     }
@@ -218,6 +227,14 @@ final class KeroTerminalView: AppTerminalView {
         sender.draggingPasteboard.readObjects(
             forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
         ) as? [URL]
+    }
+
+    /// Finder 拖放的 URL 是否指向一个目录。
+    private static func isDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(
+            atPath: url.path, isDirectory: &isDirectory
+        ) && isDirectory.boolValue
     }
 
     private static func shellToken(for path: String) -> String {

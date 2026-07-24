@@ -3,7 +3,9 @@
 //  kero
 //
 
+import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject var manager: TerminalManager
@@ -73,9 +75,34 @@ struct ContentView: View {
             }
         }
         .background(WindowChromeAccessor())
+        .onDrop(of: [UTType.fileURL], isTargeted: nil, perform: addDroppedProjects)
         .onChange(of: colorScheme) {
             manager.refreshAppearance()
         }
+    }
+
+    /// 接收从 Finder 拖入窗口的文件夹；每个有效文件夹都会创建一个项目。
+    private func addDroppedProjects(_ providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+        for provider in providers {
+            provider.loadItem(
+                forTypeIdentifier: UTType.fileURL.identifier,
+                options: nil
+            ) { item, _ in
+                let url: URL? = if let url = item as? URL {
+                    url
+                } else if let data = item as? Data {
+                    URL(dataRepresentation: data, relativeTo: nil)
+                } else {
+                    nil
+                }
+                guard let url else { return }
+                Task { @MainActor in
+                    _ = manager.addProject(at: url)
+                }
+            }
+        }
+        return true
     }
 
     /// Sessions in the visible tab are owned by `TerminalHostView`; every
@@ -151,11 +178,11 @@ private struct MainHeaderView: View {
                     if let project = manager.selectedProject {
                         // Everything in the header that isn't the scrollable tab
                         // strip: leading inset + trailing padding (8), HStack
-                        // spacings (16), sidebar toggle (24), "+" and spacing (26),
+                        // spacings (24), tab-list + sidebar toggles (56), "+" and spacing (26),
                         // and the exit-zoom button (24 + 8 spacing) while shown.
                         SessionTabsView(
                             project: project,
-                            maxStripWidth: max(0, geo.size.width - leadingInset - 74 - (manager.isPaneZoomed ? 32 : 0))
+                            maxStripWidth: max(0, geo.size.width - leadingInset - 106 - (manager.isPaneZoomed ? 32 : 0))
                         )
                     }
                     Spacer(minLength: 0)
@@ -178,7 +205,8 @@ private struct MainHeaderView: View {
                     }
                     // No project means the sidebar has nothing to show, so drop
                     // its toggle too — matching the panel collapsing itself.
-                    if manager.selectedProject != nil {
+                    if let project = manager.selectedProject {
+                        TabListButton(project: project)
                         Button {
                             manager.toggleSidebar()
                         } label: {
@@ -203,6 +231,230 @@ private struct MainHeaderView: View {
                 .fill(Color.primary.opacity(0.06))
                 .frame(height: 1)
         }
+    }
+}
+
+/// 顶栏右侧的 Tab 总览入口。用于在标题很长或标签很多时快速切换。
+private struct TabListButton: View {
+    @ObservedObject var project: Project
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isPresented ? Color(nsColor: Theme.cursor) : .secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .tooltip("Show Tab List", edge: .below, alignment: .trailing)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            TabListPopover(project: project, isPresented: $isPresented)
+        }
+    }
+}
+
+/// 可滚动的项目 Tab 下拉面板，标题刻意允许换行以完整显示终端标题。
+private struct TabListPopover: View {
+    @ObservedObject var project: Project
+    @Binding var isPresented: Bool
+    @StateObject private var terminalDetails = TerminalTabDetailsLoader()
+    @State private var currentTime = Date()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Tabs")
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+
+            Divider()
+
+            if project.tabs.count <= 6 {
+                // 内容放得下时不使用 ScrollView，避免系统压缩首尾列表项。
+                VStack(spacing: 3) {
+                    tabRows
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            } else {
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(spacing: 3) {
+                        tabRows
+                    }
+                    // 与弹出面板的大圆角保持安全距离，选中背景不会贴边。
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                }
+            }
+        }
+        .frame(width: 440)
+        // 少量 Tab 由内容的实际尺寸决定 Popover 高度，避免手算行高留白。
+        .fixedSize(horizontal: false, vertical: project.tabs.count <= 6)
+        // 弹层先完成显示，再异步抓取每个终端的系统信息。
+        .onAppear { terminalDetails.load(sessions: project.sessions) }
+        .onDisappear { terminalDetails.cancel() }
+        // 使用一个共享计时器刷新所有行，避免每一行的 TimelineView 影响布局高度。
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) {
+            currentTime = $0
+        }
+    }
+
+    private func details(for tab: PaneTab) -> TerminalSession.TabListDetails? {
+        guard case .session(let session)? = tab.focusedContent else { return nil }
+        return terminalDetails.detailsBySessionID[session.id]
+    }
+
+    @ViewBuilder
+    private var tabRows: some View {
+        ForEach(project.tabs) { tab in
+            TabListRow(
+                tab: tab,
+                isSelected: tab.id == project.selectedTabID,
+                terminalDetails: details(for: tab),
+                currentTime: currentTime
+            ) {
+                project.selectedTabID = tab.id
+                isPresented = false
+            }
+        }
+    }
+}
+
+/// Tab 列表中的一项。标题没有行数上限，避免终端标题被裁剪。
+private struct TabListRow: View {
+    @ObservedObject var tab: PaneTab
+    let isSelected: Bool
+    let terminalDetails: TerminalSession.TabListDetails?
+    let currentTime: Date
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: tab.focusedContent?.systemImage ?? "terminal")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isSelected ? Color(nsColor: Theme.cursor) : .secondary)
+                    .frame(width: 16, height: 18)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(tab.focusedContent?.title ?? "Untitled Tab")
+                        .font(.system(size: 13))
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    if case .session(let session)? = tab.focusedContent {
+                        TerminalTabDetails(
+                            session: session,
+                            details: terminalDetails,
+                            currentTime: currentTime
+                        )
+                    }
+
+                    if tab.allPanes.count > 1 {
+                        Label("\(tab.allPanes.count) panes", systemImage: "square.split.2x1")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        // 弹出面板首次打开时，macOS 会给第一个 Button 加蓝色键盘焦点环；
+        // 列表已有自己的选中背景，因此不显示这层额外描边。
+        .focusable(false)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isSelected ? Color.primary.opacity(0.09) : .clear)
+        )
+    }
+}
+
+/// 终端 Tab 的次要信息：工作目录、常驻内存和已运行时间。
+private struct TerminalTabDetails: View {
+    let session: TerminalSession
+    let details: TerminalSession.TabListDetails?
+    let currentTime: Date
+
+    var body: some View {
+        if let details {
+            detailsView(details)
+        } else {
+            Label("Loading terminal details…", systemImage: "hourglass")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func detailsView(
+        _ details: TerminalSession.TabListDetails
+    ) -> some View {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(details.directory, systemImage: "folder")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                HStack(spacing: 10) {
+                    Label(details.memoryLabel, systemImage: "memorychip")
+                    Label(session.runningDurationLabel(at: currentTime), systemImage: "clock")
+                }
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.tertiary)
+    }
+}
+
+/// 并发加载 Tab 总览详情；结果逐项发布，因此慢终端不会阻塞整个面板。
+@MainActor
+private final class TerminalTabDetailsLoader: ObservableObject {
+    @Published private(set) var detailsBySessionID: [UUID: TerminalSession.TabListDetails] = [:]
+    private var tasks: [Task<Void, Never>] = []
+
+    func load(sessions: [TerminalSession]) {
+        cancel()
+        detailsBySessionID = [:]
+
+        let requests = sessions.map { session in
+            Request(
+                id: session.id,
+                shellPid: session.shellPid,
+                fallbackDirectory: session.tabListFallbackDirectory
+            )
+        }
+        for request in requests {
+            let task = Task.detached(priority: .utility) { [weak self] in
+                let details = TerminalSession.loadTabListDetails(
+                    shellPid: request.shellPid,
+                    fallbackDirectory: request.fallbackDirectory
+                )
+                guard !Task.isCancelled else { return }
+                await self?.store(details, for: request.id)
+            }
+            tasks.append(task)
+        }
+    }
+
+    func cancel() {
+        for task in tasks { task.cancel() }
+        tasks = []
+    }
+
+    private func store(_ details: TerminalSession.TabListDetails, for id: UUID) {
+        detailsBySessionID[id] = details
+    }
+
+    private struct Request: Sendable {
+        let id: UUID
+        let shellPid: pid_t?
+        let fallbackDirectory: String
     }
 }
 
