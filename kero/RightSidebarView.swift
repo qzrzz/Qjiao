@@ -12,6 +12,7 @@ import SwiftUI
 struct RightSidebarView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var themeChanges = Theme.changes
+    @ObservedObject private var settings = AppSettings.shared
     @StateObject private var fileTree = FileTreeModel()
     @StateObject private var git = GitStatusModel()
     @StateObject private var info = SessionInfoModel()
@@ -32,6 +33,8 @@ struct RightSidebarView: View {
     var body: some View {
         HStack(spacing: 0) {
             if manager.isPanelVisible {
+                // Match the terminal tab bar's bottom border so every panel
+                // boundary uses the same theme-defined divider color.
                 Rectangle()
                     .fill(Color(nsColor: Theme.divider))
                     .frame(width: 1)
@@ -90,9 +93,20 @@ struct RightSidebarView: View {
                     }
                 }
                 .frame(width: width)
-                .background(Color(nsColor: Theme.sidebar))
-                // 面板内容的空白区域可拖动窗口，前景控件仍优先接收点击和滚动。
-                .background(WindowDragArea())
+                .background {
+                    // Keep the sidebar visually consistent with the main
+                    // window: reduced window opacity uses native blur beneath
+                    // the themed sidebar tint, rather than a sharp desktop.
+                    if settings.windowBackgroundOpacity < 1 {
+                        VisualEffectView(
+                            material: .underWindowBackground,
+                            followsApplicationActivity: true
+                        )
+                    }
+                    Color(nsColor: Theme.sidebar)
+                    // 面板内容的空白区域可拖动窗口，前景控件仍优先接收点击和滚动。
+                    WindowDragArea()
+                }
             }
         }
         .overlay(alignment: .leading) {

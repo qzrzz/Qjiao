@@ -41,6 +41,7 @@ final class AppSettings: nonisolated ObservableObject {
 
     static let defaultFontSize: Double = 13
     static let fontSizeRange: ClosedRange<Double> = 8...32
+    static let backgroundOpacityRange: ClosedRange<Double> = 0.1...1
 
     /// Light/dark appearance override; `system` follows macOS.
     @Published var theme: AppTheme {
@@ -58,6 +59,19 @@ final class AppSettings: nonisolated ObservableObject {
     /// Selected Ghostty theme for light appearance.
     @Published var themeLight: String {
         didSet { reloadThemeSelection(); save() }
+    }
+
+    /// 原生窗口面板背景的不透明度；终端表面由单独设置控制。
+    @Published var windowBackgroundOpacity: Double {
+        didSet {
+            Theme.reloadWindowBackgroundOpacity(windowBackgroundOpacity)
+            save()
+        }
+    }
+
+    /// Ghostty 终端背景的不透明度。
+    @Published var terminalBackgroundOpacity: Double {
+        didSet { save() }
     }
 
     /// Terminal font family name; empty string means the bundled default
@@ -110,6 +124,12 @@ final class AppSettings: nonisolated ObservableObject {
         theme = toml["theme"]?.string.flatMap(AppTheme.init(rawValue:)) ?? .system
         themeDark = Self.knownTheme(toml["theme-dark"]?.string, fallback: Theme.defaultDarkThemeName)
         themeLight = Self.knownTheme(toml["theme-light"]?.string, fallback: Theme.defaultLightThemeName)
+        windowBackgroundOpacity = Self.validOpacity(
+            toml["window.background-opacity"]?.double
+        )
+        terminalBackgroundOpacity = Self.validOpacity(
+            toml["terminal.background-opacity"]?.double
+        )
         fontFamily = toml["font-family"]?.string ?? ""
         let size = toml["font-size"]?.double ?? Self.defaultFontSize
         fontSize = Self.fontSizeRange.contains(size) ? size : Self.defaultFontSize
@@ -122,6 +142,7 @@ final class AppSettings: nonisolated ObservableObject {
             .flatMap(PackageManagerCommand.init(rawValue:)) ?? .npm
         applyAppearance()
         reloadThemeSelection()
+        Theme.reloadWindowBackgroundOpacity(windowBackgroundOpacity)
         if existing == nil { save() }
     }
 
@@ -132,6 +153,11 @@ final class AppSettings: nonisolated ObservableObject {
     private static func knownTheme(_ name: String?, fallback: String) -> String {
         guard let name, Theme.definition(named: name) != nil else { return fallback }
         return name
+    }
+
+    private static func validOpacity(_ value: Double?) -> Double {
+        guard let value, backgroundOpacityRange.contains(value) else { return 1 }
+        return value
     }
 
     /// Overrides the app-wide appearance so windows using the global project
@@ -154,6 +180,8 @@ final class AppSettings: nonisolated ObservableObject {
         theme = .system
         themeDark = Theme.defaultDarkThemeName
         themeLight = Theme.defaultLightThemeName
+        windowBackgroundOpacity = 1
+        terminalBackgroundOpacity = 1
         wrapLines = false
         restoreTerminalHistory = false
         directClickMovesCursor = false
@@ -170,6 +198,12 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if themeLight != Theme.defaultLightThemeName {
             lines.append("theme-light = \(TOML.quote(themeLight))")
+        }
+        if windowBackgroundOpacity != 1 {
+            lines.append("window.background-opacity = \(TOML.number(windowBackgroundOpacity))")
+        }
+        if terminalBackgroundOpacity != 1 {
+            lines.append("terminal.background-opacity = \(TOML.number(terminalBackgroundOpacity))")
         }
         if !fontFamily.isEmpty {
             lines.append("font-family = \(TOML.quote(fontFamily))")

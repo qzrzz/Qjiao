@@ -108,11 +108,14 @@ final class TerminalManager: nonisolated ObservableObject {
         // willSet — by then `didSet` has pushed the theme onto NSApp, so
         // `refreshAppearance` reads the new effective appearance.
         settingsObservation = Publishers.CombineLatest3(
-            Publishers.CombineLatest4(
-                AppSettings.shared.$fontFamily.removeDuplicates(),
-                AppSettings.shared.$fontSize.removeDuplicates(),
-                AppSettings.shared.$useBundledChineseTerminalFont.removeDuplicates(),
-                AppSettings.shared.$fontThicken.removeDuplicates()
+            Publishers.CombineLatest(
+                Publishers.CombineLatest4(
+                    AppSettings.shared.$fontFamily.removeDuplicates(),
+                    AppSettings.shared.$fontSize.removeDuplicates(),
+                    AppSettings.shared.$useBundledChineseTerminalFont.removeDuplicates(),
+                    AppSettings.shared.$fontThicken.removeDuplicates()
+                ),
+                AppSettings.shared.$terminalBackgroundOpacity.removeDuplicates()
             ),
             AppSettings.shared.$directClickMovesCursor.removeDuplicates(),
             Publishers.CombineLatest3(

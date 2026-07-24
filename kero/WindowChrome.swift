@@ -62,6 +62,11 @@ struct WindowChromeAccessor: NSViewRepresentable {
             // windows can use different project themes without changing the
             // app-wide preference. nil inherits NSApp.appearance.
             window.appearance = projectTheme.nsAppearance
+            // SwiftUI background layers can become translucent through the
+            // Appearance setting, so the AppKit window must not flatten them
+            // onto an opaque system background first.
+            window.isOpaque = false
+            window.backgroundColor = .clear
             if projectThemeChanged {
                 DispatchQueue.main.async {
                     onAppearanceChanged()

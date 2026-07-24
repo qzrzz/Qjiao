@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var themeChanges = Theme.changes
+    @ObservedObject private var settings = AppSettings.shared
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -55,15 +56,26 @@ struct ContentView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // Opaque so the pane gaps hide the unselected diffs behind,
-                    // except while a diff tab is up — then stay clear so its
-                    // web view shows through from the stack below.
+                    // Opaque so the pane gaps hide unselected diffs behind.
+                    // A diff tab's own pane stays clear so its web view,
+                    // mounted in the stack below, remains visible.
                     .background(paneLayerIsOpaque ? AnyShapeStyle(Color(nsColor: Theme.background)) : AnyShapeStyle(Color.clear))
                     .zIndex(2)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .background(Color(nsColor: Theme.background))
+            .background {
+                // A semi-transparent theme color alone exposes the desktop
+                // sharply. Put the native material behind it so the window
+                // opacity setting reads as frosted glass instead.
+                if settings.windowBackgroundOpacity < 1 {
+                    VisualEffectView(
+                        material: .underWindowBackground,
+                        followsApplicationActivity: true
+                    )
+                }
+                Color(nsColor: Theme.background)
+            }
 
             RightSidebarView(manager: manager)
         }

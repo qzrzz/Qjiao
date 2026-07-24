@@ -365,6 +365,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             builder.withFontThicken(settings.fontThicken)
             builder.withCursorStyle(.block)
             builder.withCursorStyleBlink(true)
+            builder.withBackgroundOpacity(settings.terminalBackgroundOpacity)
             builder.withWindowPaddingX(10)
             builder.withWindowPaddingY(8)
             builder.withCustom("window-padding-balance", "true")

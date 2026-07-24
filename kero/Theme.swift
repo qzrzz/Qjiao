@@ -153,6 +153,8 @@ enum Theme {
     private static let projectSelection = OSAllocatedUnfairLock(
         initialState: (light: nil as String?, dark: nil as String?)
     )
+    /// 原生窗口背景层的透明度；终端表面另由 Ghostty 配置控制。
+    private static let windowBackgroundOpacity = OSAllocatedUnfairLock(initialState: 1.0)
 
     nonisolated static func definition(named name: String) -> GhosttyThemeDefinition? {
         if name == defaultLightThemeName { return defaultLight }
@@ -190,8 +192,22 @@ enum Theme {
         changes.objectWillChange.send()
     }
 
-    static var background: NSColor { dynamic { $0.backgroundNSColor } }
-    static var sidebar: NSColor { dynamic { $0.sidebarNSColor } }
+    @MainActor
+    static func reloadWindowBackgroundOpacity(_ opacity: Double) {
+        windowBackgroundOpacity.withLock { $0 = opacity }
+        changes.objectWillChange.send()
+    }
+
+    static var background: NSColor {
+        dynamic { theme in
+            theme.backgroundNSColor.withAlphaComponent(windowBackgroundOpacity.withLock { $0 })
+        }
+    }
+    static var sidebar: NSColor {
+        dynamic { theme in
+            theme.sidebarNSColor.withAlphaComponent(windowBackgroundOpacity.withLock { $0 })
+        }
+    }
     static var cursor: NSColor { dynamic { $0.accentNSColor } }
     static var accent: NSColor { cursor }
     static var divider: NSColor {

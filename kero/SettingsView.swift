@@ -36,6 +36,17 @@ struct SettingsView: View {
                 GhosttyThemePicker(
                     title: "Light colors", selection: $settings.themeLight, dark: false
                 )
+                backgroundOpacityControl(
+                    "Window background opacity",
+                    value: $settings.windowBackgroundOpacity
+                )
+                backgroundOpacityControl(
+                    "Terminal background opacity",
+                    value: $settings.terminalBackgroundOpacity
+                )
+                Text("Window panels and terminal surfaces can be made translucent independently.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 Text("Colors apply to the terminal, editor, and window panels.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -152,6 +163,8 @@ struct SettingsView: View {
                         && settings.theme == .system
                         && settings.themeDark == Theme.defaultDarkThemeName
                         && settings.themeLight == Theme.defaultLightThemeName
+                        && settings.windowBackgroundOpacity == 1
+                        && settings.terminalBackgroundOpacity == 1
                         && !settings.wrapLines
                         && !settings.restoreTerminalHistory
                         && !settings.directClickMovesCursor
@@ -169,6 +182,23 @@ struct SettingsView: View {
             size: CGFloat(settings.fontSize),
             useBundledChineseFallback: settings.useBundledChineseTerminalFont
         )
+    }
+
+    private func backgroundOpacityControl(
+        _ title: String, value: Binding<Double>
+    ) -> some View {
+        HStack {
+            Text(title)
+            Slider(
+                value: value,
+                in: AppSettings.backgroundOpacityRange,
+                step: 0.05
+            )
+            Text("\(Int((value.wrappedValue * 100).rounded()))%")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 38, alignment: .trailing)
+        }
     }
 
 }

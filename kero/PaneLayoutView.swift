@@ -486,7 +486,6 @@ private struct PaneView: View {
                     { focus(); close(pane.content) }
                 }
             )
-                .background(Color(nsColor: Theme.background))
                 .overlay(alignment: .topTrailing) {
                     TerminalFindOverlay(find: session.find)
                 }
