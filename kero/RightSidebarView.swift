@@ -15,6 +15,7 @@ struct RightSidebarView: View {
     @StateObject private var git = GitStatusModel()
     @StateObject private var info = SessionInfoModel()
     @AppStorage("rightSidebarWidth") private var width: Double = 240
+    @State private var wasCWDVisible = false
 
     private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
@@ -152,7 +153,13 @@ struct RightSidebarView: View {
               let session = manager.selectedSession,
               manager.isPanelVisible
         else { return }
-        if manager.panelTab == .cwd, !showsCWD {
+        let cwdVisible = showsCWD
+        if cwdVisible, !wasCWDVisible {
+            manager.panelTab = .cwd
+        }
+        wasCWDVisible = cwdVisible
+
+        if manager.panelTab == .cwd, !cwdVisible {
             manager.panelTab = .files
             return
         }

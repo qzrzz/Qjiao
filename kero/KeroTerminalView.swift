@@ -20,7 +20,6 @@ final class KeroTerminalView: AppTerminalView {
     private var lastProgressValue: Int?
     private var isCapturingHistoryExport = false
     private var capturedHistoryExportPath: String?
-    private var pendingCursorPlacement: DispatchWorkItem?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -30,7 +29,6 @@ final class KeroTerminalView: AppTerminalView {
 
     deinit {
         progressReportTimer?.invalidate()
-        pendingCursorPlacement?.cancel()
     }
 
     override func layout() {
@@ -148,76 +146,7 @@ final class KeroTerminalView: AppTerminalView {
 
     override func mouseDown(with event: NSEvent) {
         focusForInteraction()
-        if isDirectCursorPlacementClick(event) {
-            // The first click of a double-click arrives as a single click.
-            // Let AppKit begin its normal selection handling now, then wait to
-            // see whether a second click or drag follows before relocating.
-            pendingCursorPlacement?.cancel()
-        }
         super.mouseDown(with: event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        super.mouseUp(with: event)
-        guard isDirectCursorPlacementClick(event) else { return }
-
-        let point = event.locationInWindow
-        let work = DispatchWorkItem { [weak self] in
-            self?.moveCursorToClick(at: point, from: event)
-        }
-        pendingCursorPlacement = work
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + NSEvent.doubleClickInterval,
-            execute: work
-        )
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        pendingCursorPlacement?.cancel()
-        pendingCursorPlacement = nil
-        super.mouseDragged(with: event)
-    }
-
-    /// Ghostty reserves Alt-click for prompt cursor placement. Direct clicks
-    /// are delayed long enough for double-click selection to win first.
-    private func isDirectCursorPlacementClick(_ event: NSEvent) -> Bool {
-        guard AppSettings.shared.directClickMovesCursor,
-              event.clickCount == 1,
-              event.modifierFlags.intersection([.shift, .control, .option, .command]).isEmpty,
-              event.type == .leftMouseDown || event.type == .leftMouseUp else {
-            return false
-        }
-        return true
-    }
-
-    private func moveCursorToClick(at point: CGPoint, from event: NSEvent) {
-        defer { pendingCursorPlacement = nil }
-        let modifiers = event.modifierFlags.union(.option)
-        guard let down = NSEvent.mouseEvent(
-            with: .leftMouseDown,
-            location: point,
-            modifierFlags: modifiers,
-            timestamp: event.timestamp,
-            windowNumber: event.windowNumber,
-            context: event.context,
-            eventNumber: event.eventNumber,
-            clickCount: 1,
-            pressure: event.pressure
-        ), let up = NSEvent.mouseEvent(
-            with: .leftMouseUp,
-            location: point,
-            modifierFlags: modifiers,
-            timestamp: event.timestamp,
-            windowNumber: event.windowNumber,
-            context: event.context,
-            eventNumber: event.eventNumber,
-            clickCount: 1,
-            pressure: event.pressure
-        ) else {
-            return
-        }
-        super.mouseDown(with: down)
-        super.mouseUp(with: up)
     }
 
     private func focusForInteraction() {
