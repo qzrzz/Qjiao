@@ -83,6 +83,14 @@ struct SettingsView: View {
 
             Section("Terminal") {
                 Toggle(
+                    "Move cursor with direct click",
+                    isOn: $settings.directClickMovesCursor
+                )
+                Text("When enabled, an unmodified click at a shell prompt moves the cursor. Selection remains available with ⇧ drag.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Toggle(
                     "Restore session history on relaunch",
                     isOn: $settings.restoreTerminalHistory
                 )
@@ -118,7 +126,8 @@ struct SettingsView: View {
                         && settings.useBundledChineseTerminalFont
                         && settings.theme == .system
                         && !settings.wrapLines
-                        && !settings.restoreTerminalHistory)
+                        && !settings.restoreTerminalHistory
+                        && !settings.directClickMovesCursor)
                 }
             }
         }

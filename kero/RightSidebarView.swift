@@ -46,6 +46,15 @@ struct RightSidebarView: View {
                             openToSide: { manager.openFileToSide($0) },
                             onRename: { manager.fileRenamed(from: $0, to: $1) }
                         )
+                    case .cwd:
+                        FileTreePanel(
+                            model: fileTree,
+                            session: manager.selectedSession,
+                            currentFilePath: openFilePath,
+                            openFile: { manager.openFile($0) },
+                            openToSide: { manager.openFileToSide($0) },
+                            onRename: { manager.fileRenamed(from: $0, to: $1) }
+                        )
                     case .git:
                         GitPanel(
                             model: git,
@@ -99,6 +108,9 @@ struct RightSidebarView: View {
             HStack(spacing: 4) {
                 tabButton(.info, systemImage: "info.circle", title: "Info", help: "Info (⇧⌘I)")
                 tabButton(.files, systemImage: "folder", title: "Files", help: "Files (⇧⌘E)")
+                if showsCWD {
+                    tabButton(.cwd, systemImage: "terminal", title: "CWD", help: "CWD")
+                }
                 tabButton(.git, systemImage: "arrow.triangle.branch", title: "Git", help: "Git (⇧⌘G)")
             }
             .padding(.horizontal, 8)
@@ -136,14 +148,39 @@ struct RightSidebarView: View {
     }
 
     private func syncModels() {
-        guard let session = manager.selectedSession, manager.isPanelVisible else { return }
-        let root = session.currentDirectoryPath
-        switch manager.panelTab {
-        case .files: fileTree.sync(root: root)
-        case .git: git.sync(root: root)
-        case .info:
-            info.sync(root: root, shellName: session.shellName, shellPid: session.shellPid)
+        guard let project = manager.selectedProject,
+              let session = manager.selectedSession,
+              manager.isPanelVisible
+        else { return }
+        if manager.panelTab == .cwd, !showsCWD {
+            manager.panelTab = .files
+            return
         }
+        switch manager.panelTab {
+        case .files: fileTree.sync(root: projectRoot(for: project, fallback: session))
+        case .cwd: fileTree.sync(root: session.currentDirectoryPath)
+        case .git: git.sync(root: session.currentDirectoryPath)
+        case .info:
+            info.sync(root: session.currentDirectoryPath, shellName: session.shellName, shellPid: session.shellPid)
+        }
+    }
+
+    /// 项目配置尚未写入目录时，使用当前终端目录作为一次性回退值。
+    private func projectRoot(for project: Project, fallback session: TerminalSession) -> String {
+        project.projectDirectory.isEmpty ? session.currentDirectoryPath : project.projectDirectory
+    }
+
+    /// 只有项目目录与当前终端目录不同时才显示 CWD 面板。
+    private var showsCWD: Bool {
+        guard let project = manager.selectedProject,
+              let session = manager.selectedSession
+        else { return false }
+        return normalizedPath(projectRoot(for: project, fallback: session))
+            != normalizedPath(session.currentDirectoryPath)
+    }
+
+    private func normalizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
     }
 }
 

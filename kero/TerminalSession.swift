@@ -75,7 +75,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         terminalView.configuration = TerminalSurfaceOptions(
             backend: .exec,
             workingDirectory: directory,
-            envVars: Self.surfaceEnvironment()
+            envVars: Self.surfaceEnvironment(shellPath: shellPath)
         )
         terminalView.controller = controller
         installOverlayScrollbar()
@@ -338,6 +338,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             builder.withCustom("command", "shell:\(command)")
             builder.withCustom("term", "xterm-256color")
             builder.withCustom("shell-integration", "none")
+            builder.withCustom(
+                "cursor-click-to-move",
+                settings.directClickMovesCursor ? "true" : "false"
+            )
             // The previous backend retained 500 rows. Ghostty budgets bytes
             // instead, so use a small per-surface cap with enough room for at
             // least that many normally sized rows while keeping synchronous
@@ -371,13 +375,24 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         }
     }
 
-    private static func surfaceEnvironment() -> [String: String] {
+    private static func surfaceEnvironment(shellPath: String) -> [String: String] {
         var environment = [
             "TERM": "xterm-256color",
             "COLORTERM": "truecolor",
         ]
         if ProcessInfo.processInfo.environment["LANG"] == nil {
             environment["LANG"] = "en_US.UTF-8"
+        }
+        if (shellPath as NSString).lastPathComponent == "zsh",
+           let integrationDirectory = Bundle.main.resourceURL?
+               .appendingPathComponent("TerminalShellIntegration/zsh", isDirectory: true)
+               .path {
+            let processEnvironment = ProcessInfo.processInfo.environment
+            environment["QJIAO_ZSH_INTEGRATION_DIR"] = integrationDirectory
+            environment["QJIAO_ZDOTDIR_WAS_SET"] = processEnvironment["ZDOTDIR"] == nil
+                ? "0" : "1"
+            environment["QJIAO_ORIGINAL_ZDOTDIR"] = processEnvironment["ZDOTDIR"] ?? ""
+            environment["ZDOTDIR"] = integrationDirectory
         }
         return environment
     }

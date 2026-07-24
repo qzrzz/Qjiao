@@ -67,6 +67,12 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// Replace an unmodified primary click with the terminal's cursor-move
+    /// gesture. Disabled by default so normal selection behavior is retained.
+    @Published var directClickMovesCursor: Bool {
+        didSet { save() }
+    }
+
     private init() {
         let existing = TOML.parse(at: Self.configURL)
         let toml = existing ?? Self.legacyDefaults()
@@ -77,6 +83,7 @@ final class AppSettings: nonisolated ObservableObject {
         useBundledChineseTerminalFont = toml["terminal.use-bundled-chinese-font"]?.bool ?? true
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
+        directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
         applyAppearance()
         if existing == nil { save() }
     }
@@ -99,6 +106,7 @@ final class AppSettings: nonisolated ObservableObject {
         theme = .system
         wrapLines = false
         restoreTerminalHistory = false
+        directClickMovesCursor = false
     }
 
     private func save() {
@@ -118,6 +126,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if restoreTerminalHistory {
             lines.append("terminal.restore-history = true")
+        }
+        if directClickMovesCursor {
+            lines.append("terminal.direct-click-moves-cursor = true")
         }
         let dir = Self.configURL.deletingLastPathComponent()
         do {

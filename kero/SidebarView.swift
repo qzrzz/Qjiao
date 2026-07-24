@@ -152,14 +152,16 @@ private struct SidebarProjectRow: View {
     @State private var isHovering = false
     @State private var isRenaming = false
     @State private var isIconPickerPresented = false
-    @State private var isDescriptionEditorPresented = false
+    @State private var isEditingDescription = false
+    @State private var isCloseConfirmationPresented = false
     @State private var renameDraft = ""
     @State private var descriptionDraft = ""
     @FocusState private var renameFocused: Bool
+    @FocusState private var descriptionFocused: Bool
 
     var body: some View {
         Group {
-            if isRenaming {
+            if isRenaming || isEditingDescription {
                 rowContent
             } else {
                 Button(action: select) {
@@ -215,11 +217,11 @@ private struct SidebarProjectRow: View {
         .sheet(isPresented: $isIconPickerPresented) {
             ProjectIconPicker(project: project)
         }
-        .sheet(isPresented: $isDescriptionEditorPresented) {
-            ProjectDescriptionEditor(
-                description: $descriptionDraft,
-                save: saveDescription
-            )
+        .alert("Close Project?", isPresented: $isCloseConfirmationPresented) {
+            Button("Delete Project", role: .destructive, action: close)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will close the project and its terminal sessions.")
         }
     }
 
@@ -251,8 +253,8 @@ private struct SidebarProjectRow: View {
 
             Spacer(minLength: 0)
 
-            if isHovering, !isRenaming {
-                Button(action: close) {
+            if isHovering, !isRenaming, !isEditingDescription {
+                Button(action: requestClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.secondary)
@@ -260,7 +262,7 @@ private struct SidebarProjectRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-            } else if index < 9, !isRenaming {
+            } else if index < 9, !isRenaming, !isEditingDescription {
                 Text("⌘\(index + 1)")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
@@ -285,15 +287,25 @@ private struct SidebarProjectRow: View {
         isRenaming = false
     }
 
+    /// 普通点击要求确认；按住 Command 点击时直接关闭项目。
+    private func requestClose() {
+        if NSEvent.modifierFlags.contains(.command) {
+            close()
+        } else {
+            isCloseConfirmationPresented = true
+        }
+    }
+
     /// 在 Finder 中打开项目当前终端所在的目录。
     private func openProjectDirectory() {
         guard let path = project.selectedSession?.currentDirectoryPath else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 
-    /// 创建并打开当前构建使用的 Qjiao 配置目录。
+    /// 创建并打开当前项目配置所在的 Qjiao 配置目录。
     private func openConfigFolder() {
         let directory = AppSettings.configURL.deletingLastPathComponent()
+            .appendingPathComponent("projects", isDirectory: true)
         do {
             try FileManager.default.createDirectory(
                 at: directory, withIntermediateDirectories: true
@@ -304,22 +316,43 @@ private struct SidebarProjectRow: View {
         }
     }
 
-    /// 打开项目描述编辑器，并使用当前值作为初始内容。
+    /// 开始项目描述的行内编辑，并使用当前值作为初始内容。
     private func beginDescriptionEdit() {
         descriptionDraft = project.description ?? ""
-        isDescriptionEditorPresented = true
+        isEditingDescription = true
+        DispatchQueue.main.async {
+            descriptionFocused = true
+        }
     }
 
     /// 保存描述；空白描述按未设置处理，从而继续显示默认的项目辅助信息。
     private func saveDescription() {
         let trimmed = descriptionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         project.description = trimmed.isEmpty ? nil : trimmed
-        isDescriptionEditorPresented = false
+        isEditingDescription = false
+    }
+
+    /// 放弃本次描述编辑，不改变已经保存的项目描述。
+    private func cancelDescriptionEdit() {
+        isEditingDescription = false
     }
 
     @ViewBuilder
     private var subtitle: some View {
-        if let description = project.description, !description.isEmpty {
+        if isEditingDescription {
+            TextField("Description", text: $descriptionDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .focused($descriptionFocused)
+                .onSubmit(saveDescription)
+                .onExitCommand(perform: cancelDescriptionEdit)
+                .onChange(of: descriptionFocused) {
+                    if !descriptionFocused, isEditingDescription {
+                        saveDescription()
+                    }
+                }
+        } else if let description = project.description, !description.isEmpty {
             Text(description)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
@@ -332,38 +365,6 @@ private struct SidebarProjectRow: View {
         } else if let session = project.selectedSession {
             SessionDirectoryLabel(session: session)
         }
-    }
-}
-
-/// 编辑项目描述的轻量弹窗，支持多行文本并保留取消操作。
-private struct ProjectDescriptionEditor: View {
-    @Binding var description: String
-    let save: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Project Description")
-                .font(.headline)
-
-            TextEditor(text: $description)
-                .font(.body)
-                .frame(width: 280, height: 90)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.secondary.opacity(0.25))
-                }
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save", action: save)
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 320)
     }
 }
 

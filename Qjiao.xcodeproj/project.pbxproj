@@ -12,10 +12,12 @@
 		AA10000000000000000000E2 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = AA10000000000000000000E1 /* Sparkle */; };
 		AA20000000000000000000A2 /* STTextView-Plugin-Neon in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000A1 /* STTextView-Plugin-Neon */; };
 		AA30000000000000000000A2 /* TreeSitterTSX in Frameworks */ = {isa = PBXBuildFile; productRef = AA30000000000000000000A1 /* TreeSitterTSX */; };
+		AA40000000000000000000A1 /* TerminalShellIntegration in Resources */ = {isa = PBXBuildFile; fileRef = AA40000000000000000000A0 /* TerminalShellIntegration */; };
 		FF519F43300BBE2100D8B982 /* PierreDiffsSwift in Frameworks */ = {isa = PBXBuildFile; productRef = AA10000000000000000000D1 /* PierreDiffsSwift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		AA40000000000000000000A0 /* TerminalShellIntegration */ = {isa = PBXFileReference; lastKnownFileType = folder; path = kero/TerminalShellIntegration; sourceTree = SOURCE_ROOT; };
 		FF3FDD73300B6A7400112486 /* Qjiao.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Qjiao.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -146,6 +148,7 @@
 		FF3FDD71300B6A7400112486 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
+				AA40000000000000000000A1 /* TerminalShellIntegration in Resources */,
 			);
 		};
 /* End PBXResourcesBuildPhase section */

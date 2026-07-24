@@ -11,6 +11,7 @@ import SwiftUI
 /// Panels available in the right sidebar.
 enum RightPanel {
     case files
+    case cwd
     case git
     case info
 }
@@ -95,11 +96,14 @@ final class TerminalManager: nonisolated ObservableObject {
         // Delivery is scheduled onto the main queue because @Published emits in
         // willSet — by then `didSet` has pushed the theme onto NSApp, so
         // `refreshAppearance` reads the new effective appearance.
-        settingsObservation = Publishers.CombineLatest4(
-            AppSettings.shared.$fontFamily.removeDuplicates(),
-            AppSettings.shared.$fontSize.removeDuplicates(),
-            AppSettings.shared.$useBundledChineseTerminalFont.removeDuplicates(),
-            AppSettings.shared.$theme.removeDuplicates()
+        settingsObservation = Publishers.CombineLatest(
+            Publishers.CombineLatest4(
+                AppSettings.shared.$fontFamily.removeDuplicates(),
+                AppSettings.shared.$fontSize.removeDuplicates(),
+                AppSettings.shared.$useBundledChineseTerminalFont.removeDuplicates(),
+                AppSettings.shared.$theme.removeDuplicates()
+            ),
+            AppSettings.shared.$directClickMovesCursor.removeDuplicates()
         )
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -152,6 +156,7 @@ final class TerminalManager: nonisolated ObservableObject {
 
         let project = makeProject(createInitialSession: false)
         project.customName = directoryURL.lastPathComponent
+        project.projectDirectory = directoryURL.path
         project.newSession(directory: directoryURL.path)
         insert(project)
         return true
@@ -575,7 +580,8 @@ final class TerminalManager: nonisolated ObservableObject {
                     ProjectConfig(
                         customName: project.customName,
                         description: project.description,
-                        icon: project.icon
+                        icon: project.icon,
+                        projectDirectory: project.projectDirectory
                     ),
                     for: project.id
                 )
@@ -584,6 +590,7 @@ final class TerminalManager: nonisolated ObservableObject {
                     customName: nil,
                     description: nil,
                     icon: nil,
+                    projectDirectory: nil,
                     tabs: tabs,
                     selectedTabIndex: project.tabs.firstIndex { $0.id == project.selectedTabID }
                 )
@@ -618,19 +625,24 @@ final class TerminalManager: nonisolated ObservableObject {
             project.customName = config?.customName ?? saved.customName
             project.description = config?.description ?? saved.description
             project.icon = config?.icon ?? saved.icon
+            project.projectDirectory = config?.projectDirectory ?? saved.projectDirectory ?? ""
+            for tab in saved.tabs {
+                project.restoreTab(from: tab, histories: Self.pendingHistories)
+            }
+            if project.projectDirectory.isEmpty {
+                project.projectDirectory = project.sessions.first?.currentDirectoryPath ?? ""
+            }
             // 旧版快照中的项目配置在首次恢复时迁移到独立配置文件。
-            if config == nil {
+            if config == nil || config?.projectDirectory == nil {
                 ProjectConfigStore.save(
                     ProjectConfig(
                         customName: project.customName,
                         description: project.description,
-                        icon: project.icon
+                        icon: project.icon,
+                        projectDirectory: project.projectDirectory
                     ),
                     for: project.id
                 )
-            }
-            for tab in saved.tabs {
-                project.restoreTab(from: tab, histories: Self.pendingHistories)
             }
             guard !project.tabs.isEmpty else {
                 projectObservations[project.id] = nil
