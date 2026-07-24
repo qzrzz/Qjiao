@@ -8,8 +8,8 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// Panels available in the right sidebar.
-enum RightPanel {
+/// Panels available in the right sidebar. Raw values are persisted in snapshots.
+enum RightPanel: String, Codable {
     case start
     case files
     case cwd
@@ -97,18 +97,23 @@ final class TerminalManager: nonisolated ObservableObject {
         if !restored {
             newProject()
         }
-        // Re-theme live sessions only when font or appearance settings change.
+        // Re-theme live sessions when font, appearance, or terminal theme settings change.
         // Delivery is scheduled onto the main queue because @Published emits in
         // willSet — by then `didSet` has pushed the theme onto NSApp, so
         // `refreshAppearance` reads the new effective appearance.
-        settingsObservation = Publishers.CombineLatest(
+        settingsObservation = Publishers.CombineLatest3(
             Publishers.CombineLatest4(
                 AppSettings.shared.$fontFamily.removeDuplicates(),
                 AppSettings.shared.$fontSize.removeDuplicates(),
                 AppSettings.shared.$useBundledChineseTerminalFont.removeDuplicates(),
-                AppSettings.shared.$theme.removeDuplicates()
+                AppSettings.shared.$fontThicken.removeDuplicates()
             ),
-            AppSettings.shared.$directClickMovesCursor.removeDuplicates()
+            AppSettings.shared.$directClickMovesCursor.removeDuplicates(),
+            Publishers.CombineLatest3(
+                AppSettings.shared.$theme.removeDuplicates(),
+                AppSettings.shared.$themeLight.removeDuplicates(),
+                AppSettings.shared.$themeDark.removeDuplicates()
+            )
         )
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -333,6 +338,7 @@ final class TerminalManager: nonisolated ObservableObject {
         let directory = project.projectDirectory.isEmpty
             ? selectedSession?.currentDirectoryPath
             : project.projectDirectory
+        let previousTabID = project.selectedTabID
         let session: TerminalSession
         if !forceNewTab, let edge = command.split.edge,
            let splitSession = project.newSplitSession(directory: directory, toward: edge) {
@@ -340,7 +346,12 @@ final class TerminalManager: nonisolated ObservableObject {
         } else {
             session = project.newSession(directory: directory)
         }
-        session.setFixedTitle(command.title)
+        // Start titles and manual tab renames share PaneTab.customName. A
+        // split command keeps the existing tab name by design.
+        if project.selectedTabID != previousTabID {
+            let title = command.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            project.selectedTab?.customName = title.isEmpty ? nil : title
+        }
         session.sendCommandWhenReady(text + "\n")
     }
 
@@ -664,7 +675,8 @@ final class TerminalManager: nonisolated ObservableObject {
                     }
                     let (col, row) = tab.focusedLocation() ?? (0, 0)
                     return ProjectSnapshot.TabSnapshot(
-                        columns: columns, focusedColumn: col, focusedRow: row
+                        columns: columns, focusedColumn: col, focusedRow: row,
+                        customName: tab.customName
                     )
                 }
                 ProjectConfigStore.save(
@@ -687,7 +699,10 @@ final class TerminalManager: nonisolated ObservableObject {
                     selectedTabIndex: project.tabs.firstIndex { $0.id == project.selectedTabID }
                 )
             },
-            selectedProjectIndex: projects.firstIndex { $0.id == selectedProjectID }
+            selectedProjectIndex: projects.firstIndex { $0.id == selectedProjectID },
+            isLeftSidebarVisible: isLeftSidebarVisible,
+            isRightPanelVisible: isPanelVisible,
+            rightPanelTab: panelTab
         )
         return (snapshot, histories)
     }
@@ -711,6 +726,15 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Rebuilds projects and tabs from a saved window snapshot. Returns
     /// false when the snapshot holds nothing restorable.
     private func restore(from snapshot: SessionSnapshot) -> Bool {
+        if let visible = snapshot.isLeftSidebarVisible {
+            isLeftSidebarVisible = visible
+        }
+        if let visible = snapshot.isRightPanelVisible {
+            isPanelVisible = visible
+        }
+        if let tab = snapshot.rightPanelTab {
+            panelTab = tab
+        }
         for saved in snapshot.projects where !saved.tabs.isEmpty {
             let project = makeProject(id: saved.id, createInitialSession: false)
             let config = ProjectConfigStore.load(for: project.id)

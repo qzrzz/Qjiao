@@ -40,9 +40,6 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private var lastScrollbar: TerminalScrollbar?
     private var lastHistorySnapshot: String?
     private var isTerminating = false
-    /// A launcher-provided tab title. When set, shell title escape sequences
-    /// cannot replace it for the lifetime of this session.
-    private var fixedTitle: String?
 
     init(initialDirectory: String? = nil, restoredHistory: String? = nil) {
         let shellPath = Self.loginShell()
@@ -199,12 +196,6 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
     func sendCommand(_ text: String) {
         terminalView.sendText(text)
-    }
-
-    func setFixedTitle(_ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        fixedTitle = trimmed.isEmpty ? nil : trimmed
-        if let fixedTitle { title = fixedTitle }
     }
 
     /// Queues an automated command until this surface has been attached and
@@ -371,8 +362,13 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             // primary face. Repeated font-family entries form Ghostty's list.
             builder.withCustom("font-family", "Symbols Nerd Font Mono")
             builder.withFontSize(Float(settings.fontSize))
+            builder.withFontThicken(settings.fontThicken)
             builder.withCursorStyle(.block)
             builder.withCursorStyleBlink(true)
+            builder.withWindowPaddingX(10)
+            builder.withWindowPaddingY(8)
+            builder.withCustom("window-padding-balance", "true")
+            builder.withCustom("window-padding-color", "extend")
             // Kero owns the app-level command map. Leaving Ghostty's defaults
             // installed makes its performKeyEquivalent intercept shortcuts
             // such as Cmd-T, Cmd-N, Cmd-D, Cmd-K, and project/tab navigation
@@ -408,9 +404,9 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             builder.withCustom("scrollback-limit", "4194304")
             builder.withCustom("macos-option-as-alt", "true")
             builder.withCustom("scrollbar", "never")
-            builder.withCustom("clipboard-read", "allow")
+            builder.withCustom("clipboard-read", "ask")
             builder.withCustom("clipboard-write", "allow")
-            builder.withCustom("clipboard-paste-protection", "false")
+            builder.withCustom("clipboard-paste-protection", "true")
         }
     }
 
@@ -565,8 +561,52 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
 extension TerminalSession: TerminalSurfaceTitleDelegate {
     func terminalDidChangeTitle(_ title: String) {
-        guard !title.isEmpty, fixedTitle == nil else { return }
+        guard !title.isEmpty else { return }
         self.title = title
+    }
+}
+
+extension TerminalSession: TerminalSurfaceClipboardConfirmationDelegate {
+    func terminalDidRequestClipboardConfirmation(
+        _ request: TerminalClipboardConfirmationRequest
+    ) {
+        guard let window = terminalView.window else {
+            request.deny()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        switch request.kind {
+        case .unsafePaste:
+            alert.messageText = "Warning: Potentially Unsafe Paste"
+            alert.informativeText = "Pasting this text may execute commands."
+        case .osc52Read:
+            alert.messageText = "Authorize Clipboard Access"
+            alert.informativeText = "A terminal program is attempting to read the clipboard."
+        }
+        alert.accessoryView = Self.clipboardPreview(request.contents)
+        alert.addButton(withTitle: request.kind == .unsafePaste ? "Paste" : "Allow")
+        let cancel = alert.addButton(withTitle: request.kind == .unsafePaste ? "Cancel" : "Deny")
+        cancel.keyEquivalent = "\u{1b}"
+        Task { @MainActor in
+            let response = await alert.beginSheetModal(for: window)
+            if response == .alertFirstButtonReturn { request.approve() }
+            else { request.deny() }
+        }
+    }
+
+    private static func clipboardPreview(_ contents: String) -> NSView {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 120))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        let text = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
+        text.isEditable = false
+        text.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        text.string = String(contents.prefix(4096))
+        text.autoresizingMask = [.width]
+        scroll.documentView = text
+        return scroll
     }
 }
 

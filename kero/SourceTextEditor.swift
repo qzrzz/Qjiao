@@ -19,10 +19,8 @@ struct EditorState: Codable, Equatable {
     var scrollY: Double?
 }
 
-/// Editor colors matching the app's GitHub Light / GitHub Dark theme
-/// (`Theme.background` is the same hex, so the editor blends into the
-/// window). Selection color is not included: STTextView always uses the
-/// system selection color.
+/// Editor colors resolved from the selected Ghostty theme. Selection color is
+/// not included: STTextView always uses the system selection color.
 struct EditorPalette: Equatable {
     var text: NSColor
     var background: NSColor
@@ -30,31 +28,26 @@ struct EditorPalette: Equatable {
     var lineHighlight: NSColor
     var gutterText: NSColor
 
-    static func github(dark: Bool) -> EditorPalette {
-        dark
-            ? EditorPalette(
-                text: color(0xe6edf3),
-                background: color(0x0d1117),
-                insertionPoint: color(0x58a6ff),
-                lineHighlight: color(0x161b22),
-                gutterText: color(0x484f58)
-            )
-            : EditorPalette(
-                text: color(0x1f2328),
-                background: color(0xffffff),
-                insertionPoint: color(0x0969da),
-                lineHighlight: color(0xf6f8fa),
-                gutterText: color(0xafb8c1)
-            )
+    static func theme(dark: Bool) -> EditorPalette {
+        let colors = Theme.terminal(dark: dark)
+        return EditorPalette(
+            text: colors.foreground,
+            background: colors.background,
+            insertionPoint: colors.cursor,
+            lineHighlight: colors.background.blended(
+                withFraction: dark ? 0.10 : 0.08,
+                of: colors.foreground
+            ) ?? colors.background,
+            gutterText: colors.foreground.blended(
+                withFraction: dark ? 0.45 : 0.55,
+                of: colors.background
+            ) ?? colors.foreground
+        )
     }
 
-    private static func color(_ hex: Int) -> NSColor {
-        NSColor(
-            srgbRed: CGFloat((hex >> 16) & 0xff) / 255.0,
-            green: CGFloat((hex >> 8) & 0xff) / 255.0,
-            blue: CGFloat(hex & 0xff) / 255.0,
-            alpha: 1
-        )
+    /// Kept as a compatibility spelling for callers outside the current app.
+    static func github(dark: Bool) -> EditorPalette {
+        theme(dark: dark)
     }
 }
 
@@ -65,6 +58,7 @@ struct EditorPalette: Equatable {
 /// `FileTab.editorState` as it changes and restored when the view is
 /// recreated on tab switch or relaunch.
 struct SourceTextEditor: NSViewRepresentable {
+    @ObservedObject private var themeChanges = Theme.changes
     let file: FileTab
     let font: NSFont
     let palette: EditorPalette

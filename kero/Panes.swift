@@ -86,6 +86,8 @@ struct PaneColumn: nonisolated Identifiable {
 final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
     nonisolated let id = UUID()
 
+    /// User-assigned title shared by manual renaming and Start launchers.
+    @Published var customName: String?
     @Published var columns: [PaneColumn]
     @Published var focusedPaneID: UUID
     /// Whether the focused pane is zoomed to fill the tab. Presentation-only:
@@ -124,6 +126,12 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
 
     var focusedPane: Pane? { allPanes.first { $0.id == focusedPaneID } }
     var focusedContent: PaneContent? { focusedPane?.content }
+
+    /// Visible title, falling back to the focused content's automatic title.
+    var displayTitle: String? {
+        if let customName, !customName.isEmpty { return customName }
+        return focusedContent?.title
+    }
 
     var sessions: [TerminalSession] {
         allContents.compactMap { if case .session(let session) = $0 { return session }; return nil }

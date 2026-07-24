@@ -227,6 +227,25 @@ final class TerminalCallbackBridge {
         return false
     }
 
+    /// Routes an escalated clipboard request to the host confirmation UI.
+    func handleClipboardConfirmation(
+        contents: String,
+        kind: TerminalClipboardConfirmationRequest.Kind,
+        state: UnsafeMutableRawPointer
+    ) {
+        let request = TerminalClipboardConfirmationRequest(
+            bridge: self, kind: kind, contents: contents, state: state
+        )
+        guard let delegate = delegate
+            as? any TerminalSurfaceClipboardConfirmationDelegate
+        else {
+            TerminalDebugLog.log(.input, "clipboard confirm denied: no delegate")
+            request.deny()
+            return
+        }
+        delegate.terminalDidRequestClipboardConfirmation(request)
+    }
+
     func handleClose(processAlive: Bool) {
         TerminalDebugLog.log(
             .lifecycle,

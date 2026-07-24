@@ -50,6 +50,16 @@ final class AppSettings: nonisolated ObservableObject {
         }
     }
 
+    /// Selected Ghostty theme for dark appearance.
+    @Published var themeDark: String {
+        didSet { reloadThemeSelection(); save() }
+    }
+
+    /// Selected Ghostty theme for light appearance.
+    @Published var themeLight: String {
+        didSet { reloadThemeSelection(); save() }
+    }
+
     /// Terminal font family name; empty string means the bundled default
     /// (JetBrains Mono).
     @Published var fontFamily: String {
@@ -57,6 +67,11 @@ final class AppSettings: nonisolated ObservableObject {
     }
 
     @Published var fontSize: Double {
+        didSet { save() }
+    }
+
+    /// Whether Ghostty should render terminal glyphs with thicker strokes.
+    @Published var fontThicken: Bool {
         didSet { save() }
     }
 
@@ -93,9 +108,12 @@ final class AppSettings: nonisolated ObservableObject {
         let existing = TOML.parse(at: Self.configURL)
         let toml = existing ?? Self.legacyDefaults()
         theme = toml["theme"]?.string.flatMap(AppTheme.init(rawValue:)) ?? .system
+        themeDark = Self.knownTheme(toml["theme-dark"]?.string, fallback: Theme.defaultDarkThemeName)
+        themeLight = Self.knownTheme(toml["theme-light"]?.string, fallback: Theme.defaultLightThemeName)
         fontFamily = toml["font-family"]?.string ?? ""
         let size = toml["font-size"]?.double ?? Self.defaultFontSize
         fontSize = Self.fontSizeRange.contains(size) ? size : Self.defaultFontSize
+        fontThicken = toml["font-thicken"]?.bool ?? false
         useBundledChineseTerminalFont = toml["terminal.use-bundled-chinese-font"]?.bool ?? true
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
@@ -103,7 +121,17 @@ final class AppSettings: nonisolated ObservableObject {
         packageManagerCommand = toml["terminal.package-manager"]?.string
             .flatMap(PackageManagerCommand.init(rawValue:)) ?? .npm
         applyAppearance()
+        reloadThemeSelection()
         if existing == nil { save() }
+    }
+
+    private func reloadThemeSelection() {
+        Theme.reloadSelection(light: themeLight, dark: themeDark)
+    }
+
+    private static func knownTheme(_ name: String?, fallback: String) -> String {
+        guard let name, Theme.definition(named: name) != nil else { return fallback }
+        return name
     }
 
     /// Overrides the app-wide appearance so every window — and the terminal
@@ -116,12 +144,15 @@ final class AppSettings: nonisolated ObservableObject {
     func resetFont() {
         fontFamily = ""
         fontSize = Self.defaultFontSize
+        fontThicken = false
     }
 
     func resetToDefaults() {
         resetFont()
         useBundledChineseTerminalFont = true
         theme = .system
+        themeDark = Theme.defaultDarkThemeName
+        themeLight = Theme.defaultLightThemeName
         wrapLines = false
         restoreTerminalHistory = false
         directClickMovesCursor = false
@@ -133,10 +164,17 @@ final class AppSettings: nonisolated ObservableObject {
         if theme != .system {
             lines.append("theme = \(TOML.quote(theme.rawValue))")
         }
+        if themeDark != Theme.defaultDarkThemeName {
+            lines.append("theme-dark = \(TOML.quote(themeDark))")
+        }
+        if themeLight != Theme.defaultLightThemeName {
+            lines.append("theme-light = \(TOML.quote(themeLight))")
+        }
         if !fontFamily.isEmpty {
             lines.append("font-family = \(TOML.quote(fontFamily))")
         }
         lines.append("font-size = \(TOML.number(fontSize))")
+        if fontThicken { lines.append("font-thicken = true") }
         if !useBundledChineseTerminalFont {
             lines.append("terminal.use-bundled-chinese-font = false")
         }

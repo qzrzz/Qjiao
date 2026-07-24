@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import GhosttyTheme
 import SwiftUI
 
 /// The app settings window (Cmd+,).
@@ -29,6 +30,15 @@ struct SettingsView: View {
                     Spacer()
                     ThemePicker(selection: $settings.theme)
                 }
+                Picker("Dark colors", selection: $settings.themeDark) {
+                    ForEach(Self.darkThemeNames, id: \.self) { Text($0).tag($0) }
+                }
+                Picker("Light colors", selection: $settings.themeLight) {
+                    ForEach(Self.lightThemeNames, id: \.self) { Text($0).tag($0) }
+                }
+                Text("Colors apply to the terminal, editor, and window panels.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Font") {
@@ -65,6 +75,11 @@ struct SettingsView: View {
                     isOn: $settings.useBundledChineseTerminalFont
                 )
                 Text("Source Han Sans CN VF Mono1200 is used as the terminal CJK fallback.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Thicken font strokes", isOn: $settings.fontThicken)
+                Text("Renders terminal text with slightly heavier strokes.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -132,8 +147,11 @@ struct SettingsView: View {
                     }
                     .disabled(settings.fontFamily.isEmpty
                         && settings.fontSize == AppSettings.defaultFontSize
+                        && !settings.fontThicken
                         && settings.useBundledChineseTerminalFont
                         && settings.theme == .system
+                        && settings.themeDark == Theme.defaultDarkThemeName
+                        && settings.themeLight == Theme.defaultLightThemeName
                         && !settings.wrapLines
                         && !settings.restoreTerminalHistory
                         && !settings.directClickMovesCursor
@@ -152,6 +170,11 @@ struct SettingsView: View {
             useBundledChineseFallback: settings.useBundledChineseTerminalFont
         )
     }
+
+    private static let darkThemeNames = [Theme.defaultDarkThemeName]
+        + GhosttyThemeCatalog.allThemes.filter(\.isDark).map(\.name)
+    private static let lightThemeNames = [Theme.defaultLightThemeName]
+        + GhosttyThemeCatalog.allThemes.filter { !$0.isDark }.map(\.name)
 }
 
 /// Sizes its sole child to the child's ideal height, capped at `maxHeight`.
@@ -276,7 +299,7 @@ private struct MiniWindow: View {
 
     var body: some View {
         let colors = Theme.terminal(dark: dark)
-        let text = Color(colors.foreground)
+        let text = Color(nsColor: colors.foreground)
 
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
@@ -293,7 +316,7 @@ private struct MiniWindow: View {
             }
             .padding(5)
             .frame(minWidth: 22, maxWidth: 22, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(Theme.sidebarFill(dark: dark)))
+            .background(Color(nsColor: Theme.sidebarFill(dark: dark)))
 
             VStack(alignment: .leading, spacing: 3.5) {
                 RoundedRectangle(cornerRadius: 1.5)
@@ -302,13 +325,13 @@ private struct MiniWindow: View {
                     .padding(.bottom, 1)
 
                 HStack(spacing: 2) {
-                    bar(3, Color(colors.cursor))
+                    bar(3, Color(nsColor: colors.cursor))
                     bar(22, text.opacity(0.8))
                 }
                 bar(30, text.opacity(0.45))
                 bar(16, text.opacity(0.45))
                 HStack(spacing: 2) {
-                    bar(3, Color(colors.cursor))
+                    bar(3, Color(nsColor: colors.cursor))
                     bar(7, text.opacity(0.8))
                 }
             }

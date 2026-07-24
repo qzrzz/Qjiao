@@ -12,6 +12,36 @@ import GhosttyKit
     import AppKit
 #endif
 
+/// Injectable pasteboard operations used by terminal clipboard callbacks.
+enum TerminalClipboardIO {
+    nonisolated(unsafe) static var readString: () -> String? = {
+        #if canImport(UIKit)
+            UIPasteboard.general.string
+        #elseif canImport(AppKit)
+            NSPasteboard.general.string(forType: .string)
+        #endif
+    }
+
+    nonisolated(unsafe) static var writeString: (String) -> Void = { string in
+        #if canImport(UIKit)
+            UIPasteboard.general.string = string
+        #elseif canImport(AppKit)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(string, forType: .string)
+        #endif
+    }
+
+    nonisolated(unsafe) static var complete: (
+        _ surface: ghostty_surface_t,
+        _ string: UnsafePointer<CChar>,
+        _ state: UnsafeMutableRawPointer,
+        _ confirmed: Bool
+    ) -> Void = { surface, string, state, confirmed in
+        ghostty_surface_complete_clipboard_request(surface, string, state, confirmed)
+    }
+}
+
 private enum TerminalCallbacks {
     static func wakeup(userdata: UnsafeMutableRawPointer?) {
         guard let userdata else { return }
@@ -59,20 +89,16 @@ private enum TerminalCallbacks {
         clipboard _: ghostty_clipboard_e,
         contents: UnsafePointer<ghostty_clipboard_content_s>?,
         contentsLen: Int,
-        confirm _: Bool
+        confirm: Bool
     ) {
+        guard !confirm else {
+            TerminalDebugLog.log(.input, "clipboard write denied: confirmation required")
+            return
+        }
         guard contentsLen > 0 else { return }
         guard let content = contents?.pointee else { return }
         guard let data = content.data else { return }
-        let string = String(cString: data)
-
-        #if canImport(UIKit)
-            UIPasteboard.general.string = string
-        #elseif canImport(AppKit)
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(string, forType: .string)
-        #endif
+        TerminalClipboardIO.writeString(String(cString: data))
     }
 
     static func readClipboard(
@@ -87,13 +113,7 @@ private enum TerminalCallbacks {
             .takeUnretainedValue()
         guard let surface = bridge.rawSurface else { return false }
 
-        #if canImport(UIKit)
-            let string = UIPasteboard.general.string
-        #elseif canImport(AppKit)
-            let string = NSPasteboard.general.string(forType: .string)
-        #endif
-
-        guard let string else {
+        guard let string = TerminalClipboardIO.readString() else {
             TerminalDebugLog.log(.input, "clipboard paste read empty")
             return false
         }
@@ -102,7 +122,7 @@ private enum TerminalCallbacks {
             "clipboard paste read bytes=\(string.utf8.count) lines=\(TerminalInputText.lineCount(in: string))"
         )
         string.withCString { cString in
-            ghostty_surface_complete_clipboard_request(surface, cString, opaquePtr, false)
+            TerminalClipboardIO.complete(surface, cString, opaquePtr, false)
         }
         TerminalDebugLog.log(.input, "clipboard paste complete")
         return true
@@ -119,17 +139,15 @@ private enum TerminalCallbacks {
         let bridge = Unmanaged<TerminalCallbackBridge>
             .fromOpaque(userdata)
             .takeUnretainedValue()
-        guard let surface = bridge.rawSurface else { return }
-
-        let text = String(cString: string)
-        TerminalDebugLog.log(
-            .input,
-            "clipboard paste confirm request=\(request.rawValue) bytes=\(text.utf8.count) lines=\(TerminalInputText.lineCount(in: text))"
-        )
-        text.withCString { cString in
-            ghostty_surface_complete_clipboard_request(surface, cString, opaquePtr, true)
+        guard request != GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE else { return }
+        let kind: TerminalClipboardConfirmationRequest.Kind =
+            request == GHOSTTY_CLIPBOARD_REQUEST_PASTE ? .unsafePaste : .osc52Read
+        let contents = String(cString: string)
+        let stateBits = UInt(bitPattern: opaquePtr)
+        terminalRunOnMain {
+            guard let state = UnsafeMutableRawPointer(bitPattern: stateBits) else { return }
+            bridge.handleClipboardConfirmation(contents: contents, kind: kind, state: state)
         }
-        TerminalDebugLog.log(.input, "clipboard paste confirmed")
     }
 }
 

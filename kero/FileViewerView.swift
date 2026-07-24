@@ -123,6 +123,7 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
 /// bar), an image preview, or a placeholder for anything binary or
 /// oversized.
 struct FileViewerView: View {
+    @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject var file: FileTab
     /// Whether this file's pane is the focused one in its tab.
     var isFocused: Bool = true
@@ -145,7 +146,7 @@ struct FileViewerView: View {
                 SourceTextEditor(
                     file: file,
                     font: TerminalFont.current(),
-                    palette: .github(dark: colorScheme == .dark),
+                    palette: .theme(dark: colorScheme == .dark),
                     wrapLines: settings.wrapLines,
                     isFocused: isFocused,
                     onFocused: onFocused,

@@ -359,6 +359,7 @@ private struct DiffWebHostView: NSViewRepresentable {
 /// Renders a diff tab with PierreDiffsSwift: syntax-highlighted unified or
 /// split view with word-level change highlighting.
 struct DiffViewerView: View {
+    @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject var diff: DiffTab
     @ObservedObject private var web: DiffWebModel
     /// The view stays mounted while other tabs are selected (see
@@ -457,7 +458,7 @@ struct DiffViewerView: View {
         .padding(.vertical, 6)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color.primary.opacity(0.06))
+                .fill(Color(nsColor: Theme.divider))
                 .frame(height: 1)
         }
     }

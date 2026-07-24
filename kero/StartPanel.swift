@@ -259,9 +259,9 @@ private struct StartCommandInlineEditor: View {
             }
 
             TextField(
-                command.type == .terminal ? "Terminal title" : "Name",
+                command.type == .terminal ? "Tab title" : "Name",
                 text: $command.title,
-                prompt: Text(command.type == .terminal ? "Optional fixed title" : "Optional name")
+                prompt: Text(command.type == .terminal ? "Optional tab title" : "Optional name")
             )
             typeEditor
 

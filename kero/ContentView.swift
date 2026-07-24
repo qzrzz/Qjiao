@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject var manager: TerminalManager
+    @ObservedObject private var themeChanges = Theme.changes
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -232,7 +233,7 @@ private struct MainHeaderView: View {
         .frame(height: 42)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color.primary.opacity(0.06))
+                .fill(Color(nsColor: Theme.divider))
                 .frame(height: 1)
         }
     }
@@ -346,7 +347,7 @@ private struct TabListRow: View {
                 .frame(width: 16, height: 18)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(tab.focusedContent?.title ?? "Untitled Tab")
+                    Text(tab.displayTitle ?? "Untitled Tab")
                         .font(.system(size: 13))
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .lineLimit(1)
@@ -471,6 +472,7 @@ private struct SessionTabsView: View {
     @State private var overflow = StripOverflow()
     @State private var draggedTabID: UUID?
     @State private var tabFrames: [UUID: CGRect] = [:]
+    @State private var renamingTabID: UUID?
 
     /// Which edges have off-screen tabs, i.e. where to show a fade hint.
     private struct StripOverflow: Equatable {
@@ -488,7 +490,8 @@ private struct SessionTabsView: View {
                             tab: tab,
                             isSelected: tab.id == project.selectedTabID,
                             select: { project.selectedTabID = tab.id },
-                            close: { project.close(tab) }
+                            close: { project.close(tab) },
+                            renamingTabID: $renamingTabID
                         )
                         .contextMenu { tabContextMenu(for: tab) }
                         .background {
@@ -505,7 +508,8 @@ private struct SessionTabsView: View {
                                 .onChanged { value in
                                     updateTabDrag(source: tab.id, location: value.location)
                                 }
-                                .onEnded { _ in endTabDrag() }
+                                .onEnded { _ in endTabDrag() },
+                            including: renamingTabID == tab.id ? .subviews : .all
                         )
                     }
                 }
@@ -587,6 +591,11 @@ private struct SessionTabsView: View {
 
     @ViewBuilder
     private func tabContextMenu(for tab: PaneTab) -> some View {
+        Button("Rename…") { renamingTabID = tab.id }
+        if tab.customName != nil {
+            Button("Use Automatic Title") { tab.customName = nil }
+        }
+        Divider()
         if case .file(let file) = tab.focusedContent {
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])
@@ -626,32 +635,103 @@ private struct PaneTabItem: View {
     let isSelected: Bool
     let select: () -> Void
     let close: () -> Void
+    @Binding var renamingTabID: UUID?
 
     var body: some View {
         let paneCount = tab.allPanes.count
-        switch tab.focusedContent {
-        case .session(let session):
-            SessionTabLabel(session: session, paneCount: paneCount, isSelected: isSelected, select: select, close: close)
-        case .file(let file):
-            FileTabLabel(file: file, paneCount: paneCount, isSelected: isSelected, select: select, close: close)
-        case .diff(let diff):
-            TabItemChrome(
-                systemImage: "plus.forwardslash.minus",
-                title: diff.title,
-                paneCount: paneCount,
-                isSelected: isSelected,
-                select: select,
-                close: close
+        if renamingTabID == tab.id {
+            TabRenameChrome(
+                icon: tab.focusedContent?.systemImage ?? "terminal",
+                initialValue: tab.displayTitle ?? "",
+                commit: { value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    tab.customName = trimmed.isEmpty ? nil : trimmed
+                },
+                end: { renamingTabID = nil }
             )
-            .help(diff.path)
-        case nil:
-            EmptyView()
+        } else {
+            switch tab.focusedContent {
+            case .session(let session):
+                SessionTabLabel(
+                    session: session,
+                    customTitle: tab.customName,
+                    paneCount: paneCount,
+                    isSelected: isSelected,
+                    select: select,
+                    close: close
+                )
+            case .file(let file):
+                FileTabLabel(
+                    file: file,
+                    customTitle: tab.customName,
+                    paneCount: paneCount,
+                    isSelected: isSelected,
+                    select: select,
+                    close: close
+                )
+            case .diff(let diff):
+                TabItemChrome(
+                    systemImage: "plus.forwardslash.minus",
+                    title: tab.customName ?? diff.title,
+                    paneCount: paneCount,
+                    isSelected: isSelected,
+                    select: select,
+                    close: close
+                )
+                .help(diff.path)
+            case nil:
+                EmptyView()
+            }
         }
+    }
+}
+
+/// Inline editor for a tab title; Enter/focus loss commits and Escape cancels.
+private struct TabRenameChrome: View {
+    let icon: String
+    let initialValue: String
+    let commit: (String) -> Void
+    let end: () -> Void
+    @State private var draft: String
+    @State private var finished = false
+    @FocusState private var focused: Bool
+
+    init(icon: String, initialValue: String, commit: @escaping (String) -> Void, end: @escaping () -> Void) {
+        self.icon = icon
+        self.initialValue = initialValue
+        self.commit = commit
+        self.end = end
+        _draft = State(initialValue: initialValue)
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 9))
+            TextField("", text: $draft)
+                .textFieldStyle(.plain)
+                .frame(width: 110)
+                .focused($focused)
+                .onSubmit { finish(apply: true) }
+                .onExitCommand { finish(apply: false) }
+                .onChange(of: focused) { if !focused { finish(apply: true) } }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.09)))
+        .onAppear { DispatchQueue.main.async { focused = true } }
+    }
+
+    private func finish(apply: Bool) {
+        guard !finished else { return }
+        finished = true
+        if apply { commit(draft) }
+        end()
     }
 }
 
 private struct SessionTabLabel: View {
     @ObservedObject var session: TerminalSession
+    var customTitle: String?
     let paneCount: Int
     let isSelected: Bool
     let select: () -> Void
@@ -663,7 +743,7 @@ private struct SessionTabLabel: View {
         TimelineView(.periodic(from: .now, by: 0.3)) { _ in
             TabItemChrome(
                 systemImage: "terminal",
-                title: session.title,
+                title: customTitle ?? session.title,
                 paneCount: paneCount,
                 isSelected: isSelected,
                 isTerminalRunning: session.isForegroundCommandRunning,
@@ -676,6 +756,7 @@ private struct SessionTabLabel: View {
 
 private struct FileTabLabel: View {
     @ObservedObject var file: FileTab
+    var customTitle: String?
     let paneCount: Int
     let isSelected: Bool
     let select: () -> Void
@@ -684,7 +765,7 @@ private struct FileTabLabel: View {
     var body: some View {
         TabItemChrome(
             systemImage: "doc.text",
-            title: file.name,
+            title: customTitle ?? file.name,
             paneCount: paneCount,
             isSelected: isSelected,
             isDirty: file.isDirty,

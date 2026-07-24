@@ -4,6 +4,9 @@
 //
 
 import AppKit
+import Combine
+import GhosttyTheme
+import os
 
 /// The user's light/dark preference. Applied by overriding `NSApp.appearance`,
 /// which drives every window, the dynamic colors below, and — through
@@ -45,90 +48,69 @@ struct KeroTerminalTheme {
 /// App theme, loosely based on GitHub Dark / GitHub Light.
 /// The `NSColor` properties are dynamic and adapt to the system appearance;
 /// terminal sessions use `terminal(dark:)` and re-apply on appearance change.
+final class ThemeChanges: nonisolated ObservableObject {}
+
+/// Resolves Ghostty themes into terminal and native-window colors.
 enum Theme {
-    static let background = dynamic(light: 0xffffff, dark: 0x0d1117)
-    static let sidebar = dynamic(light: sidebarLight, dark: sidebarDark)
-    static let cursor = dynamic(light: 0x0969da, dark: 0x58a6ff)
+    static let defaultDarkThemeName = "Default Dark"
+    static let defaultLightThemeName = "Default Light"
+    @MainActor static let changes = ThemeChanges()
 
-    private static let sidebarLight = 0xf6f8fa
-    private static let sidebarDark = 0x010409
+    private static let defaultDark = makeDefault(
+        name: defaultDarkThemeName, source: "GitHub Dark Default", dark: true
+    )
+    private static let defaultLight = makeDefault(
+        name: defaultLightThemeName, source: "GitHub Light Default", dark: false
+    )
+    private static let selection = OSAllocatedUnfairLock(
+        initialState: (light: defaultLight, dark: defaultDark)
+    )
 
-    /// Sidebar fill resolved for one appearance. The Settings theme previews
-    /// draw light and dark side by side, so they can't use the dynamic
-    /// `sidebar` — it would resolve both halves to the ambient appearance.
-    static func sidebarFill(dark: Bool) -> NSColor {
-        nsColor(dark ? sidebarDark : sidebarLight)
+    nonisolated static func definition(named name: String) -> GhosttyThemeDefinition? {
+        if name == defaultLightThemeName { return defaultLight }
+        if name == defaultDarkThemeName { return defaultDark }
+        return GhosttyThemeCatalog.theme(named: name)
     }
 
-    static func terminal(dark: Bool) -> KeroTerminalTheme {
-        dark
-            ? KeroTerminalTheme(
-                background: nsColor(0x0d1117),
-                foreground: nsColor(0xe6edf3),
-                cursor: nsColor(0x58a6ff),
-                ansi: darkAnsi
-            )
-            : KeroTerminalTheme(
-                background: nsColor(0xffffff),
-                foreground: nsColor(0x1f2328),
-                cursor: nsColor(0x0969da),
-                ansi: lightAnsi
-            )
+    @MainActor
+    static func reloadSelection(light: String, dark: String) {
+        let resolved = (
+            light: definition(named: light) ?? defaultLight,
+            dark: definition(named: dark) ?? defaultDark
+        )
+        selection.withLock { $0 = resolved }
+        changes.objectWillChange.send()
     }
 
-    /// The 16 ANSI colors (normal + bright), dark variant.
-    private static let darkAnsi: [String] = [
-        ansi(0x21262d), // black
-        ansi(0xff7b72), // red
-        ansi(0x3fb950), // green
-        ansi(0xd29922), // yellow
-        ansi(0x58a6ff), // blue
-        ansi(0xbc8cff), // magenta
-        ansi(0x39c5cf), // cyan
-        ansi(0xb1bac4), // white
-        ansi(0x484f58), // bright black
-        ansi(0xffa198), // bright red
-        ansi(0x56d364), // bright green
-        ansi(0xe3b341), // bright yellow
-        ansi(0x79c0ff), // bright blue
-        ansi(0xd2a8ff), // bright magenta
-        ansi(0x56d4dd), // bright cyan
-        ansi(0xf0f6fc), // bright white
-    ]
-
-    /// The 16 ANSI colors (normal + bright), light variant.
-    private static let lightAnsi: [String] = [
-        ansi(0x24292f), // black
-        ansi(0xcf222e), // red
-        ansi(0x116329), // green
-        ansi(0x953800), // yellow
-        ansi(0x0969da), // blue
-        ansi(0x8250df), // magenta
-        ansi(0x1b7c83), // cyan
-        ansi(0x6e7781), // white
-        ansi(0x57606a), // bright black
-        ansi(0xa40e26), // bright red
-        ansi(0x1a7f37), // bright green
-        ansi(0x633c01), // bright yellow
-        ansi(0x218bff), // bright blue
-        ansi(0xa475f9), // bright magenta
-        ansi(0x3192aa), // bright cyan
-        ansi(0x8c959f), // bright white
-    ]
-
-    private static func dynamic(light: Int, dark: Int) -> NSColor {
-        NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            return nsColor(isDark ? dark : light)
+    static var background: NSColor { dynamic { $0.backgroundNSColor } }
+    static var sidebar: NSColor { dynamic { $0.sidebarNSColor } }
+    static var cursor: NSColor { dynamic { $0.accentNSColor } }
+    static var accent: NSColor { cursor }
+    static var divider: NSColor {
+        dynamic { theme in
+            theme.name == defaultDarkThemeName || theme.name == defaultLightThemeName
+                ? NSColor.labelColor.withAlphaComponent(0.06)
+                : theme.surfaceNSColor(elevation: 0.08)
         }
     }
 
-    private static func nsColor(_ hex: Int) -> NSColor {
-        NSColor(
-            srgbRed: CGFloat((hex >> 16) & 0xff) / 255.0,
-            green: CGFloat((hex >> 8) & 0xff) / 255.0,
-            blue: CGFloat(hex & 0xff) / 255.0,
-            alpha: 1
+    static func isDefault(dark: Bool) -> Bool {
+        let theme = selection.withLock { dark ? $0.dark : $0.light }
+        return theme.name == (dark ? defaultDarkThemeName : defaultLightThemeName)
+    }
+
+    static func sidebarFill(dark: Bool) -> NSColor {
+        let theme = selection.withLock { dark ? $0.dark : $0.light }
+        return theme.sidebarNSColor
+    }
+
+    static func terminal(dark: Bool) -> KeroTerminalTheme {
+        let theme = selection.withLock { dark ? $0.dark : $0.light }
+        return KeroTerminalTheme(
+            background: theme.backgroundNSColor,
+            foreground: theme.foregroundNSColor,
+            cursor: theme.cursorNSColor,
+            ansi: theme.paletteValues
         )
     }
 
@@ -140,7 +122,69 @@ enum Theme {
         return String(format: "%02X%02X%02X", r, g, b)
     }
 
-    private static func ansi(_ hex: Int) -> String {
-        String(format: "%06X", hex)
+    private static func dynamic(
+        _ resolve: @escaping @Sendable (GhosttyThemeDefinition) -> NSColor
+    ) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let theme = selection.withLock { dark ? $0.dark : $0.light }
+            return resolve(theme)
+        }
+    }
+
+    private static func makeDefault(
+        name: String, source: String, dark: Bool
+    ) -> GhosttyThemeDefinition {
+        guard let base = GhosttyThemeCatalog.theme(named: source) else {
+            return GhosttyThemeDefinition(
+                name: name,
+                background: dark ? "0d1117" : "ffffff",
+                foreground: dark ? "e6edf3" : "1f2328"
+            )
+        }
+        return GhosttyThemeDefinition(
+            name: name,
+            background: base.background,
+            foreground: base.foreground,
+            cursorColor: base.cursorColor,
+            cursorText: base.cursorText,
+            selectionBackground: base.selectionBackground,
+            selectionForeground: base.selectionForeground,
+            palette: base.palette
+        )
+    }
+
+}
+
+nonisolated extension GhosttyThemeDefinition {
+    var backgroundNSColor: NSColor { Self.nsColor(background) }
+    var foregroundNSColor: NSColor { Self.nsColor(foreground) }
+    var cursorNSColor: NSColor {
+        cursorColor.map(Self.nsColor) ?? accentNSColor
+    }
+    var accentNSColor: NSColor {
+        (palette[4] ?? cursorColor).map(Self.nsColor) ?? foregroundNSColor
+    }
+    var sidebarNSColor: NSColor {
+        if name == Theme.defaultDarkThemeName { return Self.nsColor("010409") }
+        if name == Theme.defaultLightThemeName { return Self.nsColor("f6f8fa") }
+        return backgroundNSColor
+    }
+    func surfaceNSColor(elevation: CGFloat) -> NSColor {
+        backgroundNSColor.blended(withFraction: elevation, of: foregroundNSColor)
+            ?? backgroundNSColor
+    }
+    var paletteValues: [String] {
+        (0..<16).map { index in palette[index] ?? (index < 8 ? "808080" : "c0c0c0") }
+    }
+    private static func nsColor(_ hex: String) -> NSColor {
+        let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        guard digits.count == 6, let value = Int(digits, radix: 16) else { return .magenta }
+        return NSColor(
+            srgbRed: CGFloat((value >> 16) & 0xff) / 255,
+            green: CGFloat((value >> 8) & 0xff) / 255,
+            blue: CGFloat(value & 0xff) / 255,
+            alpha: 1
+        )
     }
 }

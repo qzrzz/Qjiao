@@ -37,10 +37,10 @@ struct TerminalHostView: NSViewRepresentable {
         container.addSubview(terminal)
         container.addSubview(scrollbar, positioned: .above, relativeTo: terminal)
         NSLayoutConstraint.activate([
-            terminal.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            terminal.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
-            terminal.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
-            terminal.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+            terminal.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 2),
+            terminal.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
+            terminal.topAnchor.constraint(equalTo: container.topAnchor, constant: 2),
+            terminal.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -2),
             scrollbar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollbar.topAnchor.constraint(equalTo: container.topAnchor),
             scrollbar.bottomAnchor.constraint(equalTo: container.bottomAnchor),

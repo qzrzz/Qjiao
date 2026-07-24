@@ -10,6 +10,8 @@ import SwiftUI
 /// its sessions show as horizontal tabs in the main header.
 struct SidebarView: View {
     @ObservedObject var manager: TerminalManager
+    @ObservedObject private var themeChanges = Theme.changes
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
     @AppStorage("leftSidebarWidth") private var width: Double = 220
     @State private var draggedProjectID: UUID?
@@ -82,12 +84,26 @@ struct SidebarView: View {
             .padding(.vertical, 6)
             .overlay(alignment: .top) {
                 Rectangle()
-                    .fill(Color.primary.opacity(0.06))
+                    .fill(Color(nsColor: Theme.divider))
                     .frame(height: 1)
             }
         }
         .frame(width: width)
-        .background(VisualEffectView(material: .sidebar))
+        .background {
+            if Theme.isDefault(dark: colorScheme == .dark) {
+                VisualEffectView(material: .sidebar)
+            } else {
+                Color(nsColor: Theme.sidebar)
+            }
+        }
+        .overlay(alignment: .trailing) {
+            if !Theme.isDefault(dark: colorScheme == .dark) {
+                Rectangle()
+                    .fill(Color(nsColor: Theme.divider))
+                    .frame(width: 1)
+                    .allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .trailing) {
             SidebarResizeHandle(
                 edge: .trailing,

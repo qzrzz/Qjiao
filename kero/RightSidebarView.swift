@@ -11,6 +11,7 @@ import SwiftUI
 /// button or ⇧⌘B. Files/Git switch via tabs along its top, otty-style.
 struct RightSidebarView: View {
     @ObservedObject var manager: TerminalManager
+    @ObservedObject private var themeChanges = Theme.changes
     @StateObject private var fileTree = FileTreeModel()
     @StateObject private var git = GitStatusModel()
     @StateObject private var info = SessionInfoModel()
@@ -32,7 +33,7 @@ struct RightSidebarView: View {
         HStack(spacing: 0) {
             if manager.isPanelVisible {
                 Rectangle()
-                    .fill(Color.primary.opacity(0.06))
+                    .fill(Color(nsColor: Theme.divider))
                     .frame(width: 1)
 
                 VStack(spacing: 0) {

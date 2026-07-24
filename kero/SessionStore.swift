@@ -86,15 +86,20 @@ struct SessionSnapshot: Codable {
             var columns: [ColumnSnapshot]
             var focusedColumn: Int
             var focusedRow: Int
+            var customName: String?
 
-            init(columns: [ColumnSnapshot], focusedColumn: Int, focusedRow: Int) {
+            init(
+                columns: [ColumnSnapshot], focusedColumn: Int, focusedRow: Int,
+                customName: String? = nil
+            ) {
                 self.columns = columns
                 self.focusedColumn = focusedColumn
                 self.focusedRow = focusedRow
+                self.customName = customName
             }
 
             enum CodingKeys: String, CodingKey {
-                case columns, focusedColumn, focusedRow
+                case columns, focusedColumn, focusedRow, customName
             }
 
             init(from decoder: any Decoder) throws {
@@ -103,6 +108,7 @@ struct SessionSnapshot: Codable {
                     self.columns = columns
                     focusedColumn = (try? container.decode(Int.self, forKey: .focusedColumn)) ?? 0
                     focusedRow = (try? container.decode(Int.self, forKey: .focusedRow)) ?? 0
+                    customName = try? container.decode(String.self, forKey: .customName)
                     return
                 }
                 // Legacy: the tab was a single content enum. Wrap it in a
@@ -111,6 +117,7 @@ struct SessionSnapshot: Codable {
                 columns = [ColumnSnapshot(panes: [PaneSnapshot(content: content, weight: 1)], weight: 1)]
                 focusedColumn = 0
                 focusedRow = 0
+                customName = nil
             }
         }
 
@@ -129,6 +136,10 @@ struct SessionSnapshot: Codable {
 
     var projects: [ProjectSnapshot]
     var selectedProjectIndex: Int?
+    /// Optional so snapshots written before sidebar persistence still decode.
+    var isLeftSidebarVisible: Bool?
+    var isRightPanelVisible: Bool?
+    var rightPanelTab: RightPanel?
 }
 
 /// Persisted top level: one `SessionSnapshot` per open window, in
