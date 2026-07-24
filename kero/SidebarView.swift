@@ -152,7 +152,9 @@ private struct SidebarProjectRow: View {
     @State private var isHovering = false
     @State private var isRenaming = false
     @State private var isIconPickerPresented = false
+    @State private var isDescriptionEditorPresented = false
     @State private var renameDraft = ""
+    @State private var descriptionDraft = ""
     @FocusState private var renameFocused: Bool
 
     var body: some View {
@@ -186,6 +188,15 @@ private struct SidebarProjectRow: View {
                     project.customName = nil
                 }
             }
+            Button("Edit Description…") {
+                beginDescriptionEdit()
+            }
+            Button("Open in Finder") {
+                openProjectDirectory()
+            }
+            Button("Open Config Folder") {
+                openConfigFolder()
+            }
             Divider()
             Button("Change Icon…") {
                 isIconPickerPresented = true
@@ -202,6 +213,12 @@ private struct SidebarProjectRow: View {
         }
         .sheet(isPresented: $isIconPickerPresented) {
             ProjectIconPicker(project: project)
+        }
+        .sheet(isPresented: $isDescriptionEditorPresented) {
+            ProjectDescriptionEditor(
+                description: $descriptionDraft,
+                save: saveDescription
+            )
         }
     }
 
@@ -267,9 +284,46 @@ private struct SidebarProjectRow: View {
         isRenaming = false
     }
 
+    /// 在 Finder 中打开项目当前终端所在的目录。
+    private func openProjectDirectory() {
+        guard let path = project.selectedSession?.currentDirectoryPath else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    /// 创建并打开当前构建使用的 Qjiao 配置目录。
+    private func openConfigFolder() {
+        let directory = AppSettings.configURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true
+            )
+            NSWorkspace.shared.activateFileViewerSelecting([directory])
+        } catch {
+            NSLog("qjiao: failed to open config folder \(directory.path): \(error)")
+        }
+    }
+
+    /// 打开项目描述编辑器，并使用当前值作为初始内容。
+    private func beginDescriptionEdit() {
+        descriptionDraft = project.description ?? ""
+        isDescriptionEditorPresented = true
+    }
+
+    /// 保存描述；空白描述按未设置处理，从而继续显示默认的项目辅助信息。
+    private func saveDescription() {
+        let trimmed = descriptionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        project.description = trimmed.isEmpty ? nil : trimmed
+        isDescriptionEditorPresented = false
+    }
+
     @ViewBuilder
     private var subtitle: some View {
-        if project.sessions.count > 1 {
+        if let description = project.description, !description.isEmpty {
+            Text(description)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        } else if project.sessions.count > 1 {
             Text("\(project.sessions.count) sessions")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
@@ -277,6 +331,38 @@ private struct SidebarProjectRow: View {
         } else if let session = project.selectedSession {
             SessionDirectoryLabel(session: session)
         }
+    }
+}
+
+/// 编辑项目描述的轻量弹窗，支持多行文本并保留取消操作。
+private struct ProjectDescriptionEditor: View {
+    @Binding var description: String
+    let save: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Project Description")
+                .font(.headline)
+
+            TextEditor(text: $description)
+                .font(.body)
+                .frame(width: 280, height: 90)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.25))
+                }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save", action: save)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
     }
 }
 

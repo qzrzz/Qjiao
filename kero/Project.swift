@@ -25,6 +25,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// User-assigned name; when nil the project title follows the
     /// selected session's terminal title.
     @Published var customName: String?
+    /// 项目的可选描述，显示在项目列表名称下方。
+    @Published var description: String?
     /// 项目列表的可选自定义图标；未设置时显示默认文件夹图标。
     @Published var icon: ProjectIcon?
     @Published var tabs: [PaneTab] = []

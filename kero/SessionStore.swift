@@ -73,6 +73,8 @@ struct SessionSnapshot: Codable {
 
         var customName: String?
         /// 可选，确保升级前保存的会话仍能正常恢复。
+        var description: String?
+        /// 可选，确保升级前保存的会话仍能正常恢复。
         var icon: ProjectIcon?
         var tabs: [TabSnapshot]
         var selectedTabIndex: Int?

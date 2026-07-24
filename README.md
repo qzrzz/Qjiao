@@ -1,6 +1,8 @@
-# Qjiao
+# 🫑 Qjiao 
 
-基于 Kero 的二次开发以适配自己使用习惯和喜欢
+围绕文件夹终端
+
+基于 Kero 的二次开发以适配自己使用习惯和喜欢。
 
 > [https://kero.sh](https://kero.sh) A native terminal workspace for macOS.
 
@@ -15,4 +17,6 @@
     - 默认使用内置 `Source Han Sans CN VF Mono1200` 作为中文等宽回退字体，并可在设置中关闭。
 - 拖拽文件夹自动以该文件夹创建项目并在其中启动终端。
 - 项目支持自定义图标（Emoji 和 SF Symbols ）。
+- 项目支持添加描述，并显示在项目列表中。
+- 项目右键菜单支持在 Finder 中打开项目目录和配置文件夹。
 - 增加 Tabs 选择菜单。
