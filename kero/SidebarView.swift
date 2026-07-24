@@ -191,6 +191,7 @@ private struct SidebarProjectRow: View {
             Button("Edit Description…") {
                 beginDescriptionEdit()
             }
+            Divider()
             Button("Open in Finder") {
                 openProjectDirectory()
             }

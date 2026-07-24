@@ -170,9 +170,10 @@ final class TerminalManager: nonisolated ObservableObject {
         selectedProjectID = project.id
     }
 
-    private func makeProject(createInitialSession: Bool = true) -> Project {
+    private func makeProject(id: UUID? = nil, createInitialSession: Bool = true) -> Project {
         projectCounter += 1
         let project = Project(
+            id: id ?? UUID(),
             fallbackName: "Project \(projectCounter)",
             createInitialSession: createInitialSession
         )
@@ -570,10 +571,19 @@ final class TerminalManager: nonisolated ObservableObject {
                         columns: columns, focusedColumn: col, focusedRow: row
                     )
                 }
+                ProjectConfigStore.save(
+                    ProjectConfig(
+                        customName: project.customName,
+                        description: project.description,
+                        icon: project.icon
+                    ),
+                    for: project.id
+                )
                 return ProjectSnapshot(
-                    customName: project.customName,
-                    description: project.description,
-                    icon: project.icon,
+                    id: project.id,
+                    customName: nil,
+                    description: nil,
+                    icon: nil,
                     tabs: tabs,
                     selectedTabIndex: project.tabs.firstIndex { $0.id == project.selectedTabID }
                 )
@@ -603,10 +613,22 @@ final class TerminalManager: nonisolated ObservableObject {
     /// false when the snapshot holds nothing restorable.
     private func restore(from snapshot: SessionSnapshot) -> Bool {
         for saved in snapshot.projects where !saved.tabs.isEmpty {
-            let project = makeProject(createInitialSession: false)
-            project.customName = saved.customName
-            project.description = saved.description
-            project.icon = saved.icon
+            let project = makeProject(id: saved.id, createInitialSession: false)
+            let config = ProjectConfigStore.load(for: project.id)
+            project.customName = config?.customName ?? saved.customName
+            project.description = config?.description ?? saved.description
+            project.icon = config?.icon ?? saved.icon
+            // 旧版快照中的项目配置在首次恢复时迁移到独立配置文件。
+            if config == nil {
+                ProjectConfigStore.save(
+                    ProjectConfig(
+                        customName: project.customName,
+                        description: project.description,
+                        icon: project.icon
+                    ),
+                    for: project.id
+                )
+            }
             for tab in saved.tabs {
                 project.restoreTab(from: tab, histories: Self.pendingHistories)
             }

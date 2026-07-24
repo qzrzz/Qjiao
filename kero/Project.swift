@@ -20,7 +20,7 @@ enum ProjectIcon: Codable, Equatable {
 /// `TerminalManager.close(_:)`) removes it from the manager.
 @MainActor
 final class Project: nonisolated ObservableObject, nonisolated Identifiable {
-    nonisolated let id = UUID()
+    nonisolated let id: UUID
 
     /// User-assigned name; when nil the project title follows the
     /// selected session's terminal title.
@@ -50,7 +50,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
 
     /// Pass `createInitialSession: false` when restoring a saved project;
     /// the caller then rebuilds the tabs itself.
-    init(fallbackName: String, createInitialSession: Bool = true) {
+    init(id: UUID = UUID(), fallbackName: String, createInitialSession: Bool = true) {
+        self.id = id
         self.fallbackName = fallbackName
         if createInitialSession {
             newSession()

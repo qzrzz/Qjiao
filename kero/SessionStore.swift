@@ -5,6 +5,44 @@
 
 import Foundation
 
+/// 项目名称、图标和描述的独立配置内容，和会话布局分开保存。
+struct ProjectConfig: Codable {
+    var customName: String?
+    var description: String?
+    var icon: ProjectIcon?
+}
+
+/// 项目配置文件存储。每个项目使用稳定 UUID 对应一个 JSON 文件。
+@MainActor
+enum ProjectConfigStore {
+    private static var directoryURL: URL {
+        AppSettings.configURL.deletingLastPathComponent()
+            .appendingPathComponent("projects", isDirectory: true)
+    }
+
+    static func load(for id: UUID) -> ProjectConfig? {
+        let url = fileURL(for: id)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(ProjectConfig.self, from: data)
+    }
+
+    static func save(_ config: ProjectConfig, for id: UUID) {
+        do {
+            try FileManager.default.createDirectory(
+                at: directoryURL, withIntermediateDirectories: true
+            )
+            let data = try JSONEncoder().encode(config)
+            try data.write(to: fileURL(for: id), options: .atomic)
+        } catch {
+            NSLog("qjiao: failed to save project config \(id): \(error)")
+        }
+    }
+
+    private static func fileURL(for id: UUID) -> URL {
+        directoryURL.appendingPathComponent("\(id.uuidString).json")
+    }
+}
+
 /// Snapshot of open projects and tabs, saved so a relaunch restores the
 /// previous layout. Terminal sessions restore as fresh shells started in
 /// their last known working directory — with their previous scrollback
@@ -71,6 +109,8 @@ struct SessionSnapshot: Codable {
             }
         }
 
+        /// 项目稳定 ID；旧版快照没有此字段，恢复时会生成新的 ID。
+        var id: UUID?
         var customName: String?
         /// 可选，确保升级前保存的会话仍能正常恢复。
         var description: String?
