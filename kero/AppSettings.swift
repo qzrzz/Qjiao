@@ -134,8 +134,9 @@ final class AppSettings: nonisolated ObservableObject {
         return name
     }
 
-    /// Overrides the app-wide appearance so every window — and the terminal
-    /// theme, which reads `NSApp.effectiveAppearance` — follows the choice.
+    /// Overrides the app-wide appearance so windows using the global project
+    /// theme — and their terminals — follow the choice. Explicit project
+    /// themes set a window-level appearance instead.
     /// Called from `init` because `didSet` doesn't run during initialization.
     func applyAppearance() {
         NSApp?.appearance = theme.nsAppearance

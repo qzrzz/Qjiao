@@ -79,10 +79,23 @@ struct ContentView: View {
                 CommandPaletteView(manager: manager)
             }
         }
-        .background(WindowChromeAccessor())
+        .background(
+            WindowChromeAccessor(
+                projectTheme: manager.selectedProject?.theme ?? .global,
+                onAppearanceChanged: manager.reloadActiveProjectTheme
+            )
+        )
         .onDrop(of: [UTType.fileURL], isTargeted: nil, perform: addDroppedProjects)
         .onChange(of: colorScheme) {
             manager.refreshAppearance()
+        }
+        .onChange(of: manager.selectedProject?.theme) {
+            manager.refreshAppearance()
+        }
+        .onAppear {
+            // The window appearance may be applied by WindowChromeAccessor
+            // during the first mount; refresh once after that override exists.
+            manager.reloadActiveProjectTheme()
         }
     }
 

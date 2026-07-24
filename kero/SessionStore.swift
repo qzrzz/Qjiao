@@ -10,6 +10,8 @@ struct ProjectConfig: Codable {
     var customName: String?
     var description: String?
     var icon: ProjectIcon?
+    /// 可选，兼容未设置项目级主题的旧项目配置。
+    var theme: ProjectTheme?
     /// 可选，兼容添加项目目录字段前创建的配置文件。
     var projectDirectory: String?
     /// Optional so project configuration written before Start existed keeps
@@ -128,6 +130,8 @@ struct SessionSnapshot: Codable {
         var description: String?
         /// 可选，确保升级前保存的会话仍能正常恢复。
         var icon: ProjectIcon?
+        /// Optional so snapshots written before project themes existed decode.
+        var theme: ProjectTheme?
         /// 项目目录由独立配置文件保存；该字段仅用于旧快照兼容。
         var projectDirectory: String?
         var tabs: [TabSnapshot]

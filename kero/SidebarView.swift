@@ -4,12 +4,14 @@
 //
 
 import AppKit
+import GhosttyTheme
 import SwiftUI
 
 /// Vertical tab strip listing projects, otty-style. Each row is a project;
 /// its sessions show as horizontal tabs in the main header.
 struct SidebarView: View {
     @ObservedObject var manager: TerminalManager
+    @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var themeChanges = Theme.changes
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
@@ -23,34 +25,33 @@ struct SidebarView: View {
             WindowDragArea()
                 .frame(height: 38)
 
-            ScrollView {
-                VStack(spacing: 3) {
-                    ForEach(Array(manager.projects.enumerated()), id: \.element.id) { index, project in
-                        SidebarProjectRow(
-                            project: project,
-                            index: index,
-                            isSelected: project.id == manager.selectedProjectID,
-                            select: { manager.selectedProjectID = project.id },
-                            close: { manager.close(project) },
-                            isDragging: draggedProjectID == project.id,
-                            onDrag: { updateProjectDrag(source: project.id, location: $0) },
-                            onDragEnded: endProjectDrag
-                        )
-                        .background {
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: ProjectFramePreferenceKey.self,
-                                    value: [project.id: proxy.frame(in: .global)]
-                                )
-                            }
+            GeometryReader { viewport in
+                ScrollView {
+                    VStack(spacing: 3) {
+                        ForEach(Array(manager.projects.enumerated()), id: \.element.id) { index, project in
+                            SidebarProjectRow(
+                                project: project,
+                                index: index,
+                                isSelected: project.id == manager.selectedProjectID,
+                                select: { manager.selectedProjectID = project.id },
+                                close: { manager.close(project) },
+                                isDragging: draggedProjectID == project.id,
+                                onDrag: { updateProjectDrag(source: project.id, location: $0) },
+                                onDragEnded: endProjectDrag
+                            )
+                            .background(ProjectFrameReader(projectID: project.id))
                         }
+                        // 动态填满最后一个项目行与底部栏之间的空白区域。
+                        let dragAreaHeight = listDragAreaHeight(
+                            in: viewport.frame(in: .global)
+                        )
+                        WindowDragArea()
+                            .frame(maxWidth: .infinity)
+                            .frame(height: dragAreaHeight)
                     }
-                    // 只在项目行下方的空白区域拖动窗口，避免和项目排序手势冲突。
-                    WindowDragArea()
-                        .frame(maxWidth: .infinity, minHeight: 300)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
                 }
-                .padding(.horizontal, 8)
-                .padding(.top, 8)
             }
 
             ZStack {
@@ -63,15 +64,7 @@ struct SidebarView: View {
                         tooltip: "New Project (⌘N)"
                     ) { manager.newProject() }
                     Spacer()
-                    SidebarFooterButton(
-                        systemImage: "exclamationmark.bubble",
-                        tooltip: "Send Feedback",
-                        tooltipAlignment: .trailing
-                    ) {
-                        NSWorkspace.shared.open(
-                            URL(string: "https://github.com/egoist/kero/issues/new")!
-                        )
-                    }
+                    SidebarThemeMenu(settings: settings)
                     SidebarFooterButton(
                         systemImage: "gearshape",
                         tooltip: "Settings (⌘,)",
@@ -90,10 +83,12 @@ struct SidebarView: View {
         }
         .frame(width: width)
         .background {
-            if Theme.isDefault(dark: colorScheme == .dark) {
-                VisualEffectView(material: .sidebar)
-            } else {
-                Color(nsColor: Theme.sidebar)
+            Group {
+                if Theme.isDefault(dark: colorScheme == .dark) {
+                    VisualEffectView(material: .sidebar)
+                } else {
+                    Color(nsColor: Theme.sidebar)
+                }
             }
         }
         .overlay(alignment: .trailing) {
@@ -130,6 +125,15 @@ struct SidebarView: View {
         draggedProjectID = nil
         NSCursor.arrow.set()
     }
+
+    /// 计算列表最后一行到视口底部的距离，确保整段空白都能拖动窗口。
+    private func listDragAreaHeight(in viewport: CGRect) -> CGFloat {
+        guard let lastRowBottom = projectFrames.values.map(\.maxY).max() else {
+            return max(0, viewport.height - 8)
+        }
+        // 预留 VStack 行间距，避免拖拽区把 ScrollView 内容撑出滚动范围。
+        return max(0, viewport.maxY - lastRowBottom - 3)
+    }
 }
 
 private struct SidebarFooterButton: View {
@@ -156,11 +160,66 @@ private struct SidebarFooterButton: View {
     }
 }
 
+private struct SidebarThemeMenu: View {
+    @ObservedObject var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            ForEach(AppTheme.allCases) { theme in
+                Toggle(isOn: Binding(
+                    get: { settings.theme == theme },
+                    set: { if $0 { settings.theme = theme } }
+                )) {
+                    Text(theme.title)
+                }
+            }
+        } label: {
+            Image(systemName: appearanceIcon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isHovering ? .primary : .secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .tooltip("Theme: \(settings.theme.title)", alignment: .trailing)
+    }
+
+    private var appearanceIcon: String {
+        switch settings.theme {
+        case .dark:
+            return "moon.fill"
+        case .light:
+            return "sun.max.fill"
+        case .system:
+            return colorScheme == .dark ? "moon.fill" : "sun.max.fill"
+        }
+    }
+}
+
 private struct ProjectFramePreferenceKey: PreferenceKey {
     static let defaultValue: [UUID: CGRect] = [:]
 
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue()) { $1 }
+    }
+}
+
+private struct ProjectFrameReader: View {
+    let projectID: UUID
+
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            Color.clear.preference(
+                key: ProjectFramePreferenceKey.self,
+                value: [projectID: frame]
+            )
+        }
     }
 }
 
@@ -217,6 +276,12 @@ private struct SidebarProjectRow: View {
             }
             Button("Edit Description…") {
                 beginDescriptionEdit()
+            }
+            Menu("Theme") {
+                projectThemeItem(.global)
+                curatedThemeMenu(dark: false)
+                Divider()
+                curatedThemeMenu(dark: true)
             }
             Divider()
             Button("Open in Finder") {
@@ -310,6 +375,90 @@ private struct SidebarProjectRow: View {
         let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         project.customName = trimmed.isEmpty ? nil : trimmed
         isRenaming = false
+    }
+
+    @ViewBuilder
+    private func projectThemeItem(_ theme: ProjectTheme) -> some View {
+        Toggle(isOn: Binding(
+            get: { project.theme == theme },
+            set: { if $0 { project.theme = theme } }
+        )) {
+            Label {
+                Text("Follow Global Settings")
+            } icon: {
+                Image(nsImage: ThemePreviewImageRenderer.image(for: [
+                    Theme.globalDefinition(dark: false),
+                    Theme.globalDefinition(dark: true)
+                ]))
+            }
+            .labelStyle(.titleAndIcon)
+        }
+    }
+
+    private func namedProjectThemeItem(name: String, dark: Bool) -> some View {
+        let theme: ProjectTheme = if dark {
+            .dark(name: name)
+        } else {
+            .light(name: name)
+        }
+        let definition = Theme.definition(named: name)
+            ?? Theme.globalDefinition(dark: dark)
+        return Toggle(isOn: Binding(
+            get: { project.theme == theme },
+            set: { if $0 { project.theme = theme } }
+        )) {
+            Label {
+                Text(name)
+            } icon: {
+                Image(nsImage: ThemePreviewImageRenderer.image(for: [definition]))
+            }
+            .labelStyle(.titleAndIcon)
+        }
+    }
+
+    @ViewBuilder
+    private func curatedThemeMenu(dark: Bool) -> some View {
+        Menu {
+            ForEach(ThemeMenuCatalog.primary(dark: dark), id: \.self) { name in
+                namedProjectThemeItem(name: name, dark: dark)
+            }
+            Section("Cool") {
+                ForEach(ThemeMenuCatalog.cool(dark: dark), id: \.self) { name in
+                    namedProjectThemeItem(name: name, dark: dark)
+                }
+            }
+            Section("Warm") {
+                ForEach(ThemeMenuCatalog.warm(dark: dark), id: \.self) { name in
+                    namedProjectThemeItem(name: name, dark: dark)
+                }
+            }
+            Divider()
+            allThemeMenu(dark: dark, title: "全部 \(dark ? "Dark" : "Light") 主题")
+        } label: {
+            themeMenuLabel(dark ? "Dark" : "Light", dark: dark)
+        }
+    }
+
+    @ViewBuilder
+    private func allThemeMenu(dark: Bool, title: String) -> some View {
+        Menu {
+            ForEach(ThemeMenuCatalog.all(dark: dark), id: \.self) { name in
+                namedProjectThemeItem(name: name, dark: dark)
+            }
+        } label: {
+            themeMenuLabel(title, dark: dark)
+        }
+    }
+
+    private func themeMenuLabel(_ title: String, dark: Bool) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(nsImage: ThemePreviewImageRenderer.image(
+                for: [Theme.globalDefinition(dark: dark)]
+            ))
+        }
+        .labelStyle(.titleAndIcon)
     }
 
     /// 普通点击要求确认；按住 Command 点击时直接关闭项目。

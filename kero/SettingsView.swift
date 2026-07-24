@@ -30,12 +30,12 @@ struct SettingsView: View {
                     Spacer()
                     ThemePicker(selection: $settings.theme)
                 }
-                Picker("Dark colors", selection: $settings.themeDark) {
-                    ForEach(Self.darkThemeNames, id: \.self) { Text($0).tag($0) }
-                }
-                Picker("Light colors", selection: $settings.themeLight) {
-                    ForEach(Self.lightThemeNames, id: \.self) { Text($0).tag($0) }
-                }
+                GhosttyThemePicker(
+                    title: "Dark colors", selection: $settings.themeDark, dark: true
+                )
+                GhosttyThemePicker(
+                    title: "Light colors", selection: $settings.themeLight, dark: false
+                )
                 Text("Colors apply to the terminal, editor, and window panels.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -171,10 +171,6 @@ struct SettingsView: View {
         )
     }
 
-    private static let darkThemeNames = [Theme.defaultDarkThemeName]
-        + GhosttyThemeCatalog.allThemes.filter(\.isDark).map(\.name)
-    private static let lightThemeNames = [Theme.defaultLightThemeName]
-        + GhosttyThemeCatalog.allThemes.filter { !$0.isDark }.map(\.name)
 }
 
 /// Sizes its sole child to the child's ideal height, capped at `maxHeight`.
@@ -202,6 +198,71 @@ private struct CappedIdealHeight: Layout {
             anchor: .topLeading,
             proposal: ProposedViewSize(bounds.size)
         )
+    }
+}
+
+/// Ghostty 主题选择器只在第一层展示精选主题，其余目录收进“全部…”。
+private struct GhosttyThemePicker: View {
+    let title: String
+    @Binding var selection: String
+    let dark: Bool
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Menu {
+                ForEach(ThemeMenuCatalog.primary(dark: dark), id: \.self) { name in
+                    themeItem(name)
+                }
+                Section("Cool") {
+                    ForEach(ThemeMenuCatalog.cool(dark: dark), id: \.self) { name in
+                        themeItem(name)
+                    }
+                }
+                Section("Warm") {
+                    ForEach(ThemeMenuCatalog.warm(dark: dark), id: \.self) { name in
+                        themeItem(name)
+                    }
+                }
+                Divider()
+                Menu("全部 \(dark ? "Dark" : "Light") 主题") {
+                    ForEach(ThemeMenuCatalog.all(dark: dark), id: \.self) { name in
+                        themeItem(name)
+                    }
+                }
+            } label: {
+                themeLabel(selection, dark: dark)
+            }
+            .menuStyle(.borderlessButton)
+        }
+    }
+
+    private func themeItem(_ name: String) -> some View {
+        Toggle(isOn: Binding(
+            get: { selection == name },
+            set: { if $0 { selection = name } }
+        )) {
+            Label {
+                Text(name)
+            } icon: {
+                Image(nsImage: ThemePreviewImageRenderer.image(for: [
+                    Theme.definition(named: name) ?? Theme.globalDefinition(dark: dark)
+                ]))
+            }
+            .labelStyle(.titleAndIcon)
+        }
+    }
+
+    private func themeLabel(_ title: String, dark: Bool) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(nsImage: ThemePreviewImageRenderer.image(for: [
+                Theme.definition(named: title) ?? Theme.globalDefinition(dark: dark)
+            ]))
+        }
+        .labelStyle(.titleAndIcon)
     }
 }
 
@@ -298,7 +359,7 @@ private struct MiniWindow: View {
     let dark: Bool
 
     var body: some View {
-        let colors = Theme.terminal(dark: dark)
+        let colors = Theme.globalTerminal(dark: dark)
         let text = Color(nsColor: colors.foreground)
 
         HStack(spacing: 0) {
@@ -316,7 +377,7 @@ private struct MiniWindow: View {
             }
             .padding(5)
             .frame(minWidth: 22, maxWidth: 22, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(nsColor: Theme.sidebarFill(dark: dark)))
+            .background(Color(nsColor: Theme.globalSidebarFill(dark: dark)))
 
             VStack(alignment: .leading, spacing: 3.5) {
                 RoundedRectangle(cornerRadius: 1.5)

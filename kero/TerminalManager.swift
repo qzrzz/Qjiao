@@ -39,7 +39,12 @@ private func shellQuote(_ value: String) -> String {
 @MainActor
 final class TerminalManager: nonisolated ObservableObject {
     @Published var projects: [Project] = []
-    @Published var selectedProjectID: UUID?
+    @Published var selectedProjectID: UUID? {
+        didSet {
+            guard selectedProjectID != oldValue else { return }
+            reloadActiveProjectTheme()
+        }
+    }
     @Published var isPanelVisible = false
     @Published var panelTab: RightPanel = .files
     /// Visibility of the left project sidebar (⌘B). `isPanelVisible` above is
@@ -50,6 +55,7 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Projects publish their own changes (session list, session selection);
     /// re-publish them so views observing the manager stay current.
     private var projectObservations: [UUID: AnyCancellable] = [:]
+    private var projectThemeObservations: [UUID: AnyCancellable] = [:]
     private var projectCounter = 0
     private var settingsObservation: AnyCancellable?
     private var autosaveObservation: AnyCancellable?
@@ -199,6 +205,10 @@ final class TerminalManager: nonisolated ObservableObject {
         projectObservations[project.id] = project.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        projectThemeObservations[project.id] = project.$theme.sink { [weak self] _ in
+            guard let self, self.selectedProjectID == project.id else { return }
+            self.reloadActiveProjectTheme()
+        }
         return project
     }
 
@@ -211,6 +221,7 @@ final class TerminalManager: nonisolated ObservableObject {
         guard let index = projects.firstIndex(where: { $0.id == project.id }) else { return }
         projects.remove(at: index)
         projectObservations[project.id] = nil
+        projectThemeObservations[project.id] = nil
         if selectedProjectID == project.id {
             let neighbor = min(index, projects.count - 1)
             selectedProjectID = neighbor >= 0 ? projects[neighbor].id : nil
@@ -583,6 +594,13 @@ final class TerminalManager: nonisolated ObservableObject {
         }
     }
 
+    /// Resolves the active project's explicit theme names before repainting
+    /// terminals and native views. A global project clears the override.
+    func reloadActiveProjectTheme() {
+        Theme.reloadProjectSelection(selectedProject?.theme)
+        refreshAppearance()
+    }
+
     /// After the first window appears, reopen one window per unclaimed
     /// saved snapshot; each new window's manager claims the next one.
     /// Deferred a runloop tick so windows the system itself restores can
@@ -684,6 +702,7 @@ final class TerminalManager: nonisolated ObservableObject {
                         customName: project.customName,
                         description: project.description,
                         icon: project.icon,
+                        theme: project.theme,
                         projectDirectory: project.projectDirectory,
                         launchCommands: project.launchCommands
                     ),
@@ -694,6 +713,7 @@ final class TerminalManager: nonisolated ObservableObject {
                     customName: nil,
                     description: nil,
                     icon: nil,
+                    theme: project.theme,
                     projectDirectory: nil,
                     tabs: tabs,
                     selectedTabIndex: project.tabs.firstIndex { $0.id == project.selectedTabID }
@@ -741,6 +761,7 @@ final class TerminalManager: nonisolated ObservableObject {
             project.customName = config?.customName ?? saved.customName
             project.description = config?.description ?? saved.description
             project.icon = config?.icon ?? saved.icon
+            project.theme = config?.theme ?? saved.theme ?? .global
             project.projectDirectory = config?.projectDirectory ?? saved.projectDirectory ?? ""
             project.launchCommands = config?.launchCommands ?? []
             for tab in saved.tabs {
@@ -756,12 +777,14 @@ final class TerminalManager: nonisolated ObservableObject {
                 project.projectDirectory = project.sessions.first?.currentDirectoryPath ?? ""
             }
             // 旧版快照中的项目配置在首次恢复时迁移到独立配置文件。
-            if config == nil || config?.projectDirectory == nil || config?.launchCommands == nil {
+            if config == nil || config?.theme == nil
+                || config?.projectDirectory == nil || config?.launchCommands == nil {
                 ProjectConfigStore.save(
                     ProjectConfig(
                         customName: project.customName,
                         description: project.description,
                         icon: project.icon,
+                        theme: project.theme,
                         projectDirectory: project.projectDirectory,
                         launchCommands: project.launchCommands
                     ),
@@ -770,6 +793,7 @@ final class TerminalManager: nonisolated ObservableObject {
             }
             guard !project.tabs.isEmpty else {
                 projectObservations[project.id] = nil
+                projectThemeObservations[project.id] = nil
                 continue
             }
             if let index = saved.selectedTabIndex, project.tabs.indices.contains(index) {

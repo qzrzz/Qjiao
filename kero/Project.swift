@@ -139,6 +139,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     @Published var projectDirectory = ""
     /// 项目列表的可选自定义图标；未设置时显示默认文件夹图标。
     @Published var icon: ProjectIcon?
+    /// 项目级主题覆盖；默认跟随全局设置。
+    @Published var theme: ProjectTheme = .global
     /// User-configured actions displayed in the right sidebar's Start panel.
     @Published var launchCommands: [ProjectLaunchCommand] = []
     @Published var tabs: [PaneTab] = []

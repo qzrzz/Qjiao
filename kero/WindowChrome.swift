@@ -10,6 +10,9 @@ import SwiftUI
 /// 20pt leading, vertically centered on the header's center line. AppKit
 /// re-lays the buttons out on various events, so we re-apply after each.
 struct WindowChromeAccessor: NSViewRepresentable {
+    var projectTheme: ProjectTheme = .global
+    var onAppearanceChanged: () -> Void = {}
+
     static let buttonCenterY: CGFloat = 21
     static let buttonLeading: CGFloat = 16
     static let buttonSpacing: CGFloat = 20
@@ -22,7 +25,11 @@ struct WindowChromeAccessor: NSViewRepresentable {
         let view = NSView()
         DispatchQueue.main.async {
             if let window = view.window {
-                context.coordinator.attach(window)
+                context.coordinator.attach(
+                    window,
+                    projectTheme: projectTheme,
+                    onAppearanceChanged: onAppearanceChanged
+                )
             }
         }
         return view
@@ -30,7 +37,11 @@ struct WindowChromeAccessor: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         if let window = view.window {
-            context.coordinator.attach(window)
+            context.coordinator.attach(
+                window,
+                projectTheme: projectTheme,
+                onAppearanceChanged: onAppearanceChanged
+            )
         }
     }
 
@@ -38,8 +49,24 @@ struct WindowChromeAccessor: NSViewRepresentable {
     final class Coordinator {
         private weak var window: NSWindow?
         private var observers: [NSObjectProtocol] = []
+        private var lastProjectTheme: ProjectTheme?
 
-        func attach(_ window: NSWindow) {
+        func attach(
+            _ window: NSWindow,
+            projectTheme: ProjectTheme,
+            onAppearanceChanged: @escaping () -> Void
+        ) {
+            let projectThemeChanged = lastProjectTheme != projectTheme
+            lastProjectTheme = projectTheme
+            // A project override is a window appearance, so multiple Qjiao
+            // windows can use different project themes without changing the
+            // app-wide preference. nil inherits NSApp.appearance.
+            window.appearance = projectTheme.nsAppearance
+            if projectThemeChanged {
+                DispatchQueue.main.async {
+                    onAppearanceChanged()
+                }
+            }
             guard self.window !== window else { return }
             self.window = window
             // Interactive controls occupy the title-bar region. Disable the

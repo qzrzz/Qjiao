@@ -111,7 +111,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             Self.terminalConfiguration(command: launchCommand)
         )
         _ = controller.setTheme(Self.ghosttyTheme())
-        let isDark = NSApp.effectiveAppearance.bestMatch(
+        let isDark = terminalView.effectiveAppearance.bestMatch(
             from: [.darkAqua, .aqua]
         ) == .darkAqua
         controller.setColorScheme(isDark ? .dark : .light)
