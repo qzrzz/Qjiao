@@ -47,7 +47,10 @@
 - 终端 Tab 最小宽度调整为 136；标题变长时立即扩张，变短后延迟收缩并带有过渡动画，减少标签宽度抖动；自动与手动标签名的最大宽度均为 220。
 - 增加全局“禁用 Zsh 自动标题名”开关；仅为 Qjiao 新建的 zsh 终端设置 `DISABLE_AUTO_TITLE=true`，并可在 Tab 右键菜单中切换。
 - 设置面板改为顶部图标分类导航，按 General、Terminal、Editor、Files、About 分组展示配置项；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
-- 设置 Files 分组：Display File Size 可在右侧 Files / CWD 文件树中显示文件大小（目录不计算体积）；配置写入 `files.display-file-size`。
+- 设置 Files 分组：Display File Size 默认开启，可在右侧 Files / CWD 文件树中显示文件大小（目录不在刷新时自动计算）；关闭时写入 `files.display-file-size = false`。
+- Files / CWD 目录树：hover 文件夹时右侧显示 Size 按钮，点击后在后台按需统计该文件夹逻辑体积（不阻塞 UI、不跟随符号链接、可取消与缓存；完成后显示大小，再点可重算）；多选时 Size 作用于全部选中目录（按钮显示数量，队列限流并发 2），右键菜单亦支持 Calculate Size。
+- 设置 Files 分组可配置文件树字体族与字号（默认内置 Inter Variable / 13pt，资源 `kero/Fonts/InterVariable.ttf`），写入 `files.font-family` / `files.font-size`，行高与图标随字号缩放。
+- Files / CWD 目录树支持选中态：单击选择、双击打开文件（目录为展开/折叠）；⌘ 点击切换多选、⇧ 点击按可见范围多选；⌘A 全选；右键菜单与废纸篓支持批量操作；箭头单独切换展开。
 - 统一 chrome 字号体系（`SidebarTypography`）：左侧项目栏、右侧边栏 Start / Files / CWD / Git / Info 与顶栏 Tabs 共用 title / body / secondary / caption 等角色；列表与标签主文字统一为 13，正文字号不低于 11 以提高可读性。
 - Start 面板「Add Launcher」按钮加大（顶栏 + 与空状态主按钮）。
 - 右侧面板上下分区框架：上半保留 Start/Files/Git 等；中间可拖分割（默认 70/30，双击恢复）；下半区顶部为 System / Note tabs（最小宽 75、宽度随内容），可收起到仅显示 tabs（双击底栏切换收起/展开）。

@@ -41,6 +41,9 @@ final class AppSettings: nonisolated ObservableObject {
 
     static let defaultFontSize: Double = 13
     static let fontSizeRange: ClosedRange<Double> = 8...32
+    /// Files / CWD 树默认字号，与 chrome `body` 一致。
+    static let defaultFilesFontSize: Double = 13
+    static let filesFontSizeRange: ClosedRange<Double> = 10...22
     static let backgroundOpacityRange: ClosedRange<Double> = 0.1...1
 
     /// Light/dark appearance override; `system` follows macOS.
@@ -100,8 +103,18 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
-    /// 右侧 Files / CWD 文件树是否在文件名右侧显示文件大小。默认关闭以保持列表紧凑。
+    /// 右侧 Files / CWD 文件树是否在文件名右侧显示文件大小。默认开启。
     @Published var displayFileSize: Bool {
+        didSet { save() }
+    }
+
+    /// Files / CWD 文件树字体族；空字符串表示内置 Inter Variable。
+    @Published var filesFontFamily: String {
+        didSet { save() }
+    }
+
+    /// Files / CWD 文件树主文字字号（pt）。
+    @Published var filesFontSize: Double {
         didSet { save() }
     }
 
@@ -204,7 +217,10 @@ final class AppSettings: nonisolated ObservableObject {
         fontThicken = toml["font-thicken"]?.bool ?? false
         useBundledChineseTerminalFont = toml["terminal.use-bundled-chinese-font"]?.bool ?? true
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
-        displayFileSize = toml["files.display-file-size"]?.bool ?? false
+        displayFileSize = toml["files.display-file-size"]?.bool ?? true
+        filesFontFamily = toml["files.font-family"]?.string ?? ""
+        let filesSize = toml["files.font-size"]?.double ?? Self.defaultFilesFontSize
+        filesFontSize = Self.filesFontSizeRange.contains(filesSize) ? filesSize : Self.defaultFilesFontSize
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
         disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
@@ -269,7 +285,9 @@ final class AppSettings: nonisolated ObservableObject {
         visualEffectState = "followsApp"
         visualEffectAlpha = 1
         wrapLines = false
-        displayFileSize = false
+        displayFileSize = true
+        filesFontFamily = ""
+        filesFontSize = Self.defaultFilesFontSize
         restoreTerminalHistory = false
         directClickMovesCursor = false
         disableZshAutoTitle = false
@@ -317,8 +335,15 @@ final class AppSettings: nonisolated ObservableObject {
         if wrapLines {
             lines.append("editor.wrap-lines = true")
         }
-        if displayFileSize {
-            lines.append("files.display-file-size = true")
+        // 默认 true：仅在关闭时写回，避免污染默认配置文件。
+        if !displayFileSize {
+            lines.append("files.display-file-size = false")
+        }
+        if !filesFontFamily.isEmpty {
+            lines.append("files.font-family = \(TOML.quote(filesFontFamily))")
+        }
+        if filesFontSize != Self.defaultFilesFontSize {
+            lines.append("files.font-size = \(TOML.number(filesFontSize))")
         }
         if restoreTerminalHistory {
             lines.append("terminal.restore-history = true")

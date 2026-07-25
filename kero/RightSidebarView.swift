@@ -6,6 +6,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 右侧下半区底栏 tab（框架阶段仅切换空壳）。
 private enum RightBottomPanel: String, CaseIterable, Identifiable {
@@ -530,6 +531,20 @@ private struct FileTreePanel: View {
                 }
                 .padding(.horizontal, 6)
                 .padding(.bottom, 8)
+                // 点击列表空白处清空选择；行上的手势优先命中。
+                .frame(maxWidth: .infinity, alignment: .top)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    model.clearSelection()
+                }
+            }
+            .focusable(true)
+            .focusEffectDisabled()
+            // ⌘A 全选当前可见项（需面板先获得焦点）。
+            .onKeyPress(keys: [.init("a")], phases: .down) { press in
+                guard press.modifiers.contains(.command) else { return .ignored }
+                model.selectAllVisible()
+                return .handled
             }
         }
     }
@@ -551,15 +566,27 @@ private struct FileTreeRow: View {
 
     private var isRenaming: Bool { model.renamingPath == item.path }
 
-    /// The file open in the active tab, so it reads as selected in the tree.
+    /// 用户多选/单击选中的行。
+    private var isSelected: Bool { model.isSelected(item.path) }
+
+    /// 当前编辑器打开的文件（与选择态可并存，选择优先高亮）。
     private var isCurrent: Bool { !item.isDirectory && item.path == currentFilePath }
 
-    /// 设置开启时在文件名右侧显示的人类可读大小（目录不显示）。
+    /// 普通文件：设置开启时显示字节大小。
     private var fileSizeLabel: String? {
         guard settings.displayFileSize, !item.isDirectory, !item.isDraft,
               let size = item.fileSize
         else { return nil }
-        return FileTreeRow.byteFormatter.string(fromByteCount: Int64(clamping: size))
+        return Self.formatByteCount(size)
+    }
+
+    /// 目录：按需统计完成后的可读体积（与文件共用格式）。
+    private var folderSizeLabel: String? {
+        guard item.isDirectory, !item.isDraft else { return nil }
+        if case .ready(let size) = model.folderSizeState(for: item.path) {
+            return Self.formatByteCount(size)
+        }
+        return nil
     }
 
     private static let byteFormatter: ByteCountFormatter = {
@@ -570,6 +597,38 @@ private struct FileTreeRow: View {
         formatter.isAdaptive = true
         return formatter
     }()
+
+    private static func formatByteCount(_ size: UInt64) -> String {
+        byteFormatter.string(fromByteCount: Int64(clamping: size))
+    }
+
+    private var rowBackground: Color {
+        if isSelected {
+            return Color(nsColor: Theme.cursor).opacity(0.22)
+        }
+        if isCurrent {
+            return Color.primary.opacity(0.09)
+        }
+        if isHovering {
+            return Color.primary.opacity(0.05)
+        }
+        return .clear
+    }
+
+    /// 选中态背景偏 accent 半透明，次要层级字色会糊在一起；选中时抬到 primary。
+    private var titleForeground: Color {
+        if isSelected {
+            return .primary
+        }
+        // 点文件保持更弱一层。
+        return item.name.hasPrefix(".")
+            ? Color.primary.opacity(0.45)
+            : Color.secondary
+    }
+
+    private var sizeForeground: Color {
+        isSelected ? Color.secondary : Color.primary.opacity(0.45)
+    }
 
     var body: some View {
         if item.isDraft {
@@ -582,53 +641,108 @@ private struct FileTreeRow: View {
         } else {
             content
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(isCurrent ? Color.primary.opacity(0.09) : (isHovering ? Color.primary.opacity(0.05) : .clear))
+                    RoundedRectangle(cornerRadius: 4).fill(rowBackground)
                 )
                 .onHover { isHovering = $0 }
                 .contextMenu { rowMenu }
         }
     }
 
+    /// 右键菜单作用目标（只读，禁止在 body / menu 构建期改选择态）。
+    /// 点在已多选的项上 → 整组；否则仅当前行（与 Finder 在动作瞬间解析目标一致）。
+    private var menuActionTargets: [FileTreeModel.Item] {
+        if model.isSelected(item.path), model.selectedPaths.count > 1 {
+            return model.selectedItems
+        }
+        return [item]
+    }
+
     @ViewBuilder
     private var rowMenu: some View {
-        if !item.isDirectory {
-            Button("Open") {
-                openFile(item.path)
+        // 注意：SwiftUI 会在刷新 body 时求值 contextMenu 内容；
+        // 此处绝不能写 selectedPaths，否则会触发无限重绘（CPU 打满、界面一直转圈）。
+        let targets = menuActionTargets
+        let fileTargets = targets.filter { !$0.isDirectory }
+        let onlyItem = targets.count == 1 ? targets[0] : nil
+
+        if !fileTargets.isEmpty {
+            Button(fileTargets.count == 1 ? "Open" : "Open \(fileTargets.count) Files") {
+                selectForContextAction()
+                for file in fileTargets { openFile(file.path) }
             }
-            Button("Open to the Side") {
-                openToSide(item.path)
+            if let only = onlyItem, !only.isDirectory {
+                Button("Open to the Side") {
+                    selectForContextAction()
+                    openToSide(only.path)
+                }
             }
         }
+
         Button("Open in Default App") {
-            NSWorkspace.shared.open(URL(fileURLWithPath: item.path))
+            selectForContextAction()
+            for target in menuActionTargets {
+                NSWorkspace.shared.open(URL(fileURLWithPath: target.path))
+            }
         }
         Button("Reveal in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)])
+            selectForContextAction()
+            let urls = menuActionTargets.map { URL(fileURLWithPath: $0.path) }
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
         }
-        Button("Copy Path") {
+        Button(targets.count == 1 ? "Copy Path" : "Copy Paths") {
+            selectForContextAction()
+            let text = menuActionTargets.map(\.path).joined(separator: "\n")
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.path, forType: .string)
+            NSPasteboard.general.setString(text, forType: .string)
         }
-        if item.isDirectory {
+
+        if let only = onlyItem, only.isDirectory {
             Button("cd Here") {
-                session?.sendCommand("cd " + shellQuote(item.path) + "\n")
+                selectForContextAction()
+                session?.sendCommand("cd " + shellQuote(only.path) + "\n")
             }
             Divider()
             Button("New File…") {
-                model.beginNewFile(in: item.path)
+                selectForContextAction()
+                model.beginNewFile(in: only.path)
             }
             Button("New Folder…") {
-                model.beginNewFolder(in: item.path)
+                selectForContextAction()
+                model.beginNewFolder(in: only.path)
             }
         }
+
+        // 多选/单选目录：右键也可触发体积统计（与 hover Size 同一套队列）。
+        let directoryTargets = targets.filter(\.isDirectory)
+        if !directoryTargets.isEmpty {
+            let n = directoryTargets.count
+            Button(n == 1 ? "Calculate Size" : "Calculate Size (\(n))") {
+                selectForContextAction()
+                model.requestFolderSizes(
+                    for: directoryTargets.map(\.path),
+                    recalculate: true
+                )
+            }
+        }
+
         Divider()
-        Button("Rename") {
-            model.beginRename(item)
+        if let only = onlyItem {
+            Button("Rename") {
+                model.beginRename(only)
+            }
         }
-        Button("Move to Trash", role: .destructive) {
-            model.moveToTrash(item)
+        Button(
+            targets.count == 1 ? "Move to Trash" : "Move \(targets.count) Items to Trash",
+            role: .destructive
+        ) {
+            selectForContextAction()
+            model.moveToTrash(paths: Set(menuActionTargets.map(\.path)))
         }
+    }
+
+    /// 用户点了菜单项后再收敛选择（允许改状态；不会在 body 构建期触发）。
+    private func selectForContextAction() {
+        model.prepareContextSelection(for: item)
     }
 
     /// Commits an inline rename and, when the file actually moved, tells the
@@ -656,49 +770,209 @@ private struct FileTreeRow: View {
         if isRenaming {
             renameRow
         } else {
-            rowButton
+            selectableRow
         }
     }
 
-    private var rowButton: some View {
-        Button {
-            if item.isDirectory {
-                model.toggle(item)
-            } else {
-                openFile(item.path)
+    /// 单击选择（含 ⌘ / ⇧），双击打开文件或展开目录；chevron 单独切换展开。
+    private var selectableRow: some View {
+        HStack(spacing: 5) {
+            expandControl
+            MaterialFileIconView(
+                fileName: item.name,
+                isDirectory: item.isDirectory,
+                isExpanded: item.isDirectory && model.isExpanded(item),
+                isRoot: item.path == model.rootPath,
+                size: FileTreeFont.iconSize
+            )
+            .frame(width: FileTreeFont.iconSize, alignment: .center)
+            Text(item.name)
+                .foregroundStyle(titleForeground)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: 4)
+            trailingSizeControl
+        }
+        .font(FileTreeFont.body)
+        .frame(minHeight: FileTreeFont.rowMinHeight, alignment: .leading)
+        .padding(.leading, CGFloat(item.depth) * 12 + 6)
+        .padding(.trailing, 6)
+        .padding(.vertical, 2)
+        .contentShape(RoundedRectangle(cornerRadius: 4))
+        // simultaneous：单击立即选择（无双击延迟）；双击再打开/展开。
+        .onTapGesture {
+            model.selectClick(item, modifiers: NSEvent.modifierFlags)
+        }
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                activateItem()
             }
-        } label: {
-            HStack(spacing: 5) {
-                leadingGlyphs
-                Text(item.name)
-                    .foregroundStyle(item.name.hasPrefix(".") ? .tertiary : .secondary)
+        )
+        // Drag a row out as a file URL: onto the terminal (which inserts its
+        // path) or into Finder and other apps. 拖的是当前选择组（若本行在选中内）。
+        .onDrag {
+            dragProvider()
+        }
+    }
+
+    /// 行尾体积区：文件直接显示；目录 hover 出 Size，统计中转圈，完成后显示数字。
+    @ViewBuilder
+    private var trailingSizeControl: some View {
+        if item.isDirectory {
+            folderSizeControl
+        } else if let fileSizeLabel {
+            Text(fileSizeLabel)
+                .font(FileTreeFont.caption)
+                .foregroundStyle(sizeForeground)
+                .monospacedDigit()
+                .lineLimit(1)
+                .layoutPriority(0)
+        }
+    }
+
+    /// Size 按钮作用目录：本行在多选内 → 全部选中目录；否则仅本行。
+    private var sizeActionDirectoryPaths: [String] {
+        if isSelected, model.selectedPaths.count > 1 {
+            return model.selectedItems.filter(\.isDirectory).map(\.path)
+        }
+        return item.isDirectory ? [item.path] : []
+    }
+
+    @ViewBuilder
+    private var folderSizeControl: some View {
+        switch model.folderSizeState(for: item.path) {
+        case .calculating:
+            // 离开 hover 仍保留指示，避免大目录扫盘时「按钮消失却不知进度」。
+            ProgressView()
+                .controlSize(.mini)
+                .scaleEffect(0.75)
+                .frame(width: 14, height: 14)
+                .help("Calculating folder size…")
+        case .ready:
+            if let folderSizeLabel {
+                let sizeText = Text(folderSizeLabel)
+                    .font(FileTreeFont.caption)
+                    .foregroundStyle(sizeForeground)
+                    .monospacedDigit()
                     .lineLimit(1)
-                    .layoutPriority(1)
-                Spacer(minLength: 4)
-                if let fileSizeLabel {
-                    Text(fileSizeLabel)
-                        .font(SidebarTypography.caption())
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .layoutPriority(0)
+                // hover 时点击数字可重算；多选时重算整组选中目录。
+                if isHovering {
+                    let paths = sizeActionDirectoryPaths
+                    let n = paths.count
+                    Button {
+                        model.requestFolderSizes(for: paths, recalculate: true)
+                    } label: {
+                        sizeText
+                    }
+                    .buttonStyle(.plain)
+                    .help(
+                        n > 1
+                            ? "Recalculate size for \(n) folders"
+                            : "Recalculate folder size"
+                    )
+                    .layoutPriority(0)
+                } else {
+                    sizeText.layoutPriority(0)
                 }
             }
-            // 字号挂在整行上，避免 Button 标签内个别 Text 字号被控件样式吞掉。
-            .font(SidebarTypography.body())
-            .frame(minHeight: SidebarTypography.rowMinHeight, alignment: .leading)
-            .padding(.leading, CGFloat(item.depth) * 12 + 6)
-            .padding(.trailing, 6)
-            .padding(.vertical, 2)
-            .contentShape(RoundedRectangle(cornerRadius: 4))
+        case .idle, .failed:
+            if isHovering {
+                let paths = sizeActionDirectoryPaths
+                let n = paths.count
+                let isFailed = model.folderSizeState(for: item.path) == .failed
+                let title: String = {
+                    if n > 1 { return "Size \(n)" }
+                    return isFailed ? "Retry" : "Size"
+                }()
+                Button {
+                    // 多选：跳过已 ready 的，只补算 idle/failed；单行 failed 走 Retry 同路径。
+                    model.requestFolderSizes(for: paths, recalculate: false)
+                } label: {
+                    Text(title)
+                        .font(FileTreeFont.caption.weight(.medium))
+                        .foregroundStyle(Color(nsColor: Theme.cursor))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color(nsColor: Theme.cursor).opacity(0.14))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(
+                    n > 1
+                        ? "Calculate size for \(n) selected folders"
+                        : (isFailed ? "Retry calculating folder size" : "Calculate folder size")
+                )
+            }
         }
-        .buttonStyle(.plain)
-        // Drag a row out as a file URL: onto the terminal (which inserts its
-        // path) or into Finder and other apps. A click still opens/toggles;
-        // the drag only begins once the pointer moves.
-        .onDrag {
-            NSItemProvider(object: URL(fileURLWithPath: item.path) as NSURL)
+    }
+
+    /// 目录折叠箭头：只切换展开，不打开文件。
+    @ViewBuilder
+    private var expandControl: some View {
+        if item.isDirectory {
+            Button {
+                model.toggle(item)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(FileTreeFont.compact)
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(model.isExpanded(item) ? 90 : 0))
+                    .frame(width: 12, height: FileTreeFont.rowMinHeight, alignment: .center)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            Spacer().frame(width: 12)
         }
+    }
+
+    /// 双击：文件 → 打开；目录 → 展开/折叠。同时保证该项被选中。
+    private func activateItem() {
+        model.selectClick(item, modifiers: [])
+        if item.isDirectory {
+            model.toggle(item)
+        } else {
+            openFile(item.path)
+        }
+    }
+
+    private func dragProvider() -> NSItemProvider {
+        let paths: [String]
+        if isSelected, model.selectedPaths.count > 1 {
+            paths = model.selectedItems.map(\.path)
+        } else {
+            // 拖未选中项时先单选该项，与 Finder 一致。
+            if !isSelected {
+                model.selectClick(item, modifiers: [])
+            }
+            paths = [item.path]
+        }
+        // NSItemProvider 以主文件 URL 为代表；多文件时写入 pasteboard 文件列表。
+        if paths.count == 1 {
+            return NSItemProvider(object: URL(fileURLWithPath: paths[0]) as NSURL)
+        }
+        let provider = NSItemProvider()
+        let urls = paths.map { URL(fileURLWithPath: $0) }
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.fileURL.identifier,
+            visibility: .all
+        ) { completion in
+            // 注册第一个 URL 的 data；多文件拖拽由系统在部分场景下降级为单文件。
+            if let data = urls.first?.dataRepresentation {
+                completion(data, nil)
+            } else {
+                completion(nil, nil)
+            }
+            return nil
+        }
+        // 额外把全部路径写成 public.file-url 列表，供支持多文件的目标读取。
+        provider.registerObject(
+            urls.map(\.absoluteString).joined(separator: "\n") as NSString,
+            visibility: .all
+        )
+        return provider
     }
 
     private var renameRow: some View {
@@ -712,8 +986,8 @@ private struct FileTreeRow: View {
                     if !fieldFocused { commitRename() }
                 }
         }
-        .font(SidebarTypography.body())
-        .frame(minHeight: SidebarTypography.rowMinHeight, alignment: .leading)
+        .font(FileTreeFont.body)
+        .frame(minHeight: FileTreeFont.rowMinHeight, alignment: .leading)
         .padding(.leading, CGFloat(item.depth) * 12 + 6)
         .padding(.trailing, 6)
         .padding(.vertical, 2)
@@ -734,8 +1008,8 @@ private struct FileTreeRow: View {
                     if !fieldFocused { commitDraft() }
                 }
         }
-        .font(SidebarTypography.body())
-        .frame(minHeight: SidebarTypography.rowMinHeight, alignment: .leading)
+        .font(FileTreeFont.body)
+        .frame(minHeight: FileTreeFont.rowMinHeight, alignment: .leading)
         .padding(.leading, CGFloat(item.depth) * 12 + 6)
         .padding(.trailing, 6)
         .padding(.vertical, 2)
@@ -748,7 +1022,7 @@ private struct FileTreeRow: View {
     private func nameField(_ placeholder: String) -> some View {
         TextField(placeholder, text: $editingName)
             .textFieldStyle(.plain)
-            .font(SidebarTypography.body())
+            .font(FileTreeFont.body)
             .foregroundStyle(.primary)
             .focused($fieldFocused)
             .padding(.horizontal, 4)
@@ -770,26 +1044,27 @@ private struct FileTreeRow: View {
         DispatchQueue.main.async { fieldFocused = true }
     }
 
+    /// 重命名/草稿行仍用静态 leading（无独立 chevron 按钮）。
     private var leadingGlyphs: some View {
-        Group {
+        let iconSize = FileTreeFont.iconSize
+        return Group {
             if item.isDirectory && !item.isDraft {
                 Image(systemName: "chevron.right")
-                    .font(SidebarTypography.compact())
+                    .font(FileTreeFont.compact)
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(model.isExpanded(item) ? 90 : 0))
                     .frame(width: 12, alignment: .center)
             } else {
                 Spacer().frame(width: 12)
             }
-            // Material Icon Theme：按文件名/扩展名/目录名匹配彩色 SVG。
             MaterialFileIconView(
                 fileName: item.name,
                 isDirectory: item.isDirectory,
                 isExpanded: item.isDirectory && model.isExpanded(item),
                 isRoot: item.path == model.rootPath,
-                size: 16
+                size: iconSize
             )
-            .frame(width: 16, alignment: .center)
+            .frame(width: iconSize, alignment: .center)
         }
     }
 }

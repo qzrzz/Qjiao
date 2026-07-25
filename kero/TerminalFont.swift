@@ -16,11 +16,12 @@ enum TerminalFont {
     private static let symbolsFontName = "SymbolsNFM"
 
     /// Registers the bundled JetBrains Mono faces (Regular/Bold/Italic/
-    /// BoldItalic), Source Han Sans CN, and the Symbols Nerd Font for this process only, so
-    /// nothing is installed system-wide. Must run before the first
-    /// terminal view is created.
+    /// BoldItalic), Inter Variable（Files 树默认）、Source Han Sans CN, and the
+    /// Symbols Nerd Font for this process only, so nothing is installed
+    /// system-wide. Must run before the first terminal / file-tree view is created.
     static func registerBundledFonts() {
-        // Xcode's synchronized groups flatten Fonts/ into Contents/Resources.
+        // Xcode's synchronized groups flatten Fonts/ into Contents/Resources。
+        // 会一并注册 InterVariable.ttf / InterVariable-Italic.ttf。
         let urls = Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: nil) ?? []
         guard !urls.isEmpty else { return }
         CTFontManagerRegisterFontURLs(urls as CFArray, .process, true, nil)

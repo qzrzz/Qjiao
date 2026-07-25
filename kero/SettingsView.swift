@@ -15,6 +15,8 @@ struct SettingsView: View {
 
     /// Installed fixed-pitch families (bundled default first).
     private let families = TerminalFont.selectableFamilies()
+    /// Files 树可选字体族（内置 Inter 第一项；设置里空字符串映射到该默认）。
+    private let filesFontFamilies = FileTreeFont.selectableFamilies()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -305,6 +307,47 @@ struct SettingsView: View {
             }
 
             if selectedSection == .files {
+            Section("Font") {
+                Group {
+                    Picker("Family", selection: $settings.filesFontFamily) {
+                        // 空字符串 = 内置 Inter Variable，与 Terminal 的 bundled 默认同一约定。
+                        Text("\(FileTreeFont.bundledFamily) (Bundled)").tag("")
+                        Divider()
+                        ForEach(filesFontFamilies.dropFirst(), id: \.self) { family in
+                            Text(family).tag(family)
+                        }
+                    }
+
+                    HStack {
+                        Text("Size")
+                        Slider(
+                            value: $settings.filesFontSize,
+                            in: AppSettings.filesFontSizeRange,
+                            step: 1
+                        )
+                        Text("\(Int(settings.filesFontSize)) pt")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        Stepper(
+                            "",
+                            value: $settings.filesFontSize,
+                            in: AppSettings.filesFontSizeRange,
+                            step: 1
+                        )
+                        .labelsHidden()
+                    }
+
+                    // 预览随当前 Files 字体即时变化，便于对照树中观感。
+                    Text("package.json   src/   README.md   1.2 KB")
+                        .font(FileTreeFont.body)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 2)
+                }
+                .settingsRowPadding()
+            }
+
             Section("File Tree") {
                 Group {
                     settingWithDescription(
@@ -481,7 +524,9 @@ struct SettingsView: View {
             && settings.visualEffectState == "followsApp"
             && settings.visualEffectAlpha == 1
             && !settings.wrapLines
-            && !settings.displayFileSize
+            && settings.displayFileSize
+            && settings.filesFontFamily.isEmpty
+            && settings.filesFontSize == AppSettings.defaultFilesFontSize
             && !settings.restoreTerminalHistory
             && !settings.directClickMovesCursor
             && !settings.disableZshAutoTitle
