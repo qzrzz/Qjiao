@@ -416,7 +416,7 @@ private struct TerminalTabDetails: View {
             detailsView(details)
         } else {
             Label("Loading terminal details…", systemImage: "hourglass")
-                .font(.system(size: 10))
+                .font(SidebarTypography.section())
                 .foregroundStyle(.tertiary)
         }
     }
@@ -434,7 +434,7 @@ private struct TerminalTabDetails: View {
                     Label(session.runningDurationLabel(at: currentTime), systemImage: "clock")
                 }
             }
-            .font(.system(size: 10))
+            .font(SidebarTypography.section())
             .foregroundStyle(.tertiary)
     }
 }
@@ -581,7 +581,7 @@ private struct SessionTabsView: View {
                 project.newSession()
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(SidebarTypography.compact())
                     .foregroundStyle(.secondary)
                     .frame(width: 22, height: 22)
                     .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -730,9 +730,10 @@ private struct TabRenameChrome: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 9))
+            Image(systemName: icon).font(SidebarTypography.micro())
             TextField("", text: $draft)
                 .textFieldStyle(.plain)
+                .font(SidebarTypography.body())
                 .frame(width: 110)
                 .focused($focused)
                 .onSubmit { finish(apply: true) }
@@ -837,11 +838,11 @@ private struct TabItemChrome: View {
                         .accessibilityLabel("Command running")
                 } else {
                     Image(systemName: systemImage)
-                        .font(.system(size: 9, weight: .medium))
+                        .font(SidebarTypography.micro())
                         .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: Theme.cursor)) : AnyShapeStyle(.tertiary))
                 }
                 Text(title)
-                    .font(.system(size: 11.5))
+                    .font(SidebarTypography.body())
                     .foregroundStyle(isSelected ? .primary : .secondary)
                     .lineLimit(1)
                     // 标题独占可伸缩空间，右侧的分栏提示、修改提示和关闭按钮始终右对齐。
@@ -849,16 +850,16 @@ private struct TabItemChrome: View {
                 if paneCount > 1 {
                     HStack(spacing: 2) {
                         Image(systemName: "square.split.2x1")
-                            .font(.system(size: 7.5, weight: .semibold))
+                            .font(SidebarTypography.chevron())
                         Text("\(paneCount)")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(SidebarTypography.micro(.semibold))
                     }
                     .foregroundStyle(.tertiary)
                 }
                 if isHovering {
                     Button(action: close) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(SidebarTypography.compact(.bold))
                             .foregroundStyle(.secondary)
                             .frame(width: 14, height: 14)
                             .contentShape(Rectangle())
@@ -898,8 +899,9 @@ private struct TabItemChrome: View {
     private func updateRetainedWidth() {
         // 图标、关闭/修改状态、左右内边距和元素间距占用的固定宽度。
         let accessoryWidth: CGFloat = paneCount > 1 ? 73 : 44
+        // 与 Tab 标题 SwiftUI 字号保持一致，避免测宽偏小导致文字被裁切。
         let titleWidth = (title as NSString).size(
-            withAttributes: [.font: NSFont.systemFont(ofSize: 11.5)]
+            withAttributes: [.font: SidebarTypography.bodyNSFont]
         ).width
         let desiredWidth = min(
             max(titleWidth + accessoryWidth, Self.minimumWidth),
@@ -933,7 +935,7 @@ private struct TabItemChrome: View {
         shrinkTask = nil
         let accessoryWidth: CGFloat = paneCount > 1 ? 73 : 44
         let titleWidth = (title as NSString).size(
-            withAttributes: [.font: NSFont.systemFont(ofSize: 11.5)]
+            withAttributes: [.font: SidebarTypography.bodyNSFont]
         ).width
         let desiredWidth = min(
             max(titleWidth + accessoryWidth, Self.minimumWidth), Self.maximumWidth
@@ -959,7 +961,7 @@ private struct TabContentIcon: View {
                 .accessibilityLabel("Command running")
         } else {
             Image(systemName: content?.systemImage ?? "terminal")
-                .font(.system(size: 12, weight: .medium))
+                .font(SidebarTypography.secondary(.medium))
                 .foregroundStyle(tint)
         }
     }
