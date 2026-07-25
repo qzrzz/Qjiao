@@ -30,17 +30,19 @@ struct EditorPalette: Equatable {
 
     static func theme(dark: Bool) -> EditorPalette {
         let colors = Theme.terminal(dark: dark)
+        let opacity = AppSettings.shared.terminalBackgroundOpacity
+        let bg = colors.background.withAlphaComponent(opacity)
         return EditorPalette(
             text: colors.foreground,
-            background: colors.background,
+            background: bg,
             insertionPoint: colors.cursor,
-            lineHighlight: colors.background.blended(
+            lineHighlight: bg.blended(
                 withFraction: dark ? 0.10 : 0.08,
                 of: colors.foreground
-            ) ?? colors.background,
+            ) ?? bg,
             gutterText: colors.foreground.blended(
                 withFraction: dark ? 0.45 : 0.55,
-                of: colors.background
+                of: bg
             ) ?? colors.foreground
         )
     }
@@ -59,6 +61,8 @@ struct EditorPalette: Equatable {
 /// recreated on tab switch or relaunch.
 struct SourceTextEditor: NSViewRepresentable {
     @ObservedObject private var themeChanges = Theme.changes
+    @ObservedObject private var settings = AppSettings.shared
+    @Environment(\.colorScheme) private var colorScheme
     let file: FileTab
     let font: NSFont
     let palette: EditorPalette
@@ -83,7 +87,7 @@ struct SourceTextEditor: NSViewRepresentable {
         scrollView.documentView = textView
 
         scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = true
+        scrollView.drawsBackground = (settings.terminalBackgroundOpacity == 1)
         // The window uses a full-size content view, so automatic insets
         // would add a titlebar-height top inset that misaligns the gutter
         // numbers against the text by one line.
@@ -200,16 +204,21 @@ struct SourceTextEditor: NSViewRepresentable {
     /// Guarded assignments: the font/color setters restyle the whole
     /// document, and this runs on every SwiftUI render.
     private func apply(to textView: STTextView, scrollView: NSScrollView) {
+        let opacity = settings.terminalBackgroundOpacity
+        let currentThemeBg = Theme.terminal(dark: colorScheme == .dark).background
+        let targetBg = currentThemeBg.withAlphaComponent(opacity)
+
         if textView.font != font {
             textView.font = font
         }
         if textView.textColor != palette.text {
             textView.textColor = palette.text
         }
-        if textView.backgroundColor != palette.background {
-            textView.backgroundColor = palette.background
-            scrollView.backgroundColor = palette.background
+        if textView.backgroundColor != targetBg {
+            textView.backgroundColor = targetBg
+            scrollView.backgroundColor = targetBg
         }
+        scrollView.drawsBackground = (opacity == 1)
         textView.insertionPointColor = palette.insertionPoint
         textView.selectedLineHighlightColor = palette.lineHighlight
         // false = wrap at the view width, true = expand horizontally.

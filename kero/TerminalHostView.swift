@@ -13,6 +13,8 @@ struct TerminalHostView: NSViewRepresentable {
     let session: TerminalSession
     /// Whether this terminal's pane is the focused one in its tab.
     var isFocused: Bool = true
+    /// Whether the tab contains multiple split panes.
+    var hasMultiplePanes: Bool = false
     /// Called when the terminal takes focus itself (e.g. a click), so the
     /// model's focused pane can follow.
     var onFocused: () -> Void = {}
@@ -27,6 +29,7 @@ struct TerminalHostView: NSViewRepresentable {
         let container = TerminalContainerView()
         container.terminal = session.terminalView
         container.focusOnAppear = isFocused
+        container.updateCornerRadius(hasMultiplePanes: hasMultiplePanes)
         let terminal = session.terminalView
         terminal.onBecomeFirstResponder = onFocused
         terminal.splitTarget.onSplit = onSplit
@@ -37,10 +40,10 @@ struct TerminalHostView: NSViewRepresentable {
         container.addSubview(terminal)
         container.addSubview(scrollbar, positioned: .above, relativeTo: terminal)
         NSLayoutConstraint.activate([
-            terminal.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 2),
-            terminal.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
-            terminal.topAnchor.constraint(equalTo: container.topAnchor, constant: 2),
-            terminal.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -2),
+            terminal.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            terminal.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            terminal.topAnchor.constraint(equalTo: container.topAnchor),
+            terminal.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             scrollbar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollbar.topAnchor.constraint(equalTo: container.topAnchor),
             scrollbar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -56,6 +59,7 @@ struct TerminalHostView: NSViewRepresentable {
         session.terminalView.splitTarget.onClose = onClose
         let container = view as? TerminalContainerView
         container?.focusOnAppear = isFocused
+        container?.updateCornerRadius(hasMultiplePanes: hasMultiplePanes)
         // Take focus only on the unfocused→focused edge (keyboard navigation,
         // a split landing here), never on every render — that would fight the
         // user for focus and make sidebar text fields untypable.
@@ -151,6 +155,25 @@ private final class TerminalContainerView: NSView {
         }
     }
     private var pendingFocusRequest = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+    }
+
+    func updateCornerRadius(hasMultiplePanes: Bool) {
+        let radius: CGFloat = hasMultiplePanes ? 6 : 0
+        if layer?.cornerRadius != radius {
+            layer?.cornerRadius = radius
+            layer?.masksToBounds = hasMultiplePanes
+            layer?.cornerCurve = .continuous
+        }
+    }
 
     deinit {
         NotificationCenter.default.removeObserver(self)

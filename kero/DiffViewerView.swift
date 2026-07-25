@@ -360,6 +360,7 @@ private struct DiffWebHostView: NSViewRepresentable {
 /// split view with word-level change highlighting.
 struct DiffViewerView: View {
     @ObservedObject private var themeChanges = Theme.changes
+    @ObservedObject private var settings = AppSettings.shared
     @ObservedObject var diff: DiffTab
     @ObservedObject private var web: DiffWebModel
     /// The view stays mounted while other tabs are selected (see
@@ -402,7 +403,7 @@ struct DiffViewerView: View {
                             .overlay {
                                 if !web.isReady {
                                     DiffSkeletonView()
-                                        .background(Color(nsColor: Theme.background))
+                                        .background(Color(nsColor: Theme.background.withAlphaComponent(settings.terminalBackgroundOpacity)))
                                         .transition(.opacity)
                                 }
                             }

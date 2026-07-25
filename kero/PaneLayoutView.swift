@@ -450,10 +450,9 @@ private struct PaneView: View {
         // no handle — so nothing about the common case changes.
         if showFocusRing {
             content
-                // Deliberately no clip: masking an AppKit view forces an
-                // offscreen recomposite that flickers on live resize. The
-                // content background matches the surrounding gaps, so square
-                // content corners blend in and only the rounded stroke reads.
+                // Deliberately no SwiftUI clip: masking an AppKit view forces an
+                // offscreen recomposite that flickers on live resize. Clipping is
+                // handled natively by AppKit CALayer (TerminalContainerView).
                 .overlay { focusRing }
                 .overlay(alignment: .top) {
                     if allowsMove { moveHandle }
@@ -480,6 +479,7 @@ private struct PaneView: View {
             TerminalHostView(
                 session: session,
                 isFocused: isFocused,
+                hasMultiplePanes: tab.hasMultiplePanes,
                 onFocused: focus,
                 onSplit: splitFromMenu,
                 onClose: onClosePane.map { close in
@@ -491,7 +491,8 @@ private struct PaneView: View {
                 }
         case .file(let file):
             FileViewerView(file: file, isFocused: isFocused, onFocused: focus, onSplit: splitFromMenu)
-                .background(Color(nsColor: Theme.background))
+                .background(Color(nsColor: Theme.background.withAlphaComponent(AppSettings.shared.terminalBackgroundOpacity)))
+                .clipShape(RoundedRectangle(cornerRadius: tab.hasMultiplePanes ? 6 : 0, style: .continuous))
         case .diff:
             // Rendered by the always-mounted diff stack behind the layout; stay
             // transparent and non-interactive so clicks and scrolls reach it.

@@ -449,6 +449,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
                 ? "0" : "1"
             environment["QJIAO_ORIGINAL_ZDOTDIR"] = processEnvironment["ZDOTDIR"] ?? ""
             environment["ZDOTDIR"] = integrationDirectory
+            // 只向本应用新建的 zsh 注入此变量；不会改动用户系统终端的环境。
+            if AppSettings.shared.disableZshAutoTitle {
+                environment["DISABLE_AUTO_TITLE"] = "true"
+            }
         }
         return environment
     }

@@ -43,3 +43,8 @@
 - 项目右键菜单支持项目级主题：遵循全局设置，或在 Light/Dark 精选、Cool、Warm 分隔项中选择具体 Ghostty 主题，并可从各自菜单内的“全部 Light 主题”“全部 Dark 主题”进入完整目录；主题菜单和全局主题选择器使用背景色、文本色及界面/文件夹强调色预览图标。
 - 左侧面板底部增加主题菜单，可快速切换 System、Light、Dark 外观。
 - Default Dark 主题的左侧项目面板改用更深的 `underWindowBackground` 材质，避免系统侧栏材质提亮背景。
+- 修复开启终端不透明度时切换 Tab 后未选中的 Git Diff 对比器透出显示的问题，并将终端背景不透明度设置应用于 Git Diff 对比器。
+- 终端 Tab 最小宽度调整为 136；标题变长时立即扩张，变短后延迟收缩并带有过渡动画，减少标签宽度抖动；自动与手动标签名的最大宽度均为 220。
+- 增加全局“禁用 Zsh 自动标题名”开关；仅为 Qjiao 新建的 zsh 终端设置 `DISABLE_AUTO_TITLE=true`，并可在 Tab 右键菜单中切换。
+- 设置面板改为顶部图标分类导航，按 General、Terminal、Editor、About 分组展示配置项；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
+- 右侧边栏统一字号体系（`SidebarTypography`）：Start / Files / CWD / Git / Info 共用 title / body / secondary / caption 等角色；列表主文字（含 Files 目录树）统一为 13，正文字号不低于 11 以提高可读性。

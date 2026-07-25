@@ -113,9 +113,63 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 仅为 Qjiao 启动的 zsh 注入 `DISABLE_AUTO_TITLE=true`，阻止 zshrc 自动改写标签标题。
+    @Published var disableZshAutoTitle: Bool {
+        didSet { save() }
+    }
+
     /// The command prefix used by the Info panel's package script launcher.
     @Published var packageManagerCommand: PackageManagerCommand {
         didSet { save() }
+    }
+
+    /// 毛玻璃 4 核心属性定制选项：Material 材质
+    @Published var visualEffectMaterial: String {
+        didSet { save() }
+    }
+
+    /// 毛玻璃 4 核心属性定制选项：Blending Mode 混合模式
+    @Published var visualEffectBlendingMode: String {
+        didSet { save() }
+    }
+
+    /// 毛玻璃 4 核心属性定制选项：State 激活状态
+    @Published var visualEffectState: String {
+        didSet { save() }
+    }
+
+    /// 毛玻璃 4 核心属性定制选项：Alpha 不透明度 (0.0 ~ 1.0)
+    @Published var visualEffectAlpha: Double {
+        didSet { save() }
+    }
+
+    var resolvedVisualEffectMaterial: NSVisualEffectView.Material {
+        switch visualEffectMaterial {
+        case "sidebar": return .sidebar
+        case "underWindowBackground": return .underWindowBackground
+        case "hud": return .hudWindow
+        case "popover": return .popover
+        case "menu": return .menu
+        case "headerView": return .headerView
+        case "titlebar": return .titlebar
+        default: return .underWindowBackground
+        }
+    }
+
+    var resolvedVisualEffectBlendingMode: NSVisualEffectView.BlendingMode {
+        switch visualEffectBlendingMode {
+        case "withinWindow": return .withinWindow
+        default: return .behindWindow
+        }
+    }
+
+    var resolvedVisualEffectState: NSVisualEffectView.State? {
+        switch visualEffectState {
+        case "active": return .active
+        case "inactive": return .inactive
+        case "followsWindow": return .followsWindowActiveState
+        default: return nil
+        }
     }
 
     private init() {
@@ -130,6 +184,10 @@ final class AppSettings: nonisolated ObservableObject {
         terminalBackgroundOpacity = Self.validOpacity(
             toml["terminal.background-opacity"]?.double
         )
+        visualEffectMaterial = toml["window.effect-material"]?.string ?? "underWindowBackground"
+        visualEffectBlendingMode = toml["window.effect-blending-mode"]?.string ?? "behindWindow"
+        visualEffectState = toml["window.effect-state"]?.string ?? "followsApp"
+        visualEffectAlpha = Self.validOpacity(toml["window.effect-alpha"]?.double)
         fontFamily = toml["font-family"]?.string ?? ""
         let size = toml["font-size"]?.double ?? Self.defaultFontSize
         fontSize = Self.fontSizeRange.contains(size) ? size : Self.defaultFontSize
@@ -138,6 +196,7 @@ final class AppSettings: nonisolated ObservableObject {
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
+        disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
         packageManagerCommand = toml["terminal.package-manager"]?.string
             .flatMap(PackageManagerCommand.init(rawValue:)) ?? .npm
         applyAppearance()
@@ -182,9 +241,14 @@ final class AppSettings: nonisolated ObservableObject {
         themeLight = Theme.defaultLightThemeName
         windowBackgroundOpacity = 1
         terminalBackgroundOpacity = 1
+        visualEffectMaterial = "underWindowBackground"
+        visualEffectBlendingMode = "behindWindow"
+        visualEffectState = "followsApp"
+        visualEffectAlpha = 1
         wrapLines = false
         restoreTerminalHistory = false
         directClickMovesCursor = false
+        disableZshAutoTitle = false
         packageManagerCommand = .npm
     }
 
@@ -205,6 +269,18 @@ final class AppSettings: nonisolated ObservableObject {
         if terminalBackgroundOpacity != 1 {
             lines.append("terminal.background-opacity = \(TOML.number(terminalBackgroundOpacity))")
         }
+        if visualEffectMaterial != "underWindowBackground" {
+            lines.append("window.effect-material = \(TOML.quote(visualEffectMaterial))")
+        }
+        if visualEffectBlendingMode != "behindWindow" {
+            lines.append("window.effect-blending-mode = \(TOML.quote(visualEffectBlendingMode))")
+        }
+        if visualEffectState != "followsApp" {
+            lines.append("window.effect-state = \(TOML.quote(visualEffectState))")
+        }
+        if visualEffectAlpha != 1 {
+            lines.append("window.effect-alpha = \(TOML.number(visualEffectAlpha))")
+        }
         if !fontFamily.isEmpty {
             lines.append("font-family = \(TOML.quote(fontFamily))")
         }
@@ -221,6 +297,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if directClickMovesCursor {
             lines.append("terminal.direct-click-moves-cursor = true")
+        }
+        if disableZshAutoTitle {
+            lines.append("terminal.disable-zsh-auto-title = true")
         }
         if packageManagerCommand != .npm {
             lines.append("terminal.package-manager = \(TOML.quote(packageManagerCommand.rawValue))")

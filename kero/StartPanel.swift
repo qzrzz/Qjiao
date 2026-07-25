@@ -33,34 +33,35 @@ struct StartPanel: View {
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: "play.circle")
-                .font(.system(size: 11, weight: .medium))
+                .font(SidebarTypography.secondary(.medium))
                 .foregroundStyle(Color(nsColor: Theme.cursor))
             VStack(alignment: .leading, spacing: 1) {
                 Text("Start")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(SidebarTypography.title())
                 Text("Project launchers")
-                    .font(.system(size: 10))
+                    .font(SidebarTypography.caption())
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             Button(action: runAllCommands) {
                 Image(systemName: "play.fill")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(SidebarTypography.title())
                     .foregroundStyle(.white)
-                    .frame(width: 30, height: 28)
+                    .frame(width: 34, height: 32)
                     .background(Color(nsColor: Theme.cursor))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .buttonStyle(.plain)
             .disabled(project.launchCommands.isEmpty)
             .help("Run all launchers in order")
             Button(action: addCommand) {
                 Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .medium))
-                    .frame(width: 30, height: 28)
+                    // 与「全部运行」同级可点区域，避免 + 看起来像次要工具图标。
+                    .font(SidebarTypography.title(.medium))
+                    .frame(width: 34, height: 32)
                     .background(Color.primary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .contentShape(RoundedRectangle(cornerRadius: 6))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
             .help("Add Launcher")
@@ -126,19 +127,20 @@ struct StartPanel: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "play.circle")
-                .font(.system(size: 24, weight: .light))
+                .font(SidebarTypography.emptyIcon())
                 .foregroundStyle(.tertiary)
             Text("No project launchers")
-                .font(.system(size: 12, weight: .medium))
+                .font(SidebarTypography.body(.medium))
                 .foregroundStyle(.secondary)
             Text("Add a terminal command, application, folder, or webpage.")
-                .font(.system(size: 11))
+                .font(SidebarTypography.secondary())
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
             Button("Add Launcher", action: addCommand)
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.regular)
+                .font(SidebarTypography.body(.medium))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -179,7 +181,7 @@ private struct StartCommandRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "line.3.horizontal")
-                .font(.system(size: 9, weight: .medium))
+                .font(SidebarTypography.micro())
                 .foregroundStyle(.tertiary)
                 .frame(width: 22, height: 24)
                 .contentShape(RoundedRectangle(cornerRadius: 5))
@@ -192,11 +194,11 @@ private struct StartCommandRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(command.displayTitle)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(SidebarTypography.body(.medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text(command.type.title)
-                    .font(.system(size: 10))
+                    .font(SidebarTypography.caption())
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -204,7 +206,7 @@ private struct StartCommandRow: View {
 
             Button(action: run) {
                 Image(systemName: "play.fill")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(SidebarTypography.micro(.semibold))
                     .foregroundStyle(Color(nsColor: Theme.cursor))
                     .frame(width: 22, height: 22)
                     .contentShape(RoundedRectangle(cornerRadius: 5))
@@ -214,7 +216,7 @@ private struct StartCommandRow: View {
 
             Button(action: toggleExpanded) {
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(SidebarTypography.caption(.semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 22, height: 22)
                     .contentShape(RoundedRectangle(cornerRadius: 5))
@@ -271,7 +273,7 @@ private struct StartCommandInlineEditor: View {
                     .controlSize(.small)
             }
         }
-        .font(.system(size: 11))
+        .font(SidebarTypography.secondary())
         .padding(.horizontal, 12)
         .padding(.top, 2)
         .padding(.bottom, 10)
@@ -358,7 +360,7 @@ private struct StartCommandDragPreview: View {
             StartCommandIcon(command: command)
                 .frame(width: 16, height: 16)
             Text(command.displayTitle)
-                .font(.system(size: 12, weight: .medium))
+                .font(SidebarTypography.body(.medium))
                 .lineLimit(1)
         }
         .foregroundStyle(.primary)

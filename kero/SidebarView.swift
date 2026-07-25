@@ -85,11 +85,11 @@ struct SidebarView: View {
         .background {
             Group {
                 if Theme.isDefault(dark: colorScheme == .dark) {
-                    VisualEffectView(material: .sidebar, followsApplicationActivity: true)
+                    VisualEffectView()
                     Color(nsColor: Theme.sidebar).opacity(0.5)
                 } 
                 else {
-                    VisualEffectView(material: .sidebar, followsApplicationActivity: true)
+                    VisualEffectView()
                     Color(nsColor: Theme.sidebar).opacity(0.7)
                 }
             }

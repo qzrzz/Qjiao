@@ -11,48 +11,175 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var updater = Updater.shared
+    @State private var selectedSection: SettingsSection = .general
 
     /// Installed fixed-pitch families (bundled default first).
     private let families = TerminalFont.selectableFamilies()
 
     var body: some View {
-        CappedIdealHeight(maxHeight: 600) { form }
+        VStack(spacing: 0) {
+            sectionPicker
+            Divider()
+            // 分类切换时内容多少不同；让表单始终填满固定区域，避免窗口和导航跟随内容跳动。
+            form
+                .frame(maxHeight: .infinity)
+        }
+        .frame(width: 510, height: 650)
+    }
+
+    /// 顶部图标导航借鉴原生设置应用的分类结构，避免全部选项堆在一张长表单中。
+    private var sectionPicker: some View {
+        HStack(spacing: 7) {
+            ForEach(SettingsSection.allCases) { section in
+                Button { selectedSection = section } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: section.systemImage)
+                            .font(.system(size: 15, weight: .medium))
+                        Text(section.title)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(selectedSection == section ? Color.accentColor : .secondary)
+                    .frame(width: 80, height: 60)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(selectedSection == section ? Color.accentColor.opacity(0.10) : .clear)
+                    )
+                    // 让整张可见导航卡片都能点击，而不是仅图标和文字响应点击。
+                    .contentShape(RoundedRectangle(cornerRadius: 7))
+                }
+                .buttonStyle(.plain)
+                // 分类切换后不保留键盘焦点的蓝色描边；选中状态仅由填充色表达。
+                .focusEffectDisabled()
+                .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
+            }
+        }
+        .padding(.vertical, 8)
     }
 
     private var form: some View {
         Form {
+            if selectedSection == .general {
             Section("Appearance") {
-                // A plain row rather than LabeledContent: that stamps its own
-                // label onto every child, leaving all three previews named
-                // "Theme" to VoiceOver instead of System/Light/Dark.
-                HStack {
-                    Text("Theme")
-                    Spacer()
-                    ThemePicker(selection: $settings.theme)
+                Group {
+                    // A plain row rather than LabeledContent: that stamps its own
+                    // label onto every child, leaving all three previews named
+                    // "Theme" to VoiceOver instead of System/Light/Dark.
+                    HStack {
+                        Text("Theme")
+                        Spacer()
+                        ThemePicker(selection: $settings.theme)
+                    }
+                    GhosttyThemePicker(
+                        title: "Dark colors", selection: $settings.themeDark, dark: true
+                    )
+                    GhosttyThemePicker(
+                        title: "Light colors", selection: $settings.themeLight, dark: false
+                    )
                 }
-                GhosttyThemePicker(
-                    title: "Dark colors", selection: $settings.themeDark, dark: true
-                )
-                GhosttyThemePicker(
-                    title: "Light colors", selection: $settings.themeLight, dark: false
-                )
-                backgroundOpacityControl(
-                    "Window background opacity",
-                    value: $settings.windowBackgroundOpacity
-                )
-                backgroundOpacityControl(
-                    "Terminal background opacity",
-                    value: $settings.terminalBackgroundOpacity
-                )
-                Text("Window panels and terminal surfaces can be made translucent independently.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Text("Colors apply to the terminal, editor, and window panels.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                .settingsRowPadding()
             }
 
+            Section {
+                Group {
+                    backgroundOpacityControl(
+                        "Window background opacity",
+                        value: $settings.windowBackgroundOpacity
+                    )
+                    backgroundOpacityControl(
+                        "Terminal background opacity",
+                        value: $settings.terminalBackgroundOpacity
+                    )
+                }
+                .settingsRowPadding()
+            }
+
+            Section {
+                Group {
+                    Text("Window visual effect material when the window is transparent.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+
+                    Picker("Effect material", selection: $settings.visualEffectMaterial) {
+                        Text("Under Window (Default)").tag("underWindowBackground")
+                        Text("Sidebar").tag("sidebar")
+                        Text("HUD Panel").tag("hud")
+                        Text("Popover").tag("popover")
+                        Text("Menu").tag("menu")
+                        Text("Header View").tag("headerView")
+                        Text("Titlebar").tag("titlebar")
+                    }
+
+                    Picker("Blending mode", selection: $settings.visualEffectBlendingMode) {
+                        Text("Behind Window").tag("behindWindow")
+                        Text("Within Window").tag("withinWindow")
+                    }
+
+                    Picker("Active state", selection: $settings.visualEffectState) {
+                        Text("Follow Application").tag("followsApp")
+                        Text("Follow Window Focus").tag("followsWindow")
+                        Text("Always Active").tag("active")
+                        Text("Always Inactive").tag("inactive")
+                    }
+
+                    backgroundOpacityControl(
+                        "Visual effect alpha",
+                        value: $settings.visualEffectAlpha
+                    )
+                }
+                .settingsRowPadding()
+            }
+
+            Section("Project") {
+                Group {
+                    settingWithDescription(
+                        "Package manager",
+                        "Used for package scripts launched from the Info panel."
+                    ) {
+                        Picker("", selection: $settings.packageManagerCommand) {
+                            ForEach(PackageManagerCommand.allCases) { command in
+                                Text(command.rawValue).tag(command)
+                            }
+                        }
+                        .labelsHidden()
+                    }
+                }
+                .settingsRowPadding()
+            }
+
+            Section("Defaults") {
+                Group {
+                HStack {
+                    Text("Restore all Qjiao preferences to their defaults.")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Reset to Defaults") {
+                        settings.resetToDefaults()
+                    }
+                    .disabled(isUsingDefaults)
+                }
+                }
+                .settingsRowPadding()
+            }
+
+            Section("Updates") {
+                Group {
+                    Toggle(
+                        "Automatically check for updates",
+                        isOn: $updater.automaticallyChecksForUpdates
+                    )
+
+                    Button("Check for Updates…") {
+                        updater.checkForUpdates()
+                    }
+                    .disabled(!updater.canCheckForUpdates)
+                }
+                .settingsRowPadding()
+            }
+            }
+
+            if selectedSection == .terminal {
             Section("Font") {
+                Group {
                 Picker("Family", selection: $settings.fontFamily) {
                     Text("\(TerminalFont.bundledFamily) (Bundled)").tag("")
                     Divider()
@@ -81,99 +208,160 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
 
-                Toggle(
+                settingWithDescription(
                     "Use bundled Chinese terminal font",
-                    isOn: $settings.useBundledChineseTerminalFont
-                )
-                Text("Source Han Sans CN VF Mono1200 is used as the terminal CJK fallback.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    "Source Han Sans CN VF Mono1200 is used as the terminal CJK fallback."
+                ) {
+                    Toggle("", isOn: $settings.useBundledChineseTerminalFont)
+                        .labelsHidden()
+                }
 
-                Toggle("Thicken font strokes", isOn: $settings.fontThicken)
-                Text("Renders terminal text with slightly heavier strokes.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                settingWithDescription(
+                    "Thicken font strokes",
+                    "Renders terminal text with slightly heavier strokes."
+                ) {
+                    Toggle("", isOn: $settings.fontThicken)
+                        .labelsHidden()
+                }
+                }
+                .settingsRowPadding()
             }
 
             Section("Preview") {
-                // Exercises regular/bold plus Nerd Font icon fallback.
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Qjiao ❯ echo \"the quick brown fox\" 0O 1lI")
-                    Text("\u{E0A0} main \u{E0B0} ~/dev/qjiao \u{E711} \u{F024B} \u{F0A7D}")
-                    Text("bold — permission denied (os error 13)")
-                        .bold()
-                }
+                Group {
+                    // Exercises regular/bold plus Nerd Font icon fallback.
+
+                    VStack(alignment: .leading, spacing: 6) {
+
+                        Text("Qjiao ❯ echo \"the quick brown fox\" 0O 1lI")
+
+                        Text("\u{E0A0} main \u{E0B0} ~/dev/qjiao \u{E711} \u{F024B} \u{F0A7D}")
+
+                        Text("bold — permission denied (os error 13)")
+
+                            .bold()
+
+                        Text("""
+                        ┌────┬──────────────┬──────────┬────────────┐
+                        │ ID │ Name         │ 状态     │ Description│
+                        ├────┼──────────────┼──────────┼────────────┤
+                        │ 06 │ 青椒         │ 测试中   │ Testing    │
+                        └────┴──────────────┴──────────┴────────────┘
+                        """)
+
+                    }
+
+
                 .font(Font(previewFont))
                 .padding(.vertical, 4)
+                }
+                .settingsRowPadding()
             }
 
             Section("Terminal") {
-                Toggle(
+                Group {
+                settingWithDescription(
                     "Move cursor with direct click",
-                    isOn: $settings.directClickMovesCursor
-                )
-                Text("When enabled, an unmodified click at a shell prompt moves the cursor. Selection remains available with ⇧ drag.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                Picker("Package manager", selection: $settings.packageManagerCommand) {
-                    ForEach(PackageManagerCommand.allCases) { command in
-                        Text(command.rawValue).tag(command)
-                    }
+                    "Cursor as naturally as in a text editor."
+                ) {
+                    Toggle("", isOn: $settings.directClickMovesCursor)
+                        .labelsHidden()
                 }
-                Text("Used for package scripts launched from the Info panel.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
 
-                Toggle(
-                    "Restore session history on relaunch",
-                    isOn: $settings.restoreTerminalHistory
-                )
-                Text("Reopened terminals show their previous scrollback above a fresh shell.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Text Editing") {
-                Toggle("Wrap lines to editor width", isOn: $settings.wrapLines)
-            }
-
-            Section("Updates") {
-                Toggle(
-                    "Automatically check for updates",
-                    isOn: $updater.automaticallyChecksForUpdates
-                )
-
-                Button("Check for Updates…") {
-                    updater.checkForUpdates()
+                settingWithDescription(
+                    "Disable Zsh Auto Title",
+                    "Sets DISABLE_AUTO_TITLE=true only for new zsh terminals in Qjiao."
+                ) {
+                    Toggle("", isOn: $settings.disableZshAutoTitle)
+                        .labelsHidden()
                 }
-                .disabled(!updater.canCheckForUpdates)
+
+                }
+                .settingsRowPadding()
             }
 
             Section {
-                HStack {
-                    Spacer()
-                    Button("Reset to Defaults") {
-                        settings.resetToDefaults()
+                Group {
+                    settingWithDescription(
+                        "Restore session history on relaunch",
+                        "Reopened terminals show their previous scrollback above a fresh shell."
+                    ) {
+                        Toggle("", isOn: $settings.restoreTerminalHistory)
+                            .labelsHidden()
                     }
-                    .disabled(settings.fontFamily.isEmpty
-                        && settings.fontSize == AppSettings.defaultFontSize
-                        && !settings.fontThicken
-                        && settings.useBundledChineseTerminalFont
-                        && settings.theme == .system
-                        && settings.themeDark == Theme.defaultDarkThemeName
-                        && settings.themeLight == Theme.defaultLightThemeName
-                        && settings.windowBackgroundOpacity == 1
-                        && settings.terminalBackgroundOpacity == 1
-                        && !settings.wrapLines
-                        && !settings.restoreTerminalHistory
-                        && !settings.directClickMovesCursor
-                        && settings.packageManagerCommand == .npm)
                 }
+                .settingsRowPadding()
+            }
+            }
+
+            if selectedSection == .editor {
+            Section("Text Editing") {
+                Group {
+                Toggle("Wrap lines to editor width", isOn: $settings.wrapLines)
+                }
+                .settingsRowPadding()
+            }
+            }
+
+            if selectedSection == .about {
+            Section {
+                Group {
+                    VStack(spacing: 8) {
+                        Image(nsImage: NSApplication.shared.applicationIconImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 54, height: 54)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                        Text("Qjiao")
+                            .font(.title2.weight(.semibold))
+                        Text("A terminal workspace for macOS")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .settingsRowPadding()
+            }
+
+            Section("Project") {
+                Group {
+                    aboutLinkRow(
+                        imageName: "GitHubMark",
+                        title: "Qjiao GitHub",
+                        subtitle: "qzrzz/Qjiao",
+                        url: "https://github.com/qzrzz/Qjiao"
+                    )
+                    aboutLinkRow(
+                        systemImage: "person",
+                        title: "Author",
+                        subtitle: "Qzrzz · qzrzz.com",
+                        url: "https://qzrzz.com/"
+                    )
+                }
+                .settingsRowPadding()
+            }
+
+            Section("Acknowledgements") {
+                Group {
+                    aboutLinkRow(
+                        systemImage: "arrow.triangle.branch",
+                        title: "Forked from egoist/kero",
+                        subtitle: "egoist / kero",
+                        url: "https://github.com/egoist/kero"
+                    )
+                    aboutLinkRow(
+                        systemImage: "heart",
+                        title: "Thanks to egoist",
+                        subtitle: "github.com/egoist",
+                        url: "https://github.com/egoist"
+                    )
+                }
+                .settingsRowPadding()
+            }
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440)
+        .frame(width: 510)
     }
 
     private var previewFont: NSFont {
@@ -197,37 +385,127 @@ struct SettingsView: View {
             Text("\(Int((value.wrappedValue * 100).rounded()))%")
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(width: 38, alignment: .trailing)
+            .frame(width: 38, alignment: .trailing)
         }
+    }
+
+    /// 将设置标题、说明与右侧控件合并为一个表单行，避免标题和说明之间出现分隔线。
+    private func settingWithDescription<Control: View>(
+        _ title: String,
+        _ description: String,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                Text(description)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            control()
+        }
+    }
+
+    /// About 页面中整行可点击的外部链接，统一展示图标、标题、来源和跳转提示。
+    private func aboutLinkRow(
+        systemImage: String? = nil,
+        imageName: String? = nil,
+        title: String,
+        subtitle: String,
+        url: String
+    ) -> some View {
+        Link(destination: URL(string: url)!) {
+            HStack(spacing: 12) {
+                Group {
+                    if let imageName {
+                        Image(imageName)
+                            .resizable()
+                            .renderingMode(.template)
+                            .scaledToFit()
+                            .padding(6)
+                            .foregroundStyle(.primary)
+                    } else if let systemImage {
+                        Image(systemName: systemImage)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                .frame(width: 28, height: 28)
+                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var isUsingDefaults: Bool {
+        settings.fontFamily.isEmpty
+            && settings.fontSize == AppSettings.defaultFontSize
+            && !settings.fontThicken
+            && settings.useBundledChineseTerminalFont
+            && settings.theme == .system
+            && settings.themeDark == Theme.defaultDarkThemeName
+            && settings.themeLight == Theme.defaultLightThemeName
+            && settings.windowBackgroundOpacity == 1
+            && settings.terminalBackgroundOpacity == 1
+            && settings.visualEffectMaterial == "underWindowBackground"
+            && settings.visualEffectBlendingMode == "behindWindow"
+            && settings.visualEffectState == "followsApp"
+            && settings.visualEffectAlpha == 1
+            && !settings.wrapLines
+            && !settings.restoreTerminalHistory
+            && !settings.directClickMovesCursor
+            && !settings.disableZshAutoTitle
+            && settings.packageManagerCommand == .npm
     }
 
 }
 
-/// Sizes its sole child to the child's ideal height, capped at `maxHeight`.
-/// A `maxHeight` frame plus `fixedSize` can't express this: the grouped Form
-/// is a List, which only scrolls when *proposed* the capped height, yet still
-/// has to be measured unconstrained to hug shorter content.
-private struct CappedIdealHeight: Layout {
-    var maxHeight: CGFloat
+/// 设置页的可见分类；每个分类对应顶部一个图标入口。
+private enum SettingsSection: CaseIterable, Identifiable {
+    case general
+    case terminal
+    case editor
+    case about
 
-    func sizeThatFits(
-        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) -> CGSize {
-        let ideal = subviews[0].sizeThatFits(
-            ProposedViewSize(width: proposal.width, height: nil)
-        )
-        return CGSize(width: ideal.width, height: min(ideal.height, maxHeight))
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .terminal: "Terminal"
+        case .editor: "Editor"
+        case .about: "About"
+        }
     }
 
-    func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
-        cache: inout ()
-    ) {
-        subviews[0].place(
-            at: bounds.origin,
-            anchor: .topLeading,
-            proposal: ProposedViewSize(bounds.size)
-        )
+    var systemImage: String {
+        switch self {
+        case .general: "gearshape"
+        case .terminal: "terminal"
+        case .editor: "text.cursor"
+        case .about: "info.circle"
+        }
+    }
+}
+
+private extension View {
+    /// 将分组中的每个实际设置行直接撑开，绕过 macOS Form 不响应 listRowInsets 的限制。
+    func settingsRowPadding() -> some View {
+        padding(.vertical, 4)
+            .padding(.horizontal, 8)
     }
 }
 

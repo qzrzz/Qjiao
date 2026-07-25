@@ -3,6 +3,7 @@
 //  kero
 //
 
+import AppKit
 import Combine
 import SwiftUI
 import UniformTypeIdentifiers
@@ -26,22 +27,20 @@ struct ContentView: View {
                     .zIndex(1)
 
                 ZStack {
-                    // Diff panes stay mounted while unselected: removing one
-                    // would pull its NSHostingView out of the window, which
-                    // tears down and re-creates the WKWebView inside (losing
-                    // the rendered diff and scroll position). Unselected ones
-                    // just sit covered by the active tab's opaque pane layer.
-                    // Diffs are always their own single-pane tab, so a selected
-                    // diff fills the whole content area, unchanged.
+                    // Diff 面板在未选中时保持挂载：避免其 NSHostingView 从窗口移除
+                    // 导致内部 WKWebView 被销毁和重新创建（丢失已渲染的 diff 和滚动位置）。
+                    // 未选中的 Diff 需要将透明度设为 0，防止终端开启透明背景时透出显示。
                     if let project = manager.selectedProject {
                         ForEach(project.diffPlacements, id: \.diff.id) { placement in
+                            let isSelected = project.selectedTabID == placement.tabID
                             DiffViewerView(
                                 diff: placement.diff,
-                                isSelected: project.selectedTabID == placement.tabID
+                                isSelected: isSelected
                             )
-                            .background(Color(nsColor: Theme.background))
-                            .allowsHitTesting(project.selectedTabID == placement.tabID)
-                            .zIndex(project.selectedTabID == placement.tabID ? 1 : 0)
+                            .background(Color(nsColor: Theme.background.withAlphaComponent(settings.terminalBackgroundOpacity)))
+                            .opacity(isSelected ? 1 : 0)
+                            .allowsHitTesting(isSelected)
+                            .zIndex(isSelected ? 1 : 0)
                         }
                     }
                     Group {
@@ -68,13 +67,10 @@ struct ContentView: View {
                 // A semi-transparent theme color alone exposes the desktop
                 // sharply. Put the native material behind it so the window
                 // opacity setting reads as frosted glass instead.
-                if settings.windowBackgroundOpacity < 1 {
-                    VisualEffectView(
-                        material: .underWindowBackground,
-                        followsApplicationActivity: true
-                    )
+                if settings.windowBackgroundOpacity < 1 || settings.visualEffectAlpha < 1 {
+                    VisualEffectView()
                 }
-                Color(nsColor: Theme.background)
+                Color(nsColor: Theme.background.withAlphaComponent(settings.windowBackgroundOpacity))
             }
 
             RightSidebarView(manager: manager)
@@ -225,7 +221,7 @@ private struct MainHeaderView: View {
                             manager.togglePaneZoom()
                         } label: {
                             Image(systemName: "arrow.down.forward.and.arrow.up.backward")
-                                .font(.system(size: 12, weight: .medium))
+                                .font(SidebarTypography.secondary(.medium))
                                 .foregroundStyle(Color(nsColor: Theme.cursor))
                                 .frame(width: 24, height: 24)
                                 .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -241,7 +237,7 @@ private struct MainHeaderView: View {
                             manager.toggleSidebar()
                         } label: {
                             Image(systemName: "sidebar.right")
-                                .font(.system(size: 12, weight: .medium))
+                                .font(SidebarTypography.secondary(.medium))
                                 .foregroundStyle(manager.isPanelVisible ? Color(nsColor: Theme.cursor) : .secondary)
                                 .frame(width: 24, height: 24)
                                 .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -274,7 +270,7 @@ private struct TabListButton: View {
             isPresented.toggle()
         } label: {
             Image(systemName: "chevron.down")
-                .font(.system(size: 12, weight: .medium))
+                .font(SidebarTypography.secondary(.medium))
                 .foregroundStyle(isPresented ? Color(nsColor: Theme.cursor) : .secondary)
                 .frame(width: 24, height: 24)
                 .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -297,7 +293,7 @@ private struct TabListPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Tabs")
-                .font(.system(size: 13, weight: .semibold))
+                .font(SidebarTypography.body(.semibold))
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
 
@@ -373,7 +369,7 @@ private struct TabListRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(tab.displayTitle ?? "Untitled Tab")
-                        .font(.system(size: 13))
+                        .font(SidebarTypography.body())
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -388,7 +384,7 @@ private struct TabListRow: View {
 
                     if tab.allPanes.count > 1 {
                         Label("\(tab.allPanes.count) panes", systemImage: "square.split.2x1")
-                            .font(.system(size: 10))
+                            .font(SidebarTypography.section())
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -493,6 +489,7 @@ private final class TerminalTabDetailsLoader: ObservableObject {
 /// plus a "+" button.
 private struct SessionTabsView: View {
     @ObservedObject var project: Project
+    @ObservedObject private var settings = AppSettings.shared
     let maxStripWidth: CGFloat
     @State private var overflow = StripOverflow()
     @State private var draggedTabID: UUID?
@@ -620,6 +617,7 @@ private struct SessionTabsView: View {
         if tab.customName != nil {
             Button("Use Automatic Title") { tab.customName = nil }
         }
+        Toggle("Disable Zsh Auto Title", isOn: $settings.disableZshAutoTitle)
         Divider()
         if case .file(let file) = tab.focusedContent {
             Button("Reveal in Finder") {
@@ -698,6 +696,7 @@ private struct PaneTabItem: View {
                 TabItemChrome(
                     systemImage: "plus.forwardslash.minus",
                     title: tab.customName ?? diff.title,
+                    manualTitle: tab.customName,
                     paneCount: paneCount,
                     isSelected: isSelected,
                     select: select,
@@ -769,6 +768,7 @@ private struct SessionTabLabel: View {
             TabItemChrome(
                 systemImage: "terminal",
                 title: customTitle ?? session.title,
+                manualTitle: customTitle,
                 paneCount: paneCount,
                 isSelected: isSelected,
                 isTerminalRunning: session.isForegroundCommandRunning,
@@ -791,6 +791,7 @@ private struct FileTabLabel: View {
         TabItemChrome(
             systemImage: "doc.text",
             title: customTitle ?? file.name,
+            manualTitle: customTitle,
             paneCount: paneCount,
             isSelected: isSelected,
             isDirty: file.isDirty,
@@ -802,8 +803,17 @@ private struct FileTabLabel: View {
 }
 
 private struct TabItemChrome: View {
+    /// 常规 Tab 的最小宽度，避免短标题让标签过于紧凑。
+    private static let minimumWidth: CGFloat = 136
+    /// 标题再长也不继续挤占整个标签栏，超出部分使用截断显示。
+    private static let maximumWidth: CGFloat = 220
+    /// 标题缩短后保留当前宽度的时长，避免命令状态频繁变化造成标签抖动。
+    private static let shrinkDelay: Duration = .seconds(2)
+
     let systemImage: String
     let title: String
+    /// 非空时表示用户手动指定的标签名，应立即采用其对应宽度。
+    var manualTitle: String?
     var paneCount: Int = 1
     let isSelected: Bool
     var isDirty = false
@@ -812,6 +822,9 @@ private struct TabItemChrome: View {
     let close: () -> Void
 
     @State private var isHovering = false
+    /// 当前显示宽度会立即扩张，但会延迟收缩，给标题的短暂变化留出缓冲。
+    @State private var retainedWidth = minimumWidth
+    @State private var shrinkTask: Task<Void, Never>?
 
     var body: some View {
         Button(action: select) {
@@ -831,6 +844,8 @@ private struct TabItemChrome: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(isSelected ? .primary : .secondary)
                     .lineLimit(1)
+                    // 标题独占可伸缩空间，右侧的分栏提示、修改提示和关闭按钮始终右对齐。
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if paneCount > 1 {
                     HStack(spacing: 2) {
                         Image(systemName: "square.split.2x1")
@@ -865,14 +880,67 @@ private struct TabItemChrome: View {
             .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        // Cap tab width so a long title truncates instead of stretching the
-        // tab; short titles still shrink to fit (maxWidth is an upper bound).
-        .frame(maxWidth: 220)
+        .frame(width: retainedWidth, alignment: .leading)
+        .clipped()
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Color.primary.opacity(0.09) : (isHovering ? Color.primary.opacity(0.04) : .clear))
         )
         .onHover { isHovering = $0 }
+        .onAppear(perform: updateRetainedWidth)
+        .onChange(of: title) { updateRetainedWidth() }
+        .onChange(of: manualTitle) { applyManualTitleWidth() }
+        .onChange(of: paneCount) { updateRetainedWidth() }
+        .onDisappear { shrinkTask?.cancel() }
+    }
+
+    /// 根据 AppKit 测得的标题自然宽度更新显示宽度：扩张即时生效，收缩等待一段时间后再执行。
+    private func updateRetainedWidth() {
+        // 图标、关闭/修改状态、左右内边距和元素间距占用的固定宽度。
+        let accessoryWidth: CGFloat = paneCount > 1 ? 73 : 44
+        let titleWidth = (title as NSString).size(
+            withAttributes: [.font: NSFont.systemFont(ofSize: 11.5)]
+        ).width
+        let desiredWidth = min(
+            max(titleWidth + accessoryWidth, Self.minimumWidth),
+            Self.maximumWidth
+        )
+
+        guard desiredWidth < retainedWidth else {
+            shrinkTask?.cancel()
+            shrinkTask = nil
+            guard desiredWidth != retainedWidth else { return }
+            withAnimation(.easeOut(duration: 0.16)) {
+                retainedWidth = desiredWidth
+            }
+            return
+        }
+
+        shrinkTask?.cancel()
+        let widthBeforeDelay = retainedWidth
+        shrinkTask = Task { @MainActor in
+            try? await Task.sleep(for: Self.shrinkDelay)
+            guard !Task.isCancelled, retainedWidth == widthBeforeDelay else { return }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                retainedWidth = desiredWidth
+            }
+        }
+    }
+
+    /// 用户完成手动改名后不等待自动标题的防抖时间，立即更新为新标题所需宽度。
+    private func applyManualTitleWidth() {
+        shrinkTask?.cancel()
+        shrinkTask = nil
+        let accessoryWidth: CGFloat = paneCount > 1 ? 73 : 44
+        let titleWidth = (title as NSString).size(
+            withAttributes: [.font: NSFont.systemFont(ofSize: 11.5)]
+        ).width
+        let desiredWidth = min(
+            max(titleWidth + accessoryWidth, Self.minimumWidth), Self.maximumWidth
+        )
+        withAnimation(.easeInOut(duration: 0.2)) {
+            retainedWidth = desiredWidth
+        }
     }
 }
 
