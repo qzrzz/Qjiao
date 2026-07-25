@@ -133,6 +133,10 @@ struct SystemSnapshot: Equatable {
     var diskWriteElapsedSeconds: TimeInterval?
     var netDownloadBytesPerSec: Double?
     var netUploadBytesPerSec: Double?
+    /// 本机局域网 IPv4（优先默认路由网卡）。
+    var localIPv4Address: String?
+    /// 对应网卡名，如 `en0` / `en6`。
+    var localIPv4Interface: String?
     var proxy: SystemProxyInfo?
     var reachability: [SystemReachabilityItem] = []
     var updatedAt: Date?
@@ -178,6 +182,8 @@ final class SystemInfoModel: nonisolated ObservableObject {
     private let runner: any SystemCommandRunner
     private var pollTask: Task<Void, Never>?
     private var reachTask: Task<Void, Never>?
+    /// 每次重启轮询都会更换，用于阻止已取消轮次继续发车。
+    private var reachScheduleID = UUID()
     private var isActive = false
     /// 手动刷新可打断「进行中」的节流，排队一次 forceSlow。
     private var pendingForceRefresh = false
@@ -205,6 +211,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
 
     private var lastDiskCapacityAt: Date?
     private var lastProxyAt: Date?
+    private var lastLocalIPAt: Date?
     private var lastMemTotalAt: Date?
     private var cachedMemTotal: UInt64?
     /// 各站点历史采样（按 id）。
@@ -351,9 +358,12 @@ final class SystemInfoModel: nonisolated ObservableObject {
     }
 
     private func restartReachabilityLoop() {
+        // 已发出的 curl 由 probingSiteIDs 去重；旧轮尚未发出的请求用 token 阻止。
+        reachScheduleID = UUID()
         reachTask?.cancel()
         reachTask = nil
         guard isActive, let seconds = reachabilityInterval.seconds else { return }
+        let scheduleID = reachScheduleID
         reachTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { break }
@@ -363,20 +373,24 @@ final class SystemInfoModel: nonisolated ObservableObject {
                     continue
                 }
 
-                // 每到用户设定的间隔开启一轮；同轮请求间隔 1 秒，避免瞬间并发连接。
-                let cycleStartedAt = Date()
-                for id in ids {
-                    guard !Task.isCancelled else { break }
-                    Task { [weak self] in
-                        await self?.probeSites(ids: [id])
+                // 每到用户设定的间隔准点开启一轮；同轮请求间隔 1 秒。
+                // 批次独立发车，因此站点数多于间隔秒数时也不会推迟下一轮开始。
+                Task { [weak self, ids] in
+                    for (index, id) in ids.enumerated() {
+                        guard let self,
+                              self.reachScheduleID == scheduleID,
+                              self.isActive,
+                              self.reachabilityInterval.seconds != nil
+                        else { break }
+                        Task { [weak self] in
+                            await self?.probeSites(ids: [id])
+                        }
+                        if index < ids.count - 1 {
+                            try? await Task.sleep(for: .seconds(1))
+                        }
                     }
-                    try? await Task.sleep(for: .seconds(1))
                 }
-                guard !Task.isCancelled else { break }
-                let remaining = seconds - Date().timeIntervalSince(cycleStartedAt)
-                if remaining > 0 {
-                    try? await Task.sleep(for: .seconds(remaining))
-                }
+                try? await Task.sleep(for: .seconds(seconds))
             }
         }
     }
@@ -399,6 +413,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         let runner = self.runner
         let wantDisk = forceSlow || lastDiskCapacityAt.map { Date().timeIntervalSince($0) >= 10 } ?? true
         let wantProxy = forceSlow || lastProxyAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
+        let wantLocalIP = forceSlow || lastLocalIPAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
         let wantMemTotal = cachedMemTotal == nil
             || lastMemTotalAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
         // 磁盘写入量：每 30s 一拍（手动/force 可立刻采）。
@@ -419,6 +434,13 @@ final class SystemInfoModel: nonisolated ObservableObject {
         async let proxyResult = wantProxy
             ? optionalRun(runner, ["scutil", "--proxy"], timeout: .seconds(3))
             : nil
+        // 本机局域网 IP：默认路由网卡 + scutil --nwi 地址表。
+        async let routeResult = wantLocalIP
+            ? optionalRun(runner, ["route", "-n", "get", "default"], timeout: .seconds(2))
+            : nil
+        async let nwiResult = wantLocalIP
+            ? optionalRun(runner, ["scutil", "--nwi"], timeout: .seconds(3))
+            : nil
         async let memTotalResult = wantMemTotal
             ? optionalRun(runner, ["sysctl", "-n", "hw.memsize"], timeout: .seconds(2))
             : nil
@@ -430,6 +452,8 @@ final class SystemInfoModel: nonisolated ObservableObject {
         let dfOut = await dfResult
         let iostatOut = await iostatResult
         let proxyOut = await proxyResult
+        let routeOut = await routeResult
+        let nwiOut = await nwiResult
         let memTotalOut = await memTotalResult
         let swapOut = await swapResult
 
@@ -480,6 +504,22 @@ final class SystemInfoModel: nonisolated ObservableObject {
         if let proxyOut {
             next.proxy = Self.parseProxy(proxyOut)
             lastProxyAt = Date()
+        }
+
+        if wantLocalIP {
+            let preferredIF = routeOut.flatMap(Self.parseDefaultRouteInterface)
+            if let nwiOut, let local = Self.parseLocalIPv4(fromNWI: nwiOut, preferredInterface: preferredIF) {
+                next.localIPv4Address = local.address
+                next.localIPv4Interface = local.interface
+            } else {
+                // 无有效局域网 IPv4：清空，避免残留离线地址。
+                next.localIPv4Address = nil
+                next.localIPv4Interface = nil
+            }
+            lastLocalIPAt = Date()
+        } else {
+            next.localIPv4Address = snapshot.localIPv4Address
+            next.localIPv4Interface = snapshot.localIPv4Interface
         }
 
         // 可达性由独立 reachTask 按间隔探测，避免拖慢 2s 资源轮询。
@@ -749,6 +789,42 @@ final class SystemInfoModel: nonisolated ObservableObject {
         )
         guard let used, let total else { return nil }
         return (used, total)
+    }
+
+    /// `route -n get default` → `interface: en0`
+    private nonisolated static func parseDefaultRouteInterface(_ output: String) -> String? {
+        firstMatch(#"interface:\s*(\S+)"#, in: output)
+    }
+
+    /// 从 `scutil --nwi` 取局域网 IPv4；优先默认路由网卡，否则取表中第一项。
+    private nonisolated static func parseLocalIPv4(
+        fromNWI output: String,
+        preferredInterface: String?
+    ) -> (interface: String, address: String)? {
+        // 形如：
+        //      en6 : flags …
+        //            address    : 192.168.50.203
+        var pairs: [(iface: String, address: String)] = []
+        var currentIF: String?
+        for line in output.split(whereSeparator: \.isNewline).map(String.init) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let iface = firstMatch(#"^([A-Za-z0-9]+)\s*:\s*flags"#, in: trimmed) {
+                currentIF = iface
+                continue
+            }
+            if let iface = currentIF,
+               let addr = firstMatch(#"^address\s*:\s*([0-9.]+)"#, in: trimmed),
+               !addr.hasPrefix("127.") {
+                pairs.append((iface, addr))
+                currentIF = nil
+            }
+        }
+        guard !pairs.isEmpty else { return nil }
+        if let preferred = preferredInterface,
+           let match = pairs.first(where: { $0.iface == preferred }) {
+            return (match.iface, match.address)
+        }
+        return (pairs[0].iface, pairs[0].address)
     }
 
     /// 汇总 `netstat -ib` 各物理/虚拟链路的 Ibytes/Obytes（排除 lo，且只计 Link 行以免重复）。

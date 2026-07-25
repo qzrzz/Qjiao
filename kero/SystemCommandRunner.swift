@@ -81,6 +81,7 @@ struct LocalProcessRunner: SystemCommandRunner {
             "iostat": "/usr/sbin/iostat",
             "netstat": "/usr/sbin/netstat",
             "scutil": "/usr/sbin/scutil",
+            "route": "/sbin/route",
             "curl": "/usr/bin/curl",
             "which": "/usr/bin/which",
         ]

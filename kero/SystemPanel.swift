@@ -313,6 +313,7 @@ struct SystemPanel: View {
     private var networkGroup: some View {
         VStack(spacing: 0) {
             networkRow
+            localIPRow
             proxyRow
         }
     }
@@ -366,6 +367,57 @@ struct SystemPanel: View {
         }
     }
 
+    /// [图标] IP  192.168.x.x [复制]  …（复制按钮紧跟文本）
+    private var localIPRow: some View {
+        let address = model.snapshot.localIPv4Address
+        let display = address ?? "—"
+        return HStack(spacing: 4) {
+            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                .font(SidebarTypography.micro())
+                .foregroundStyle(address != nil ? accent : .secondary)
+                .frame(width: 11, height: 11)
+                .padding(.trailing, 2)
+            Text("IP")
+                .font(SidebarTypography.micro(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .leading)
+            Text(display)
+                .font(SidebarTypography.section(.medium))
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .help(localIPHelp)
+            if let address {
+                Button {
+                    copyToPasteboard(address)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(SidebarTypography.micro())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Copy IP address")
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: 18)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("IP \(display)")
+    }
+
+    private var localIPHelp: String {
+        if let address = model.snapshot.localIPv4Address {
+            if let iface = model.snapshot.localIPv4Interface {
+                return "\(iface) · \(address)"
+            }
+            return address
+        }
+        return "No local IPv4"
+    }
+
     /// [图标] Proxy  127.0.0.1:1886 [复制]  …（复制按钮紧跟文本，不右对齐）
     private var proxyRow: some View {
         let endpoint = proxyEndpointText
@@ -388,7 +440,7 @@ struct SystemPanel: View {
                 .help(model.snapshot.proxy?.summary ?? "")
             if let exportCmd = proxyShellExportCommand {
                 Button {
-                    copyProxyExport(exportCmd)
+                    copyToPasteboard(exportCmd)
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(SidebarTypography.micro())
@@ -431,9 +483,9 @@ struct SystemPanel: View {
         model.snapshot.proxy?.shellExportCommand
     }
 
-    private func copyProxyExport(_ command: String) {
+    private func copyToPasteboard(_ text: String) {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(command, forType: .string)
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     // MARK: - Reachability
