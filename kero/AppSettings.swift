@@ -123,6 +123,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// System 面板 Reachability 探测间隔（默认 30s）。
+    @Published var systemReachabilityInterval: ReachabilityInterval {
+        didSet { save() }
+    }
+
     /// 毛玻璃 4 核心属性定制选项：Material 材质
     @Published var visualEffectMaterial: String {
         didSet { save() }
@@ -199,10 +204,22 @@ final class AppSettings: nonisolated ObservableObject {
         disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
         packageManagerCommand = toml["terminal.package-manager"]?.string
             .flatMap(PackageManagerCommand.init(rawValue:)) ?? .npm
+        // 优先 config.toml；无则迁移旧 UserDefaults，最后回落默认 30s。
+        var needsSave = existing == nil
+        if let raw = toml["system.reachability-interval"]?.string,
+           let value = ReachabilityInterval(rawValue: raw) {
+            systemReachabilityInterval = value
+        } else if let legacy = ReachabilityStore.loadLegacyInterval() {
+            systemReachabilityInterval = legacy
+            ReachabilityStore.clearLegacyInterval()
+            needsSave = true
+        } else {
+            systemReachabilityInterval = .default
+        }
         applyAppearance()
         reloadThemeSelection()
         Theme.reloadWindowBackgroundOpacity(windowBackgroundOpacity)
-        if existing == nil { save() }
+        if needsSave { save() }
     }
 
     private func reloadThemeSelection() {
@@ -250,6 +267,7 @@ final class AppSettings: nonisolated ObservableObject {
         directClickMovesCursor = false
         disableZshAutoTitle = false
         packageManagerCommand = .npm
+        systemReachabilityInterval = .default
     }
 
     private func save() {
@@ -303,6 +321,11 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if packageManagerCommand != .npm {
             lines.append("terminal.package-manager = \(TOML.quote(packageManagerCommand.rawValue))")
+        }
+        if systemReachabilityInterval != .default {
+            lines.append(
+                "system.reachability-interval = \(TOML.quote(systemReachabilityInterval.rawValue))"
+            )
         }
         let dir = Self.configURL.deletingLastPathComponent()
         do {

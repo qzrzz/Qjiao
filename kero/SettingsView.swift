@@ -258,7 +258,7 @@ struct SettingsView: View {
                 .settingsRowPadding()
             }
 
-            Section("Terminal") {
+            Section("Features") {
                 Group {
                 settingWithDescription(
                     "Move cursor with direct click",

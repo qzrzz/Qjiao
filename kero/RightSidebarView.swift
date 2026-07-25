@@ -7,8 +7,31 @@ import AppKit
 import Combine
 import SwiftUI
 
+/// 右侧下半区底栏 tab（框架阶段仅切换空壳）。
+private enum RightBottomPanel: String, CaseIterable, Identifiable {
+    case system
+    case note
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: return "System"
+        case .note: return "Note"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .system: return "cpu"
+        case .note: return "note.text"
+        }
+    }
+}
+
 /// Right sidebar: hidden by default, toggled from the terminal's corner
-/// button or ⇧⌘B. Files/Git switch via tabs along its top, otty-style.
+/// button or ⇧⌘B. 上半区沿用 Start/Files/Git 等顶栏面板；下半区为
+/// System / Note 框架（内容待填）；中间可拖分割。
 struct RightSidebarView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var themeChanges = Theme.changes
@@ -16,10 +39,29 @@ struct RightSidebarView: View {
     @StateObject private var fileTree = FileTreeModel()
     @StateObject private var git = GitStatusModel()
     @StateObject private var info = SessionInfoModel()
+    @StateObject private var systemInfo = SystemInfoModel()
     @AppStorage("rightSidebarWidth") private var width: Double = 240
+    /// 上半区占「可分割内容高度」的比例；默认 70%。收起下半区时仍保留，便于展开还原。
+    @AppStorage("rightSidebarTopFraction") private var topFraction: Double = 0.70
+    /// 下半区是否收起为仅显示 System/Note tabs（内容高度为 0）。
+    @AppStorage("rightSidebarBottomCollapsed") private var bottomCollapsed = false
+    /// 下半区底栏选中项：system / note。
+    @AppStorage("rightSidebarBottomTab") private var bottomTabRaw: String = RightBottomPanel.system.rawValue
     @State private var wasCWDVisible = false
 
     private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+    /// 上沿放宽到接近贴底：下半最小可为仅 tabs。
+    private static let topFractionRange: ClosedRange<Double> = 0.25...0.98
+    private static let defaultTopFraction: Double = 0.70
+    private static let splitHandleHeight: CGFloat = 7
+    private static let bottomBarHeight: CGFloat = 38
+    private static let minTopContentHeight: CGFloat = 80
+    /// 展开时下半区内容区的建议最小高度（收起时可为 0，仅留 tabs）。
+    private static let minBottomContentHeight: CGFloat = 60
+
+    private var bottomTab: RightBottomPanel {
+        RightBottomPanel(rawValue: bottomTabRaw) ?? .system
+    }
 
     /// Path of the file in the focused pane, so the tree can highlight it.
     /// Reactive: focus/selection is published up through the project to `manager`.
@@ -44,71 +86,19 @@ struct RightSidebarView: View {
                             .fill(Color(nsColor: Theme.divider))
                     }
 
-                VStack(spacing: 0) {
-                    tabBar
-                    switch manager.panelTab {
-                    case .start:
-                        if let project = manager.selectedProject {
-                            StartPanel(
-                                project: project,
-                                runCommand: { manager.runLaunchCommand($0) },
-                                runAllCommands: { manager.runAllLaunchCommands() }
-                            )
+                splitBody
+                    .frame(width: width)
+                    .background {
+                        // Keep the sidebar visually consistent with the main
+                        // window: reduced window opacity uses native blur beneath
+                        // the themed sidebar tint, rather than a sharp desktop.
+                        if settings.windowBackgroundOpacity < 1 || settings.visualEffectAlpha < 1 {
+                            VisualEffectView()
                         }
-                    case .files:
-                        FileTreePanel(
-                            model: fileTree,
-                            session: manager.selectedSession,
-                            currentFilePath: openFilePath,
-                            openFile: { manager.openFile($0) },
-                            openToSide: { manager.openFileToSide($0) },
-                            onRename: { manager.fileRenamed(from: $0, to: $1) }
-                        )
-                    case .cwd:
-                        FileTreePanel(
-                            model: fileTree,
-                            session: manager.selectedSession,
-                            currentFilePath: openFilePath,
-                            openFile: { manager.openFile($0) },
-                            openToSide: { manager.openFileToSide($0) },
-                            onRename: { manager.fileRenamed(from: $0, to: $1) }
-                        )
-                    case .git:
-                        GitPanel(
-                            model: git,
-                            session: manager.selectedSession,
-                            openFile: { manager.openFile($0) },
-                            openToSide: { manager.openFileToSide($0) },
-                            openDiff: { entry, staged in
-                                manager.openDiff(
-                                    repoRoot: git.repoRoot,
-                                    path: entry.path,
-                                    staged: staged,
-                                    untracked: entry.isUntracked,
-                                    origPath: entry.origPath
-                                )
-                            }
-                        )
-                    case .info:
-                        InfoPanel(
-                            model: info,
-                            session: manager.selectedSession,
-                            runPackageScript: { manager.runPackageScript($0) }
-                        )
+                        Color(nsColor: Theme.sidebar.withAlphaComponent(settings.windowBackgroundOpacity))
+                        // 面板内容的空白区域可拖动窗口，前景控件仍优先接收点击和滚动。
+                        WindowDragArea()
                     }
-                }
-                .frame(width: width)
-                .background {
-                    // Keep the sidebar visually consistent with the main
-                    // window: reduced window opacity uses native blur beneath
-                    // the themed sidebar tint, rather than a sharp desktop.
-                    if settings.windowBackgroundOpacity < 1 || settings.visualEffectAlpha < 1 {
-                        VisualEffectView()
-                    }
-                    Color(nsColor: Theme.sidebar.withAlphaComponent(settings.windowBackgroundOpacity))
-                    // 面板内容的空白区域可拖动窗口，前景控件仍优先接收点击和滚动。
-                    WindowDragArea()
-                }
             }
         }
         .overlay(alignment: .leading) {
@@ -121,19 +111,224 @@ struct RightSidebarView: View {
                 )
             }
         }
-        .onAppear(perform: syncModels)
+        .onAppear {
+            syncModels()
+            syncSystemPolling()
+        }
         .onReceive(refreshTimer) { _ in syncModels() }
-        .onChange(of: manager.isPanelVisible) { syncModels() }
+        .onChange(of: manager.isPanelVisible) {
+            syncModels()
+            syncSystemPolling()
+        }
         .onChange(of: manager.panelTab) { syncModels() }
         .onChange(of: manager.selectedSession?.id) { syncModels() }
         // A `cd` in the terminal publishes the new cwd immediately (OSC 7 →
         // session.workingDirectory); resync at once instead of waiting for the
         // next refreshTimer tick, which is what made the panel lag the change.
         .onChange(of: manager.selectedSession?.workingDirectory) { syncModels() }
+        .onChange(of: bottomTabRaw) { syncSystemPolling() }
+        .onChange(of: bottomCollapsed) { syncSystemPolling() }
+    }
+
+    /// 仅在右侧栏可见、下半区展开且选中 System 时轮询 CLI 指标。
+    private func syncSystemPolling() {
+        let active = manager.isPanelVisible
+            && !bottomCollapsed
+            && bottomTab == .system
+        systemInfo.setActive(active)
+    }
+
+    /// 上下分区主体：上半现有面板、可拖分割；下半区顶部是 System/Note tabs，
+    /// 其下为内容（可收起到 0，仅留 tabs）。
+    private var splitBody: some View {
+        GeometryReader { geo in
+            let available = max(0, geo.size.height - Self.splitHandleHeight)
+            let minBottom = Self.bottomBarHeight
+            let (topHeight, bottomHeight) = sectionHeights(available: available, minBottom: minBottom)
+
+            VStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    tabBar
+                    topPanelContent
+                }
+                .frame(height: topHeight, alignment: .top)
+                .clipped()
+
+                VerticalSplitHandle(
+                    fraction: $topFraction,
+                    range: Self.topFractionRange,
+                    defaultFraction: Self.defaultTopFraction,
+                    availableHeight: available,
+                    isCollapsed: $bottomCollapsed,
+                    collapsedBottomHeight: Self.bottomBarHeight
+                )
+
+                // Tabs 在下半区顶部；收起时 bottomHeight == tabs 栏，内容不占高。
+                VStack(spacing: 0) {
+                    bottomTabBar
+                    if !bottomCollapsed, bottomHeight > Self.bottomBarHeight {
+                        bottomPlaceholder
+                    }
+                }
+                .frame(height: bottomHeight, alignment: .top)
+                .clipped()
+            }
+        }
+    }
+
+    /// 按收起状态与 topFraction 分配上下高度；下半最小仅为 tabs 栏。
+    private func sectionHeights(available: CGFloat, minBottom: CGFloat) -> (CGFloat, CGFloat) {
+        if bottomCollapsed {
+            let bottom = min(minBottom, available)
+            let top = max(0, available - bottom)
+            return (top, bottom)
+        }
+        let clampedFraction = min(
+            max(topFraction, Self.topFractionRange.lowerBound),
+            Self.topFractionRange.upperBound
+        )
+        let top = max(
+            Self.minTopContentHeight,
+            min(available - minBottom, available * clampedFraction)
+        )
+        let bottom = max(minBottom, available - top)
+        return (top, bottom)
+    }
+
+    @ViewBuilder
+    private var topPanelContent: some View {
+        switch manager.panelTab {
+        case .start:
+            if let project = manager.selectedProject {
+                StartPanel(
+                    project: project,
+                    runCommand: { manager.runLaunchCommand($0) },
+                    runAllCommands: { manager.runAllLaunchCommands() }
+                )
+            }
+        case .files:
+            FileTreePanel(
+                model: fileTree,
+                session: manager.selectedSession,
+                currentFilePath: openFilePath,
+                openFile: { manager.openFile($0) },
+                openToSide: { manager.openFileToSide($0) },
+                onRename: { manager.fileRenamed(from: $0, to: $1) }
+            )
+        case .cwd:
+            FileTreePanel(
+                model: fileTree,
+                session: manager.selectedSession,
+                currentFilePath: openFilePath,
+                openFile: { manager.openFile($0) },
+                openToSide: { manager.openFileToSide($0) },
+                onRename: { manager.fileRenamed(from: $0, to: $1) }
+            )
+        case .git:
+            GitPanel(
+                model: git,
+                session: manager.selectedSession,
+                openFile: { manager.openFile($0) },
+                openToSide: { manager.openFileToSide($0) },
+                openDiff: { entry, staged in
+                    manager.openDiff(
+                        repoRoot: git.repoRoot,
+                        path: entry.path,
+                        staged: staged,
+                        untracked: entry.isUntracked,
+                        origPath: entry.origPath
+                    )
+                }
+            )
+        case .info:
+            InfoPanel(
+                model: info,
+                session: manager.selectedSession,
+                runPackageScript: { manager.runPackageScript($0) }
+            )
+        }
+    }
+
+    /// 下半区内容：System 接 CLI 采集面板；Note 仍为占位。
+    @ViewBuilder
+    private var bottomPlaceholder: some View {
+        switch bottomTab {
+        case .system:
+            SystemPanel(model: systemInfo)
+        case .note:
+            VStack(spacing: 8) {
+                Image(systemName: RightBottomPanel.note.systemImage)
+                    .font(SidebarTypography.emptyInlineIcon())
+                    .foregroundStyle(.tertiary)
+                Text(RightBottomPanel.note.title)
+                    .font(SidebarTypography.body(.medium))
+                    .foregroundStyle(.secondary)
+                Text("Coming soon")
+                    .font(SidebarTypography.section())
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Note, coming soon")
+        }
+    }
+
+    private var bottomTabBar: some View {
+        ZStack(alignment: .leading) {
+            // 标签未占满的区域仍可拖动窗口。
+            WindowDragArea()
+            HStack(spacing: 4) {
+                ForEach(RightBottomPanel.allCases) { tab in
+                    bottomTabButton(tab)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+        }
+        .frame(height: Self.bottomBarHeight)
+        .contentShape(Rectangle())
+        // 与 tab 按钮并存：双击底栏任意处（含标签）切换收起/展开。
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                toggleBottomCollapsed()
+            }
+        )
+        .help(bottomCollapsed ? "Double-click to expand" : "Double-click to collapse")
+        .accessibilityHint(bottomCollapsed ? "Double-click to expand panel" : "Double-click to collapse panel")
+    }
+
+    private func bottomTabButton(_ tab: RightBottomPanel) -> some View {
+        let isActive = bottomTab == tab
+        return Button {
+            bottomTabRaw = tab.rawValue
+        } label: {
+            sidebarTabLabel(
+                systemImage: tab.systemImage,
+                title: tab.title,
+                isActive: isActive
+            )
+        }
+        .buttonStyle(.plain)
+        .help(tab.title)
+        .accessibilityLabel(tab.title)
+        .accessibilityValue(isActive ? "Selected" : "Not selected")
+    }
+
+    /// 收起时仅保留 tabs；展开时恢复上次 topFraction（若无效则用默认 70%）。
+    private func toggleBottomCollapsed() {
+        if bottomCollapsed {
+            bottomCollapsed = false
+            if topFraction >= Self.topFractionRange.upperBound - 0.01 {
+                topFraction = Self.defaultTopFraction
+            }
+        } else {
+            bottomCollapsed = true
+        }
     }
 
     private var tabBar: some View {
-        ZStack {
+        ZStack(alignment: .leading) {
             // 右侧顶栏未被面板切换按钮占用的区域可拖动窗口。
             WindowDragArea()
 
@@ -145,6 +340,7 @@ struct RightSidebarView: View {
                     tabButton(.cwd, systemImage: "terminal", title: "CWD", help: "CWD")
                 }
                 tabButton(.git, systemImage: "arrow.triangle.branch", title: "Git", help: "Git (⇧⌘G)")
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, 8)
             .padding(.top, 12)
@@ -158,26 +354,33 @@ struct RightSidebarView: View {
         return Button {
             manager.panelTab = panel
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .font(SidebarTypography.caption(.medium))
-                Text(title)
-                    .font(SidebarTypography.secondary(isActive ? .medium : .regular))
-            }
-            // 未选中的面板标签使用次级文字色，避免在浅色模式下过于发白。
-            .foregroundStyle(isActive ? .primary : .secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? Color.primary.opacity(0.09) : .clear)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+            sidebarTabLabel(systemImage: systemImage, title: title, isActive: isActive)
         }
         .buttonStyle(.plain)
         .help(help)
         .accessibilityLabel(title)
         .accessibilityValue(isActive ? "Selected" : "Not selected")
+    }
+
+    /// 上/下半区共用的 tab 样式：内容宽度（最小 75）、左对齐；字重始终 medium，
+    /// 选中只改颜色和背景，避免 regular↔medium 宽度变化导致抖动。
+    private func sidebarTabLabel(systemImage: String, title: String, isActive: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+                .font(SidebarTypography.caption(.medium))
+            Text(title)
+                .font(SidebarTypography.secondary(.medium))
+        }
+        // 未选中使用次级文字色，避免在浅色模式下过于发白。
+        .foregroundStyle(isActive ? .primary : .secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(minWidth: 75)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isActive ? Color.primary.opacity(0.09) : .clear)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func syncModels() {

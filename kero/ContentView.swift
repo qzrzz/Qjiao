@@ -75,6 +75,8 @@ struct ContentView: View {
 
             RightSidebarView(manager: manager)
         }
+        // 全局 tooltip 宿主：浮在侧栏顶栏 / ScrollView 之上，避免被裁剪遮挡。
+        .tooltipHost()
         .ignoresSafeArea()
         .overlay(alignment: .topLeading) {
             TerminalParkingView(sessions: parkedTerminalSessions)
