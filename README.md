@@ -47,5 +47,5 @@
 - 终端 Tab 最小宽度调整为 136；标题变长时立即扩张，变短后延迟收缩并带有过渡动画，减少标签宽度抖动；自动与手动标签名的最大宽度均为 220。
 - 增加全局“禁用 Zsh 自动标题名”开关；仅为 Qjiao 新建的 zsh 终端设置 `DISABLE_AUTO_TITLE=true`，并可在 Tab 右键菜单中切换。
 - 设置面板改为顶部图标分类导航，按 General、Terminal、Editor、About 分组展示配置项；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
-- 统一 chrome 字号体系（`SidebarTypography`）：右侧边栏 Start / Files / CWD / Git / Info 与顶栏 Tabs 共用 title / body / secondary / caption 等角色；列表与标签主文字统一为 13，正文字号不低于 11 以提高可读性。
+- 统一 chrome 字号体系（`SidebarTypography`）：左侧项目栏、右侧边栏 Start / Files / CWD / Git / Info 与顶栏 Tabs 共用 title / body / secondary / caption 等角色；列表与标签主文字统一为 13，正文字号不低于 11 以提高可读性。
 - Start 面板「Add Launcher」按钮加大（顶栏 + 与空状态主按钮）。

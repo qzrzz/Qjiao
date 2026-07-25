@@ -152,7 +152,7 @@ private struct SidebarFooterButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .medium))
+                .font(SidebarTypography.secondary(.medium))
                 .foregroundStyle(isHovering ? .primary : .secondary)
                 .frame(width: 24, height: 24)
                 .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -180,7 +180,7 @@ private struct SidebarThemeMenu: View {
             }
         } label: {
             Image(systemName: appearanceIcon)
-                .font(.system(size: 12, weight: .medium))
+                .font(SidebarTypography.secondary(.medium))
                 .foregroundStyle(isHovering ? .primary : .secondary)
                 .frame(width: 24, height: 24)
                 .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -326,7 +326,7 @@ private struct SidebarProjectRow: View {
                 if isRenaming {
                     TextField("", text: $renameDraft)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(SidebarTypography.body(.medium))
                         .focused($renameFocused)
                         .onSubmit(commitRename)
                         .onExitCommand { isRenaming = false }
@@ -337,7 +337,7 @@ private struct SidebarProjectRow: View {
                         }
                 } else {
                     Text(project.name)
-                        .font(.system(size: 12))
+                        .font(SidebarTypography.body())
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .lineLimit(1)
                 }
@@ -349,7 +349,7 @@ private struct SidebarProjectRow: View {
             if isHovering, !isRenaming, !isEditingDescription {
                 Button(action: requestClose) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(SidebarTypography.micro(.bold))
                         .foregroundStyle(.secondary)
                         .frame(width: 16, height: 16)
                         .contentShape(Rectangle())
@@ -357,7 +357,7 @@ private struct SidebarProjectRow: View {
                 .buttonStyle(.plain)
             } else if index < 9, !isRenaming, !isEditingDescription {
                 Text("⌘\(index + 1)")
-                    .font(.system(size: 10))
+                    .font(SidebarTypography.section())
                     .foregroundStyle(.tertiary)
             }
         }
@@ -519,7 +519,7 @@ private struct SidebarProjectRow: View {
         if isEditingDescription {
             TextField("Description", text: $descriptionDraft)
                 .textFieldStyle(.plain)
-                .font(.system(size: 10))
+                .font(SidebarTypography.section())
                 .foregroundStyle(.secondary)
                 .focused($descriptionFocused)
                 .onSubmit(saveDescription)
@@ -531,12 +531,12 @@ private struct SidebarProjectRow: View {
                 }
         } else if let description = project.description, !description.isEmpty {
             Text(description)
-                .font(.system(size: 10))
+                .font(SidebarTypography.section())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         } else if project.sessions.count > 1 {
             Text("\(project.sessions.count) sessions")
-                .font(.system(size: 10))
+                .font(SidebarTypography.section())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         } else if let session = project.selectedSession {
@@ -555,21 +555,21 @@ private struct ProjectIconView: View {
         case .sfSymbol(let name):
             Image(systemName: name)
                 // 与 Emoji 使用相同字号和图标区域，避免项目列表中两类图标大小不一致。
-                .font(.system(size: 15, weight: .medium))
+                .font(SidebarTypography.listIcon())
                 .foregroundStyle(iconColor)
                 .frame(width: 24, height: 24)
         case .emoji(let emoji):
             Text(emoji)
                 // 彩色 Emoji 的实际字形通常比标称字号更宽、更高；保留
                 // 额外边距并禁止压缩，避免肤色、组合 Emoji 等被裁掉。
-                .font(.system(size: 17))
+                .font(SidebarTypography.listEmoji())
                 .lineLimit(1)
                 .fixedSize()
                 .frame(width: 24, height: 24)
         case nil:
             Image(systemName: "folder")
                 // 默认文件夹图标也保持与自定义 Emoji 相同的尺寸。
-                .font(.system(size: 15, weight: .medium))
+                .font(SidebarTypography.listIcon())
                 .foregroundStyle(iconColor)
                 .frame(width: 24, height: 24)
         }
@@ -612,7 +612,7 @@ private struct ProjectIconPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Project Icon")
-                .font(.headline)
+                .font(SidebarTypography.title())
 
             Picker("Icon type", selection: $source) {
                 ForEach(Source.allCases) { source in
@@ -640,7 +640,7 @@ private struct ProjectIconPicker: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: symbolName)
-                    .font(.system(size: 22))
+                    .font(SidebarTypography.pickerIcon())
                     .frame(width: 28)
                 TextField("SF Symbol name", text: $symbolName)
                     .textFieldStyle(.roundedBorder)
@@ -654,7 +654,7 @@ private struct ProjectIconPicker: View {
                 .textFieldStyle(.roundedBorder)
 
             Text("\(filteredSymbols.count) of \(Self.symbols.count) SF Symbols")
-                .font(.caption)
+                .font(SidebarTypography.caption())
                 .foregroundStyle(.secondary)
 
             ScrollView {
@@ -664,7 +664,7 @@ private struct ProjectIconPicker: View {
                             select(.sfSymbol(symbol))
                         } content: {
                             Image(systemName: symbol)
-                                .font(.system(size: 18))
+                                .font(SidebarTypography.pickerGridIcon())
                         }
                     }
                 }
@@ -676,7 +676,7 @@ private struct ProjectIconPicker: View {
     private var emojiPicker: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Use the macOS Character Viewer to browse and search every Emoji and symbol.")
-                .font(.callout)
+                .font(SidebarTypography.secondary())
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
@@ -690,7 +690,7 @@ private struct ProjectIconPicker: View {
 
             HStack {
                 Text(emoji.isEmpty ? "😀" : emoji)
-                    .font(.system(size: 34))
+                    .font(SidebarTypography.pickerEmojiPreview())
                     .frame(width: 46, height: 46)
                     .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                 Button("Browse All Emoji & Symbols…") {
@@ -747,7 +747,7 @@ private struct SessionDirectoryLabel: View {
     var body: some View {
         if let dir = session.directoryLabel {
             Text(dir)
-                .font(.system(size: 10))
+                .font(SidebarTypography.section())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }
