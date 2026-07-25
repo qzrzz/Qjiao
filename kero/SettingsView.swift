@@ -313,6 +313,7 @@ struct SettingsView: View {
             Section("Text Editing") {
                 Group {
                 Toggle("Wrap lines to editor width", isOn: $settings.wrapLines)
+                Toggle("Show editor status bar", isOn: $settings.showEditorStatusBar)
                 }
                 .settingsRowPadding()
             }

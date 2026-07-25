@@ -104,6 +104,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 是否在源码编辑器底部显示文件与格式化状态栏。
+    @Published var showEditorStatusBar: Bool {
+        didSet { save() }
+    }
+
     /// 亮色外观下编辑器的配色；空字符串代表继承全局与当前项目主题。
     @Published var editorThemeLight: String {
         didSet { save() }
@@ -228,6 +233,7 @@ final class AppSettings: nonisolated ObservableObject {
         fontThicken = toml["font-thicken"]?.bool ?? false
         useBundledChineseTerminalFont = toml["terminal.use-bundled-chinese-font"]?.bool ?? true
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
+        showEditorStatusBar = toml["editor.show-status-bar"]?.bool ?? true
         // 兼容上一版只有一个 editor.theme 的配置，将它迁移到匹配的亮色或暗色选项。
         let legacyEditorTheme = toml["editor.theme"]?.string
         editorThemeLight = Self.knownEditorTheme(
@@ -317,6 +323,7 @@ final class AppSettings: nonisolated ObservableObject {
         visualEffectState = "followsApp"
         visualEffectAlpha = 1
         wrapLines = false
+        showEditorStatusBar = true
         editorThemeLight = ""
         editorThemeDark = ""
         displayFileSize = true
@@ -368,6 +375,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if wrapLines {
             lines.append("editor.wrap-lines = true")
+        }
+        if !showEditorStatusBar {
+            lines.append("editor.show-status-bar = false")
         }
         if !editorThemeLight.isEmpty {
             lines.append("editor.theme-light = \(TOML.quote(editorThemeLight))")

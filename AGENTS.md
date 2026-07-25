@@ -10,3 +10,4 @@
 - Kero 的原仓库是：https://github.com/egoist/kero.git 本项目是独立仓库，移植功能时不移植上游 git 记录。
 
 - 当前环境使用的是 Xcode 是 beta 版， Xcode-beta.app
+- 界面中的数字要注意使用 monospacedDigit 字体

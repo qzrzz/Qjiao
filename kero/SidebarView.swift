@@ -169,6 +169,7 @@ private struct SidebarFooterButton: View {
 private struct SidebarThemeButton: View {
     @ObservedObject var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openSettings) private var openSettings
     @State private var isHovering = false
 
     var body: some View {
@@ -190,6 +191,10 @@ private struct SidebarThemeButton: View {
                 )) {
                     Text(theme.title)
                 }
+            }
+            Divider()
+            Button("Appearance Settings") {
+                openSettings()
             }
         }
     }

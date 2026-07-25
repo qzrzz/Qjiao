@@ -56,7 +56,7 @@ struct RightSidebarView: View {
     private static let topFractionRange: ClosedRange<Double> = 0.25...0.98
     private static let defaultTopFraction: Double = 0.70
     private static let splitHandleHeight: CGFloat = 7
-    private static let bottomBarHeight: CGFloat = 38
+    private static let bottomBarHeight: CGFloat = 36
     private static let minTopContentHeight: CGFloat = 80
     /// 展开时下半区内容区的建议最小高度（收起时可为 0，仅留 tabs）。
     private static let minBottomContentHeight: CGFloat = 60

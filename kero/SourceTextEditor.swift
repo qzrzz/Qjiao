@@ -252,6 +252,9 @@ struct SourceTextEditor: NSViewRepresentable {
         func attach(textView: STTextView, scrollView: NSScrollView) {
             self.textView = textView
             textView.textDelegate = self
+            file.onReloadEditorText = { [weak self] in
+                self?.reloadTextFromFile()
+            }
             scrollObserver = NotificationCenter.default.addObserver(
                 forName: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView,
@@ -294,6 +297,21 @@ struct SourceTextEditor: NSViewRepresentable {
             let selection = textView.textSelection
             file.editorState.selectionLocation = selection.location
             file.editorState.selectionLength = selection.length
+            file.updateSelectionSummary(selection)
+        }
+
+        /// 格式化工具改写磁盘文件后，将模型中新读入的文本立即同步到已挂载的视图，
+        /// 并尽可能恢复原光标或选区。格式化会改变文本长度，因此范围需安全截断。
+        private func reloadTextFromFile() {
+            guard let textView, textView.text != file.text else { return }
+            textView.text = file.text
+            let textLength = (file.text as NSString).length
+            let location = min(file.editorState.selectionLocation, textLength)
+            let length = min(file.editorState.selectionLength, textLength - location)
+            let selection = NSRange(location: location, length: length)
+            textView.textSelection = selection
+            file.updateSelectionSummary(selection)
+            textView.needsLayout = true
         }
     }
 }
