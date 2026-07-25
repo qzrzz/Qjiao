@@ -56,7 +56,7 @@ struct RightSidebarView: View {
     private static let topFractionRange: ClosedRange<Double> = 0.25...0.98
     private static let defaultTopFraction: Double = 0.70
     private static let splitHandleHeight: CGFloat = 7
-    private static let bottomBarHeight: CGFloat = 36
+    private static let bottomBarHeight: CGFloat = 34
     private static let minTopContentHeight: CGFloat = 80
     /// 展开时下半区内容区的建议最小高度（收起时可为 0，仅留 tabs）。
     private static let minBottomContentHeight: CGFloat = 60
@@ -300,21 +300,23 @@ struct RightSidebarView: View {
         }
     }
 
+    /// 下半区比例是否处于拖拽贴底吸附的极小高度 (>= 0.90)
+    private var isTopFractionAtBottomLimit: Bool {
+        topFraction >= 0.90
+    }
+
     private var bottomTabBar: some View {
-        ZStack(alignment: .leading) {
-            // 标签未占满的区域仍可拖动窗口。
-            WindowDragArea()
-            HStack(spacing: 4) {
-                ForEach(RightBottomPanel.allCases) { tab in
-                    bottomTabButton(tab)
-                }
-                Spacer(minLength: 0)
-                bottomCollapseButton
+        HStack(alignment: .center, spacing: 4) {
+            ForEach(RightBottomPanel.allCases) { tab in
+                bottomTabButton(tab)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            Spacer(minLength: 0)
+            bottomCollapseButton
         }
+        .padding(.horizontal, 8)
+        .offset(y: -1.5)
         .frame(height: Self.bottomBarHeight)
+        .background { WindowDragArea() }
         .contentShape(Rectangle())
         // 与 tab 按钮并存：双击底栏任意处（含标签）切换收起/展开。
         .simultaneousGesture(
@@ -335,7 +337,7 @@ struct RightSidebarView: View {
             Image(systemName: bottomCollapsed ? "chevron.up" : "chevron.down")
                 .font(SidebarTypography.caption(.medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 22, height: 22)
+                .frame(width: 24, height: 24)
                 .contentShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
@@ -360,11 +362,13 @@ struct RightSidebarView: View {
         .accessibilityValue(isActive ? "Selected" : "Not selected")
     }
 
-    /// 收起时仅保留 tabs；展开时恢复上次 topFraction（若无效则用默认 70%）。
+    /// 底部 Tabs 展开/收起切换逻辑：
+    /// - 若处于收起状态 (`bottomCollapsed == true`)：展开下半区；若记录的比例处于拖拽贴底吸附值，则自动恢复为默认高度 (70%)，否则保留用户自定义记录高度。
+    /// - 若处于展开状态 (`bottomCollapsed == false`)：收起下半区 (`bottomCollapsed = true`)。
     private func toggleBottomCollapsed() {
         if bottomCollapsed {
             bottomCollapsed = false
-            if topFraction >= Self.topFractionRange.upperBound - 0.01 {
+            if isTopFractionAtBottomLimit {
                 topFraction = Self.defaultTopFraction
             }
         } else {
@@ -410,16 +414,17 @@ struct RightSidebarView: View {
     /// 上/下半区共用的 tab 样式：内容宽度（最小 75）、左对齐；字重始终 medium，
     /// 选中只改颜色和背景，避免 regular↔medium 宽度变化导致抖动。
     private func sidebarTabLabel(systemImage: String, title: String, isActive: Bool) -> some View {
-        HStack(spacing: 5) {
+        HStack(alignment: .center, spacing: 5) {
             Image(systemName: systemImage)
                 .font(SidebarTypography.caption(.medium))
             Text(title)
                 .font(SidebarTypography.secondary(.medium))
+                .lineLimit(1)
         }
         // 未选中使用次级文字色，避免在浅色模式下过于发白。
         .foregroundStyle(isActive ? .primary : .secondary)
         .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .frame(height: 24)
         .frame(minWidth: 75)
         .background(
             RoundedRectangle(cornerRadius: 6)

@@ -527,10 +527,18 @@ struct ImageMetadata {
         self.dpiX = Int(round(finalScale * 72.0))
         self.dpiY = Int(round(finalScale * 72.0))
 
-        // 解析磁盘文件大小
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+        // 解析磁盘文件大小或内存图像数据大小 (例如剪贴板或拖拽数据)
+        var calculatedSize: Int64 = 0
+        if !path.isEmpty,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: path),
            let size = attrs[.size] as? Int64 {
-            self.fileSizeString = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+            calculatedSize = size
+        } else if let tiffData = image.tiffRepresentation {
+            calculatedSize = Int64(tiffData.count)
+        }
+
+        if calculatedSize > 0 {
+            self.fileSizeString = ByteCountFormatter.string(fromByteCount: calculatedSize, countStyle: .file)
         } else {
             self.fileSizeString = "Unknown"
         }
@@ -625,12 +633,47 @@ struct CheckerboardView: View {
     }
 }
 
-/// 增强版图像查看器视图，默认开启像素模式，图标化轻量工具栏，支持旋转、自由拖拽与双图对比模式。
+/// 鼠标滚轮监听组件，用于捕获 NSEvent 滚轮信号实现图片自由连续缩放
+struct ScrollWheelListenerView: NSViewRepresentable {
+    var onScroll: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = ScrollWheelNSView()
+        view.onScroll = onScroll
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? ScrollWheelNSView)?.onScroll = onScroll
+    }
+
+    class ScrollWheelNSView: NSView {
+        var onScroll: ((CGFloat) -> Void)?
+
+        override func scrollWheel(with event: NSEvent) {
+            let delta = event.deltaY
+            if abs(delta) > 0.001 {
+                onScroll?(delta)
+            } else {
+                super.scrollWheel(with: event)
+            }
+        }
+    }
+}
+
+/// 增强版图像查看器视图，默认开启像素模式，图标化轻量工具栏，支持旋转、自由拖拽、滚轮自由缩放与双图对比模式。
 struct ImageViewerView: View {
     @ObservedObject var file: FileTab
     let image: NSImage
 
     @State private var zoomOption: ImageZoomOption = .fit
+    /// 鼠标滚轮/触控板产生的自由放缩倍率 (nil 时表示使用 zoomOption 的预设)
+    @State private var customZoomScale: CGFloat? = nil
+    /// 触控板 pinch 手势缩放增量
+    @GestureState private var gestureMagnification: CGFloat = 1.0
+    /// 本地 NSEvent 滚轮监听器引用
+    @State private var scrollMonitor: Any? = nil
+
     /// 持久化记录像素模式 (Nearest Neighbor)，跨标签与应用重启自动保持上一次选择
     @AppStorage("imageViewerIsPixelated") private var isPixelated: Bool = true
     @State private var backgroundMode: ImageBackgroundMode = .defaultTheme
@@ -646,6 +689,8 @@ struct ImageViewerView: View {
     @State private var isCompareMode: Bool = false
     /// 对比图图像 NSImage
     @State private var compareImage: NSImage? = nil
+    /// 对比图磁盘路径
+    @State private var compareImagePath: String? = nil
     /// 对比图元数据信息
     @State private var compareMetadata: ImageMetadata? = nil
     /// 分界竖线位置比例 (0.05 ~ 0.95)，默认 0.5
@@ -700,7 +745,7 @@ struct ImageViewerView: View {
 
                 ScrollView([.horizontal, .vertical]) {
                     ZStack(alignment: .center) {
-                        // 背景图层 (根据包围盒大小拉伸)
+                        // 背景图层 (根据包围盒大小拉伸，填充全视口)
                         backgroundView
                             .frame(width: max(boundingWidth, containerSize.width),
                                    height: max(boundingHeight, containerSize.height))
@@ -712,22 +757,168 @@ struct ImageViewerView: View {
                                 boundingHeight: max(boundingHeight, containerSize.height),
                                 unrotatedWidth: unrotatedWidth,
                                 unrotatedHeight: unrotatedHeight,
-                                totalOffset: totalOffset,
-                                dragGesture: dragGesture
+                                totalOffset: totalOffset
                             )
                         } else {
                             // 单图正常视图
                             singleImageView(
                                 unrotatedWidth: unrotatedWidth,
                                 unrotatedHeight: unrotatedHeight,
-                                totalOffset: totalOffset,
-                                dragGesture: dragGesture
+                                totalOffset: totalOffset
                             )
                         }
                     }
                     .frame(minWidth: containerSize.width, minHeight: containerSize.height, alignment: .center)
+                    .contentShape(Rectangle())
+                    .gesture(dragGesture)
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            offset = .zero
+                        }
+                    }
+                }
+                .gesture(
+                    MagnificationGesture()
+                        .updating($gestureMagnification) { val, state, _ in
+                            state = val
+                        }
+                        .onEnded { val in
+                            let current = computeScale(containerSize: containerSize, baseSize: effectiveBaseSize)
+                            customZoomScale = max(0.05, min(20.0, current * val))
+                        }
+                )
+                .overlay(alignment: .topLeading) {
+                    if isCompareMode {
+                        topLeftOverlay
+                            .padding(10)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if isCompareMode {
+                        topRightOverlay
+                            .padding(10)
+                    }
+                }
+                .onAppear {
+                    if scrollMonitor == nil {
+                        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+                            guard let win = event.window, win == NSApp.keyWindow || win == NSApp.mainWindow else {
+                                return event
+                            }
+                            let deltaY = event.deltaY
+                            let deltaX = event.deltaX
+                            guard abs(deltaY) > 0.01 || abs(deltaX) > 0.01 else { return event }
+
+                            let flags = event.modifierFlags
+                            if flags.contains(.command) {
+                                // 按住 Cmd 键：垂直平移 (Vertical Pan)
+                                let panY = deltaY * 10.0
+                                DispatchQueue.main.async {
+                                    self.offset.height += panY
+                                }
+                                return nil
+                            } else if flags.contains(.shift) {
+                                // 按住 Shift 键：水平平移 (Horizontal Pan)
+                                let panX = (abs(deltaX) > abs(deltaY) ? deltaX : deltaY) * 10.0
+                                DispatchQueue.main.async {
+                                    self.offset.width += panX
+                                }
+                                return nil
+                            } else {
+                                // 默认无修饰键：自由滚轮缩放 (Zoom)
+                                let step = deltaY > 0 ? 1.08 : 0.92
+                                DispatchQueue.main.async {
+                                    let current = self.computeScale(containerSize: containerSize, baseSize: effectiveBaseSize)
+                                    let targetScale = max(0.05, min(20.0, current * step))
+                                    withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.86)) {
+                                        self.customZoomScale = targetScale
+                                    }
+                                }
+                                return nil
+                            }
+                        }
+                    }
+                }
+                .onDisappear {
+                    if let monitor = scrollMonitor {
+                        NSEvent.removeMonitor(monitor)
+                        scrollMonitor = nil
+                    }
                 }
             }
+        }
+    }
+
+    /// 对比模式左上角原图元数据浮层 (第一行文件名，第二行像素尺寸与文件大小)
+    private var topLeftOverlay: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: "photo")
+                    .font(.system(size: 10))
+                Text("Original: \(file.name)")
+                    .font(.system(size: 11, weight: .regular))
+                    .lineLimit(1)
+            }
+            HStack(spacing: 6) {
+                Text("\(metadata.pixelWidth) × \(metadata.pixelHeight) px")
+                Text("•")
+                Text(metadata.fileSizeString)
+            }
+            .font(.system(size: 10, weight: .regular))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Material.thinMaterial)
+        .cornerRadius(6)
+        .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
+        .textSelection(.enabled)
+    }
+
+    /// 对比模式右上角对比图元数据浮层 (第一行文件名与清除按钮，第二行像素尺寸与文件大小)
+    @ViewBuilder
+    private var topRightOverlay: some View {
+        if let compMeta = compareMetadata {
+            let name = compareImagePath != nil ? ((compareImagePath! as NSString).lastPathComponent) : "Clipboard Image"
+            VStack(alignment: .trailing, spacing: 3) {
+                HStack(spacing: 5) {
+                    Image(systemName: "photo.badge.plus")
+                        .font(.system(size: 10))
+                    Text("Compare: \(name)")
+                        .font(.system(size: 11, weight: .regular))
+                        .lineLimit(1)
+
+                    // 关闭对比图按钮 (回到缺省占位与添加模式)
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            compareImage = nil
+                            compareImagePath = nil
+                            compareMetadata = nil
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove comparison image")
+                }
+                HStack(spacing: 6) {
+                    Text("\(compMeta.pixelWidth) × \(compMeta.pixelHeight) px")
+                    Text("•")
+                    Text(compMeta.fileSizeString)
+                }
+                .font(.system(size: 10, weight: .regular))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Material.thinMaterial)
+            .cornerRadius(6)
+            .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
+            .textSelection(.enabled)
         }
     }
 
@@ -735,8 +926,7 @@ struct ImageViewerView: View {
     private func singleImageView(
         unrotatedWidth: CGFloat,
         unrotatedHeight: CGFloat,
-        totalOffset: CGSize,
-        dragGesture: some Gesture
+        totalOffset: CGSize
     ) -> some View {
         Image(nsImage: image)
             .resizable()
@@ -746,32 +936,25 @@ struct ImageViewerView: View {
             .rotationEffect(.degrees(rotationDegrees))
             .offset(totalOffset)
             .shadow(color: .black.opacity(backgroundMode == .defaultTheme ? 0.1 : 0.0), radius: 6, x: 0, y: 2)
-            .gesture(dragGesture)
-            .onTapGesture(count: 2) {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    offset = .zero
-                }
-            }
     }
 
-    /// 对比模式下的图像展示 (双图叠加，分界线左右遮罩，同步响应手势)
+    /// 对比模式下的图像展示 (双图叠加，分界线左右精确遮罩)
     private func compareCanvasView(
         boundingWidth: CGFloat,
         boundingHeight: CGFloat,
         unrotatedWidth: CGFloat,
         unrotatedHeight: CGFloat,
-        totalOffset: CGSize,
-        dragGesture: some Gesture
+        totalOffset: CGSize
     ) -> some View {
-        let currentSplitX = max(0, min(boundingWidth, boundingWidth * splitRatio + splitDragOffset))
+        let baseSplitX = boundingWidth * splitRatio
+        let currentSplitX = max(0, min(boundingWidth, baseSplitX + splitDragOffset))
 
         return ZStack(alignment: .center) {
             // 1. 原图层 (位于分界竖线左侧)
             singleImageView(
                 unrotatedWidth: unrotatedWidth,
                 unrotatedHeight: unrotatedHeight,
-                totalOffset: totalOffset,
-                dragGesture: dragGesture
+                totalOffset: totalOffset
             )
             .mask(
                 HStack(spacing: 0) {
@@ -792,12 +975,6 @@ struct ImageViewerView: View {
                     .rotationEffect(.degrees(rotationDegrees))
                     .offset(totalOffset)
                     .shadow(color: .black.opacity(backgroundMode == .defaultTheme ? 0.1 : 0.0), radius: 6, x: 0, y: 2)
-                    .gesture(dragGesture)
-                    .onTapGesture(count: 2) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            offset = .zero
-                        }
-                    }
                     .mask(
                         HStack(spacing: 0) {
                             Spacer(minLength: 0)
@@ -813,10 +990,13 @@ struct ImageViewerView: View {
                     .offset(x: currentSplitX / 2)
             }
 
-            // 3. 可拖拽分界竖线与拖动手柄
+            // 3. 可拖拽分界竖线与两端手柄 (避开中间细节)
             splitDividerLineView(boundingWidth: boundingWidth, boundingHeight: boundingHeight)
         }
         .frame(width: boundingWidth, height: boundingHeight)
+        .onDrop(of: [.fileURL, .url, .plainText, .utf8PlainText, .image], isTargeted: $isDropTargeted) { providers in
+            handleCompareDrop(providers: providers)
+        }
     }
 
     /// 对比模式缺省占位与操作面板 (支持文件拖拽 Drop、剪贴板粘贴与文件对话框选取)
@@ -879,44 +1059,60 @@ struct ImageViewerView: View {
                 .stroke(isDropTargeted ? Color.accentColor : Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
                 .background(isDropTargeted ? Color.accentColor.opacity(0.05) : Color.primary.opacity(0.02))
         )
-        .onDrop(of: ["public.file-url", "public.image"], isTargeted: $isDropTargeted) { providers in
+        .onDrop(of: [.fileURL, .url, .plainText, .utf8PlainText, .image], isTargeted: $isDropTargeted) { providers in
             handleCompareDrop(providers: providers)
         }
     }
 
-    /// 可左右拖拽的对比分界竖线
+    /// 精确对齐的可左右拖拽分界竖线，手柄分布在顶端与底端 (无缝无跳变)
     private func splitDividerLineView(boundingWidth: CGFloat, boundingHeight: CGFloat) -> some View {
-        let currentSplitX = max(0, min(boundingWidth, boundingWidth * splitRatio + splitDragOffset))
-        let lineOffset = currentSplitX - boundingWidth / 2
+        let baseSplitX = boundingWidth * splitRatio
+        let currentSplitX = max(0, min(boundingWidth, baseSplitX + splitDragOffset))
+        let lineOffsetX = currentSplitX - boundingWidth / 2
 
         let splitDragGesture = DragGesture()
             .updating($splitDragOffset) { value, state, _ in
                 state = value.translation.width
             }
             .onEnded { value in
-                let finalX = currentSplitX + value.translation.width
+                let finalX = max(0, min(boundingWidth, baseSplitX + value.translation.width))
                 splitRatio = max(0.05, min(0.95, finalX / boundingWidth))
             }
 
         return ZStack {
+            // 纤细分界竖线 (无中心遮挡)
             Rectangle()
-                .fill(Color.white)
-                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 0)
-                .frame(width: 2, height: boundingHeight)
+                .fill(Color.white.opacity(0.9))
+                .shadow(color: .black.opacity(0.35), radius: 1.5, x: 0, y: 0)
+                .frame(width: 1.5, height: boundingHeight)
 
-            Circle()
-                .fill(Color.white)
-                .frame(width: 24, height: 24)
-                .shadow(color: .black.opacity(0.25), radius: 3, x: 0, y: 1)
-                .overlay(
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 10, weight: .regular))
-                        .rotationEffect(.degrees(90))
-                        .foregroundStyle(Color.gray)
-                )
+            // 仅在顶端和底端放置拖拽手柄胶囊
+            VStack {
+                endHandleCapsule
+                Spacer()
+                endHandleCapsule
+            }
+            .padding(.vertical, 8)
+            .frame(height: boundingHeight)
         }
-        .offset(x: lineOffset)
+        .offset(x: lineOffsetX)
         .gesture(splitDragGesture)
+    }
+
+    /// 位于竖线顶端与底端的小巧双向拖拽手柄
+    private var endHandleCapsule: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "arrow.left.and.right")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(Color.primary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            Capsule()
+                .fill(Color.white)
+                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+        )
     }
 
     /// 从剪贴板提取图像
@@ -925,11 +1121,13 @@ struct ImageViewerView: View {
         if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
            let img = images.first {
             self.compareImage = img
+            self.compareImagePath = nil
             self.compareMetadata = ImageMetadata(image: img, path: "")
         } else if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
                   let url = urls.first,
                   let img = NSImage(contentsOf: url) {
             self.compareImage = img
+            self.compareImagePath = url.path
             self.compareMetadata = ImageMetadata(image: img, path: url.path)
         }
     }
@@ -942,42 +1140,130 @@ struct ImageViewerView: View {
         panel.canChooseDirectories = false
         if panel.runModal() == .OK, let url = panel.url, let img = NSImage(contentsOf: url) {
             self.compareImage = img
+            self.compareImagePath = url.path
             self.compareMetadata = ImageMetadata(image: img, path: url.path)
         }
     }
 
-    /// 处理对比图文件/图像拖入 (Drop)
+    /// 处理对比图文件/图像拖入 (Drop)，优先从拖拽 Pasteboard 与 ItemProvider 提取真实磁盘文件路径
     private func handleCompareDrop(providers: [NSItemProvider]) -> Bool {
-        for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier("public.file-url") {
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    if let url = url, let img = NSImage(contentsOf: url) {
-                        DispatchQueue.main.async {
-                            self.compareImage = img
-                            self.compareMetadata = ImageMetadata(image: img, path: url.path)
-                        }
-                    }
-                }
-                return true
-            } else if provider.hasItemConformingToTypeIdentifier("public.image") {
-                _ = provider.loadObject(ofClass: NSImage.self) { img, _ in
-                    if let img = img as? NSImage {
-                        DispatchQueue.main.async {
-                            self.compareImage = img
-                            self.compareMetadata = ImageMetadata(image: img, path: "")
-                        }
-                    }
+        // A. 优先从系统的 Drag Pasteboard 直接提取文件 URL 或路径 (针对 Finder 拖拽与项目侧边栏文件树拖拽)
+        let dragPB = NSPasteboard(name: .drag)
+        if let urls = dragPB.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], let url = urls.first {
+            let path = url.isFileURL ? url.path : (url.path.isEmpty ? url.absoluteString : url.path)
+            let cleanPath = (path as NSString).expandingTildeInPath
+            if !cleanPath.isEmpty, let img = NSImage(contentsOfFile: cleanPath) ?? NSImage(contentsOf: url) {
+                DispatchQueue.main.async {
+                    self.compareImage = img
+                    self.compareImagePath = cleanPath
+                    self.compareMetadata = ImageMetadata(image: img, path: cleanPath)
                 }
                 return true
             }
         }
-        return false
+        if let paths = dragPB.readObjects(forClasses: [NSString.self], options: nil) as? [String], let rawPath = paths.first {
+            let cleanPath = (rawPath as NSString).expandingTildeInPath
+            let fileURL = rawPath.hasPrefix("file://") ? URL(string: rawPath) : URL(fileURLWithPath: cleanPath)
+            let finalPath = fileURL?.path ?? cleanPath
+            if FileManager.default.fileExists(atPath: finalPath), let img = NSImage(contentsOfFile: finalPath) {
+                DispatchQueue.main.async {
+                    self.compareImage = img
+                    self.compareImagePath = finalPath
+                    self.compareMetadata = ImageMetadata(image: img, path: finalPath)
+                }
+                return true
+            }
+        }
+
+        // B. 从 NSItemProvider 异步解包 (覆盖 Plain Text 路径字符串)
+        guard let provider = providers.first else { return false }
+
+        // 1. 尝试按 String 路径提取 (项目侧边栏文件树拖拽传输)
+        if provider.canLoadObject(ofClass: String.self) {
+            _ = provider.loadObject(ofClass: String.self) { str, _ in
+                if let str = str {
+                    let cleanPath = (str as NSString).expandingTildeInPath
+                    let fileURL = str.hasPrefix("file://") ? URL(string: str) : URL(fileURLWithPath: cleanPath)
+                    let finalPath = fileURL?.path ?? cleanPath
+
+                    if FileManager.default.fileExists(atPath: finalPath), let img = NSImage(contentsOfFile: finalPath) ?? (fileURL != nil ? NSImage(contentsOf: fileURL!) : nil) {
+                        DispatchQueue.main.async {
+                            self.compareImage = img
+                            self.compareImagePath = finalPath
+                            self.compareMetadata = ImageMetadata(image: img, path: finalPath)
+                        }
+                        return
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.loadObjectUrlFallback(provider: provider)
+                }
+            }
+            return true
+        }
+
+        // 2. 尝试按 URL 提取
+        loadObjectUrlFallback(provider: provider)
+        return true
     }
 
-    /// 根据选中的缩放选项与容器视口计算实时生效的缩放倍率；Fit 模式自动适应视口且上限不超过 1.0 (不拉大图片)
+    /// 第二重降级：使用 canLoadObject(ofClass: URL.self) 尝试提取
+    private func loadObjectUrlFallback(provider: NSItemProvider) {
+        if provider.canLoadObject(ofClass: URL.self) {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url = url {
+                    let path = url.isFileURL ? url.path : (url.path.isEmpty ? url.absoluteString : url.path)
+                    let cleanPath = (path as NSString).expandingTildeInPath
+                    if !cleanPath.isEmpty, let img = NSImage(contentsOfFile: cleanPath) ?? NSImage(contentsOf: url) {
+                        DispatchQueue.main.async {
+                            self.compareImage = img
+                            self.compareImagePath = cleanPath
+                            self.compareMetadata = ImageMetadata(image: img, path: cleanPath)
+                        }
+                        return
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.fallbackLoadNSImage(provider: provider)
+                }
+            }
+        } else {
+            fallbackLoadNSImage(provider: provider)
+        }
+    }
+
+    /// 降级读取纯 NSImage 内存图像 (针对无法提取磁盘 URL 的情况)
+    private func fallbackLoadNSImage(provider: NSItemProvider) {
+        if provider.canLoadObject(ofClass: NSImage.self) {
+            _ = provider.loadObject(ofClass: NSImage.self) { img, _ in
+                if let img = img as? NSImage {
+                    DispatchQueue.main.async {
+                        self.compareImage = img
+                        self.compareImagePath = nil
+                        self.compareMetadata = ImageMetadata(image: img, path: "")
+                    }
+                }
+            }
+        }
+    }
+
+    /// 当前呈现给用户的缩放倍数格式化文本
+    private var currentDisplayZoomText: String {
+        if let custom = customZoomScale {
+            let percent = Int(round(custom * 100))
+            return "\(percent)%"
+        } else {
+            return zoomOption.title
+        }
+    }
+
+    /// 根据选中的缩放预设选项或滚轮自由数值与容器视口计算实时生效的缩放倍率
     private func computeScale(containerSize: CGSize, baseSize: CGSize) -> CGFloat {
-        if let ratio = zoomOption.ratio {
-            return ratio
+        let base: CGFloat
+        if let custom = customZoomScale {
+            base = custom
+        } else if let ratio = zoomOption.ratio {
+            base = ratio
         } else {
             // Fit 自适应模式：保留 32px 安全 Padding 边距，且最大不超过 1.0
             let availableWidth = max(containerSize.width - 32, 1)
@@ -985,8 +1271,9 @@ struct ImageViewerView: View {
             guard baseSize.width > 0 && baseSize.height > 0 else { return 1.0 }
             let fitX = availableWidth / baseSize.width
             let fitY = availableHeight / baseSize.height
-            return min(fitX, fitY, 1.0)
+            base = min(fitX, fitY, 1.0)
         }
+        return base * gestureMagnification
     }
 
     /// 对应的背景 View
@@ -1007,9 +1294,15 @@ struct ImageViewerView: View {
     /// 顶部图像控制与信息面板 (无粗体、纯图标化像素/背景/旋转/对比模式按钮、全英文文本可选中)
     private var imageControlToolbar: some View {
         HStack(spacing: 8) {
-            // 1. 缩放倍数下拉菜单 (原生勾选状态)
+            // 1. 缩放倍数下拉菜单 (原生勾选状态，支持选取预设时重置自由滚轮数值)
             Menu {
-                Picker("Zoom", selection: $zoomOption) {
+                Picker("Zoom", selection: Binding(
+                    get: { zoomOption },
+                    set: { newValue in
+                        zoomOption = newValue
+                        customZoomScale = nil
+                    }
+                )) {
                     ForEach(ImageZoomOption.allCases) { option in
                         Text(option.title).tag(option)
                     }
@@ -1019,12 +1312,12 @@ struct ImageViewerView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
-                    Text("Zoom: \(zoomOption.title)")
+                    Text("Zoom: \(currentDisplayZoomText)")
                         .font(.system(size: 11, weight: .regular))
                         .monospacedDigit()
                 }
                 .padding(.horizontal, 6)
-                .padding(.vertical, 3)
+                .frame(height: 20)
                 .background(Color.primary.opacity(0.06))
                 .cornerRadius(4)
             }
@@ -1037,8 +1330,7 @@ struct ImageViewerView: View {
             } label: {
                 Image(systemName: "square.grid.3x3.fill")
                     .font(.system(size: 11))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
+                    .frame(width: 20, height: 20)
                     .background(isPixelated ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.06))
                     .foregroundStyle(isPixelated ? Color.accentColor : Color.primary)
                     .cornerRadius(4)
@@ -1054,8 +1346,7 @@ struct ImageViewerView: View {
             } label: {
                 Image(systemName: "rotate.right")
                     .font(.system(size: 11))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
+                    .frame(width: 20, height: 20)
                     .background(Color.primary.opacity(0.06))
                     .cornerRadius(4)
             }
@@ -1068,15 +1359,12 @@ struct ImageViewerView: View {
                     isCompareMode.toggle()
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "rectangle.split.2x1")
-                        .font(.system(size: 11))
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-                .background(isCompareMode ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.06))
-                .foregroundStyle(isCompareMode ? Color.accentColor : Color.primary)
-                .cornerRadius(4)
+                Image(systemName: "rectangle.split.2x1")
+                    .font(.system(size: 11))
+                    .frame(width: 20, height: 20)
+                    .background(isCompareMode ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.06))
+                    .foregroundStyle(isCompareMode ? Color.accentColor : Color.primary)
+                    .cornerRadius(4)
             }
             .buttonStyle(.plain)
             .help("Image Comparison Mode")
@@ -1092,8 +1380,7 @@ struct ImageViewerView: View {
             } label: {
                 Image(systemName: "light.panel.fill")
                     .font(.system(size: 11))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
+                    .frame(width: 20, height: 20)
                     .background(Color.primary.opacity(0.06))
                     .cornerRadius(4)
             }

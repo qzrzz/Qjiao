@@ -67,4 +67,4 @@
 - System 面板数字与 IP/代理地址统一 `monospacedDigit`；自定义 Tooltip 单行等宽数字、多行等宽字体以对齐 Mem/Disk 等指标详情。
 - 右侧 Files / CWD / Git 文件列表按文件名与扩展名显示 Material Icon Theme 彩色图标（[vscode-material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme)）；目录名匹配专用文件夹图标，展开/收起使用 open 变体；可用 `bun run scripts/vendor-material-icons.ts` 更新图标资源。
 - 左侧面板底部 Theme 按钮支持左键点击立即切换主题（Light ↔ Dark，System 模式按系统实际外观反转），右键菜单提供主题选择、分割线及 Appearance Settings 快捷入口。
-- 右侧面板下半区底部 Tabs（System/Note 选项卡栏）的最小高度调整为 36。
+- 右侧面板下半区底部 Tabs（System/Note 选项卡栏）的最小高度调整为 36，并优化展开逻辑（若之前拖拽将高度缩至最小，点击展开/双击 tabs 时自动恢复至默认 70/30 高度）。
