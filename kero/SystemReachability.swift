@@ -88,11 +88,7 @@ struct ReachabilitySite: Identifiable, Codable, Equatable {
         .init(name: "Baidu", url: "https://www.baidu.com/"),
         .init(name: "Google", url: "https://www.gstatic.com/generate_204"),
         .init(name: "Cloudflare", url: "https://cp.cloudflare.com/generate_204"),
-        .init(name: "Github", url: "https://github.com/"),
-        .init(
-            name: "Figma",
-            url: "https://static.figma.com/uploads/3b83c9551d5d60e27ad4ca2f67cd10358a154401"
-        ),
+        .init(name: "Github", url: "https://github.com/")
     ]
 }
 
