@@ -630,8 +630,20 @@ private struct FileTreeRow: View {
         return formatter
     }()
 
+    /// 格式化文件与目录体积，将 bytes/byte/字节 统一替换显示为 b。
     private static func formatByteCount(_ size: UInt64) -> String {
-        byteFormatter.string(fromByteCount: Int64(clamping: size))
+        if size < 1000 {
+            return "\(size) b"
+        }
+        let str = byteFormatter.string(fromByteCount: Int64(clamping: size))
+        return str
+            .replacingOccurrences(of: " bytes", with: " b")
+            .replacingOccurrences(of: " Bytes", with: " b")
+            .replacingOccurrences(of: " byte", with: " b")
+            .replacingOccurrences(of: " Byte", with: " b")
+            .replacingOccurrences(of: " 字节", with: " b")
+            .replacingOccurrences(of: "字节", with: "b")
+            .replacingOccurrences(of: " B", with: " b")
     }
 
     private var rowBackground: Color {

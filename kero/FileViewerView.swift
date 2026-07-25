@@ -712,7 +712,7 @@ func calculateRulerStep(pixelScale: CGFloat) -> CGFloat {
     return base * stepFactor
 }
 
-/// 顶部水平像素标尺绘制组件 (绝对对齐：刻度与图像真实物理像素在任意放缩倍率下 100% 精确重合)
+/// 顶部水平像素标尺绘制组件 (专业级多阶刻度：主刻度+数字、次刻度、细分微刻度)
 struct TopRulerCanvas: View {
     let originX: CGFloat
     let pixelScale: CGFloat
@@ -723,6 +723,7 @@ struct TopRulerCanvas: View {
             let rect = CGRect(origin: .zero, size: size)
             context.fill(Path(rect), with: .color(Color(nsColor: .windowBackgroundColor)))
 
+            // 标尺底部分界线
             let bottomLine = Path { p in
                 p.move(to: CGPoint(x: 0, y: size.height))
                 p.addLine(to: CGPoint(x: size.width, y: size.height))
@@ -730,33 +731,54 @@ struct TopRulerCanvas: View {
             context.stroke(bottomLine, with: .color(Color.primary.opacity(0.15)), lineWidth: 1)
 
             let stepPx = calculateRulerStep(pixelScale: pixelScale)
+            let subStepPx = stepPx / 5.0
 
-            let startPx = floor(-originX / (pixelScale * stepPx)) * stepPx
-            let endPx = ceil((size.width - originX) / (pixelScale * stepPx)) * stepPx
+            let startSubPx = floor(-originX / (pixelScale * subStepPx)) * subStepPx
+            let endSubPx = ceil((size.width - originX) / (pixelScale * subStepPx)) * subStepPx
 
-            var px = startPx
-            while px <= endPx {
-                let x = originX + px * pixelScale
-                // 避开左侧 20px 相交按钮，留在视口内绘制
+            var currentPx = startSubPx
+            while currentPx <= endSubPx {
+                let x = originX + currentPx * pixelScale
                 if x >= 20 && x <= size.width {
-                    // 主刻度线 (长 5px，紧贴底边)
-                    let tickPath = Path { p in
-                        p.move(to: CGPoint(x: x, y: size.height - 5))
-                        p.addLine(to: CGPoint(x: x, y: size.height))
-                    }
-                    context.stroke(tickPath, with: .color(Color.primary.opacity(0.5)), lineWidth: 1)
+                    // 判断是否为主刻度
+                    let isMajor = abs(currentPx.truncatingRemainder(dividingBy: stepPx)) < 0.001 || abs(currentPx.truncatingRemainder(dividingBy: stepPx) - stepPx) < 0.001
+                    let isMedium = !isMajor && (abs(currentPx.truncatingRemainder(dividingBy: stepPx / 2.0)) < 0.001)
 
-                    // 数字文本 (中心点水平绝对对齐刻度线 x)
-                    let text = Text("\(Int(round(px)))")
-                        .font(.system(size: 9, weight: .regular))
-                        .monospacedDigit()
-                        .foregroundStyle(Color.secondary)
-                    let resolvedText = context.resolve(text)
-                    context.draw(resolvedText, at: CGPoint(x: x, y: 7), anchor: .center)
+                    if isMajor {
+                        // 1. 主刻度线 (长 6px，深色)
+                        let tickPath = Path { p in
+                            p.move(to: CGPoint(x: x, y: size.height - 6))
+                            p.addLine(to: CGPoint(x: x, y: size.height))
+                        }
+                        context.stroke(tickPath, with: .color(Color.primary.opacity(0.55)), lineWidth: 1)
+
+                        // 主刻度数字 (居中对齐刻度线)
+                        let text = Text("\(Int(round(currentPx)))")
+                            .font(.system(size: 9, weight: .regular))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.secondary)
+                        let resolvedText = context.resolve(text)
+                        context.draw(resolvedText, at: CGPoint(x: x, y: 6), anchor: .center)
+                    } else if isMedium {
+                        // 2. 次级半步刻度线 (长 4px)
+                        let tickPath = Path { p in
+                            p.move(to: CGPoint(x: x, y: size.height - 4))
+                            p.addLine(to: CGPoint(x: x, y: size.height))
+                        }
+                        context.stroke(tickPath, with: .color(Color.primary.opacity(0.35)), lineWidth: 1)
+                    } else {
+                        // 3. 细分微刻度线 (长 2.5px)
+                        let tickPath = Path { p in
+                            p.move(to: CGPoint(x: x, y: size.height - 2.5))
+                            p.addLine(to: CGPoint(x: x, y: size.height))
+                        }
+                        context.stroke(tickPath, with: .color(Color.primary.opacity(0.20)), lineWidth: 1)
+                    }
                 }
-                px += stepPx
+                currentPx += subStepPx
             }
 
+            // 鼠标位置活动指示线
             if let mx = mouseX, mx >= 20 && mx <= size.width {
                 let pointerPath = Path { p in
                     p.move(to: CGPoint(x: mx, y: 0))
@@ -770,7 +792,7 @@ struct TopRulerCanvas: View {
     }
 }
 
-/// 左侧垂直像素标尺绘制组件 (绝对对齐：刻度与图像真实物理像素在任意放缩倍率下 100% 精确重合)
+/// 左侧垂直像素标尺绘制组件 (专业级多阶刻度：主刻度+数字、次刻度、细分微刻度)
 struct LeftRulerCanvas: View {
     let originY: CGFloat
     let pixelScale: CGFloat
@@ -781,6 +803,7 @@ struct LeftRulerCanvas: View {
             let rect = CGRect(origin: .zero, size: size)
             context.fill(Path(rect), with: .color(Color(nsColor: .windowBackgroundColor)))
 
+            // 标尺右侧分界线
             let rightLine = Path { p in
                 p.move(to: CGPoint(x: size.width, y: 0))
                 p.addLine(to: CGPoint(x: size.width, y: size.height))
@@ -788,37 +811,57 @@ struct LeftRulerCanvas: View {
             context.stroke(rightLine, with: .color(Color.primary.opacity(0.15)), lineWidth: 1)
 
             let stepPx = calculateRulerStep(pixelScale: pixelScale)
+            let subStepPx = stepPx / 5.0
 
-            let startPy = floor(-originY / (pixelScale * stepPx)) * stepPx
-            let endPy = ceil((size.height - originY) / (pixelScale * stepPx)) * stepPx
+            let startSubPy = floor(-originY / (pixelScale * subStepPx)) * subStepPx
+            let endSubPy = ceil((size.height - originY) / (pixelScale * subStepPx)) * subStepPx
 
-            var py = startPy
-            while py <= endPy {
-                let y = originY + py * pixelScale
-                // 避开顶部 20px 相交按钮，留在视口内绘制
+            var currentPy = startSubPy
+            while currentPy <= endSubPy {
+                let y = originY + currentPy * pixelScale
                 if y >= 20 && y <= size.height {
-                    // 主刻度线 (长 5px，紧贴右边)
-                    let tickPath = Path { p in
-                        p.move(to: CGPoint(x: size.width - 5, y: y))
-                        p.addLine(to: CGPoint(x: size.width, y: y))
+                    let isMajor = abs(currentPy.truncatingRemainder(dividingBy: stepPx)) < 0.001 || abs(currentPy.truncatingRemainder(dividingBy: stepPx) - stepPx) < 0.001
+                    let isMedium = !isMajor && (abs(currentPy.truncatingRemainder(dividingBy: stepPx / 2.0)) < 0.001)
+
+                    if isMajor {
+                        // 1. 主刻度线 (长 6px)
+                        let tickPath = Path { p in
+                            p.move(to: CGPoint(x: size.width - 6, y: y))
+                            p.addLine(to: CGPoint(x: size.width, y: y))
+                        }
+                        context.stroke(tickPath, with: .color(Color.primary.opacity(0.55)), lineWidth: 1)
+
+                        // 纵向主刻度数字 (逆时针 90 度旋转)
+                        var textContext = context
+                        textContext.translateBy(x: 6, y: y)
+                        textContext.rotate(by: .degrees(-90))
+
+                        let text = Text("\(Int(round(currentPy)))")
+                            .font(.system(size: 9, weight: .regular))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.secondary)
+                        let resolvedText = textContext.resolve(text)
+                        textContext.draw(resolvedText, at: .zero, anchor: .center)
+                    } else if isMedium {
+                        // 2. 次级半步刻度线 (长 4px)
+                        let tickPath = Path { p in
+                            p.move(to: CGPoint(x: size.width - 4, y: y))
+                            p.addLine(to: CGPoint(x: size.width, y: y))
+                        }
+                        context.stroke(tickPath, with: .color(Color.primary.opacity(0.35)), lineWidth: 1)
+                    } else {
+                        // 3. 细分微刻度线 (长 2.5px)
+                        let tickPath = Path { p in
+                            p.move(to: CGPoint(x: size.width - 2.5, y: y))
+                            p.addLine(to: CGPoint(x: size.width, y: y))
+                        }
+                        context.stroke(tickPath, with: .color(Color.primary.opacity(0.20)), lineWidth: 1)
                     }
-                    context.stroke(tickPath, with: .color(Color.primary.opacity(0.5)), lineWidth: 1)
-
-                    // 纵向数字文本 (逆时针 90 度旋转，垂直中心绝对对齐刻度线 y)
-                    var textContext = context
-                    textContext.translateBy(x: 7, y: y)
-                    textContext.rotate(by: .degrees(-90))
-
-                    let text = Text("\(Int(round(py)))")
-                        .font(.system(size: 9, weight: .regular))
-                        .monospacedDigit()
-                        .foregroundStyle(Color.secondary)
-                    let resolvedText = textContext.resolve(text)
-                    textContext.draw(resolvedText, at: .zero, anchor: .center)
                 }
-                py += stepPx
+                currentPy += subStepPx
             }
 
+            // 鼠标位置活动指示线
             if let my = mouseY, my >= 20 && my <= size.height {
                 let pointerPath = Path { p in
                     p.move(to: CGPoint(x: 0, y: my))
