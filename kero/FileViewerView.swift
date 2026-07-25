@@ -674,8 +674,6 @@ struct ImageViewerView: View {
     /// 本地 NSEvent 滚轮监听器引用
     @State private var scrollMonitor: Any? = nil
 
-    /// 持久化记录像素模式 (Nearest Neighbor)，跨标签与应用重启自动保持上一次选择
-    @AppStorage("imageViewerIsPixelated") private var isPixelated: Bool = true
     @State private var backgroundMode: ImageBackgroundMode = .defaultTheme
     /// 当前旋转角度 (0°, 90°, 180°, 270°)
     @State private var rotationDegrees: Double = 0
@@ -757,14 +755,16 @@ struct ImageViewerView: View {
                                 boundingHeight: max(boundingHeight, containerSize.height),
                                 unrotatedWidth: unrotatedWidth,
                                 unrotatedHeight: unrotatedHeight,
-                                totalOffset: totalOffset
+                                totalOffset: totalOffset,
+                                currentScale: currentScale
                             )
                         } else {
                             // 单图正常视图
                             singleImageView(
                                 unrotatedWidth: unrotatedWidth,
                                 unrotatedHeight: unrotatedHeight,
-                                totalOffset: totalOffset
+                                totalOffset: totalOffset,
+                                currentScale: currentScale
                             )
                         }
                     }
@@ -809,6 +809,18 @@ struct ImageViewerView: View {
                             let deltaX = event.deltaX
                             guard abs(deltaY) > 0.01 || abs(deltaX) > 0.01 else { return event }
 
+                            // 计算鼠标在窗口全局坐标系中的位置 (转为 SwiftUI 左上角原点坐标)
+                            let winHeight = win.frame.height
+                            let mouseX = event.locationInWindow.x
+                            let mouseY = winHeight - event.locationInWindow.y
+                            let mousePoint = CGPoint(x: mouseX, y: mouseY)
+
+                            // 仅当鼠标位于图片查看器容器区域内部时才响应缩放与平移，否则放行事件
+                            let containerFrame = geometry.frame(in: .global)
+                            guard containerFrame.contains(mousePoint) else {
+                                return event
+                            }
+
                             let flags = event.modifierFlags
                             if flags.contains(.command) {
                                 // 按住 Cmd 键：垂直平移 (Vertical Pan)
@@ -825,13 +837,29 @@ struct ImageViewerView: View {
                                 }
                                 return nil
                             } else {
-                                // 默认无修饰键：自由滚轮缩放 (Zoom)
+                                // 默认无修饰键：以鼠标指针当前位置为中心缩放 (Zoom around mouse location)
                                 let step = deltaY > 0 ? 1.08 : 0.92
                                 DispatchQueue.main.async {
                                     let current = self.computeScale(containerSize: containerSize, baseSize: effectiveBaseSize)
                                     let targetScale = max(0.05, min(20.0, current * step))
+                                    guard current > 0, abs(targetScale - current) > 0.0001 else { return }
+
+                                    let k = targetScale / current
+
+                                    let containerCenterX = containerFrame.midX
+                                    let containerCenterY = containerFrame.midY
+
+                                    // 鼠标相对于容器中心的偏移向量
+                                    let mX = mouseX - containerCenterX
+                                    let mY = mouseY - containerCenterY
+
+                                    // 保持鼠标下的图片像素点位置不变：O_new = M - (M - O_old) * k
+                                    let newOffsetX = mX - (mX - self.offset.width) * k
+                                    let newOffsetY = mY - (mY - self.offset.height) * k
+
                                     withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.86)) {
                                         self.customZoomScale = targetScale
+                                        self.offset = CGSize(width: newOffsetX, height: newOffsetY)
                                     }
                                 }
                                 return nil
@@ -922,39 +950,44 @@ struct ImageViewerView: View {
         }
     }
 
-    /// 单图模式下的图像展示
+    /// 单图模式下的图像展示 (放缩 > 100% 自动像素模式 .none，<= 100% 自动高质量模式 .high)
     private func singleImageView(
         unrotatedWidth: CGFloat,
         unrotatedHeight: CGFloat,
-        totalOffset: CGSize
+        totalOffset: CGSize,
+        currentScale: CGFloat
     ) -> some View {
-        Image(nsImage: image)
+        let isPixelMode = (currentScale > 1.0001)
+        return Image(nsImage: image)
             .resizable()
-            .interpolation(isPixelated ? .none : .high)
-            .antialiased(!isPixelated)
+            .interpolation(isPixelMode ? .none : .high)
+            .antialiased(!isPixelMode)
             .frame(width: unrotatedWidth, height: unrotatedHeight)
             .rotationEffect(.degrees(rotationDegrees))
             .offset(totalOffset)
             .shadow(color: .black.opacity(backgroundMode == .defaultTheme ? 0.1 : 0.0), radius: 6, x: 0, y: 2)
     }
 
-    /// 对比模式下的图像展示 (双图叠加，分界线左右精确遮罩)
+    /// 对比模式下的图像展示 (双图叠加，分界线左右精确遮罩，动态响应放大像素模式)
     private func compareCanvasView(
         boundingWidth: CGFloat,
         boundingHeight: CGFloat,
         unrotatedWidth: CGFloat,
         unrotatedHeight: CGFloat,
-        totalOffset: CGSize
+        totalOffset: CGSize,
+        currentScale: CGFloat
     ) -> some View {
         let baseSplitX = boundingWidth * splitRatio
         let currentSplitX = max(0, min(boundingWidth, baseSplitX + splitDragOffset))
+        let isPixelMode = (currentScale > 1.0001)
 
         return ZStack(alignment: .center) {
             // 1. 原图层 (位于分界竖线左侧)
             singleImageView(
                 unrotatedWidth: unrotatedWidth,
                 unrotatedHeight: unrotatedHeight,
-                totalOffset: totalOffset
+                totalOffset: totalOffset,
+                currentScale: currentScale
             )
             .mask(
                 HStack(spacing: 0) {
@@ -969,8 +1002,8 @@ struct ImageViewerView: View {
             if let compImage = compareImage {
                 Image(nsImage: compImage)
                     .resizable()
-                    .interpolation(isPixelated ? .none : .high)
-                    .antialiased(!isPixelated)
+                    .interpolation(isPixelMode ? .none : .high)
+                    .antialiased(!isPixelMode)
                     .frame(width: unrotatedWidth, height: unrotatedHeight)
                     .rotationEffect(.degrees(rotationDegrees))
                     .offset(totalOffset)
@@ -1301,6 +1334,11 @@ struct ImageViewerView: View {
                     set: { newValue in
                         zoomOption = newValue
                         customZoomScale = nil
+                        if newValue == .fit {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                offset = .zero
+                            }
+                        }
                     }
                 )) {
                     ForEach(ImageZoomOption.allCases) { option in
@@ -1317,28 +1355,14 @@ struct ImageViewerView: View {
                         .monospacedDigit()
                 }
                 .padding(.horizontal, 6)
-                .frame(height: 20)
+                .frame(height: 26)
                 .background(Color.primary.opacity(0.06))
                 .cornerRadius(4)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
 
-            // 2. 像素模式纯图标按钮 (默认开启)
-            Button {
-                isPixelated.toggle()
-            } label: {
-                Image(systemName: "square.grid.3x3.fill")
-                    .font(.system(size: 11))
-                    .frame(width: 20, height: 20)
-                    .background(isPixelated ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.06))
-                    .foregroundStyle(isPixelated ? Color.accentColor : Color.primary)
-                    .cornerRadius(4)
-            }
-            .buttonStyle(.plain)
-            .help("Pixel Mode (Disable smooth anti-aliasing)")
-
-            // 3. 顺时针旋转按钮 (单调递增 +90°)
+            // 2. 顺时针旋转按钮 (单调递增 +90°)
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     rotationDegrees += 90
@@ -1346,7 +1370,7 @@ struct ImageViewerView: View {
             } label: {
                 Image(systemName: "rotate.right")
                     .font(.system(size: 11))
-                    .frame(width: 20, height: 20)
+                    .frame(width: 26, height: 26)
                     .background(Color.primary.opacity(0.06))
                     .cornerRadius(4)
             }
@@ -1361,7 +1385,7 @@ struct ImageViewerView: View {
             } label: {
                 Image(systemName: "rectangle.split.2x1")
                     .font(.system(size: 11))
-                    .frame(width: 20, height: 20)
+                    .frame(width: 26, height: 26)
                     .background(isCompareMode ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.06))
                     .foregroundStyle(isCompareMode ? Color.accentColor : Color.primary)
                     .cornerRadius(4)
@@ -1380,7 +1404,7 @@ struct ImageViewerView: View {
             } label: {
                 Image(systemName: "light.panel.fill")
                     .font(.system(size: 11))
-                    .frame(width: 20, height: 20)
+                    .frame(width: 26, height: 26)
                     .background(Color.primary.opacity(0.06))
                     .cornerRadius(4)
             }
@@ -1420,7 +1444,7 @@ struct ImageViewerView: View {
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10)
-        .frame(height: 28)
+        .frame(height: 32)
         .background(Color.primary.opacity(0.03))
     }
 }
