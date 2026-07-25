@@ -213,28 +213,38 @@ struct SystemPanel: View {
         return formatBytesShort(used)
     }
 
-    /// 内存 tooltip：总量 / 已用 / 可用 / Wired / Compressed / Swap。
+    /// 内存 tooltip：与活动监视器口径一致（Used = App + Wired + Compressed，不含 Cached）。
     /// 固定标签栏宽（pad 到 10）+ 数值；数字由 Tooltip monospacedDigit 渲染。
     private var memoryTooltip: String? {
         guard let used = model.snapshot.memoryUsedBytes else { return nil }
         var lines: [String] = []
         if let total = model.snapshot.memoryTotalBytes, total > 0 {
-            let free = total > used ? total - used : 0
             let usedPct = Double(used) / Double(total) * 100
-            let freePct = Double(free) / Double(total) * 100
             lines = [
                 tooltipLine("Total", formatBytes(total)),
                 tooltipLine("Used", "\(formatBytes(used))  (\(formatPercent1(usedPct))%)"),
-                tooltipLine("Free", "\(formatBytes(free))  (\(formatPercent1(freePct))%)"),
             ]
         } else {
             lines = [tooltipLine("Used", formatBytes(used))]
+        }
+        // 细分与活动监视器右侧列对应：App / Wired / Compressed。
+        if let app = model.snapshot.memoryAppBytes {
+            lines.append(tooltipLine("App", formatBytes(app)))
         }
         if let wired = model.snapshot.memoryWiredBytes {
             lines.append(tooltipLine("Wired", formatBytes(wired)))
         }
         if let compressed = model.snapshot.memoryCompressedBytes {
             lines.append(tooltipLine("Compressed", formatBytes(compressed)))
+        }
+        if let cached = model.snapshot.memoryCachedBytes {
+            lines.append(tooltipLine("Cached", formatBytes(cached)))
+        }
+        if let free = model.snapshot.memoryFreeBytes {
+            lines.append(tooltipLine("Free", formatBytes(free)))
+        } else if let total = model.snapshot.memoryTotalBytes, total > used {
+            // 无 vm_stat free 时回退为 total − used（可能含缓存）。
+            lines.append(tooltipLine("Free", formatBytes(total - used)))
         }
         if let swapUsed = model.snapshot.memorySwapUsedBytes {
             if let swapTotal = model.snapshot.memorySwapTotalBytes, swapTotal > 0 {

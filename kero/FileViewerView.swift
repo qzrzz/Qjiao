@@ -592,7 +592,8 @@ enum ImageBackgroundMode: String, CaseIterable, Identifiable {
     case defaultTheme = "Default"
     case black = "Black"
     case white = "White"
-    case checkerboard = "Checkerboard"
+    case checkerboard = "Light Checkerboard"
+    case darkCheckerboard = "Dark Checkerboard"
 
     var id: String { rawValue }
 
@@ -602,22 +603,25 @@ enum ImageBackgroundMode: String, CaseIterable, Identifiable {
         case .defaultTheme: return "Default"
         case .black: return "Black"
         case .white: return "White"
-        case .checkerboard: return "Checkerboard"
+        case .checkerboard: return "Light Checkerboard"
+        case .darkCheckerboard: return "Dark Checkerboard"
         }
     }
 }
 
-/// 绘制透明棋盘格背景视图 (8x8px 灰白交替底纹)
+/// 绘制透明棋盘格背景视图 (支持 Light 灰白 / Dark 深灰黑交替底纹)
 struct CheckerboardView: View {
     /// 棋盘格单格像素尺寸
     var squareSize: CGFloat = 8
+    /// 亮格颜色
+    var lightColor: Color = Color(white: 0.92)
+    /// 暗格颜色
+    var darkColor: Color = Color(white: 0.78)
 
     var body: some View {
         Canvas { context, size in
             let cols = Int(ceil(size.width / squareSize))
             let rows = Int(ceil(size.height / squareSize))
-            let lightColor = Color(white: 0.92)
-            let darkColor = Color(white: 0.78)
 
             for r in 0..<rows {
                 for c in 0..<cols {
@@ -661,7 +665,174 @@ struct ScrollWheelListenerView: NSViewRepresentable {
     }
 }
 
-/// 增强版图像查看器视图，默认开启像素模式，图标化轻量工具栏，支持旋转、自由拖拽、滚轮自由缩放与双图对比模式。
+// MARK: - 标尺与参考线系统模型与绘图组件
+
+/// 参考线方向 (水平/垂直)
+enum GuideOrientation: String, CaseIterable, Identifiable, Codable {
+    case horizontal = "Horizontal"
+    case vertical = "Vertical"
+
+    var id: String { rawValue }
+}
+
+/// 参考线模型，保存像素物理坐标 (相对于图像原点 0,0)
+struct GuideLine: Identifiable, Equatable, Hashable {
+    let id: UUID
+    var orientation: GuideOrientation
+    /// 图像真实像素坐标 (px)
+    var pixelPosition: CGFloat
+
+    init(id: UUID = UUID(), orientation: GuideOrientation, pixelPosition: CGFloat) {
+        self.id = id
+        self.orientation = orientation
+        self.pixelPosition = pixelPosition
+    }
+}
+
+/// 顶部水平像素标尺绘制组件 (标准专业级对齐：数字中心精确水平对齐刻度线)
+struct TopRulerCanvas: View {
+    let originX: CGFloat
+    let currentScale: CGFloat
+    let mouseX: CGFloat?
+
+    var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size)
+            context.fill(Path(rect), with: .color(Color(nsColor: .windowBackgroundColor)))
+
+            let bottomLine = Path { p in
+                p.move(to: CGPoint(x: 0, y: size.height))
+                p.addLine(to: CGPoint(x: size.width, y: size.height))
+            }
+            context.stroke(bottomLine, with: .color(Color.primary.opacity(0.15)), lineWidth: 1)
+
+            let stepPx = calculateRulerStep(scale: currentScale)
+
+            let startPx = floor(-originX / (currentScale * stepPx)) * stepPx
+            let endPx = ceil((size.width - originX) / (currentScale * stepPx)) * stepPx
+
+            var px = startPx
+            while px <= endPx {
+                let x = originX + px * currentScale
+                // 避开左侧 20px 相交按钮区域，且留在视口内
+                if x >= 20 && x <= size.width {
+                    // 主刻度线 (长 5px，紧贴底边)
+                    let tickPath = Path { p in
+                        p.move(to: CGPoint(x: x, y: size.height - 5))
+                        p.addLine(to: CGPoint(x: x, y: size.height))
+                    }
+                    context.stroke(tickPath, with: .color(Color.primary.opacity(0.5)), lineWidth: 1)
+
+                    // 数字文本 (中心点水平绝对对齐刻度线 x)
+                    let text = Text("\(Int(round(px)))")
+                        .font(.system(size: 9, weight: .regular))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.secondary)
+                    let resolvedText = context.resolve(text)
+                    context.draw(resolvedText, at: CGPoint(x: x, y: 7), anchor: .center)
+                }
+                px += stepPx
+            }
+
+            if let mx = mouseX, mx >= 20 && mx <= size.width {
+                let pointerPath = Path { p in
+                    p.move(to: CGPoint(x: mx, y: 0))
+                    p.addLine(to: CGPoint(x: mx, y: size.height))
+                }
+                context.stroke(pointerPath, with: .color(Color.accentColor), lineWidth: 1)
+            }
+        }
+        .frame(height: 20)
+        .clipped()
+    }
+}
+
+/// 左侧垂直像素标尺绘制组件 (标准专业级设计：数字逆时针 90 度纵向对齐，垂直中心精确对齐刻度线)
+struct LeftRulerCanvas: View {
+    let originY: CGFloat
+    let currentScale: CGFloat
+    let mouseY: CGFloat?
+
+    var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size)
+            context.fill(Path(rect), with: .color(Color(nsColor: .windowBackgroundColor)))
+
+            let rightLine = Path { p in
+                p.move(to: CGPoint(x: size.width, y: 0))
+                p.addLine(to: CGPoint(x: size.width, y: size.height))
+            }
+            context.stroke(rightLine, with: .color(Color.primary.opacity(0.15)), lineWidth: 1)
+
+            let stepPx = calculateRulerStep(scale: currentScale)
+
+            let startPy = floor(-originY / (currentScale * stepPx)) * stepPx
+            let endPy = ceil((size.height - originY) / (currentScale * stepPx)) * stepPx
+
+            var py = startPy
+            while py <= endPy {
+                let y = originY + py * currentScale
+                // 避开顶部 20px 相交按钮区域，且留在视口内
+                if y >= 20 && y <= size.height {
+                    // 主刻度线 (长 5px，紧贴右边)
+                    let tickPath = Path { p in
+                        p.move(to: CGPoint(x: size.width - 5, y: y))
+                        p.addLine(to: CGPoint(x: size.width, y: y))
+                    }
+                    context.stroke(tickPath, with: .color(Color.primary.opacity(0.5)), lineWidth: 1)
+
+                    // 纵向数字文本 (逆时针 90 度旋转，垂直中心绝对对齐刻度线 y)
+                    var textContext = context
+                    textContext.translateBy(x: 7, y: y)
+                    textContext.rotate(by: .degrees(-90))
+
+                    let text = Text("\(Int(round(py)))")
+                        .font(.system(size: 9, weight: .regular))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.secondary)
+                    let resolvedText = textContext.resolve(text)
+                    textContext.draw(resolvedText, at: .zero, anchor: .center)
+                }
+                py += stepPx
+            }
+
+            if let my = mouseY, my >= 20 && my <= size.height {
+                let pointerPath = Path { p in
+                    p.move(to: CGPoint(x: 0, y: my))
+                    p.addLine(to: CGPoint(x: size.width, y: my))
+                }
+                context.stroke(pointerPath, with: .color(Color.accentColor), lineWidth: 1)
+            }
+        }
+        .frame(width: 20)
+        .clipped()
+    }
+}
+
+/// 根据当前缩放比例动态计算合理的标尺大刻度步长 (单位：像素 px)
+private func calculateRulerStep(scale: CGFloat) -> CGFloat {
+    let targetScreenDistance: CGFloat = 60
+    let rawPx = targetScreenDistance / max(scale, 0.001)
+
+    let exponent = floor(log10(rawPx))
+    let base = pow(10, exponent)
+    let fraction = rawPx / base
+
+    let stepFactor: CGFloat
+    if fraction <= 1.5 {
+        stepFactor = 1
+    } else if fraction <= 3.5 {
+        stepFactor = 2
+    } else if fraction <= 7.5 {
+        stepFactor = 5
+    } else {
+        stepFactor = 10
+    }
+
+    return base * stepFactor
+}
+
+/// 增强版图像查看器视图，默认开启像素模式，图标化轻量工具栏，支持旋转、自由拖拽、滚轮自由缩放、双图对比模式与标尺参考线系统。
 struct ImageViewerView: View {
     @ObservedObject var file: FileTab
     let image: NSImage
@@ -674,9 +845,14 @@ struct ImageViewerView: View {
     /// 本地 NSEvent 滚轮监听器引用
     @State private var scrollMonitor: Any? = nil
 
-    @State private var backgroundMode: ImageBackgroundMode = .defaultTheme
+    /// 持久化记录背景模式，跨标签与应用重启自动恢复上一次选择
+    @AppStorage("imageViewerBackgroundMode") private var backgroundMode: ImageBackgroundMode = .defaultTheme
     /// 当前旋转角度 (0°, 90°, 180°, 270°)
     @State private var rotationDegrees: Double = 0
+    /// 是否水平镜像翻转
+    @State private var isFlippedHorizontal: Bool = false
+    /// 是否垂直镜像翻转
+    @State private var isFlippedVertical: Bool = false
     /// 累计平移偏移位置
     @State private var offset: CGSize = .zero
     /// 手势进行时的实时拖拽偏移量
@@ -695,36 +871,93 @@ struct ImageViewerView: View {
     @State private var splitRatio: CGFloat = 0.5
     /// 拖拽竖线手势时的临时增量
     @GestureState private var splitDragOffset: CGFloat = 0
-    /// 拖拽区域的高亮指示
+    /// 对比模式拖拽放落指示状态
     @State private var isDropTargeted: Bool = false
+    // MARK: - 标尺与参考线系统状态
+    /// 是否开启标尺显示 (默认显示)
+    @State private var isRulerEnabled: Bool = false
+    /// 参考线列表 (物理像素坐标系)
+    @State private var guideLines: [GuideLine] = []
+    /// 是否锁定参考线 (禁止拖动调整)
+    @State private var isGuidesLocked: Bool = false
+    /// 是否显示参考线 (隐藏时不渲染)
+    @State private var isGuidesVisible: Bool = true
+
+    /// 正在从标尺拖拽新建参考线时的方向与当前像素坐标
+    @State private var newGuideOrientation: GuideOrientation? = nil
+    @State private var newGuidePixelPos: CGFloat? = nil
+
+    /// 正在拖拽移动已有参考线的 ID 与实时像素坐标
+    @State private var draggingGuideId: UUID? = nil
+    @State private var draggingGuidePixelPos: CGFloat? = nil
+
+    /// 当前鼠标悬停的参考线 ID
+    @State private var hoveredGuideId: UUID? = nil
+    /// 鼠标指针在容器窗口坐标系下的当前位置
+    @State private var mousePosInContainer: CGPoint? = nil
 
     /// 获取原图图像及磁盘元数据信息
     private var metadata: ImageMetadata {
         ImageMetadata(image: image, path: file.path)
     }
 
+    /// 动态获取当前主窗口/屏幕的 Retina 像素缩放因子 (Retina 高清屏通常为 2.0 / 3.0，普通屏为 1.0)
+    private var screenBackingScale: CGFloat {
+        if let windowScale = NSApp.mainWindow?.backingScaleFactor, windowScale > 0 {
+            return windowScale
+        }
+        if let screenScale = NSScreen.main?.backingScaleFactor, screenScale > 0 {
+            return screenScale
+        }
+        return 2.0
+    }
+
+    /// 高清屏下适配 1:1 绝对物理像素点对点的基准 Point 宽度
+    private var retinaPointWidth: CGFloat {
+        CGFloat(metadata.pixelWidth) / screenBackingScale
+    }
+
+    /// 高清屏下适配 1:1 绝对物理像素点对点的基准 Point 高度
+    private var retinaPointHeight: CGFloat {
+        CGFloat(metadata.pixelHeight) / screenBackingScale
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            // 顶部控制条与元数据面板
-            imageControlToolbar
+        GeometryReader { geometry in
+            let totalSize = geometry.size
+            let toolbarHeight: CGFloat = 32
+            let rulerOffset: CGFloat = isRulerEnabled ? 20 : 0
 
-            Divider()
+            let canvasAvailableSize = CGSize(
+                width: max(10, totalSize.width - rulerOffset),
+                height: max(10, totalSize.height - toolbarHeight - 1 - rulerOffset)
+            )
 
-            // 主体居中画布
-            GeometryReader { geometry in
-                let containerSize = geometry.size
-                // 判断当前处于第 1, 3 个 90° 旋转象限 (90°, 270°, 450°...)
-                let isRotated90or270 = (Int(abs(rotationDegrees) / 90.0) % 2) != 0
-                // 90°/270° 旋转时交换宽与高，确保 Fit 自适应与容器边框计算完美
-                let effectiveBaseSize = isRotated90or270
-                    ? CGSize(width: metadata.pointHeight, height: metadata.pointWidth)
-                    : CGSize(width: metadata.pointWidth, height: metadata.pointHeight)
+            // 判断当前处于第 1, 3 个 90° 旋转象限 (90°, 270°, 450°...)
+            let isRotated90or270 = (Int(abs(rotationDegrees) / 90.0) % 2) != 0
+            // 90°/270° 旋转时交换宽与高，确保 Retina 高清屏点对点像素精准自适应与视口计算完美
+            let effectiveBaseSize = isRotated90or270
+                ? CGSize(width: retinaPointHeight, height: retinaPointWidth)
+                : CGSize(width: retinaPointWidth, height: retinaPointHeight)
 
-                let currentScale = computeScale(containerSize: containerSize, baseSize: effectiveBaseSize)
-                let unrotatedWidth = metadata.pointWidth * currentScale
-                let unrotatedHeight = metadata.pointHeight * currentScale
+            let currentScale = computeScale(containerSize: canvasAvailableSize, baseSize: effectiveBaseSize)
+            let containerSize = CGSize(width: totalSize.width, height: max(10, totalSize.height - toolbarHeight - 1))
+
+            VStack(spacing: 0) {
+                // 顶部控制条与元数据面板
+                imageControlToolbar(currentScale: currentScale)
+                    .frame(height: toolbarHeight)
+
+                Divider()
+
+                let unrotatedWidth = retinaPointWidth * currentScale
+                let unrotatedHeight = retinaPointHeight * currentScale
                 let boundingWidth = isRotated90or270 ? unrotatedHeight : unrotatedWidth
                 let boundingHeight = isRotated90or270 ? unrotatedWidth : unrotatedHeight
+
+                // 计算图像像素原点 (0,0) 在容器 coordinate 中的 View 坐标 (考虑标尺边距 rulerOffset)
+                let originX = (containerSize.width - rulerOffset) / 2 - (unrotatedWidth / 2) + offset.width + dragOffset.width + rulerOffset
+                let originY = (containerSize.height - rulerOffset) / 2 - (unrotatedHeight / 2) + offset.height + dragOffset.height + rulerOffset
 
                 // 拖拽平移手势
                 let dragGesture = DragGesture()
@@ -776,6 +1009,9 @@ struct ImageViewerView: View {
                             offset = .zero
                         }
                     }
+                    .contextMenu {
+                        imageContextMenu
+                    }
                 }
                 .gesture(
                     MagnificationGesture()
@@ -797,6 +1033,22 @@ struct ImageViewerView: View {
                     if isCompareMode {
                         topRightOverlay
                             .padding(10)
+                    }
+                }
+                .overlay {
+                    rulerAndGuidesOverlayView(
+                        containerSize: containerSize,
+                        originX: originX,
+                        originY: originY,
+                        currentScale: currentScale
+                    )
+                }
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let location):
+                        mousePosInContainer = location
+                    case .ended:
+                        mousePosInContainer = nil
                     }
                 }
                 .onAppear {
@@ -901,7 +1153,613 @@ struct ImageViewerView: View {
         .background(Material.thinMaterial)
         .cornerRadius(6)
         .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
-        .textSelection(.enabled)
+.textSelection(.enabled)
+    }
+
+    // MARK: - 标尺与参考线渲染与交互手势层
+
+    // MARK: - 剪贴板与系统 Finder 联动辅助方法
+
+    /// 将当前图片复制到系统剪贴板
+    private func copyImageToClipboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+    }
+
+    /// 将当前文件路径复制到系统剪贴板
+    private func copyPathToClipboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(file.path, forType: .string)
+    }
+
+    /// 将当前图片元数据信息 (格式化文本) 复制到系统剪贴板
+    private func copyMetadataInfoToClipboard() {
+        let scaleStr = metadata.scaleFactor > 1.0 ? " (@\(Int(metadata.scaleFactor))x)" : ""
+        let infoStr = """
+        File: \((file.path as NSString).lastPathComponent)
+        Dimensions: \(metadata.pixelWidth) × \(metadata.pixelHeight) px
+        Resolution: \(metadata.dpiX) DPI\(scaleStr)
+        File Size: \(metadata.fileSizeString)
+        Path: \(file.path)
+        """
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(infoStr, forType: .string)
+    }
+
+    /// 用系统默认绑定的外部 App (如 Preview / Photoshop) 打开当前图片
+    private func openInDefaultApp() {
+        guard !file.path.isEmpty else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: file.path))
+    }
+
+    /// 弹窗导出/另存为当前图片文件
+    private func exportImage() {
+        let savePanel = NSSavePanel()
+        savePanel.title = "Export Image"
+        savePanel.nameFieldStringValue = (file.path as NSString).lastPathComponent
+        savePanel.prompt = "Export"
+        savePanel.begin { response in
+            if response == .OK, let targetURL = savePanel.url {
+                if let tiffData = image.tiffRepresentation,
+                   let bitmap = NSBitmapImageRep(data: tiffData),
+                   let pngData = bitmap.representation(using: .png, properties: [:]) {
+                    try? pngData.write(to: targetURL)
+                }
+            }
+        }
+    }
+
+    // MARK: - 上下文右键菜单 ViewBuilder
+
+    @ViewBuilder
+    private var imageContextMenu: some View {
+        // 1. 剪贴板快捷组
+        Button {
+            copyImageToClipboard()
+        } label: {
+            Label("Copy Image", systemImage: "doc.on.doc")
+        }
+
+        Button {
+            copyPathToClipboard()
+        } label: {
+            Label("Copy Path", systemImage: "link")
+        }
+
+        Divider()
+
+        // 2. 视角放缩控制组
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                zoomOption = .fit
+                customZoomScale = nil
+                offset = .zero
+            }
+        } label: {
+            Label("Fit View", systemImage: "arrow.up.left.and.arrow.down.right")
+        }
+
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                zoomOption = .p100
+                customZoomScale = nil
+                offset = .zero
+            }
+        } label: {
+            Label("100% Actual Size", systemImage: "1.square")
+        }
+
+        Divider()
+
+        // 3. 图像旋转与镜像变换组
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                rotationDegrees += 90
+            }
+        } label: {
+            Label("Rotate 90° Clockwise", systemImage: "rotate.right")
+        }
+
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                rotationDegrees -= 90
+            }
+        } label: {
+            Label("Rotate 90° Counter-Clockwise", systemImage: "rotate.left")
+        }
+
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isFlippedHorizontal.toggle()
+            }
+        } label: {
+            Label(isFlippedHorizontal ? "Reset Flip Horizontal" : "Flip Horizontal", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right.fill")
+        }
+
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isFlippedVertical.toggle()
+            }
+        } label: {
+            Label(isFlippedVertical ? "Reset Flip Vertical" : "Flip Vertical", systemImage: "arrow.up.and.down.righttriangle.up.righttriangle.down.fill")
+        }
+
+        Divider()
+
+        // 4. 背景模式子菜单
+        Menu {
+            ForEach(ImageBackgroundMode.allCases) { mode in
+                Button {
+                    backgroundMode = mode
+                } label: {
+                    HStack {
+                        Text(mode.title)
+                        if backgroundMode == mode {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Background Mode", systemImage: "square.dashed")
+        }
+
+        // 5. 标尺与参考线子菜单
+        Menu {
+            Toggle("Show Rulers", isOn: $isRulerEnabled)
+            Toggle("Show Guides", isOn: $isGuidesVisible)
+            Toggle("Lock Guides", isOn: $isGuidesLocked)
+
+            Divider()
+
+            Button(role: .destructive) {
+                guideLines.removeAll()
+            } label: {
+                Label("Clear All Guides", systemImage: "trash")
+            }
+            .disabled(guideLines.isEmpty)
+        } label: {
+            Label("Rulers & Guides", systemImage: "ruler")
+        }
+
+        Divider()
+
+        // 6. 对比模式
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                isCompareMode.toggle()
+            }
+        } label: {
+            Label(isCompareMode ? "Exit Compare Mode" : "Compare Mode", systemImage: "square.split.2x1")
+        }
+
+        Divider()
+
+        // 7. 系统 Finder 联动、外部 App 打开与导出
+        Button {
+            openInDefaultApp()
+        } label: {
+            Label("Open in Default App", systemImage: "arrow.up.forward.app")
+        }
+
+        Button {
+            NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
+        } label: {
+            Label("Reveal in Finder", systemImage: "folder")
+        }
+
+        Button {
+            exportImage()
+        } label: {
+            Label("Export Image...", systemImage: "square.and.arrow.up")
+        }
+
+        Button {
+            copyMetadataInfoToClipboard()
+        } label: {
+            Label("Copy Image Info", systemImage: "info.circle")
+        }
+    }
+
+    /// 标尺、新建参考线拖拽手势与在场参考线渲染覆盖层
+    @ViewBuilder
+    private func rulerAndGuidesOverlayView(
+        containerSize: CGSize,
+        originX: CGFloat,
+        originY: CGFloat,
+        currentScale: CGFloat
+    ) -> some View {
+        let rulerOffset: CGFloat = isRulerEnabled ? 20 : 0
+
+        ZStack(alignment: .topLeading) {
+            // 1. 已保存参考线列表渲染层
+            if isGuidesVisible {
+                ForEach(guideLines) { guide in
+                    guideLineItemView(
+                        guide: guide,
+                        containerSize: containerSize,
+                        originX: originX,
+                        originY: originY,
+                        currentScale: currentScale,
+                        rulerOffset: rulerOffset
+                    )
+                }
+            }
+
+            // 2. 正在从标尺向外拖拽新建的临时参考线
+            if let newOrient = newGuideOrientation, let newPxPos = newGuidePixelPos {
+                tempNewGuideLineView(
+                    orientation: newOrient,
+                    pixelPos: newPxPos,
+                    containerSize: containerSize,
+                    originX: originX,
+                    originY: originY,
+                    currentScale: currentScale
+                )
+            }
+
+            // 3. 像素标尺栏 (顶部与左侧)
+            if isRulerEnabled {
+                rulerBarsView(
+                    containerSize: containerSize,
+                    originX: originX,
+                    originY: originY,
+                    currentScale: currentScale
+                )
+            }
+        }
+        .frame(width: containerSize.width, height: containerSize.height)
+        .allowsHitTesting(isRulerEnabled || !guideLines.isEmpty || newGuideOrientation != nil)
+    }
+
+    // MARK: - 参考线智能边缘吸附算子
+
+    /// 计算参考线吸附后的像素坐标 (智能磁吸图像 Top/Center/Bottom 或 Left/Center/Right 边缘)
+    private func snapPixelPosition(
+        rawPixelPos: CGFloat,
+        orientation: GuideOrientation,
+        currentScale: CGFloat
+    ) -> (snappedPos: CGFloat, snapLabel: String?) {
+        let snapThresholdPx: CGFloat = 7.0 / max(currentScale, 0.001)
+
+        if orientation == .horizontal {
+            let targets: [(pos: CGFloat, label: String)] = [
+                (0, "Top Edge"),
+                (CGFloat(metadata.pixelHeight) / 2.0, "Center"),
+                (CGFloat(metadata.pixelHeight), "Bottom Edge")
+            ]
+            for target in targets {
+                if abs(rawPixelPos - target.pos) <= snapThresholdPx {
+                    return (target.pos, target.label)
+                }
+            }
+        } else {
+            let targets: [(pos: CGFloat, label: String)] = [
+                (0, "Left Edge"),
+                (CGFloat(metadata.pixelWidth) / 2.0, "Center"),
+                (CGFloat(metadata.pixelWidth), "Right Edge")
+            ]
+            for target in targets {
+                if abs(rawPixelPos - target.pos) <= snapThresholdPx {
+                    return (target.pos, target.label)
+                }
+            }
+        }
+        return (rawPixelPos, nil)
+    }
+
+    /// 单条已有参考线的渲染、Hover 高亮、坐标气泡与拖拽/移除逻辑
+    @ViewBuilder
+    private func guideLineItemView(
+        guide: GuideLine,
+        containerSize: CGSize,
+        originX: CGFloat,
+        originY: CGFloat,
+        currentScale: CGFloat,
+        rulerOffset: CGFloat
+    ) -> some View {
+        let isHovered = hoveredGuideId == guide.id
+        let isDragging = draggingGuideId == guide.id
+        let activePos = isDragging ? (draggingGuidePixelPos ?? guide.pixelPosition) : guide.pixelPosition
+        let snapInfo = snapPixelPosition(rawPixelPos: activePos, orientation: guide.orientation, currentScale: currentScale)
+
+        if guide.orientation == .horizontal {
+            // 水平参考线 (固定 View Y 坐标)
+            let viewY = originY + activePos * currentScale
+            let isOutOfBounds = isDragging && (viewY <= rulerOffset || viewY <= 0 || viewY >= containerSize.height)
+
+            if viewY >= -100 && viewY <= containerSize.height + 100 {
+                ZStack(alignment: .leading) {
+                    // 触控拖拽响应带 (宽度扩大至 14px，易于鼠标捕获)
+                    Rectangle()
+                        .fill(Color.black.opacity(0.001))
+                        .frame(width: containerSize.width, height: 14)
+                        .contentShape(Rectangle())
+
+                    // 实体参考线条 (1.5px / 超界红色警告 / 吸附黄)
+                    Rectangle()
+                        .fill(isOutOfBounds ? Color.red : (snapInfo.snapLabel != nil ? Color.yellow : (isHovered || isDragging ? Color.accentColor : Color.cyan.opacity(0.85))))
+                        .frame(width: containerSize.width, height: isOutOfBounds ? 2.5 : (snapInfo.snapLabel != nil ? 2.0 : 1.5))
+                        .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
+
+                    // 悬停/拖拽时的精准坐标与吸附/删除气泡提示
+                    if isHovered || isDragging {
+                        let textStr: String = {
+                            if isOutOfBounds {
+                                return "Release to Delete"
+                            } else if let label = snapInfo.snapLabel {
+                                return "Y: \(Int(round(activePos))) px • \(label)"
+                            } else {
+                                return "Y: \(Int(round(activePos))) px"
+                            }
+                        }()
+
+                        Text(textStr)
+                            .font(.system(size: 9, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(isOutOfBounds ? Color.red : (snapInfo.snapLabel != nil ? Color.orange : Color.accentColor)))
+                            .offset(x: max(30, (mousePosInContainer?.x ?? 50) + 10), y: -14)
+                    }
+                }
+                .position(x: containerSize.width / 2, y: viewY)
+                .onHover { over in
+                    hoveredGuideId = over ? guide.id : nil
+                }
+                .highPriorityGesture(
+                    isGuidesLocked ? nil :
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            draggingGuideId = guide.id
+                            let currentY = value.location.y
+                            let rawPx = (currentY - originY) / currentScale
+                            let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .horizontal, currentScale: currentScale)
+                            draggingGuidePixelPos = snapRes.snappedPos
+                        }
+                        .onEnded { value in
+                            let finalY = value.location.y
+                            // 若拖回顶部标尺 (Y <= rulerOffset) 或拖出上下窗口边界，自动清理移除
+                            if finalY <= rulerOffset || finalY <= 0 || finalY >= containerSize.height {
+                                guideLines.removeAll { $0.id == guide.id }
+                            } else if let newPx = draggingGuidePixelPos {
+                                if let idx = guideLines.firstIndex(where: { $0.id == guide.id }) {
+                                    guideLines[idx].pixelPosition = newPx
+                                }
+                            }
+                            draggingGuideId = nil
+                            draggingGuidePixelPos = nil
+                        }
+                )
+            }
+        } else {
+            // 垂直参考线 (固定 View X 坐标)
+            let viewX = originX + activePos * currentScale
+            let isOutOfBounds = isDragging && (viewX <= rulerOffset || viewX <= 0 || viewX >= containerSize.width)
+
+            if viewX >= -100 && viewX <= containerSize.width + 100 {
+                ZStack(alignment: .top) {
+                    // 触控拖拽响应带 (宽度扩大至 14px，易于鼠标捕获)
+                    Rectangle()
+                        .fill(Color.black.opacity(0.001))
+                        .frame(width: 14, height: containerSize.height)
+                        .contentShape(Rectangle())
+
+                    // 实体参考线条 (1.5px / 超界红色警告 / 吸附黄)
+                    Rectangle()
+                        .fill(isOutOfBounds ? Color.red : (snapInfo.snapLabel != nil ? Color.yellow : (isHovered || isDragging ? Color.accentColor : Color.cyan.opacity(0.85))))
+                        .frame(width: isOutOfBounds ? 2.5 : (snapInfo.snapLabel != nil ? 2.0 : 1.5), height: containerSize.height)
+                        .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
+
+                    // 悬停/拖拽时的精准坐标与吸附/删除气泡提示
+                    if isHovered || isDragging {
+                        let textStr: String = {
+                            if isOutOfBounds {
+                                return "Release to Delete"
+                            } else if let label = snapInfo.snapLabel {
+                                return "X: \(Int(round(activePos))) px • \(label)"
+                            } else {
+                                return "X: \(Int(round(activePos))) px"
+                            }
+                        }()
+
+                        Text(textStr)
+                            .font(.system(size: 9, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(isOutOfBounds ? Color.red : (snapInfo.snapLabel != nil ? Color.orange : Color.accentColor)))
+                            .offset(x: 12, y: max(30, (mousePosInContainer?.y ?? 50) + 10))
+                    }
+                }
+                .position(x: viewX, y: containerSize.height / 2)
+                .onHover { over in
+                    hoveredGuideId = over ? guide.id : nil
+                }
+                .highPriorityGesture(
+                    isGuidesLocked ? nil :
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            draggingGuideId = guide.id
+                            let currentX = value.location.x
+                            let rawPx = (currentX - originX) / currentScale
+                            let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, currentScale: currentScale)
+                            draggingGuidePixelPos = snapRes.snappedPos
+                        }
+                        .onEnded { value in
+                            let finalX = value.location.x
+                            // 若拖回左侧标尺 (X <= rulerOffset) 或拖出左右窗口边界，自动清理移除
+                            if finalX <= rulerOffset || finalX <= 0 || finalX >= containerSize.width {
+                                guideLines.removeAll { $0.id == guide.id }
+                            } else if let newPx = draggingGuidePixelPos {
+                                if let idx = guideLines.firstIndex(where: { $0.id == guide.id }) {
+                                    guideLines[idx].pixelPosition = newPx
+                                }
+                            }
+                            draggingGuideId = nil
+                            draggingGuidePixelPos = nil
+                        }
+                )
+            }
+        }
+    }
+
+    /// 正在从标尺拖拽新建时的临时动态参考线与实时坐标气泡
+    @ViewBuilder
+    private func tempNewGuideLineView(
+        orientation: GuideOrientation,
+        pixelPos: CGFloat,
+        containerSize: CGSize,
+        originX: CGFloat,
+        originY: CGFloat,
+        currentScale: CGFloat
+    ) -> some View {
+        let snapInfo = snapPixelPosition(rawPixelPos: pixelPos, orientation: orientation, currentScale: currentScale)
+        let activePos = snapInfo.snappedPos
+
+        if orientation == .horizontal {
+            let viewY = originY + activePos * currentScale
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(snapInfo.snapLabel != nil ? Color.yellow : Color.accentColor)
+                    .frame(width: containerSize.width, height: snapInfo.snapLabel != nil ? 2.0 : 1.5)
+                    .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
+
+                let textStr = snapInfo.snapLabel != nil ? "Y: \(Int(round(activePos))) px • \(snapInfo.snapLabel!)" : "Y: \(Int(round(activePos))) px"
+                Text(textStr)
+                    .font(.system(size: 9, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(snapInfo.snapLabel != nil ? Color.orange : Color.accentColor))
+                    .offset(x: max(30, (mousePosInContainer?.x ?? 50) + 10), y: -14)
+            }
+            .position(x: containerSize.width / 2, y: viewY)
+        } else {
+            let viewX = originX + activePos * currentScale
+            ZStack(alignment: .top) {
+                Rectangle()
+                    .fill(snapInfo.snapLabel != nil ? Color.yellow : Color.accentColor)
+                    .frame(width: snapInfo.snapLabel != nil ? 2.0 : 1.5, height: containerSize.height)
+                    .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
+
+                let textStr = snapInfo.snapLabel != nil ? "X: \(Int(round(activePos))) px • \(snapInfo.snapLabel!)" : "X: \(Int(round(activePos))) px"
+                Text(textStr)
+                    .font(.system(size: 9, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(snapInfo.snapLabel != nil ? Color.orange : Color.accentColor))
+                    .offset(x: 12, y: max(30, (mousePosInContainer?.y ?? 50) + 10))
+            }
+            .position(x: viewX, y: containerSize.height / 2)
+        }
+    }
+
+    /// 顶部与左侧标尺视图及拖拽/双击创建手势 (包含智能磁吸)
+    @ViewBuilder
+    private func rulerBarsView(
+        containerSize: CGSize,
+        originX: CGFloat,
+        originY: CGFloat,
+        currentScale: CGFloat
+    ) -> some View {
+        ZStack(alignment: .topLeading) {
+            // 1. 顶部标尺 (拖拽向下滑动创建水平参考线，双击快速创建)
+            TopRulerCanvas(
+                originX: originX,
+                currentScale: currentScale,
+                mouseX: mousePosInContainer?.x
+            )
+            .frame(width: containerSize.width, height: 20)
+            .offset(x: 0, y: 0)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { location in
+                let rawPx = (location.x - originX) / currentScale
+                let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, currentScale: currentScale)
+                guideLines.append(GuideLine(orientation: .vertical, pixelPosition: snapRes.snappedPos))
+            }
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        newGuideOrientation = .horizontal
+                        let currentY = value.location.y
+                        let rawPx = (currentY - originY) / currentScale
+                        let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .horizontal, currentScale: currentScale)
+                        newGuidePixelPos = snapRes.snappedPos
+                    }
+                    .onEnded { value in
+                        let finalY = value.location.y
+                        if finalY > 20, let px = newGuidePixelPos {
+                            guideLines.append(GuideLine(orientation: .horizontal, pixelPosition: px))
+                        }
+                        newGuideOrientation = nil
+                        newGuidePixelPos = nil
+                    }
+            )
+
+            // 2. 左侧标尺 (拖拽向右滑动创建垂直参考线，双击快速创建)
+            LeftRulerCanvas(
+                originY: originY,
+                currentScale: currentScale,
+                mouseY: mousePosInContainer?.y
+            )
+            .frame(width: 20, height: containerSize.height)
+            .offset(x: 0, y: 0)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { location in
+                let rawPy = (location.y - originY) / currentScale
+                let snapRes = snapPixelPosition(rawPixelPos: rawPy, orientation: .horizontal, currentScale: currentScale)
+                guideLines.append(GuideLine(orientation: .horizontal, pixelPosition: snapRes.snappedPos))
+            }
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        newGuideOrientation = .vertical
+                        let currentX = value.location.x
+                        let rawPx = (currentX - originX) / currentScale
+                        let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, currentScale: currentScale)
+                        newGuidePixelPos = snapRes.snappedPos
+                    }
+                    .onEnded { value in
+                        let finalX = value.location.x
+                        if finalX > 20, let px = newGuidePixelPos {
+                            guideLines.append(GuideLine(orientation: .vertical, pixelPosition: px))
+                        }
+                        newGuideOrientation = nil
+                        newGuidePixelPos = nil
+                    }
+            )
+
+            // 3. 左上角 (0,0) 标尺相交按钮块
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isRulerEnabled.toggle()
+                }
+            } label: {
+                Rectangle()
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .frame(width: 20, height: 20)
+                    .overlay(
+                        Image(systemName: "ruler")
+                            .font(.system(size: 9))
+                            .foregroundStyle(isRulerEnabled ? Color.accentColor : Color.secondary)
+                    )
+                    .overlay(
+                        Rectangle()
+                            .stroke(Color.primary.opacity(0.15), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .help("Toggle Rulers")
+        }
     }
 
     /// 对比模式右上角对比图元数据浮层 (第一行文件名与清除按钮，第二行像素尺寸与文件大小)
@@ -1281,10 +2139,13 @@ struct ImageViewerView: View {
     }
 
     /// 当前呈现给用户的缩放倍数格式化文本
-    private var currentDisplayZoomText: String {
+    private func currentDisplayZoomText(currentScale: CGFloat) -> String {
         if let custom = customZoomScale {
             let percent = Int(round(custom * 100))
             return "\(percent)%"
+        } else if zoomOption == .fit {
+            let percent = Int(round(currentScale * 100))
+            return "Fit (\(percent)%)"
         } else {
             return zoomOption.title
         }
@@ -1320,15 +2181,25 @@ struct ImageViewerView: View {
         case .white:
             Color.white
         case .checkerboard:
-            CheckerboardView()
+            CheckerboardView(
+                squareSize: 8,
+                lightColor: Color(white: 0.92),
+                darkColor: Color(white: 0.78)
+            )
+        case .darkCheckerboard:
+            CheckerboardView(
+                squareSize: 8,
+                lightColor: Color(white: 0.24),
+                darkColor: Color(white: 0.12)
+            )
         }
     }
 
-    /// 顶部图像控制与信息面板 (无粗体、纯图标化像素/背景/旋转/对比模式按钮、全英文文本可选中)
-    private var imageControlToolbar: some View {
-        HStack(spacing: 8) {
-            // 1. 缩放倍数下拉菜单 (原生勾选状态，支持选取预设时重置自由滚轮数值)
-            Menu {
+    /// 顶部图像控制与信息面板 (现代化高质感样式，支持悬停光泽高亮与 Accent 描边)
+    private func imageControlToolbar(currentScale: CGFloat) -> some View {
+        HStack(spacing: 6) {
+            // 1. 缩放倍数下拉菜单 (固定 128px 宽度，避免跳变)
+            ModernToolbarMenu(fixedWidth: 128, helpText: "Zoom Scale Option") {
                 Picker("Zoom", selection: Binding(
                     get: { zoomOption },
                     set: { newValue in
@@ -1346,105 +2217,335 @@ struct ImageViewerView: View {
                     }
                 }
                 .pickerStyle(.inline)
-            } label: {
+            } labelContent: {
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
-                    Text("Zoom: \(currentDisplayZoomText)")
+                    Text("Zoom: \(currentDisplayZoomText(currentScale: currentScale))")
                         .font(.system(size: 11, weight: .regular))
                         .monospacedDigit()
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 6)
-                .frame(height: 26)
-                .background(Color.primary.opacity(0.06))
-                .cornerRadius(4)
+                .padding(.horizontal, 8)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
 
-            // 2. 顺时针旋转按钮 (单调递增 +90°)
-            Button {
+            // 2. 一键快速重置至 Fit 状态
+            ModernToolbarButton(isActive: zoomOption == .fit && customZoomScale == nil, helpText: "Reset to Fit View (⌘0)") {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    zoomOption = .fit
+                    customZoomScale = nil
+                    offset = .zero
+                }
+            } content: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 11))
+            }
+
+            // 3. 一键快速缩放至 100% 真实像素尺寸
+            ModernToolbarButton(isActive: zoomOption == .p100 && customZoomScale == nil, helpText: "Zoom to 100% Actual Size (⌘1)") {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    zoomOption = .p100
+                    customZoomScale = nil
+                    offset = .zero
+                }
+            } content: {
+                Image(systemName: "1.square")
+                    .font(.system(size: 11))
+            }
+
+            ModernToolbarDivider()
+
+            // 4. 顺时针旋转按钮 (+90°)
+            ModernToolbarButton(helpText: "Rotate 90° Clockwise") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     rotationDegrees += 90
                 }
-            } label: {
+            } content: {
                 Image(systemName: "rotate.right")
                     .font(.system(size: 11))
-                    .frame(width: 26, height: 26)
-                    .background(Color.primary.opacity(0.06))
-                    .cornerRadius(4)
             }
-            .buttonStyle(.plain)
-            .help("Rotate 90° Clockwise")
 
-            // 4. 图片对比模式开关按钮
-            Button {
+            ModernToolbarDivider()
+
+            // 5. 图片对比模式开关按钮
+            ModernToolbarButton(isActive: isCompareMode, helpText: "Image Comparison Mode") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isCompareMode.toggle()
                 }
-            } label: {
+            } content: {
                 Image(systemName: "rectangle.split.2x1")
                     .font(.system(size: 11))
-                    .frame(width: 26, height: 26)
-                    .background(isCompareMode ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.06))
-                    .foregroundStyle(isCompareMode ? Color.accentColor : Color.primary)
-                    .cornerRadius(4)
             }
-            .buttonStyle(.plain)
-            .help("Image Comparison Mode")
 
-            // 5. 背景模式纯图标下拉菜单 (原生勾选状态)
-            Menu {
+            // 6. 标尺与参考线控制下拉菜单
+            ModernToolbarMenu(isActive: isRulerEnabled, helpText: "Rulers & Reference Guides") {
+                Toggle("Show Rulers", isOn: $isRulerEnabled)
+                Toggle("Show Guides", isOn: $isGuidesVisible)
+                Toggle("Lock Guides", isOn: $isGuidesLocked)
+
+                Divider()
+
+                Button(role: .destructive) {
+                    guideLines.removeAll()
+                } label: {
+                    Label("Clear All Guides", systemImage: "trash")
+                }
+                .disabled(guideLines.isEmpty)
+            } labelContent: {
+                Image(systemName: isRulerEnabled ? "ruler.fill" : "ruler")
+                    .font(.system(size: 11))
+            }
+
+            // 7. 背景模式下拉菜单
+            ModernToolbarMenu(helpText: "Background Mode") {
                 Picker("Background Mode", selection: $backgroundMode) {
                     ForEach(ImageBackgroundMode.allCases) { mode in
                         Text(mode.title).tag(mode)
                     }
                 }
                 .pickerStyle(.inline)
-            } label: {
+            } labelContent: {
                 Image(systemName: "light.panel.fill")
                     .font(.system(size: 11))
-                    .frame(width: 26, height: 26)
-                    .background(Color.primary.opacity(0.06))
-                    .cornerRadius(4)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("Background Mode")
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            // 5. 图片信息栏：图片尺寸、DPI（使用 viewfinder 图标）、文件大小；常规字体，支持文本选择复制与 monospacedDigit
-            HStack(spacing: 12) {
-                // 图片尺寸
-                HStack(spacing: 3) {
-                    Image(systemName: "aspectratio")
-                        .font(.system(size: 10))
-                    Text("\(metadata.pixelWidth) × \(metadata.pixelHeight) px")
-                }
-
-                // 图像分辨率 (DPI，使用 viewfinder 图标，显示 scale 标记)
-                HStack(spacing: 3) {
-                    Image(systemName: "viewfinder")
-                        .font(.system(size: 10))
-                    let scaleLabel = metadata.scaleFactor > 1.0 ? " (@\(Int(metadata.scaleFactor))x)" : ""
-                    Text("\(metadata.dpiX) DPI\(scaleLabel)")
-                }
-
-                // 文件尺寸
-                HStack(spacing: 3) {
-                    Image(systemName: "doc")
-                        .font(.system(size: 10))
-                    Text(metadata.fileSizeString)
-                }
-            }
-            .font(.system(size: 11, weight: .regular))
-            .monospacedDigit()
-            .textSelection(.enabled)
-            .foregroundStyle(.secondary)
+            // 8. 响应式元数据数值信息栏 (在窄窗口下平滑自适应降级，绝对避免折行与文本重叠)
+            AdaptiveImageMetadataView(metadata: metadata)
         }
         .padding(.horizontal, 10)
         .frame(height: 32)
-        .background(Color.primary.opacity(0.03))
+        .background(Color.primary.opacity(0.035))
+    }
+}
+
+// MARK: - 响应式元数据数值信息栏组件
+
+/// 响应式右侧图片元数据数值信息栏 (在宽/中/窄窗口下自动优雅降级，防止文本溢出或挤压工具栏按钮)
+private struct AdaptiveImageMetadataView: View {
+    let metadata: ImageMetadata
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            // 1. 完整宽窗口显示模式
+            fullWidthLayout
+
+            // 2. 中等窄窗口模式 (缩短间距，隐藏 @2x 标记与 px 后缀)
+            mediumCompactLayout
+
+            // 3. 紧凑窄窗口模式 (只保留像素尺寸与文件大小)
+            compactLayout
+
+            // 4. 极窄窗口模式 (仅保留核心像素尺寸)
+            minimalLayout
+        }
+        .font(.system(size: 11, weight: .regular))
+        .monospacedDigit()
+        .textSelection(.enabled)
+        .foregroundStyle(.secondary)
+    }
+
+    // 模式 1: 完整宽模式
+    private var fullWidthLayout: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 3) {
+                Image(systemName: "aspectratio")
+                    .font(.system(size: 10))
+                Text("\(metadata.pixelWidth) × \(metadata.pixelHeight) px")
+            }
+            HStack(spacing: 3) {
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 10))
+                let scaleLabel = metadata.scaleFactor > 1.0 ? " (@\(Int(metadata.scaleFactor))x)" : ""
+                Text("\(metadata.dpiX) DPI\(scaleLabel)")
+            }
+            HStack(spacing: 3) {
+                Image(systemName: "doc")
+                    .font(.system(size: 10))
+                Text(metadata.fileSizeString)
+            }
+        }
+    }
+
+    // 模式 2: 中等窄模式
+    private var mediumCompactLayout: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                Image(systemName: "aspectratio")
+                    .font(.system(size: 10))
+                Text("\(metadata.pixelWidth)×\(metadata.pixelHeight)")
+            }
+            HStack(spacing: 2) {
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 10))
+                Text("\(metadata.dpiX) DPI")
+            }
+            HStack(spacing: 2) {
+                Image(systemName: "doc")
+                    .font(.system(size: 10))
+                Text(metadata.fileSizeString)
+            }
+        }
+    }
+
+    // 模式 3: 紧凑窄模式
+    private var compactLayout: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                Image(systemName: "aspectratio")
+                    .font(.system(size: 10))
+                Text("\(metadata.pixelWidth)×\(metadata.pixelHeight)")
+            }
+            HStack(spacing: 2) {
+                Image(systemName: "doc")
+                    .font(.system(size: 10))
+                Text(metadata.fileSizeString)
+            }
+        }
+    }
+
+    // 模式 4: 极窄模式
+    private var minimalLayout: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "aspectratio")
+                .font(.system(size: 10))
+            Text("\(metadata.pixelWidth)×\(metadata.pixelHeight)")
+        }
+    }
+}
+
+// MARK: - 现代化极简工具栏微组件
+
+/// 现代化极简精致工具栏按钮 (包含悬停 Hover 光泽高亮、Accent 激活高亮边框与极微轻量触感微动)
+private struct ModernToolbarButton<Content: View>: View {
+    var isActive: Bool = false
+    var helpText: String? = nil
+    let action: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        Button(action: action) {
+            content()
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(backgroundColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(borderColor, lineWidth: 1)
+                )
+                .foregroundStyle(foregroundColor)
+                .shadow(color: isHovered ? Color.black.opacity(0.06) : Color.clear, radius: 2, x: 0, y: 1)
+                .scaleEffect(isHovered ? 1.03 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = hover
+            }
+        }
+        .help(helpText ?? "")
+    }
+
+    private var backgroundColor: Color {
+        if isActive {
+            return isHovered ? Color.accentColor.opacity(0.24) : Color.accentColor.opacity(0.16)
+        } else {
+            return isHovered ? Color.primary.opacity(0.09) : Color.primary.opacity(0.04)
+        }
+    }
+
+    private var borderColor: Color {
+        if isActive {
+            return Color.accentColor.opacity(isHovered ? 0.45 : 0.3)
+        } else {
+            return isHovered ? Color.primary.opacity(0.12) : Color.clear
+        }
+    }
+
+    private var foregroundColor: Color {
+        if isActive {
+            return Color.accentColor
+        } else {
+            return isHovered ? Color.primary : Color.primary.opacity(0.82)
+        }
+    }
+}
+
+/// 现代化极简精致工具栏下拉菜单
+private struct ModernToolbarMenu<Content: View, LabelContent: View>: View {
+    var isActive: Bool = false
+    var fixedWidth: CGFloat? = nil
+    var helpText: String? = nil
+    @ViewBuilder let menuContent: () -> Content
+    @ViewBuilder let labelContent: () -> LabelContent
+
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        Menu {
+            menuContent()
+        } label: {
+            labelContent()
+                .frame(width: fixedWidth, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(backgroundColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(borderColor, lineWidth: 1)
+                )
+                .foregroundStyle(foregroundColor)
+                .shadow(color: isHovered ? Color.black.opacity(0.06) : Color.clear, radius: 2, x: 0, y: 1)
+                .scaleEffect(isHovered ? 1.03 : 1.0)
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: fixedWidth)
+        .onHover { hover in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = hover
+            }
+        }
+        .help(helpText ?? "")
+    }
+
+    private var backgroundColor: Color {
+        if isActive {
+            return isHovered ? Color.accentColor.opacity(0.24) : Color.accentColor.opacity(0.16)
+        } else {
+            return isHovered ? Color.primary.opacity(0.09) : Color.primary.opacity(0.04)
+        }
+    }
+
+    private var borderColor: Color {
+        if isActive {
+            return Color.accentColor.opacity(isHovered ? 0.45 : 0.3)
+        } else {
+            return isHovered ? Color.primary.opacity(0.12) : Color.clear
+        }
+    }
+
+    private var foregroundColor: Color {
+        if isActive {
+            return Color.accentColor
+        } else {
+            return isHovered ? Color.primary : Color.primary.opacity(0.82)
+        }
+    }
+}
+
+/// 细粒度分组垂直分割线
+private struct ModernToolbarDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.12))
+            .frame(width: 1, height: 14)
+            .padding(.horizontal, 2)
     }
 }

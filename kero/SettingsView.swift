@@ -96,40 +96,43 @@ struct SettingsView: View {
                 .settingsRowPadding()
             }
 
-            Section {
-                Group {
-                    Text("Window visual effect material when the window is transparent.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
+            // 仅在窗口背景不透明度小于 100% (即 < 1) 时显示窗口视觉效果设置
+            if settings.windowBackgroundOpacity < 1 {
+                Section {
+                    Group {
+                        Text("Window visual effect material when the window is transparent.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
 
-                    Picker("Effect material", selection: $settings.visualEffectMaterial) {
-                        Text("Under Window (Default)").tag("underWindowBackground")
-                        Text("Sidebar").tag("sidebar")
-                        Text("HUD Panel").tag("hud")
-                        Text("Popover").tag("popover")
-                        Text("Menu").tag("menu")
-                        Text("Header View").tag("headerView")
-                        Text("Titlebar").tag("titlebar")
+                        Picker("Effect material", selection: $settings.visualEffectMaterial) {
+                            Text("Under Window (Default)").tag("underWindowBackground")
+                            Text("Sidebar").tag("sidebar")
+                            Text("HUD Panel").tag("hud")
+                            Text("Popover").tag("popover")
+                            Text("Menu").tag("menu")
+                            Text("Header View").tag("headerView")
+                            Text("Titlebar").tag("titlebar")
+                        }
+
+                        Picker("Blending mode", selection: $settings.visualEffectBlendingMode) {
+                            Text("Behind Window").tag("behindWindow")
+                            Text("Within Window").tag("withinWindow")
+                        }
+
+                        Picker("Active state", selection: $settings.visualEffectState) {
+                            Text("Follow Application").tag("followsApp")
+                            Text("Follow Window Focus").tag("followsWindow")
+                            Text("Always Active").tag("active")
+                            Text("Always Inactive").tag("inactive")
+                        }
+
+                        backgroundOpacityControl(
+                            "Visual effect alpha",
+                            value: $settings.visualEffectAlpha
+                        )
                     }
-
-                    Picker("Blending mode", selection: $settings.visualEffectBlendingMode) {
-                        Text("Behind Window").tag("behindWindow")
-                        Text("Within Window").tag("withinWindow")
-                    }
-
-                    Picker("Active state", selection: $settings.visualEffectState) {
-                        Text("Follow Application").tag("followsApp")
-                        Text("Follow Window Focus").tag("followsWindow")
-                        Text("Always Active").tag("active")
-                        Text("Always Inactive").tag("inactive")
-                    }
-
-                    backgroundOpacityControl(
-                        "Visual effect alpha",
-                        value: $settings.visualEffectAlpha
-                    )
+                    .settingsRowPadding()
                 }
-                .settingsRowPadding()
             }
 
             Section("Project") {

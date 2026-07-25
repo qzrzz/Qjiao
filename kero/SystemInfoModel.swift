@@ -114,11 +114,18 @@ private extension SystemProxyInfo {
 struct SystemSnapshot: Equatable {
     var cpuUsagePercent: Double?
     var memoryTotalBytes: UInt64?
+    /// 与活动监视器「已使用内存」一致：App + Wired + Compressed（不含文件缓存）。
     var memoryUsedBytes: UInt64?
-    /// PhysMem 中的 wired（不可换出）。
+    /// App 内存（匿名页 − purgeable），与活动监视器「App 内存」对齐。
+    var memoryAppBytes: UInt64?
+    /// Wired（不可换出）。
     var memoryWiredBytes: UInt64?
-    /// PhysMem 中的 compressor（压缩占用）。
+    /// Compressor 占用的物理页（活动监视器「被压缩」）。
     var memoryCompressedBytes: UInt64?
+    /// 文件缓存（file-backed pages），可被系统回收。
+    var memoryCachedBytes: UInt64?
+    /// 真正空闲页（Pages free）。
+    var memoryFreeBytes: UInt64?
     /// 交换区已用 / 总量（`sysctl vm.swapusage`）。
     var memorySwapUsedBytes: UInt64?
     var memorySwapTotalBytes: UInt64?
@@ -142,13 +149,40 @@ struct SystemSnapshot: Equatable {
     var updatedAt: Date?
 }
 
-/// `top` 解析出的瞬时字段。
+/// `top` 解析出的瞬时字段（CPU 为主；内存仅作 vm_stat 失败时的回退）。
 private struct TopSample: Equatable {
     var cpuUsagePercent: Double?
     var memoryUsedBytes: UInt64?
     var memoryUnusedBytes: UInt64?
     var memoryWiredBytes: UInt64?
     var memoryCompressedBytes: UInt64?
+}
+
+/// `vm_stat` 解析结果：对齐活动监视器的内存分类。
+private struct VmStatSample: Equatable {
+    var pageSize: UInt64
+    var freePages: UInt64
+    var wiredPages: UInt64
+    var purgeablePages: UInt64
+    var anonymousPages: UInt64
+    var fileBackedPages: UInt64
+    /// Pages occupied by compressor（物理占用，非 stored）。
+    var compressorOccupiedPages: UInt64
+
+    /// App 内存 ≈ 匿名页 − 可清除页。
+    var appBytes: UInt64 {
+        let appPages = anonymousPages > purgeablePages
+            ? anonymousPages - purgeablePages
+            : 0
+        return appPages * pageSize
+    }
+
+    var wiredBytes: UInt64 { wiredPages * pageSize }
+    var compressedBytes: UInt64 { compressorOccupiedPages * pageSize }
+    var cachedBytes: UInt64 { fileBackedPages * pageSize }
+    var freeBytes: UInt64 { freePages * pageSize }
+    /// 活动监视器「已使用内存」= App + Wired + Compressed。
+    var usedBytes: UInt64 { appBytes + wiredBytes + compressedBytes }
 }
 
 /// `iostat -Id` 累计字节采样点（约每 30s 一拍）。
@@ -422,7 +456,9 @@ final class SystemInfoModel: nonisolated ObservableObject {
 
         // 并行跑互不依赖的命令，缩短整轮刷新时间。
         // 网络速率不用 top（累计字节只精确到 G，短间隔差分为 0），改用 netstat -ib。
+        // 内存以 vm_stat 为准（对齐活动监视器）；top 的 PhysMem used 含文件缓存会虚高。
         async let topResult = optionalRun(runner, ["top", "-l", "2", "-n", "0", "-s", "1"], timeout: .seconds(8))
+        async let vmStatResult = optionalRun(runner, ["vm_stat"], timeout: .seconds(2))
         async let netstatResult = optionalRun(runner, ["netstat", "-ib"], timeout: .seconds(3))
         async let dfResult = wantDisk
             ? optionalRun(runner, ["df", "-k", "/"], timeout: .seconds(4))
@@ -448,6 +484,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         async let swapResult = optionalRun(runner, ["sysctl", "-n", "vm.swapusage"], timeout: .seconds(2))
 
         let topOut = await topResult
+        let vmStatOut = await vmStatResult
         let netstatOut = await netstatResult
         let dfOut = await dfResult
         let iostatOut = await iostatResult
@@ -470,6 +507,11 @@ final class SystemInfoModel: nonisolated ObservableObject {
         if let topOut {
             let sample = Self.parseTop(topOut)
             applyTopSample(sample, to: &next)
+        }
+
+        // vm_stat 覆盖 top 的 PhysMem used（后者把 Cached Files 算进 used）。
+        if let vmStatOut, let vm = Self.parseVmStat(vmStatOut) {
+            applyVmStatSample(vm, to: &next)
         }
 
         if let swapOut, let (used, total) = Self.parseSwapUsage(swapOut) {
@@ -662,6 +704,8 @@ final class SystemInfoModel: nonisolated ObservableObject {
         if let cpu = sample.cpuUsagePercent {
             snapshot.cpuUsagePercent = cpu
         }
+        // 内存字段仅作 vm_stat 失败时的回退；成功后会被 applyVmStatSample 覆盖。
+        // 注意：top 的 PhysMem used ≈ 活动监视器 Used + Cached Files，会虚高。
         if let used = sample.memoryUsedBytes {
             snapshot.memoryUsedBytes = used
         }
@@ -680,6 +724,16 @@ final class SystemInfoModel: nonisolated ObservableObject {
 
         // 网络速率改由 netstat 累计字节差分，见 applyNetworkCounters。
         // 磁盘写入量改由 iostat -Id 每 30s 采样，见 applyDiskIOSample。
+    }
+
+    /// 用 vm_stat 写入与活动监视器一致的 Used / App / Wired / Compressed / Cached。
+    private func applyVmStatSample(_ sample: VmStatSample, to snapshot: inout SystemSnapshot) {
+        snapshot.memoryUsedBytes = sample.usedBytes
+        snapshot.memoryAppBytes = sample.appBytes
+        snapshot.memoryWiredBytes = sample.wiredBytes
+        snapshot.memoryCompressedBytes = sample.compressedBytes
+        snapshot.memoryCachedBytes = sample.cachedBytes
+        snapshot.memoryFreeBytes = sample.freeBytes
     }
 
     /// 每 30s 用 `iostat -Id` 设备累计字节，更新：
@@ -741,7 +795,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         lastNetAt = now
     }
 
-    // MARK: - top 解析
+    // MARK: - top / vm_stat 解析
 
     private nonisolated static func parseTop(_ output: String) -> TopSample {
         let sample = lastTopSample(in: output)
@@ -755,6 +809,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         }
 
         // PhysMem: 35G used (4653M wired, 16G compressor), 104M unused.
+        // 仅作 vm_stat 不可用时的回退；used 含文件缓存，偏高于活动监视器。
         if let used = parseByteQuantity(
             firstMatch(#"PhysMem:\s*([\d.]+[KMGT]?)\s*used"#, in: sample)
         ) {
@@ -777,6 +832,43 @@ final class SystemInfoModel: nonisolated ObservableObject {
         }
 
         return result
+    }
+
+    /// 解析 `vm_stat`，按活动监视器口径计算 App / Wired / Compressed / Used。
+    private nonisolated static func parseVmStat(_ output: String) -> VmStatSample? {
+        // 首行：Mach Virtual Memory Statistics: (page size of 16384 bytes)
+        let pageSize = firstMatch(
+            #"page size of (\d+)"#,
+            in: output
+        ).flatMap(UInt64.init) ?? 16_384
+
+        func pages(_ label: String) -> UInt64? {
+            // 标签可能带引号，如 "Translation faults"；页数后常有句点。
+            firstMatch(
+                #"\#(label):\s+(\d+)"#,
+                in: output
+            ).flatMap(UInt64.init)
+        }
+
+        guard let free = pages("Pages free"),
+              let wired = pages("Pages wired down"),
+              let purgeable = pages("Pages purgeable"),
+              let anonymous = pages("Anonymous pages"),
+              let fileBacked = pages("File-backed pages"),
+              let compressor = pages("Pages occupied by compressor")
+        else {
+            return nil
+        }
+
+        return VmStatSample(
+            pageSize: pageSize,
+            freePages: free,
+            wiredPages: wired,
+            purgeablePages: purgeable,
+            anonymousPages: anonymous,
+            fileBackedPages: fileBacked,
+            compressorOccupiedPages: compressor
+        )
     }
 
     /// 解析 `sysctl -n vm.swapusage`：`total = 1024.00M  used = 85.31M  free = …`

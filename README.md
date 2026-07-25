@@ -59,6 +59,7 @@
 - Start 面板「Add Launcher」按钮加大（顶栏 + 与空状态主按钮）。
 - 右侧面板上下分区框架：上半保留 Start/Files/Git 等；中间可拖分割（默认 70/30，双击恢复）；下半区顶部为 System / Note tabs（最小宽 75、宽度随内容），可收起到仅显示 tabs（双击底栏切换收起/展开）。
 - System 面板通过命令行采集主机信息（CPU%、内存、磁盘可用/总量、磁盘传输量、网络上下行、本机局域网 IP、系统代理、Google/Baidu/Cloudflare/GitHub 可达性）；不显示温度；并行 CLI 轮询、超时杀进程、手动刷新；预留 CLI runner 以便日后 SSH 远程。
+- System 内存指标与活动监视器对齐：用 `vm_stat` 计算 Used = App + Wired + Compressed（不含文件缓存）；tooltip 展示 App / Wired / Compressed / Cached / Free；`top` PhysMem 仅作回退。
 - Note 面板：按项目的纯文本草稿编辑器（自动换行、⌘F 查找）；内容防抖保存到 `~/.config/qjiao/notes/{projectId}.txt`（Debug 为 `qjiao-dev`），切换项目 / 收起面板 / 隐藏侧栏时立即落盘。
 - System 面板可视化：CPU/内存/磁盘紧凑单行 + 一行高历史折线；磁盘写入每 30s 用 `iostat -Id` 采样，记录最近 1 分钟量（折线）、会话累计量（行内 W）与累计时长；Net / IP / Proxy 紧凑行（IP 为默认路由网卡 IPv4 可复制；Proxy 复制 `export https_proxy=…`）；Reachability 可配置站点/间隔/GET·HEAD，柱状延迟历史，右键编辑与立即检测，探测走系统代理。
 - System Reachability 探测间隔默认 30s，下拉菜单显示勾选态与 `30s (Default)` 标注；间隔写入 `~/.config/qjiao/config.toml`（`system.reachability-interval`），重启后保留。
@@ -68,3 +69,11 @@
 - 右侧 Files / CWD / Git 文件列表按文件名与扩展名显示 Material Icon Theme 彩色图标（[vscode-material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme)）；目录名匹配专用文件夹图标，展开/收起使用 open 变体；可用 `bun run scripts/vendor-material-icons.ts` 更新图标资源。
 - 左侧面板底部 Theme 按钮支持左键点击立即切换主题（Light ↔ Dark，System 模式按系统实际外观反转），右键菜单提供主题选择、分割线及 Appearance Settings 快捷入口。
 - 右侧面板下半区底部 Tabs（System/Note 选项卡栏）的最小高度调整为 36，并优化展开逻辑（若之前拖拽将高度缩至最小，点击展开/双击 tabs 时自动恢复至默认 70/30 高度）。
+- 图片查看器增强：
+  - 放缩 > 100% 自动无缝切换像素插值模式（`.none`），≤ 100% 自动高质量插值（`.high`）。
+  - 支持以鼠标指针位置为中心的视口滚轮放缩与 Cmd/Shift 快捷平移；支持原图与对比图左右双图叠加对比与竖线分界。
+  - 内置专业级像素标尺与参考线系统：支持顶部/左侧标尺自适应像素刻度与指针指示；从标尺向内拖拽或双击标尺快速创建水平/垂直参考线；参考线支持悬停/拖动实时 `X: 320 px / Y: 180 px` 坐标提示气泡；参考线支持锁定防止误触；拖拽参考线至标尺内部或超出画布释放自动清除，并支持一键清除所有参考线；标尺数字支持中心精准对齐与 -90° 纵向排布；参考线支持靠近图片边缘与中心智能磁吸（Edge Snapping）。
+  - 增强画布右键上下文菜单（Context Menu）：快捷支持复制图片到剪贴板、复制文件路径、缩放适应/100% 重置、旋转 90°、切换背景模式（含 Light/Dark 棋盘格）、标尺/参考线开关控制、开启双图对比、拷贝元数据信息以及在 Finder 中高亮定位文件。
+  - 支持背景模式跨标签与应用重启 `@AppStorage` 持久化记忆，并全新推出 Dark Checkerboard（深色棋盘格）背景模式。
+  - 适配 Retina 高清屏 (High DPI Display)：自动响应 `screenBackingScale`，实现 1:1 绝对物理像素点对点精准对齐渲染。
+
