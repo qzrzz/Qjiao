@@ -100,6 +100,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 右侧 Files / CWD 文件树是否在文件名右侧显示文件大小。默认关闭以保持列表紧凑。
+    @Published var displayFileSize: Bool {
+        didSet { save() }
+    }
+
     /// Restore each terminal's previous scrollback (as static, styled text)
     /// when the app relaunches, above the freshly started shell. Off by
     /// default: opt-in, and it writes captured output to disk.
@@ -199,6 +204,7 @@ final class AppSettings: nonisolated ObservableObject {
         fontThicken = toml["font-thicken"]?.bool ?? false
         useBundledChineseTerminalFont = toml["terminal.use-bundled-chinese-font"]?.bool ?? true
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
+        displayFileSize = toml["files.display-file-size"]?.bool ?? false
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
         disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
@@ -263,6 +269,7 @@ final class AppSettings: nonisolated ObservableObject {
         visualEffectState = "followsApp"
         visualEffectAlpha = 1
         wrapLines = false
+        displayFileSize = false
         restoreTerminalHistory = false
         directClickMovesCursor = false
         disableZshAutoTitle = false
@@ -309,6 +316,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if wrapLines {
             lines.append("editor.wrap-lines = true")
+        }
+        if displayFileSize {
+            lines.append("files.display-file-size = true")
         }
         if restoreTerminalHistory {
             lines.append("terminal.restore-history = true")

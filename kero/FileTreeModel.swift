@@ -16,6 +16,8 @@ final class FileTreeModel: nonisolated ObservableObject {
         let path: String
         let isDirectory: Bool
         let depth: Int
+        /// 普通文件的字节大小；目录与草稿行不计算，保持列表刷新廉价。
+        let fileSize: UInt64?
         /// True for the transient inline "new file/folder" input row, which
         /// has no backing file yet.
         var isDraft = false
@@ -225,7 +227,8 @@ final class FileTreeModel: nonisolated ObservableObject {
             out.append(
                 Item(
                     name: "", path: dir + "/\u{1}draft",
-                    isDirectory: draft.isDirectory, depth: depth, isDraft: true
+                    isDirectory: draft.isDirectory, depth: depth,
+                    fileSize: nil, isDraft: true
                 )
             )
         }
@@ -238,7 +241,17 @@ final class FileTreeModel: nonisolated ObservableObject {
                 let path = (dir as NSString).appendingPathComponent(name)
                 var isDir: ObjCBool = false
                 fm.fileExists(atPath: path, isDirectory: &isDir)
-                return Item(name: name, path: path, isDirectory: isDir.boolValue, depth: depth)
+                let isDirectory = isDir.boolValue
+                // 仅读文件属性；目录体积需递归，不在树刷新路径上计算。
+                let fileSize: UInt64? = {
+                    guard !isDirectory else { return nil }
+                    let attrs = try? fm.attributesOfItem(atPath: path)
+                    return (attrs?[.size] as? NSNumber)?.uint64Value
+                }()
+                return Item(
+                    name: name, path: path, isDirectory: isDirectory,
+                    depth: depth, fileSize: fileSize
+                )
             }
             .sorted { a, b in
                 if a.isDirectory != b.isDirectory { return a.isDirectory }

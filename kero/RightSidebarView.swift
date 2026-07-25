@@ -537,6 +537,7 @@ private struct FileTreePanel: View {
 
 private struct FileTreeRow: View {
     @ObservedObject var model: FileTreeModel
+    @ObservedObject private var settings = AppSettings.shared
     let item: FileTreeModel.Item
     let session: TerminalSession?
     let currentFilePath: String?
@@ -552,6 +553,23 @@ private struct FileTreeRow: View {
 
     /// The file open in the active tab, so it reads as selected in the tree.
     private var isCurrent: Bool { !item.isDirectory && item.path == currentFilePath }
+
+    /// 设置开启时在文件名右侧显示的人类可读大小（目录不显示）。
+    private var fileSizeLabel: String? {
+        guard settings.displayFileSize, !item.isDirectory, !item.isDraft,
+              let size = item.fileSize
+        else { return nil }
+        return FileTreeRow.byteFormatter.string(fromByteCount: Int64(clamping: size))
+    }
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB, .useTB]
+        formatter.countStyle = .file
+        formatter.includesUnit = true
+        formatter.isAdaptive = true
+        return formatter
+    }()
 
     var body: some View {
         if item.isDraft {
@@ -655,7 +673,16 @@ private struct FileTreeRow: View {
                 Text(item.name)
                     .foregroundStyle(item.name.hasPrefix(".") ? .tertiary : .secondary)
                     .lineLimit(1)
-                Spacer(minLength: 0)
+                    .layoutPriority(1)
+                Spacer(minLength: 4)
+                if let fileSizeLabel {
+                    Text(fileSizeLabel)
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .layoutPriority(0)
+                }
             }
             // 字号挂在整行上，避免 Button 标签内个别 Text 字号被控件样式吞掉。
             .font(SidebarTypography.body())
@@ -754,11 +781,15 @@ private struct FileTreeRow: View {
             } else {
                 Spacer().frame(width: 12)
             }
-            Image(systemName: item.isDirectory ? "folder.fill" : "doc.text")
-                // 目录树图标与文件名同级可读，不用更小的 caption。
-                .font(SidebarTypography.secondary())
-                .foregroundStyle(item.isDirectory ? Color(nsColor: Theme.cursor).opacity(0.8) : Color.secondary)
-                .frame(width: 16, alignment: .center)
+            // Material Icon Theme：按文件名/扩展名/目录名匹配彩色 SVG。
+            MaterialFileIconView(
+                fileName: item.name,
+                isDirectory: item.isDirectory,
+                isExpanded: item.isDirectory && model.isExpanded(item),
+                isRoot: item.path == model.rootPath,
+                size: 16
+            )
+            .frame(width: 16, alignment: .center)
         }
     }
 }
@@ -1941,6 +1972,12 @@ private struct GitEntryRow: View {
                         .font(SidebarTypography.caption(.bold, design: .monospaced))
                         .foregroundStyle(statusColor)
                         .frame(width: 12)
+                    // Git 变更行：按文件名匹配 Material 图标（目录变更极少，按文件处理）。
+                    MaterialFileIconView(
+                        fileName: entry.fileName,
+                        isDirectory: false,
+                        size: 14
+                    )
                     Text(entry.fileName)
                         .font(SidebarTypography.body())
                         .foregroundStyle(.secondary)

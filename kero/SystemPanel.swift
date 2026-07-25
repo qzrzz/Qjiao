@@ -620,11 +620,12 @@ struct SystemPanel: View {
         siteEditor = nil
     }
 
-    /// 检测中固定 `...`；成功用紧凑单位，避免 `523ms` 在窄栏被截成 `523...`。
+    /// 仅检测中显示 `...`；未检测和失败都显示 `—`，避免误以为任务卡住。
+    /// 成功用紧凑单位，避免 `523ms` 在窄栏被截成 `523...`。
     private func latencyText(_ status: SystemReachabilityStatus, checking: Bool) -> String {
         if checking { return "..." }
         switch status {
-        case .unknown: return "..."
+        case .unknown: return "—"
         case .reachable(let ms):
             guard let ms else { return "OK" }
             if ms < 1000 { return "\(ms)ms" }

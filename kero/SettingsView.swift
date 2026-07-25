@@ -39,7 +39,8 @@ struct SettingsView: View {
                             .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundStyle(selectedSection == section ? Color.accentColor : .secondary)
-                    .frame(width: 80, height: 60)
+                    // 五个分类时略收窄卡片，避免顶栏横向溢出固定窗口宽度。
+                    .frame(width: 74, height: 60)
                     .background(
                         RoundedRectangle(cornerRadius: 7)
                             .fill(selectedSection == section ? Color.accentColor.opacity(0.10) : .clear)
@@ -303,6 +304,21 @@ struct SettingsView: View {
             }
             }
 
+            if selectedSection == .files {
+            Section("File Tree") {
+                Group {
+                    settingWithDescription(
+                        "Display File Size",
+                        "Show each file’s size on the right in the Files and CWD panels."
+                    ) {
+                        Toggle("", isOn: $settings.displayFileSize)
+                            .labelsHidden()
+                    }
+                }
+                .settingsRowPadding()
+            }
+            }
+
             if selectedSection == .about {
             Section {
                 Group {
@@ -465,6 +481,7 @@ struct SettingsView: View {
             && settings.visualEffectState == "followsApp"
             && settings.visualEffectAlpha == 1
             && !settings.wrapLines
+            && !settings.displayFileSize
             && !settings.restoreTerminalHistory
             && !settings.directClickMovesCursor
             && !settings.disableZshAutoTitle
@@ -478,6 +495,7 @@ private enum SettingsSection: CaseIterable, Identifiable {
     case general
     case terminal
     case editor
+    case files
     case about
 
     var id: Self { self }
@@ -487,6 +505,7 @@ private enum SettingsSection: CaseIterable, Identifiable {
         case .general: "General"
         case .terminal: "Terminal"
         case .editor: "Editor"
+        case .files: "Files"
         case .about: "About"
         }
     }
@@ -496,6 +515,7 @@ private enum SettingsSection: CaseIterable, Identifiable {
         case .general: "gearshape"
         case .terminal: "terminal"
         case .editor: "text.cursor"
+        case .files: "folder"
         case .about: "info.circle"
         }
     }

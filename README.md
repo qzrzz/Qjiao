@@ -46,7 +46,8 @@
 - 修复开启终端不透明度时切换 Tab 后未选中的 Git Diff 对比器透出显示的问题，并将终端背景不透明度设置应用于 Git Diff 对比器。
 - 终端 Tab 最小宽度调整为 136；标题变长时立即扩张，变短后延迟收缩并带有过渡动画，减少标签宽度抖动；自动与手动标签名的最大宽度均为 220。
 - 增加全局“禁用 Zsh 自动标题名”开关；仅为 Qjiao 新建的 zsh 终端设置 `DISABLE_AUTO_TITLE=true`，并可在 Tab 右键菜单中切换。
-- 设置面板改为顶部图标分类导航，按 General、Terminal、Editor、About 分组展示配置项；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
+- 设置面板改为顶部图标分类导航，按 General、Terminal、Editor、Files、About 分组展示配置项；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
+- 设置 Files 分组：Display File Size 可在右侧 Files / CWD 文件树中显示文件大小（目录不计算体积）；配置写入 `files.display-file-size`。
 - 统一 chrome 字号体系（`SidebarTypography`）：左侧项目栏、右侧边栏 Start / Files / CWD / Git / Info 与顶栏 Tabs 共用 title / body / secondary / caption 等角色；列表与标签主文字统一为 13，正文字号不低于 11 以提高可读性。
 - Start 面板「Add Launcher」按钮加大（顶栏 + 与空状态主按钮）。
 - 右侧面板上下分区框架：上半保留 Start/Files/Git 等；中间可拖分割（默认 70/30，双击恢复）；下半区顶部为 System / Note tabs（最小宽 75、宽度随内容），可收起到仅显示 tabs（双击底栏切换收起/展开）。
@@ -56,3 +57,4 @@
 - System Reachability 探测间隔默认 30s，下拉菜单显示勾选态与 `30s (Default)` 标注；间隔写入 `~/.config/qjiao/config.toml`（`system.reachability-interval`），重启后保留。
 - System Reachability 保留每个站点最近一次探测错误；hover 提示展示 Last error，右键菜单提供 Copy error（无错误时 disabled）。
 - System Reachability 支持按站点配置 GET/HEAD：添加/编辑表单分段选择、右键菜单勾选切换并立即重测；curl 探测隔离用户 curl 配置、仅允许 HTTP(S)、按系统 HTTP/HTTPS/SOCKS 代理及绕过规则访问，PAC/WPAD 会明确提示暂不支持；配置随站点持久化。
+- 右侧 Files / CWD / Git 文件列表按文件名与扩展名显示 Material Icon Theme 彩色图标（[vscode-material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme)）；目录名匹配专用文件夹图标，展开/收起使用 open 变体；可用 `bun run scripts/vendor-material-icons.ts` 更新图标资源。

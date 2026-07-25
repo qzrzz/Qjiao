@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "release": "bun run scripts/release.ts",
-    "appcast": "bun run scripts/generate-appcast.ts"
+    "appcast": "bun run scripts/generate-appcast.ts",
+    "vendor:material-icons": "bun run scripts/vendor-material-icons.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

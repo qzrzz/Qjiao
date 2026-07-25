@@ -1,0 +1,1 @@
+material-icon-theme@5.37.0
