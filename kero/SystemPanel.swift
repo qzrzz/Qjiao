@@ -36,61 +36,18 @@ struct SystemPanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    resourceCard
-                    // Net + Proxy 同一组，行距与资源区一致。
-                    networkGroup
-                    reachabilityCard
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                resourceCard
+                // Net + Proxy 同一组，行距与资源区一致。
+                networkGroup
+                reachabilityCard
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(.easeInOut(duration: 0.25), value: model.snapshot)
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "cpu")
-                .font(SidebarTypography.caption(.medium))
-                .foregroundStyle(accent)
-            Text("System")
-                .font(SidebarTypography.section(.semibold))
-                .foregroundStyle(.secondary)
-            if model.isRefreshing {
-                ProgressView()
-                    .controlSize(.mini)
-                    .scaleEffect(0.7)
-                    .frame(width: 12, height: 12)
-            }
-            Spacer(minLength: 0)
-            Button {
-                model.refreshNow()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(SidebarTypography.caption(.medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 5))
-            }
-            .buttonStyle(.plain)
-            .help("Refresh")
-            .disabled(model.isRefreshing)
-            .opacity(model.isRefreshing ? 0.45 : 1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.top, 6)
-        .padding(.bottom, 4)
     }
 
     // MARK: - Resource (CPU / Memory / Disk) — 一行一项 + 右对齐等宽折线
@@ -109,7 +66,9 @@ struct SystemPanel: View {
                 history: model.cpuHistory,
                 normalize: { $0 / 100 },
                 currentFraction: (model.snapshot.cpuUsagePercent ?? 0) / 100,
-                hasValue: model.snapshot.cpuUsagePercent != nil
+                hasValue: model.snapshot.cpuUsagePercent != nil,
+                // 刷新控件紧跟「CPU 66%」，与转圈合并为同一按钮。
+                afterPercent: { refreshControl }
             )
             compactMetricRow(
                 title: "Mem",
@@ -139,8 +98,33 @@ struct SystemPanel: View {
         // 无内边距、无背景，尽量贴齐侧栏内容区。
     }
 
-    /// 单行：环 · 标题 · 百分比 · 浅色具体值 · 折线。
-    private func compactMetricRow(
+    /// 刷新与转圈合并：空闲显示箭头，刷新中显示 ProgressView 且不可点。
+    private var refreshControl: some View {
+        Button {
+            model.refreshNow()
+        } label: {
+            ZStack {
+                if model.isRefreshing {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(SidebarTypography.micro(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 14, height: 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.isRefreshing)
+        .help(model.isRefreshing ? "Refreshing…" : "Refresh")
+        .accessibilityLabel(model.isRefreshing ? "Refreshing" : "Refresh")
+    }
+
+    /// 单行：环 · 标题 · 百分比 · [可选 afterPercent] · 浅色具体值 · 折线。
+    private func compactMetricRow<AfterPercent: View>(
         title: String,
         percent: String?,
         detail: String?,
@@ -149,7 +133,8 @@ struct SystemPanel: View {
         normalize: @escaping (Double) -> Double,
         historyCapacity: Int = SystemInfoModel.historyCapacity,
         currentFraction: Double,
-        hasValue: Bool
+        hasValue: Bool,
+        @ViewBuilder afterPercent: () -> AfterPercent = { EmptyView() }
     ) -> some View {
         let fraction = min(max(currentFraction, 0), 1)
         let tint = loadColor(fraction, hasValue: hasValue)
@@ -160,6 +145,7 @@ struct SystemPanel: View {
                 // 圆环与后续文本间距 +2pt。
                 .padding(.trailing, 2)
             metricTextCluster(title: title, percent: percent, detail: detail, tooltip: textTooltip)
+            afterPercent()
             Spacer(minLength: 2)
             SystemSparkline(
                 values: series,

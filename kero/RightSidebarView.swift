@@ -31,7 +31,7 @@ private enum RightBottomPanel: String, CaseIterable, Identifiable {
 
 /// Right sidebar: hidden by default, toggled from the terminal's corner
 /// button or ⇧⌘B. 上半区沿用 Start/Files/Git 等顶栏面板；下半区为
-/// System / Note 框架（内容待填）；中间可拖分割。
+/// System / Note；中间可拖分割。
 struct RightSidebarView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var themeChanges = Theme.changes
@@ -40,6 +40,7 @@ struct RightSidebarView: View {
     @StateObject private var git = GitStatusModel()
     @StateObject private var info = SessionInfoModel()
     @StateObject private var systemInfo = SystemInfoModel()
+    @StateObject private var noteModel = NoteModel()
     @AppStorage("rightSidebarWidth") private var width: Double = 240
     /// 上半区占「可分割内容高度」的比例；默认 70%。收起下半区时仍保留，便于展开还原。
     @AppStorage("rightSidebarTopFraction") private var topFraction: Double = 0.70
@@ -114,11 +115,18 @@ struct RightSidebarView: View {
         .onAppear {
             syncModels()
             syncSystemPolling()
+            syncNoteBinding()
         }
         .onReceive(refreshTimer) { _ in syncModels() }
         .onChange(of: manager.isPanelVisible) {
             syncModels()
             syncSystemPolling()
+            // 隐藏右侧栏时先落盘，避免防抖未到就丢改动。
+            if !manager.isPanelVisible {
+                noteModel.flush()
+            } else {
+                syncNoteBinding()
+            }
         }
         .onChange(of: manager.panelTab) { syncModels() }
         .onChange(of: manager.selectedSession?.id) { syncModels() }
@@ -126,8 +134,27 @@ struct RightSidebarView: View {
         // session.workingDirectory); resync at once instead of waiting for the
         // next refreshTimer tick, which is what made the panel lag the change.
         .onChange(of: manager.selectedSession?.workingDirectory) { syncModels() }
-        .onChange(of: bottomTabRaw) { syncSystemPolling() }
-        .onChange(of: bottomCollapsed) { syncSystemPolling() }
+        .onChange(of: manager.selectedProject?.id) { syncNoteBinding() }
+        .onChange(of: bottomTabRaw) {
+            syncSystemPolling()
+            // 离开 Note tab 时立即写盘。
+            if bottomTab != .note {
+                noteModel.flush()
+            } else {
+                syncNoteBinding()
+            }
+        }
+        .onChange(of: bottomCollapsed) {
+            syncSystemPolling()
+            if bottomCollapsed {
+                noteModel.flush()
+            }
+        }
+    }
+
+    /// 笔记绑定当前选中项目；无项目时清空绑定。
+    private func syncNoteBinding() {
+        noteModel.bind(to: manager.selectedProject?.id)
     }
 
     /// 仅在右侧栏可见、下半区展开且选中 System 时轮询 CLI 指标。
@@ -167,7 +194,7 @@ struct RightSidebarView: View {
                 VStack(spacing: 0) {
                     bottomTabBar
                     if !bottomCollapsed, bottomHeight > Self.bottomBarHeight {
-                        bottomPlaceholder
+                        bottomPanelContent
                     }
                 }
                 .frame(height: bottomHeight, alignment: .top)
@@ -249,27 +276,17 @@ struct RightSidebarView: View {
         }
     }
 
-    /// 下半区内容：System 接 CLI 采集面板；Note 仍为占位。
+    /// 下半区内容：System 为 CLI 指标；Note 为按项目的纯文本草稿。
     @ViewBuilder
-    private var bottomPlaceholder: some View {
+    private var bottomPanelContent: some View {
         switch bottomTab {
         case .system:
             SystemPanel(model: systemInfo)
         case .note:
-            VStack(spacing: 8) {
-                Image(systemName: RightBottomPanel.note.systemImage)
-                    .font(SidebarTypography.emptyInlineIcon())
-                    .foregroundStyle(.tertiary)
-                Text(RightBottomPanel.note.title)
-                    .font(SidebarTypography.body(.medium))
-                    .foregroundStyle(.secondary)
-                Text("Coming soon")
-                    .font(SidebarTypography.section())
-                    .foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Note, coming soon")
+            NotePanel(
+                model: noteModel,
+                hasProject: manager.selectedProject != nil
+            )
         }
     }
 
@@ -282,6 +299,7 @@ struct RightSidebarView: View {
                     bottomTabButton(tab)
                 }
                 Spacer(minLength: 0)
+                bottomCollapseButton
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -296,6 +314,23 @@ struct RightSidebarView: View {
         )
         .help(bottomCollapsed ? "Double-click to expand" : "Double-click to collapse")
         .accessibilityHint(bottomCollapsed ? "Double-click to expand panel" : "Double-click to collapse panel")
+    }
+
+    /// 底栏右侧收起/展开，行为与双击 tabs 一致。
+    private var bottomCollapseButton: some View {
+        let title = bottomCollapsed ? "Expand" : "Collapse"
+        return Button {
+            toggleBottomCollapsed()
+        } label: {
+            Image(systemName: bottomCollapsed ? "chevron.up" : "chevron.down")
+                .font(SidebarTypography.caption(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .contentShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
     }
 
     private func bottomTabButton(_ tab: RightBottomPanel) -> some View {
