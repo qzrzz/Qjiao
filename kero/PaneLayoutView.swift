@@ -285,7 +285,15 @@ struct PaneLayoutView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             } else if let content {
                 HStack(spacing: 6) {
-                    Image(systemName: content.systemImage)
+                    if let fileName = content.materialFileName {
+                        MaterialFileIconView(
+                            fileName: fileName,
+                            isDirectory: false,
+                            size: 14
+                        )
+                    } else {
+                        Image(systemName: content.systemImage)
+                    }
                     Text(content.title).lineLimit(1)
                 }
                 .font(.system(size: 12, weight: .medium))

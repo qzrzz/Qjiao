@@ -666,7 +666,8 @@ private struct PaneTabItem: View {
         let paneCount = tab.allPanes.count
         if renamingTabID == tab.id {
             TabRenameChrome(
-                icon: tab.focusedContent?.systemImage ?? "terminal",
+                systemImage: tab.focusedContent?.systemImage ?? "terminal",
+                materialFileName: tab.focusedContent?.materialFileName,
                 initialValue: tab.displayTitle ?? "",
                 commit: { value in
                     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -697,6 +698,7 @@ private struct PaneTabItem: View {
             case .diff(let diff):
                 TabItemChrome(
                     systemImage: "plus.forwardslash.minus",
+                    materialFileName: diff.name,
                     title: tab.customName ?? diff.title,
                     manualTitle: tab.customName,
                     paneCount: paneCount,
@@ -714,7 +716,9 @@ private struct PaneTabItem: View {
 
 /// Inline editor for a tab title; Enter/focus loss commits and Escape cancels.
 private struct TabRenameChrome: View {
-    let icon: String
+    let systemImage: String
+    /// 打开文件 / Diff 时用 Material 图标，与文件树一致。
+    var materialFileName: String? = nil
     let initialValue: String
     let commit: (String) -> Void
     let end: () -> Void
@@ -722,8 +726,15 @@ private struct TabRenameChrome: View {
     @State private var finished = false
     @FocusState private var focused: Bool
 
-    init(icon: String, initialValue: String, commit: @escaping (String) -> Void, end: @escaping () -> Void) {
-        self.icon = icon
+    init(
+        systemImage: String,
+        materialFileName: String? = nil,
+        initialValue: String,
+        commit: @escaping (String) -> Void,
+        end: @escaping () -> Void
+    ) {
+        self.systemImage = systemImage
+        self.materialFileName = materialFileName
         self.initialValue = initialValue
         self.commit = commit
         self.end = end
@@ -732,7 +743,7 @@ private struct TabRenameChrome: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: icon).font(SidebarTypography.micro())
+            TabStripIconView(systemImage: systemImage, materialFileName: materialFileName, isSelected: true)
             TextField("", text: $draft)
                 .textFieldStyle(.plain)
                 .font(SidebarTypography.body())
@@ -793,6 +804,7 @@ private struct FileTabLabel: View {
     var body: some View {
         TabItemChrome(
             systemImage: "doc.text",
+            materialFileName: file.name,
             title: customTitle ?? file.name,
             manualTitle: customTitle,
             paneCount: paneCount,
@@ -805,6 +817,30 @@ private struct FileTabLabel: View {
     }
 }
 
+/// 顶栏 Tab / 重命名条上的图标：打开文件用 Material Icon，终端等仍用 SF Symbol。
+private struct TabStripIconView: View {
+    let systemImage: String
+    var materialFileName: String? = nil
+    var isSelected = false
+    /// 与 ProgressView mini 框、micro SF Symbol 视觉对齐。
+    private static let materialSize: CGFloat = 12
+
+    var body: some View {
+        if let materialFileName {
+            MaterialFileIconView(
+                fileName: materialFileName,
+                isDirectory: false,
+                size: Self.materialSize
+            )
+            .opacity(isSelected ? 1 : 0.72)
+        } else {
+            Image(systemName: systemImage)
+                .font(SidebarTypography.micro())
+                .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: Theme.cursor)) : AnyShapeStyle(.tertiary))
+        }
+    }
+}
+
 private struct TabItemChrome: View {
     /// 常规 Tab 的最小宽度，避免短标题让标签过于紧凑。
     private static let minimumWidth: CGFloat = 136
@@ -814,6 +850,8 @@ private struct TabItemChrome: View {
     private static let shrinkDelay: Duration = .seconds(2)
 
     let systemImage: String
+    /// 非空时优先显示 Material 文件图标（打开的文件 / Diff）。
+    var materialFileName: String? = nil
     let title: String
     /// 非空时表示用户手动指定的标签名，应立即采用其对应宽度。
     var manualTitle: String?
@@ -839,9 +877,11 @@ private struct TabItemChrome: View {
                         .frame(width: 11, height: 11)
                         .accessibilityLabel("Command running")
                 } else {
-                    Image(systemName: systemImage)
-                        .font(SidebarTypography.micro())
-                        .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: Theme.cursor)) : AnyShapeStyle(.tertiary))
+                    TabStripIconView(
+                        systemImage: systemImage,
+                        materialFileName: materialFileName,
+                        isSelected: isSelected
+                    )
                 }
                 Text(title)
                     .font(SidebarTypography.body())
@@ -949,11 +989,12 @@ private struct TabItemChrome: View {
 }
 
 /// Terminal items switch from the idle terminal glyph to a native spinner
-/// while their foreground process is busy. Non-terminal content keeps its
-/// regular icon.
+/// while their foreground process is busy. Open files / diffs use Material
+/// icons (same as the Files tree); other content keeps its SF Symbol.
 private struct TabContentIcon: View {
     let content: PaneContent?
     let tint: Color
+    private static let materialSize: CGFloat = 14
 
     var body: some View {
         if case .session(let session)? = content, session.isForegroundCommandRunning {
@@ -961,6 +1002,12 @@ private struct TabContentIcon: View {
                 .controlSize(.small)
                 .tint(tint)
                 .accessibilityLabel("Command running")
+        } else if let fileName = content?.materialFileName {
+            MaterialFileIconView(
+                fileName: fileName,
+                isDirectory: false,
+                size: Self.materialSize
+            )
         } else {
             Image(systemName: content?.systemImage ?? "terminal")
                 .font(SidebarTypography.secondary(.medium))

@@ -1,6 +1,6 @@
 /**
  * 从 npm 包 `material-icon-theme` 同步 SVG 图标与关联表到
- * `kero/MaterialIcons/`，供右侧 Files / CWD / Git 文件树使用。
+ * `kero/MaterialIcons/`，供右侧 Files / CWD / Git 文件树与顶栏 Tabs 使用。
  *
  * 用法：
  *   bun run scripts/vendor-material-icons.ts

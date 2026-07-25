@@ -2,8 +2,9 @@
 //  MaterialFileIcon.swift
 //  kero
 //
-//  右侧 Files / CWD / Git 文件列表图标：匹配逻辑与 SVG 资源来自
-//  Material Icon Theme（https://github.com/material-extensions/vscode-material-icon-theme）。
+//  Files / CWD / Git 文件列表与顶栏 Tabs（打开的文件 / Diff）图标：
+//  匹配逻辑与 SVG 资源来自 Material Icon Theme
+//  （https://github.com/material-extensions/vscode-material-icon-theme）。
 //
 
 import AppKit

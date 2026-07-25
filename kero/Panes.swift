@@ -47,6 +47,15 @@ extension PaneContent {
         }
     }
 
+    /// 打开的文件 / Diff 对应的文件名，供 Material Icon 解析；终端为 nil。
+    @MainActor var materialFileName: String? {
+        switch self {
+        case .session: return nil
+        case .file(let file): return file.name
+        case .diff(let diff): return diff.name
+        }
+    }
+
     @MainActor var isDirty: Bool {
         if case .file(let file) = self { return file.isDirty }
         return false
