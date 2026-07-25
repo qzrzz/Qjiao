@@ -689,10 +689,10 @@ struct GuideLine: Identifiable, Equatable, Hashable {
     }
 }
 
-/// 根据图像在 View 上的实时 Point 像素缩放因子 (effectiveScale = currentScale / screenBackingScale) 计算智能刻度步长
-func calculateRulerStep(effectiveScale: CGFloat) -> CGFloat {
+/// 根据图像 1 物理像素在 View 中的实际 Point 比例 (pixelScale = unrotatedWidth / pixelWidth) 计算刻度步长 (px)
+func calculateRulerStep(pixelScale: CGFloat) -> CGFloat {
     let targetPointStep: CGFloat = 60.0
-    let rawPxStep = targetPointStep / max(effectiveScale, 0.0001)
+    let rawPxStep = targetPointStep / max(pixelScale, 0.0001)
 
     let exponent = floor(log10(rawPxStep))
     let base = pow(10.0, exponent)
@@ -712,10 +712,10 @@ func calculateRulerStep(effectiveScale: CGFloat) -> CGFloat {
     return base * stepFactor
 }
 
-/// 顶部水平像素标尺绘制组件 (绝对对齐：0 刻度死死锁在图片 0,0 坐标，放缩与图片 100% 同步)
+/// 顶部水平像素标尺绘制组件 (绝对对齐：刻度与图像真实物理像素在任意放缩倍率下 100% 精确重合)
 struct TopRulerCanvas: View {
     let originX: CGFloat
-    let effectiveScale: CGFloat
+    let pixelScale: CGFloat
     let mouseX: CGFloat?
 
     var body: some View {
@@ -729,14 +729,14 @@ struct TopRulerCanvas: View {
             }
             context.stroke(bottomLine, with: .color(Color.primary.opacity(0.15)), lineWidth: 1)
 
-            let stepPx = calculateRulerStep(effectiveScale: effectiveScale)
+            let stepPx = calculateRulerStep(pixelScale: pixelScale)
 
-            let startPx = floor(-originX / (effectiveScale * stepPx)) * stepPx
-            let endPx = ceil((size.width - originX) / (effectiveScale * stepPx)) * stepPx
+            let startPx = floor(-originX / (pixelScale * stepPx)) * stepPx
+            let endPx = ceil((size.width - originX) / (pixelScale * stepPx)) * stepPx
 
             var px = startPx
             while px <= endPx {
-                let x = originX + px * effectiveScale
+                let x = originX + px * pixelScale
                 // 避开左侧 20px 相交按钮，留在视口内绘制
                 if x >= 20 && x <= size.width {
                     // 主刻度线 (长 5px，紧贴底边)
@@ -770,10 +770,10 @@ struct TopRulerCanvas: View {
     }
 }
 
-/// 左侧垂直像素标尺绘制组件 (绝对对齐：0 刻度死死锁在图片 0,0 坐标，放缩与图片 100% 同步)
+/// 左侧垂直像素标尺绘制组件 (绝对对齐：刻度与图像真实物理像素在任意放缩倍率下 100% 精确重合)
 struct LeftRulerCanvas: View {
     let originY: CGFloat
-    let effectiveScale: CGFloat
+    let pixelScale: CGFloat
     let mouseY: CGFloat?
 
     var body: some View {
@@ -787,14 +787,14 @@ struct LeftRulerCanvas: View {
             }
             context.stroke(rightLine, with: .color(Color.primary.opacity(0.15)), lineWidth: 1)
 
-            let stepPx = calculateRulerStep(effectiveScale: effectiveScale)
+            let stepPx = calculateRulerStep(pixelScale: pixelScale)
 
-            let startPy = floor(-originY / (effectiveScale * stepPx)) * stepPx
-            let endPy = ceil((size.height - originY) / (effectiveScale * stepPx)) * stepPx
+            let startPy = floor(-originY / (pixelScale * stepPx)) * stepPx
+            let endPy = ceil((size.height - originY) / (pixelScale * stepPx)) * stepPx
 
             var py = startPy
             while py <= endPy {
-                let y = originY + py * effectiveScale
+                let y = originY + py * pixelScale
                 // 避开顶部 20px 相交按钮，留在视口内绘制
                 if y >= 20 && y <= size.height {
                     // 主刻度线 (长 5px，紧贴右边)
@@ -1063,7 +1063,8 @@ struct ImageViewerView: View {
                         containerSize: containerSize,
                         originX: originX,
                         originY: originY,
-                        currentScale: currentScale
+                        currentScale: currentScale,
+                        unrotatedWidth: unrotatedWidth
                     )
                 }
                 .onContinuousHover { phase in
@@ -1393,9 +1394,11 @@ struct ImageViewerView: View {
         containerSize: CGSize,
         originX: CGFloat,
         originY: CGFloat,
-        currentScale: CGFloat
+        currentScale: CGFloat,
+        unrotatedWidth: CGFloat
     ) -> some View {
         let rulerOffset: CGFloat = isRulerEnabled ? 20 : 0
+        let pixelScale = unrotatedWidth / max(CGFloat(metadata.pixelWidth), 1.0)
 
         ZStack(alignment: .topLeading) {
             // 1. 已保存参考线列表渲染层
@@ -1407,7 +1410,8 @@ struct ImageViewerView: View {
                         originX: originX,
                         originY: originY,
                         currentScale: currentScale,
-                        rulerOffset: rulerOffset
+                        rulerOffset: rulerOffset,
+                        pixelScale: pixelScale
                     )
                 }
             }
@@ -1420,7 +1424,8 @@ struct ImageViewerView: View {
                     containerSize: containerSize,
                     originX: originX,
                     originY: originY,
-                    currentScale: currentScale
+                    currentScale: currentScale,
+                    pixelScale: pixelScale
                 )
             }
 
@@ -1430,7 +1435,8 @@ struct ImageViewerView: View {
                     containerSize: containerSize,
                     originX: originX,
                     originY: originY,
-                    currentScale: currentScale
+                    currentScale: currentScale,
+                    pixelScale: pixelScale
                 )
             }
         }
@@ -1482,9 +1488,9 @@ struct ImageViewerView: View {
         originX: CGFloat,
         originY: CGFloat,
         currentScale: CGFloat,
-        rulerOffset: CGFloat
+        rulerOffset: CGFloat,
+        pixelScale: CGFloat
     ) -> some View {
-        let effectiveScale = currentScale / screenBackingScale
         let isHovered = hoveredGuideId == guide.id
         let isDragging = draggingGuideId == guide.id
         let activePos = isDragging ? (draggingGuidePixelPos ?? guide.pixelPosition) : guide.pixelPosition
@@ -1492,7 +1498,7 @@ struct ImageViewerView: View {
 
         if guide.orientation == .horizontal {
             // 水平参考线 (固定 View Y 坐标)
-            let viewY = originY + activePos * effectiveScale
+            let viewY = originY + activePos * pixelScale
             let isOutOfBounds = isDragging && (viewY <= rulerOffset || viewY <= 0 || viewY >= containerSize.height)
 
             if viewY >= -100 && viewY <= containerSize.height + 100 {
@@ -1541,7 +1547,7 @@ struct ImageViewerView: View {
                         .onChanged { value in
                             draggingGuideId = guide.id
                             let currentY = value.location.y
-                            let rawPx = (currentY - originY) / effectiveScale
+                            let rawPx = (currentY - originY) / pixelScale
                             let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .horizontal, currentScale: currentScale)
                             draggingGuidePixelPos = snapRes.snappedPos
                         }
@@ -1562,7 +1568,7 @@ struct ImageViewerView: View {
             }
         } else {
             // 垂直参考线 (固定 View X 坐标)
-            let viewX = originX + activePos * effectiveScale
+            let viewX = originX + activePos * pixelScale
             let isOutOfBounds = isDragging && (viewX <= rulerOffset || viewX <= 0 || viewX >= containerSize.width)
 
             if viewX >= -100 && viewX <= containerSize.width + 100 {
@@ -1611,7 +1617,7 @@ struct ImageViewerView: View {
                         .onChanged { value in
                             draggingGuideId = guide.id
                             let currentX = value.location.x
-                            let rawPx = (currentX - originX) / effectiveScale
+                            let rawPx = (currentX - originX) / pixelScale
                             let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, currentScale: currentScale)
                             draggingGuidePixelPos = snapRes.snappedPos
                         }
@@ -1641,14 +1647,14 @@ struct ImageViewerView: View {
         containerSize: CGSize,
         originX: CGFloat,
         originY: CGFloat,
-        currentScale: CGFloat
+        currentScale: CGFloat,
+        pixelScale: CGFloat
     ) -> some View {
-        let effectiveScale = currentScale / screenBackingScale
         let snapInfo = snapPixelPosition(rawPixelPos: pixelPos, orientation: orientation, currentScale: currentScale)
         let activePos = snapInfo.snappedPos
 
         if orientation == .horizontal {
-            let viewY = originY + activePos * effectiveScale
+            let viewY = originY + activePos * pixelScale
             ZStack(alignment: .leading) {
                 Rectangle()
                     .fill(snapInfo.snapLabel != nil ? Color.yellow : Color.accentColor)
@@ -1667,7 +1673,7 @@ struct ImageViewerView: View {
             }
             .position(x: containerSize.width / 2, y: viewY)
         } else {
-            let viewX = originX + activePos * effectiveScale
+            let viewX = originX + activePos * pixelScale
             ZStack(alignment: .top) {
                 Rectangle()
                     .fill(snapInfo.snapLabel != nil ? Color.yellow : Color.accentColor)
@@ -1694,21 +1700,20 @@ struct ImageViewerView: View {
         containerSize: CGSize,
         originX: CGFloat,
         originY: CGFloat,
-        currentScale: CGFloat
+        currentScale: CGFloat,
+        pixelScale: CGFloat
     ) -> some View {
-        let effectiveScale = currentScale / screenBackingScale
-
         ZStack(alignment: .topLeading) {
             // 1. 顶部标尺 (拖拽向下滑动创建水平参考线，双击快速创建)
             TopRulerCanvas(
                 originX: originX,
-                effectiveScale: effectiveScale,
+                pixelScale: pixelScale,
                 mouseX: mousePosInContainer?.x
             )
             .frame(width: containerSize.width, height: 20)
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { location in
-                let rawPx = (location.x - originX) / effectiveScale
+                let rawPx = (location.x - originX) / pixelScale
                 let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, currentScale: currentScale)
                 guideLines.append(GuideLine(orientation: .vertical, pixelPosition: snapRes.snappedPos))
             }
@@ -1717,7 +1722,7 @@ struct ImageViewerView: View {
                     .onChanged { value in
                         newGuideOrientation = .horizontal
                         let currentY = value.location.y
-                        let rawPx = (currentY - originY) / effectiveScale
+                        let rawPx = (currentY - originY) / pixelScale
                         let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .horizontal, currentScale: currentScale)
                         newGuidePixelPos = snapRes.snappedPos
                     }
@@ -1734,13 +1739,13 @@ struct ImageViewerView: View {
             // 2. 左侧标尺 (拖拽向右滑动创建垂直参考线，双击快速创建)
             LeftRulerCanvas(
                 originY: originY,
-                effectiveScale: effectiveScale,
+                pixelScale: pixelScale,
                 mouseY: mousePosInContainer?.y
             )
             .frame(width: 20, height: containerSize.height)
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { location in
-                let rawPy = (location.y - originY) / effectiveScale
+                let rawPy = (location.y - originY) / pixelScale
                 let snapRes = snapPixelPosition(rawPixelPos: rawPy, orientation: .horizontal, currentScale: currentScale)
                 guideLines.append(GuideLine(orientation: .horizontal, pixelPosition: snapRes.snappedPos))
             }
@@ -1749,7 +1754,7 @@ struct ImageViewerView: View {
                     .onChanged { value in
                         newGuideOrientation = .vertical
                         let currentX = value.location.x
-                        let rawPx = (currentX - originX) / effectiveScale
+                        let rawPx = (currentX - originX) / pixelScale
                         let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, currentScale: currentScale)
                         newGuidePixelPos = snapRes.snappedPos
                     }
