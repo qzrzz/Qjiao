@@ -53,33 +53,91 @@ enum SyntaxLanguage: Hashable {
 /// asks for a plugin per file; unsupported file types get `nil` and render as
 /// plain text. The highlighter itself lives in `SyntaxHighlightPlugin`.
 enum SyntaxHighlighting {
-    /// The theme kero hands the highlighter: the plugin's bundled *default
-    /// colors* — which ship light and dark asset variants, so they follow the
-    /// window appearance automatically — paired with an **empty** font table.
-    ///
-    /// The empty fonts are deliberate. The highlighter would otherwise tag each
-    /// token with `theme.font(forToken:)` and reset the view to SF Mono,
-    /// discarding kero's `TerminalFont.current()`. With no fonts, every token
-    /// keeps the editor's own font and only the foreground color changes.
-    ///
-    /// `STPluginNeonAppKit.Theme` is fully qualified because kero has its own
-    /// `Theme` (Theme.swift) in this module that would otherwise shadow it.
+    /// Neon 主题和对应的稳定键；键变化时已打开的编辑器会重新绘制语法颜色。
+    struct ThemeConfiguration {
+        let theme: STPluginNeonAppKit.Theme
+        let key: String
+    }
+
+    /// 将 Ghostty 的终端语义调色板映射到 tree-sitter 的语法 token。
+    /// 字体表保持为空，避免高亮插件覆盖编辑器的字体设置。
     @MainActor
-    static let theme = STPluginNeonAppKit.Theme(
-        colors: STPluginNeonAppKit.Theme.default.colors,
-        fonts: STPluginNeonAppKit.Theme.Fonts(fonts: [:])
-    )
+    static func theme(themeName: String, dark: Bool) -> ThemeConfiguration {
+        if let vscode = VSCodeEditorTheme.definition(named: themeName) {
+            return ThemeConfiguration(
+                theme: STPluginNeonAppKit.Theme(
+                    colors: STPluginNeonAppKit.Theme.Colors(colors: vscode.tokens),
+                    fonts: STPluginNeonAppKit.Theme.Fonts(fonts: [:])
+                ),
+                key: vscode.id
+            )
+        }
+        let resolved = Theme.editorTerminal(themeName, dark: dark)
+        let colors = resolved.colors
+        let ansi = colors.ansi.map(nsColor)
+        func ansiColor(_ index: Int) -> NSColor { ansi.indices.contains(index) ? ansi[index] : colors.foreground }
+
+        let plain = colors.foreground
+        let muted = ansiColor(8)
+        let tokenColors: [String: NSColor] = [
+            "plain": plain,
+            "variable": plain,
+            "parameter": plain,
+            "operator": plain,
+            "punctuation.special": muted,
+            "comment": muted,
+            "string": ansiColor(2),
+            "text.literal": ansiColor(2),
+            "number": ansiColor(5),
+            "boolean": ansiColor(5),
+            "keyword": ansiColor(4),
+            "keyword.function": ansiColor(4),
+            "keyword.return": ansiColor(4),
+            "include": ansiColor(4),
+            "type": ansiColor(3),
+            "constructor": ansiColor(3),
+            "text.title": ansiColor(11),
+            "function.call": ansiColor(6),
+            "method": ansiColor(6),
+            "property": ansiColor(6),
+            "variable.builtin": ansiColor(1),
+        ]
+        let key = ([Theme.hex(colors.foreground)] + colors.ansi).joined(separator: ":")
+        return ThemeConfiguration(
+            theme: STPluginNeonAppKit.Theme(
+                colors: STPluginNeonAppKit.Theme.Colors(colors: tokenColors),
+                fonts: STPluginNeonAppKit.Theme.Fonts(fonts: [:])
+            ),
+            key: key
+        )
+    }
 
     /// A syntax-highlighting plugin for `path`, or `nil` when the file type has
     /// no bundled grammar (the editor then shows plain text).
     @MainActor
-    static func plugin(for path: String) -> SyntaxHighlightPlugin? {
+    static func plugin(
+        for path: String,
+        theme: STPluginNeonAppKit.Theme,
+        onCoordinatorReady: @escaping (SyntaxHighlightCoordinator) -> Void
+    ) -> SyntaxHighlightPlugin? {
         guard let language = language(for: path) else { return nil }
         return SyntaxHighlightPlugin(
             theme: theme,
             language: language,
             highlightsData: highlightsData(for: language),
-            injectionsData: injectionsData(for: language)
+            injectionsData: injectionsData(for: language),
+            onCoordinatorReady: onCoordinatorReady
+        )
+    }
+
+    /// Ghostty 的 ANSI 颜色以 `RRGGBB` 字符串提供，转为 AppKit 颜色供 Neon 使用。
+    private static func nsColor(_ hex: String) -> NSColor {
+        let value = Int(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
+        return NSColor(
+            srgbRed: CGFloat((value >> 16) & 0xff) / 255,
+            green: CGFloat((value >> 8) & 0xff) / 255,
+            blue: CGFloat(value & 0xff) / 255,
+            alpha: 1
         )
     }
 

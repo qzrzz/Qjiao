@@ -298,6 +298,18 @@ struct SettingsView: View {
             }
 
             if selectedSection == .editor {
+            Section("Color Theme") {
+                Group {
+                    EditorThemePicker(
+                        title: "Light colors", selection: $settings.editorThemeLight, dark: false
+                    )
+                    EditorThemePicker(
+                        title: "Dark colors", selection: $settings.editorThemeDark, dark: true
+                    )
+                }
+                .settingsRowPadding()
+            }
+
             Section("Text Editing") {
                 Group {
                 Toggle("Wrap lines to editor width", isOn: $settings.wrapLines)
@@ -634,6 +646,68 @@ private struct GhosttyThemePicker: View {
             Image(nsImage: ThemePreviewImageRenderer.image(for: [
                 Theme.definition(named: title) ?? Theme.globalDefinition(dark: dark)
             ]))
+        }
+        .labelStyle(.titleAndIcon)
+    }
+}
+
+/// 编辑器单一外观的配色选择器；空字符串表示继承全局与项目主题。
+private struct EditorThemePicker: View {
+    let title: String
+    @Binding var selection: String
+    let dark: Bool
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Menu {
+                followGlobalItem
+                Divider()
+                Section("VS Code") {
+                    ForEach(VSCodeEditorTheme.all(dark: dark), id: \.id) { theme in
+                        vscodeThemeItem(theme)
+                    }
+                }
+            } label: {
+                themeLabel
+            }
+            .menuStyle(.borderlessButton)
+        }
+    }
+
+    private var followGlobalItem: some View {
+        Toggle(isOn: Binding(
+            get: { selection.isEmpty },
+            set: { if $0 { selection = "" } }
+        )) {
+            Label {
+                Text("Default")
+            } icon: {
+                Image(nsImage: ThemePreviewImageRenderer.image(for: [Theme.globalDefinition(dark: dark)]))
+            }
+            .labelStyle(.titleAndIcon)
+        }
+    }
+
+    private func vscodeThemeItem(_ theme: VSCodeEditorTheme.Definition) -> some View {
+        Toggle(isOn: Binding(
+            get: { selection == theme.id },
+            set: { if $0 { selection = theme.id } }
+        )) {
+            Text(theme.title)
+        }
+    }
+
+    private var themeLabel: some View {
+        let label = selection.isEmpty
+            ? "Default"
+            : VSCodeEditorTheme.definition(named: selection)?.title ?? selection
+        let definition = Theme.definition(named: selection) ?? Theme.globalDefinition(dark: dark)
+        return Label {
+            Text(label)
+        } icon: {
+            Image(nsImage: ThemePreviewImageRenderer.image(for: [definition]))
         }
         .labelStyle(.titleAndIcon)
     }

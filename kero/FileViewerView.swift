@@ -139,6 +139,9 @@ struct FileViewerView: View {
     var body: some View {
         switch file.content {
         case .text:
+            let themeName = colorScheme == .dark
+                ? settings.editorThemeDark
+                : settings.editorThemeLight
             VStack(spacing: 0) {
                 if let error = file.saveError {
                     saveErrorBar(error)
@@ -146,7 +149,13 @@ struct FileViewerView: View {
                 SourceTextEditor(
                     file: file,
                     font: TerminalFont.current(),
-                    palette: .theme(dark: colorScheme == .dark),
+                    palette: .theme(
+                        themeName: themeName,
+                        dark: colorScheme == .dark
+                    ),
+                    syntaxTheme: SyntaxHighlighting.theme(
+                        themeName: themeName, dark: colorScheme == .dark
+                    ),
                     wrapLines: settings.wrapLines,
                     isFocused: isFocused,
                     onFocused: onFocused,

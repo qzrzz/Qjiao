@@ -16,9 +16,10 @@ Launchers [全部启动][添加命令]
    - npm script 条目条件右键菜单
     -  右键菜单：
     -  Edit package.json
-    -  ---
-    -  Run with npm
-    -  Run with bun
-    -  Run with pnpm
-    -  Run with nub
-    -  Run with vp
+    -  Run with time 
+    -  Run with --inspect 
+    -  Run with --prof 
+
+Run with time 使用  `/usr/bin/time cmd` 或者  `time cmd` ，根据 `/usr/bin/time cmd` 是否存在
+Run with  --inspect  使用  NODE_OPTIONS="--inspect" 
+Run with  --prof  使用  NODE_OPTIONS="--prof" 

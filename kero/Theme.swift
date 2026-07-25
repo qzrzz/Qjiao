@@ -247,6 +247,30 @@ enum Theme {
 
     static func terminal(dark: Bool) -> KeroTerminalTheme {
         let theme = resolvedDefinition(dark: dark)
+        return terminalTheme(theme)
+    }
+
+    /// 解析指定外观的编辑器配色。空名称代表继承项目级主题覆盖后的窗口主题。
+    static func editorTerminal(
+        _ themeName: String, dark: Bool
+    ) -> (colors: KeroTerminalTheme, isDark: Bool) {
+        if let vscode = VSCodeEditorTheme.definition(named: themeName) {
+            return (
+                KeroTerminalTheme(
+                    background: vscode.background,
+                    foreground: vscode.foreground,
+                    cursor: vscode.cursor,
+                    ansi: Array(repeating: hex(vscode.foreground), count: 16)
+                ),
+                vscode.dark
+            )
+        }
+        // 编辑器独立主题仅接受内置 VS Code 主题；其他值（包括旧 Ghostty
+        // 编辑器配置）回退为当前窗口解析出的全局或项目主题。
+        return (terminal(dark: dark), dark)
+    }
+
+    private static func terminalTheme(_ theme: GhosttyThemeDefinition) -> KeroTerminalTheme {
         return KeroTerminalTheme(
             background: theme.backgroundNSColor,
             foreground: theme.foregroundNSColor,

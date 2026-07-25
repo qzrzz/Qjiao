@@ -28,8 +28,9 @@ struct EditorPalette: Equatable {
     var lineHighlight: NSColor
     var gutterText: NSColor
 
-    static func theme(dark: Bool) -> EditorPalette {
-        let colors = Theme.terminal(dark: dark)
+    static func theme(themeName: String, dark: Bool) -> EditorPalette {
+        let resolved = Theme.editorTerminal(themeName, dark: dark)
+        let colors = resolved.colors
         let opacity = AppSettings.shared.terminalBackgroundOpacity
         let bg = colors.background.withAlphaComponent(opacity)
         return EditorPalette(
@@ -37,11 +38,11 @@ struct EditorPalette: Equatable {
             background: bg,
             insertionPoint: colors.cursor,
             lineHighlight: bg.blended(
-                withFraction: dark ? 0.10 : 0.08,
+                withFraction: resolved.isDark ? 0.10 : 0.08,
                 of: colors.foreground
             ) ?? bg,
             gutterText: colors.foreground.blended(
-                withFraction: dark ? 0.45 : 0.55,
+                withFraction: resolved.isDark ? 0.45 : 0.55,
                 of: bg
             ) ?? colors.foreground
         )
@@ -49,7 +50,7 @@ struct EditorPalette: Equatable {
 
     /// Kept as a compatibility spelling for callers outside the current app.
     static func github(dark: Bool) -> EditorPalette {
-        theme(dark: dark)
+        theme(themeName: "", dark: dark)
     }
 }
 
@@ -62,10 +63,10 @@ struct EditorPalette: Equatable {
 struct SourceTextEditor: NSViewRepresentable {
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject private var settings = AppSettings.shared
-    @Environment(\.colorScheme) private var colorScheme
     let file: FileTab
     let font: NSFont
     let palette: EditorPalette
+    let syntaxTheme: SyntaxHighlighting.ThemeConfiguration
     let wrapLines: Bool
     var isFocused: Bool = true
     var onFocused: () -> Void = {}
@@ -117,7 +118,11 @@ struct SourceTextEditor: NSViewRepresentable {
         // window — sees the whole document. The plugin only layers foreground
         // colors as rendering attributes; the font stays kero's (see
         // SyntaxHighlighting.theme).
-        if let plugin = SyntaxHighlighting.plugin(for: file.path) {
+        if let plugin = SyntaxHighlighting.plugin(
+            for: file.path,
+            theme: syntaxTheme.theme,
+            onCoordinatorReady: { context.coordinator.attachSyntaxHighlighter($0) }
+        ) {
             textView.addPlugin(plugin)
         }
 
@@ -170,6 +175,7 @@ struct SourceTextEditor: NSViewRepresentable {
         (textView as? FocusReportingTextView)?.onBecomeFirstResponder = onFocused
         (textView as? FocusReportingTextView)?.splitTarget.onSplit = onSplit
         apply(to: textView, scrollView: scrollView)
+        context.coordinator.updateSyntaxTheme(syntaxTheme)
         // Take focus on the unfocused→focused edge (keyboard navigation moving
         // focus here), never on every render.
         if isFocused, !context.coordinator.wasFocused {
@@ -205,8 +211,7 @@ struct SourceTextEditor: NSViewRepresentable {
     /// document, and this runs on every SwiftUI render.
     private func apply(to textView: STTextView, scrollView: NSScrollView) {
         let opacity = settings.terminalBackgroundOpacity
-        let currentThemeBg = Theme.terminal(dark: colorScheme == .dark).background
-        let targetBg = currentThemeBg.withAlphaComponent(opacity)
+        let targetBg = palette.background
 
         if textView.font != font {
             textView.font = font
@@ -233,6 +238,8 @@ struct SourceTextEditor: NSViewRepresentable {
     final class Coordinator: NSObject, STTextViewDelegate {
         private let file: FileTab
         private weak var textView: STTextView?
+        private weak var syntaxHighlighter: SyntaxHighlightCoordinator?
+        private var syntaxThemeKey: String?
         private var scrollObserver: (any NSObjectProtocol)?
         /// Last-applied focus state, so `updateNSView` can act only on the
         /// unfocused→focused edge.
@@ -256,6 +263,16 @@ struct SourceTextEditor: NSViewRepresentable {
                     self.file.editorState.scrollY = clipView.bounds.origin.y
                 }
             }
+        }
+
+        func attachSyntaxHighlighter(_ coordinator: SyntaxHighlightCoordinator) {
+            syntaxHighlighter = coordinator
+        }
+
+        func updateSyntaxTheme(_ configuration: SyntaxHighlighting.ThemeConfiguration) {
+            guard syntaxThemeKey != configuration.key else { return }
+            syntaxThemeKey = configuration.key
+            syntaxHighlighter?.update(theme: configuration.theme)
         }
 
         deinit {

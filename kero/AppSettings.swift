@@ -6,6 +6,7 @@
 import AppKit
 import Combine
 import Foundation
+import GhosttyTheme
 
 /// Command prefix used when running a package script from the Info panel.
 enum PackageManagerCommand: String, CaseIterable, Identifiable {
@@ -100,6 +101,16 @@ final class AppSettings: nonisolated ObservableObject {
     /// Soft-wrap file editor lines to the viewport width. Off by default so
     /// long lines scroll horizontally.
     @Published var wrapLines: Bool {
+        didSet { save() }
+    }
+
+    /// 亮色外观下编辑器的配色；空字符串代表继承全局与当前项目主题。
+    @Published var editorThemeLight: String {
+        didSet { save() }
+    }
+
+    /// 暗色外观下编辑器的配色；空字符串代表继承全局与当前项目主题。
+    @Published var editorThemeDark: String {
         didSet { save() }
     }
 
@@ -217,6 +228,16 @@ final class AppSettings: nonisolated ObservableObject {
         fontThicken = toml["font-thicken"]?.bool ?? false
         useBundledChineseTerminalFont = toml["terminal.use-bundled-chinese-font"]?.bool ?? true
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
+        // 兼容上一版只有一个 editor.theme 的配置，将它迁移到匹配的亮色或暗色选项。
+        let legacyEditorTheme = toml["editor.theme"]?.string
+        editorThemeLight = Self.knownEditorTheme(
+            toml["editor.theme-light"]?.string ?? Self.legacyEditorTheme(legacyEditorTheme, dark: false),
+            dark: false
+        )
+        editorThemeDark = Self.knownEditorTheme(
+            toml["editor.theme-dark"]?.string ?? Self.legacyEditorTheme(legacyEditorTheme, dark: true),
+            dark: true
+        )
         displayFileSize = toml["files.display-file-size"]?.bool ?? true
         filesFontFamily = toml["files.font-family"]?.string ?? ""
         let filesSize = toml["files.font-size"]?.double ?? Self.defaultFilesFontSize
@@ -253,6 +274,17 @@ final class AppSettings: nonisolated ObservableObject {
         return name
     }
 
+    private static func knownEditorTheme(_ name: String?, dark: Bool) -> String {
+        guard let name, VSCodeEditorTheme.definition(named: name)?.dark == dark else { return "" }
+        return name
+    }
+
+    private static func legacyEditorTheme(_ value: String?, dark: Bool) -> String? {
+        let prefix = dark ? "dark:" : "light:"
+        guard let value, value.hasPrefix(prefix) else { return nil }
+        return String(value.dropFirst(prefix.count))
+    }
+
     private static func validOpacity(_ value: Double?) -> Double {
         guard let value, backgroundOpacityRange.contains(value) else { return 1 }
         return value
@@ -285,6 +317,8 @@ final class AppSettings: nonisolated ObservableObject {
         visualEffectState = "followsApp"
         visualEffectAlpha = 1
         wrapLines = false
+        editorThemeLight = ""
+        editorThemeDark = ""
         displayFileSize = true
         filesFontFamily = ""
         filesFontSize = Self.defaultFilesFontSize
@@ -334,6 +368,12 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if wrapLines {
             lines.append("editor.wrap-lines = true")
+        }
+        if !editorThemeLight.isEmpty {
+            lines.append("editor.theme-light = \(TOML.quote(editorThemeLight))")
+        }
+        if !editorThemeDark.isEmpty {
+            lines.append("editor.theme-dark = \(TOML.quote(editorThemeDark))")
         }
         // 默认 true：仅在关闭时写回，避免污染默认配置文件。
         if !displayFileSize {

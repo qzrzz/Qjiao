@@ -86,8 +86,8 @@ struct ReachabilitySite: Identifiable, Codable, Equatable {
 
     static let defaults: [ReachabilitySite] = [
         .init(name: "Baidu", url: "https://www.baidu.com/"),
-        .init(name: "Google", url: "https://www.gstatic.com/generate_204"),
         .init(name: "Cloudflare", url: "https://cp.cloudflare.com/generate_204"),
+        .init(name: "Google", url: "https://www.google.com/favicon.ico"),
         .init(name: "Github", url: "https://github.com/")
     ]
 }

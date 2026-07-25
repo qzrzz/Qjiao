@@ -272,7 +272,16 @@ struct RightSidebarView: View {
             InfoPanel(
                 model: info,
                 session: manager.selectedSession,
-                runPackageScript: { manager.runPackageScript($0) }
+                runPackageScript: { name, mode in
+                    manager.runPackageScript(name, mode: mode)
+                },
+                openPackageJSON: {
+                    let root = info.rootPath
+                    guard !root.isEmpty else { return }
+                    manager.openFile(
+                        (root as NSString).appendingPathComponent("package.json")
+                    )
+                }
             )
         }
     }
@@ -540,10 +549,28 @@ private struct FileTreePanel: View {
             }
             .focusable(true)
             .focusEffectDisabled()
-            // ⌘A 全选当前可见项（需面板先获得焦点）。
+            // 文件树快捷键：⌘A 全选、⌘C 复制、⌘V 粘贴（需面板焦点）。
             .onKeyPress(keys: [.init("a")], phases: .down) { press in
                 guard press.modifiers.contains(.command) else { return .ignored }
                 model.selectAllVisible()
+                return .handled
+            }
+            .onKeyPress(keys: [.init("c")], phases: .down) { press in
+                guard press.modifiers.contains(.command),
+                      !press.modifiers.contains(.shift),
+                      !press.modifiers.contains(.option)
+                else { return .ignored }
+                guard !model.selectedItems.isEmpty else { return .ignored }
+                model.copySelectionToPasteboard()
+                return .handled
+            }
+            .onKeyPress(keys: [.init("v")], phases: .down) { press in
+                guard press.modifiers.contains(.command),
+                      !press.modifiers.contains(.shift),
+                      !press.modifiers.contains(.option)
+                else { return .ignored }
+                guard FileTreeModel.canPasteFromPasteboard else { return .ignored }
+                model.pasteFromPasteboard()
                 return .handled
             }
         }
@@ -696,12 +723,28 @@ private struct FileTreeRow: View {
             NSPasteboard.general.setString(text, forType: .string)
         }
 
+        Divider()
+        // 复制文件本身（fileURL，可粘贴到本树或 Finder）。
+        Button(targets.count == 1 ? "Copy" : "Copy \(targets.count) Items") {
+            selectForContextAction()
+            model.copyToPasteboard(paths: menuActionTargets.map(\.path))
+        }
+        // 粘贴到右键目标：文件夹内，或文件的父目录。
+        // 注意：不在菜单构建期写 selectedPaths；canPaste 只读剪贴板。
+        if FileTreeModel.canPasteFromPasteboard {
+            Button("Paste") {
+                selectForContextAction()
+                let dest = model.pasteDestinationDirectory(for: item)
+                model.pasteFromPasteboard(into: dest)
+            }
+        }
+
         if let only = onlyItem, only.isDirectory {
+            Divider()
             Button("cd Here") {
                 selectForContextAction()
                 session?.sendCommand("cd " + shellQuote(only.path) + "\n")
             }
-            Divider()
             Button("New File…") {
                 selectForContextAction()
                 model.beginNewFile(in: only.path)
@@ -788,6 +831,8 @@ private struct FileTreeRow: View {
             .frame(width: FileTreeFont.iconSize, alignment: .center)
             Text(item.name)
                 .foregroundStyle(titleForeground)
+                // 文件名中的数字等宽，便于 `file01` / `file10` 等纵向对齐。
+                .monospacedDigit()
                 .lineLimit(1)
                 .layoutPriority(1)
             Spacer(minLength: 4)
@@ -822,9 +867,8 @@ private struct FileTreeRow: View {
             folderSizeControl
         } else if let fileSizeLabel {
             Text(fileSizeLabel)
-                .font(FileTreeFont.caption)
+                .font(FileTreeFont.caption.monospacedDigit())
                 .foregroundStyle(sizeForeground)
-                .monospacedDigit()
                 .lineLimit(1)
                 .layoutPriority(0)
         }
@@ -850,10 +894,10 @@ private struct FileTreeRow: View {
                 .help("Calculating folder size…")
         case .ready:
             if let folderSizeLabel {
+                // Font.monospacedDigit：表格数字宽度固定，列表右侧体积列更稳。
                 let sizeText = Text(folderSizeLabel)
-                    .font(FileTreeFont.caption)
+                    .font(FileTreeFont.caption.monospacedDigit())
                     .foregroundStyle(sizeForeground)
-                    .monospacedDigit()
                     .lineLimit(1)
                 // hover 时点击数字可重算；多选时重算整组选中目录。
                 if isHovering {
@@ -889,7 +933,7 @@ private struct FileTreeRow: View {
                     model.requestFolderSizes(for: paths, recalculate: false)
                 } label: {
                     Text(title)
-                        .font(FileTreeFont.caption.weight(.medium))
+                        .font(FileTreeFont.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(Color(nsColor: Theme.cursor))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
@@ -2126,6 +2170,15 @@ private struct GitSectionHeader: View {
                         .font(SidebarTypography.section(.semibold))
                         // 分组标题使用次级文字色，提升浅色模式下的可读性。
                         .foregroundStyle(.secondary)
+                    // 数量紧跟标题，不再右对齐到行尾。
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(SidebarTypography.micro())
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.primary.opacity(0.07)))
+                    }
                 }
                 .contentShape(Rectangle())
             }
@@ -2149,15 +2202,6 @@ private struct GitSectionHeader: View {
             }
 
             Spacer(minLength: 0)
-
-            if count > 0 {
-                Text("\(count)")
-                    .font(SidebarTypography.micro())
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.primary.opacity(0.07)))
-            }
         }
         // Fixed height so the taller hover buttons don't grow the header.
         .frame(height: SidebarTypography.rowMinHeight)
@@ -2399,12 +2443,16 @@ private struct GitEntryRow: View {
 private struct InfoPanel: View {
     @ObservedObject var model: SessionInfoModel
     let session: TerminalSession?
-    let runPackageScript: (String) -> Void
+    let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
+    let openPackageJSON: () -> Void
 
     @State private var directoryCollapsed = false
     @State private var packageScriptsCollapsed = false
     @State private var processesCollapsed = false
     @State private var portsCollapsed = false
+
+    /// 展开分组内容相对标题的左边距，形成层级缩进。
+    private static let expandedContentLeading: CGFloat = 12
 
     private static let vsCodeURL = NSWorkspace.shared
         .urlForApplication(withBundleIdentifier: "com.microsoft.VSCode")
@@ -2422,6 +2470,32 @@ private struct InfoPanel: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 8)
             }
+        }
+        // 分组内容为空时自动收起；从空变为有内容时展开以便查看。
+        .onChange(of: model.packageScripts.count) { oldCount, newCount in
+            autoCollapse(oldCount: oldCount, newCount: newCount, isCollapsed: $packageScriptsCollapsed)
+        }
+        .onChange(of: model.processes.count) { oldCount, newCount in
+            autoCollapse(oldCount: oldCount, newCount: newCount, isCollapsed: $processesCollapsed)
+        }
+        .onChange(of: model.ports.count) { oldCount, newCount in
+            autoCollapse(oldCount: oldCount, newCount: newCount, isCollapsed: $portsCollapsed)
+        }
+        .onAppear {
+            if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
+            if model.processes.isEmpty { processesCollapsed = true }
+            if model.ports.isEmpty { portsCollapsed = true }
+        }
+    }
+
+    /// 空 → 收起；0→有内容 → 展开；其余保持用户选择。
+    private func autoCollapse(
+        oldCount: Int, newCount: Int, isCollapsed: Binding<Bool>
+    ) {
+        if newCount == 0 {
+            isCollapsed.wrappedValue = true
+        } else if oldCount == 0 {
+            isCollapsed.wrappedValue = false
         }
     }
 
@@ -2493,7 +2567,8 @@ private struct InfoPanel: View {
                     }
                 }
             }
-            .padding(.horizontal, 6)
+            .padding(.leading, Self.expandedContentLeading)
+            .padding(.trailing, 6)
             .padding(.top, 2)
             .padding(.bottom, 4)
         }
@@ -2527,7 +2602,7 @@ private struct InfoPanel: View {
         .help(title == "Copy" ? "Copy Path" : "Open in \(title)")
     }
 
-    // MARK: Processes
+    // MARK: Package scripts
 
     @ViewBuilder
     private var packageScriptsSection: some View {
@@ -2538,32 +2613,20 @@ private struct InfoPanel: View {
             actions: []
         )
         if !packageScriptsCollapsed {
-            if model.packageScripts.isEmpty {
-                emptyRow("No package scripts in package.json")
-            } else {
-                ForEach(model.packageScripts) { script in
-                    Button {
-                        runPackageScript(script.name)
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: "play.fill")
-                                .font(SidebarTypography.micro())
-                                .foregroundStyle(Color.accentColor)
-                                .frame(width: 12)
-                            Text(script.name)
-                                .font(SidebarTypography.body(.medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .contentShape(RoundedRectangle(cornerRadius: 4))
+            Group {
+                if model.packageScripts.isEmpty {
+                    emptyRow("No package scripts in package.json")
+                } else {
+                    ForEach(model.packageScripts) { script in
+                        InfoPackageScriptRow(
+                            script: script,
+                            run: { mode in runPackageScript(script.name, mode) },
+                            editPackageJSON: openPackageJSON
+                        )
                     }
-                    .buttonStyle(.plain)
-                    .help(script.command)
                 }
             }
+            .padding(.leading, Self.expandedContentLeading)
         }
     }
 
@@ -2578,15 +2641,18 @@ private struct InfoPanel: View {
             actions: []
         )
         if !processesCollapsed {
-            if model.processes.isEmpty {
-                emptyRow("No running processes")
-            } else {
-                ForEach(model.processes) { process in
-                    InfoProcessRow(process: process) { force in
-                        model.kill(process.pid, force: force)
+            Group {
+                if model.processes.isEmpty {
+                    emptyRow("No running processes")
+                } else {
+                    ForEach(model.processes) { process in
+                        InfoProcessRow(process: process) { force in
+                            model.kill(process.pid, force: force)
+                        }
                     }
                 }
             }
+            .padding(.leading, Self.expandedContentLeading)
         }
     }
 
@@ -2601,15 +2667,18 @@ private struct InfoPanel: View {
             actions: []
         )
         if !portsCollapsed {
-            if model.ports.isEmpty {
-                emptyRow("No listening ports")
-            } else {
-                ForEach(model.ports) { port in
-                    InfoPortRow(port: port) { force in
-                        model.kill(port.pid, force: force)
+            Group {
+                if model.ports.isEmpty {
+                    emptyRow("No listening ports")
+                } else {
+                    ForEach(model.ports) { port in
+                        InfoPortRow(port: port) { force in
+                            model.kill(port.pid, force: force)
+                        }
                     }
                 }
             }
+            .padding(.leading, Self.expandedContentLeading)
         }
     }
 
@@ -2620,6 +2689,51 @@ private struct InfoPanel: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
+    }
+}
+
+/// npm script 行：单击运行、hover 高亮、右键菜单提供编辑与包装运行方式。
+private struct InfoPackageScriptRow: View {
+    let script: SessionInfoModel.PackageScript
+    let run: (TerminalManager.PackageScriptRunMode) -> Void
+    let editPackageJSON: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button {
+            run(.normal)
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "play.fill")
+                    .font(SidebarTypography.micro())
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 12)
+                Text(script.name)
+                    .font(SidebarTypography.body(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .frame(height: SidebarTypography.rowMinHeight)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .contentShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .help(script.command)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isHovering ? Color.primary.opacity(0.05) : .clear)
+        )
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            Button("Edit package.json") { editPackageJSON() }
+            Divider()
+            Button("Run with time") { run(.withTime) }
+            Button("Run with --inspect") { run(.withInspect) }
+            Button("Run with --prof") { run(.withProf) }
+        }
     }
 }
 

@@ -461,6 +461,345 @@ final class FileTreeModel: nonisolated ObservableObject {
         rebuild()
     }
 
+    // MARK: - Copy / Paste
+
+    /// 同名冲突时用户选择：覆盖、使用新文件名、取消后续粘贴。
+    private enum PasteConflictChoice {
+        case overwrite
+        case newName
+        case cancel
+    }
+
+    /// 剪贴板是否含可粘贴的文件/目录 URL（含从 Finder 复制的项）。
+    static var canPasteFromPasteboard: Bool {
+        !readFileURLsFromPasteboard().isEmpty
+    }
+
+    /// 将选中路径写入系统剪贴板（`fileURL`，与 Finder 互通）。
+    func copyToPasteboard(paths: [String]) {
+        let unique = orderedUniquePaths(paths)
+        guard !unique.isEmpty else { return }
+        let urls = unique.map { URL(fileURLWithPath: $0) as NSURL }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects(urls)
+    }
+
+    /// 复制当前选中项；无选中时 no-op。
+    func copySelectionToPasteboard() {
+        copyToPasteboard(paths: selectedItems.map(\.path))
+    }
+
+    /// 解析粘贴目标目录：单选文件夹 → 其内；单选文件 → 父目录；
+    /// 多选 → 锚点所在目录（文件夹则其内）；否则项目根。
+    func pasteDestinationDirectory() -> String {
+        guard !rootPath.isEmpty else { return "" }
+        let selected = selectedItems
+        if selected.count == 1 {
+            let item = selected[0]
+            return item.isDirectory
+                ? item.path
+                : (item.path as NSString).deletingLastPathComponent
+        }
+        if let anchor = selectionAnchorPath {
+            if let item = items.first(where: { $0.path == anchor }) {
+                return item.isDirectory
+                    ? item.path
+                    : (item.path as NSString).deletingLastPathComponent
+            }
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: anchor, isDirectory: &isDir) {
+                return isDir.boolValue
+                    ? anchor
+                    : (anchor as NSString).deletingLastPathComponent
+            }
+        }
+        return rootPath
+    }
+
+    /// 右键行上的粘贴目标：目录 → 其内；文件 → 父目录。
+    func pasteDestinationDirectory(for item: Item) -> String {
+        item.isDirectory
+            ? item.path
+            : (item.path as NSString).deletingLastPathComponent
+    }
+
+    /// 从剪贴板粘贴到 `directory`；同名时弹窗选覆盖或新文件名。
+    func pasteFromPasteboard(into directory: String) {
+        let destDir = directory.isEmpty ? rootPath : directory
+        guard !destDir.isEmpty else { return }
+        let sources = Self.readFileURLsFromPasteboard()
+        guard !sources.isEmpty else { return }
+
+        // 异步拷贝大目录；冲突对话框仍在主线程。
+        Task { @MainActor [weak self] in
+            await self?.performPaste(sources: sources, into: destDir)
+        }
+    }
+
+    /// 粘贴到当前推断的目标目录（快捷键 ⌘V）。
+    func pasteFromPasteboard() {
+        pasteFromPasteboard(into: pasteDestinationDirectory())
+    }
+
+    /// 粘贴前已解析好的单条拷贝任务。
+    private struct PasteJob {
+        let source: String
+        let dest: String
+        let overwrite: Bool
+    }
+
+    private func performPaste(sources: [URL], into destDir: String) async {
+        let normalizedDestDir = (destDir as NSString).standardizingPath
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: normalizedDestDir, isDirectory: &isDir),
+              isDir.boolValue
+        else {
+            presentError(
+                "Couldn’t paste here.",
+                "The destination folder is missing or is not a directory."
+            )
+            return
+        }
+
+        // 第一遍：校验并分类，不直接替用户决定同名策略。
+        var firstError: String?
+        /// 目标已存在且不是「粘贴自身」→ 需用户批量决策。
+        var conflictItems: [(source: String, name: String)] = []
+        /// 无冲突或粘贴自身（仅能新文件名）→ 可直接规划。
+        var directJobs: [PasteJob] = []
+        /// 规划新文件名时占用的名字，避免同批多文件撞到同一个 `copy` 名。
+        var reservedNames = Set<String>()
+
+        for sourceURL in sources {
+            let normalizedSource = (sourceURL.path as NSString).standardizingPath
+            let itemName = (normalizedSource as NSString).lastPathComponent
+
+            // 禁止把文件夹粘进自己或其子目录。
+            if normalizedDestDir == normalizedSource
+                || normalizedDestDir.hasPrefix(normalizedSource + "/")
+            {
+                if firstError == nil {
+                    firstError = "“\(itemName)” can’t be pasted into itself or one of its subfolders."
+                }
+                continue
+            }
+
+            guard FileManager.default.fileExists(atPath: normalizedSource) else {
+                if firstError == nil {
+                    firstError = "“\(itemName)” no longer exists."
+                }
+                continue
+            }
+
+            let preferredDest = (normalizedDestDir as NSString).appendingPathComponent(itemName)
+            let preferredExists = FileManager.default.fileExists(atPath: preferredDest)
+
+            if preferredExists {
+                // 目标已有同名（含「粘贴到自身所在目录」）：一律进冲突列表，
+                // 由用户整批选择覆盖 / 新文件名，绝不默认加 copy。
+                conflictItems.append((normalizedSource, itemName))
+            } else {
+                reservedNames.insert(itemName)
+                directJobs.append(
+                    PasteJob(source: normalizedSource, dest: preferredDest, overwrite: false)
+                )
+            }
+        }
+
+        // 有同名冲突：整批只问一次，选项应用于本批全部冲突项。
+        var conflictJobs: [PasteJob] = []
+        if !conflictItems.isEmpty {
+            let conflictNames = conflictItems.map(\.name)
+            switch presentPasteConflictBatch(conflictNames: conflictNames) {
+            case .cancel:
+                // 用户取消：整批不粘贴（含无冲突项），避免半批结果难预期。
+                return
+            case .overwrite:
+                for item in conflictItems {
+                    let dest = (normalizedDestDir as NSString).appendingPathComponent(item.name)
+                    // 源与目标是同一路径时覆盖会先删后拷导致丢文件，直接跳过（已在目标位置）。
+                    if (dest as NSString).standardizingPath
+                        == (item.source as NSString).standardizingPath
+                    {
+                        continue
+                    }
+                    conflictJobs.append(
+                        PasteJob(source: item.source, dest: dest, overwrite: true)
+                    )
+                }
+            case .newName:
+                for item in conflictItems {
+                    let newName = Self.uniqueCopyName(
+                        for: item.name, in: normalizedDestDir, reserved: &reservedNames
+                    )
+                    conflictJobs.append(
+                        PasteJob(
+                            source: item.source,
+                            dest: (normalizedDestDir as NSString).appendingPathComponent(newName),
+                            overwrite: false
+                        )
+                    )
+                }
+            }
+        }
+
+        let jobs = directJobs + conflictJobs
+        guard !jobs.isEmpty else {
+            if let firstError {
+                presentError("Couldn’t paste.", firstError)
+            }
+            return
+        }
+
+        var createdPaths: [String] = []
+        for job in jobs {
+            let copyError: String? = await Task.detached(priority: .userInitiated) {
+                Self.copyItem(from: job.source, to: job.dest, overwrite: job.overwrite)
+            }.value
+
+            if let copyError {
+                if firstError == nil {
+                    firstError = copyError
+                }
+            } else {
+                createdPaths.append(job.dest)
+                if job.overwrite {
+                    dropFolderSizes(under: [job.dest])
+                }
+            }
+        }
+
+        finishPaste(createdPaths: createdPaths, destDir: normalizedDestDir, firstError: firstError)
+    }
+
+    private func finishPaste(createdPaths: [String], destDir: String, firstError: String?) {
+        if !createdPaths.isEmpty {
+            expanded.insert(destDir)
+            selectedPaths = Set(createdPaths)
+            selectionAnchorPath = createdPaths.first
+        }
+        rebuild()
+        if let firstError {
+            presentError("Couldn’t paste completely.", firstError)
+        }
+    }
+
+    /// 同名冲突整批询问一次：覆盖 / 新文件名 / 取消（取消则本批全部不粘贴）。
+    private func presentPasteConflictBatch(conflictNames: [String]) -> PasteConflictChoice {
+        let alert = NSAlert()
+        let count = conflictNames.count
+        if count == 1 {
+            alert.messageText = "An item named “\(conflictNames[0])” already exists in this location."
+            alert.informativeText =
+                "Choose Overwrite or New Name for this paste. The choice applies to all name conflicts in this batch."
+        } else {
+            alert.messageText = "\(count) items already exist in this location."
+            let preview = conflictNames.prefix(8).joined(separator: "\n")
+            let more = count > 8 ? "\n…" : ""
+            alert.informativeText =
+                "\(preview)\(more)\n\nChoose one action for all \(count) conflicting items in this paste."
+        }
+        alert.alertStyle = .warning
+        // 默认偏安全：新文件名；其次覆盖；取消整批。
+        alert.addButton(withTitle: "New Name")
+        alert.addButton(withTitle: "Overwrite")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .newName
+        case .alertSecondButtonReturn:
+            return .overwrite
+        default:
+            return .cancel
+        }
+    }
+
+    /// Finder 风格副本名：`a.txt` → `a copy.txt` → `a copy 2.txt` …
+    /// `reserved`：同批已占用的文件名，避免多个冲突项生成同一个 `copy` 名。
+    nonisolated private static func uniqueCopyName(
+        for originalName: String,
+        in directory: String,
+        reserved: inout Set<String>
+    ) -> String {
+        let ns = originalName as NSString
+        let ext = ns.pathExtension
+        let base = ns.deletingPathExtension
+        let stemBase = ext.isEmpty ? originalName : base
+        let fm = FileManager.default
+
+        func makeName(copyIndex: Int) -> String {
+            let stem: String
+            if copyIndex <= 1 {
+                stem = "\(stemBase) copy"
+            } else {
+                stem = "\(stemBase) copy \(copyIndex)"
+            }
+            return ext.isEmpty ? stem : "\(stem).\(ext)"
+        }
+
+        var index = 1
+        while index < 10_000 {
+            let candidate = makeName(copyIndex: index)
+            let path = (directory as NSString).appendingPathComponent(candidate)
+            if !reserved.contains(candidate), !fm.fileExists(atPath: path) {
+                reserved.insert(candidate)
+                return candidate
+            }
+            index += 1
+        }
+        // 极端情况下退回 UUID，保证可粘贴。
+        let fallback = ext.isEmpty ? UUID().uuidString : "\(UUID().uuidString).\(ext)"
+        reserved.insert(fallback)
+        return fallback
+    }
+
+    /// 后台拷贝；`overwrite` 时先删目标再复制。返回错误文案，成功为 nil。
+    nonisolated private static func copyItem(from source: String, to dest: String, overwrite: Bool) -> String? {
+        let fm = FileManager.default
+        let name = (source as NSString).lastPathComponent
+        do {
+            if overwrite, fm.fileExists(atPath: dest) {
+                try fm.removeItem(atPath: dest)
+            }
+            try fm.copyItem(atPath: source, toPath: dest)
+            return nil
+        } catch {
+            return "“\(name)”: \(error.localizedDescription)"
+        }
+    }
+
+    nonisolated private static func readFileURLsFromPasteboard() -> [URL] {
+        let pb = NSPasteboard.general
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true,
+        ]
+        guard let objects = pb.readObjects(forClasses: [NSURL.self], options: options) as? [URL]
+        else { return [] }
+        // 去重并标准化路径。
+        var seen = Set<String>()
+        var result: [URL] = []
+        for url in objects {
+            let path = (url.path as NSString).standardizingPath
+            if seen.insert(path).inserted {
+                result.append(URL(fileURLWithPath: path))
+            }
+        }
+        return result
+    }
+
+    private func orderedUniquePaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for path in paths where !path.isEmpty {
+            let normalized = (path as NSString).standardizingPath
+            if seen.insert(normalized).inserted {
+                result.append(normalized)
+            }
+        }
+        return result
+    }
+
     // MARK: - Rename
 
     func beginRename(_ item: Item) {

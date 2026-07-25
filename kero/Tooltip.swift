@@ -96,6 +96,12 @@ private struct TooltipModifier: ViewModifier {
 
 private struct TooltipHostModifier: ViewModifier {
     private static let gap: CGFloat = 6
+    private static let fontSize: CGFloat = 11
+    /// 多行时行距，让 System 指标等多行说明更易扫读。
+    private static let multilineLineSpacing: CGFloat = 2
+    private static let maxMeasureWidth: CGFloat = 320
+    private static let horizontalPadding: CGFloat = 7
+    private static let verticalPadding: CGFloat = 4
 
     func body(content: Content) -> some View {
         content.overlayPreferenceValue(TooltipPreferenceKey.self) { requests in
@@ -121,13 +127,17 @@ private struct TooltipHostModifier: ViewModifier {
     }
 
     private func tooltipLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11))
+        let multiline = text.contains("\n")
+        return Text(text)
+            // 单行：比例字 + monospacedDigit（数字/IP 不跳）。
+            // 多行：等宽字 + monospacedDigit，标签栏空格填充才能列对齐（Mem/Disk 指标）。
+            .font(Self.labelFont(multiline: multiline))
             .foregroundStyle(.primary)
             .multilineTextAlignment(.leading)
+            .lineSpacing(multiline ? Self.multilineLineSpacing : 0)
             .fixedSize(horizontal: true, vertical: true)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
+            .padding(.horizontal, Self.horizontalPadding)
+            .padding(.vertical, Self.verticalPadding)
             .background {
                 RoundedRectangle(cornerRadius: 5)
                     .fill(.regularMaterial)
@@ -139,20 +149,39 @@ private struct TooltipHostModifier: ViewModifier {
             }
     }
 
+    private static func labelFont(multiline: Bool) -> Font {
+        if multiline {
+            return .system(size: fontSize, design: .monospaced).monospacedDigit()
+        }
+        return .system(size: fontSize).monospacedDigit()
+    }
+
     /// 用 NSString 估算标签尺寸，避免再套一层 Preference 循环。
+    /// 字体需与 `tooltipLabel` 一致，否则多行会对不齐或被裁切。
     private func measureLabel(_ text: String) -> CGSize {
-        let font = NSFont.systemFont(ofSize: 11)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let multiline = text.contains("\n")
+        let font: NSFont = multiline
+            ? .monospacedSystemFont(ofSize: Self.fontSize, weight: .regular)
+            : .monospacedDigitSystemFont(ofSize: Self.fontSize, weight: .regular)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        if multiline {
+            // NSString 测高不直接吃 SwiftUI lineSpacing；用额外行高近似。
+            paragraph.lineSpacing = Self.multilineLineSpacing
+        }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .paragraphStyle: paragraph,
+        ]
         let ns = text as NSString
         let bounds = ns.boundingRect(
-            with: CGSize(width: 320, height: 10_000),
+            with: CGSize(width: Self.maxMeasureWidth, height: 10_000),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: attrs
         )
-        // padding 14×8
         return CGSize(
-            width: ceil(bounds.width) + 14,
-            height: ceil(bounds.height) + 8
+            width: ceil(bounds.width) + Self.horizontalPadding * 2,
+            height: ceil(bounds.height) + Self.verticalPadding * 2
         )
     }
 

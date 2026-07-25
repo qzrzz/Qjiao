@@ -282,16 +282,43 @@ final class TerminalManager: nonisolated ObservableObject {
         project.newSession()
     }
 
+    /// Info 面板运行 npm script 时的包装方式。
+    enum PackageScriptRunMode {
+        /// 直接 `pm run <script>`。
+        case normal
+        /// `/usr/bin/time`（若存在）或 shell `time` 计时。
+        case withTime
+        /// `NODE_OPTIONS="--inspect"` 启动调试。
+        case withInspect
+        /// `NODE_OPTIONS="--prof"` 启用 V8 性能分析。
+        case withProf
+    }
+
     /// Opens a fresh terminal in the selected project's root and runs one
     /// package script using the package manager selected in Settings.
-    func runPackageScript(_ scriptName: String) {
+    func runPackageScript(_ scriptName: String, mode: PackageScriptRunMode = .normal) {
         guard let project = selectedProject, !scriptName.isEmpty else { return }
         let directory = project.projectDirectory.isEmpty
             ? selectedSession?.currentDirectoryPath
             : project.projectDirectory
         let session = project.newSession(directory: directory)
-        let command = AppSettings.shared.packageManagerCommand.rawValue
-        session.sendCommandWhenReady("\(command) \(shellQuote(scriptName))\n")
+        let run = "\(AppSettings.shared.packageManagerCommand.rawValue) \(shellQuote(scriptName))"
+        let command: String
+        switch mode {
+        case .normal:
+            command = run
+        case .withTime:
+            // 优先 GNU/BSD 的 `/usr/bin/time`；不存在时退回 shell 内建 `time`。
+            let timePrefix = FileManager.default.isExecutableFile(atPath: "/usr/bin/time")
+                ? "/usr/bin/time"
+                : "time"
+            command = "\(timePrefix) \(run)"
+        case .withInspect:
+            command = "NODE_OPTIONS=\"--inspect\" \(run)"
+        case .withProf:
+            command = "NODE_OPTIONS=\"--prof\" \(run)"
+        }
+        session.sendCommandWhenReady(command + "\n")
     }
 
     /// Runs one saved project launcher from the Start sidebar panel.

@@ -64,7 +64,7 @@ struct SidebarView: View {
                         tooltip: "New Project (⌘N)"
                     ) { manager.newProject() }
                     Spacer()
-                    SidebarThemeMenu(settings: settings)
+                    SidebarThemeButton(settings: settings)
                     SidebarFooterButton(
                         systemImage: "gearshape",
                         tooltip: "Settings (⌘,)",
@@ -163,13 +163,26 @@ private struct SidebarFooterButton: View {
     }
 }
 
-private struct SidebarThemeMenu: View {
+/// 侧边栏底部的主题切换按钮：
+/// - 左键点击：在亮色/暗色主题之间立即切换（若当前为 System，则根据系统实际外观反转设置）
+/// - 右键点击：弹出包含 Theme 选项的上下文菜单
+private struct SidebarThemeButton: View {
     @ObservedObject var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
 
     var body: some View {
-        Menu {
+        Button(action: toggleTheme) {
+            Image(systemName: appearanceIcon)
+                .font(SidebarTypography.secondary(.medium))
+                .foregroundStyle(isHovering ? .primary : .secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .tooltip("Theme: \(settings.theme.title)", alignment: .trailing)
+        .contextMenu {
             ForEach(AppTheme.allCases) { theme in
                 Toggle(isOn: Binding(
                     get: { settings.theme == theme },
@@ -178,20 +191,26 @@ private struct SidebarThemeMenu: View {
                     Text(theme.title)
                 }
             }
-        } label: {
-            Image(systemName: appearanceIcon)
-                .font(SidebarTypography.secondary(.medium))
-                .foregroundStyle(isHovering ? .primary : .secondary)
-                .frame(width: 24, height: 24)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
         }
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .tooltip("Theme: \(settings.theme.title)", alignment: .trailing)
     }
 
+    /// 点击切换主题
+    /// - 如果当前是 Light，变为 Dark
+    /// - 如果当前是 Dark，变为 Light
+    /// - 如果当前是 System，获取实际主题是 Light 还是 Dark，反转设置为 Light 或 Dark
+    private func toggleTheme() {
+        switch settings.theme {
+        case .light:
+            settings.theme = .dark
+        case .dark:
+            settings.theme = .light
+        case .system:
+            let isEffectiveDark = (colorScheme == .dark)
+            settings.theme = isEffectiveDark ? .light : .dark
+        }
+    }
+
+    /// 获取主题对应的图标
     private var appearanceIcon: String {
         switch settings.theme {
         case .dark:

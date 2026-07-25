@@ -39,6 +39,8 @@ struct SyntaxHighlightPlugin: STPlugin {
     /// fences, HTML `<script>`, …), or `nil`. Drives the injection-aware token
     /// provider; see `SyntaxHighlighting.injectionsData(for:)`.
     let injectionsData: Data?
+    /// 暴露协调器给编辑器包装层，以便配色变化时重绘而无需重新打开文件。
+    let onCoordinatorReady: (SyntaxHighlightCoordinator) -> Void
 
     /// These handlers are stored on `STPluginEvents`, which the text view
     /// itself retains (`STTextView.plugins`) for as long as it lives — and the
@@ -73,13 +75,15 @@ struct SyntaxHighlightPlugin: STPlugin {
     }
 
     func makeCoordinator(context: CoordinatorContext) -> SyntaxHighlightCoordinator {
-        SyntaxHighlightCoordinator(
+        let coordinator = SyntaxHighlightCoordinator(
             textView: context.textView,
             theme: theme,
             language: language,
             highlightsData: highlightsData,
             injectionsData: injectionsData
         )
+        onCoordinatorReady(coordinator)
+        return coordinator
     }
 }
 
@@ -121,6 +125,7 @@ enum HighlightQueryCache {
 @MainActor
 final class SyntaxHighlightCoordinator {
     private var highlighter: Neon.Highlighter?
+    private var theme: STPluginNeonAppKit.Theme
     private let language: SyntaxLanguage
     private let tsLanguage: SwiftTreeSitter.Language
     private let tsClient: TreeSitterClient
@@ -140,6 +145,7 @@ final class SyntaxHighlightCoordinator {
         highlightsData: Data,
         injectionsData: Data?
     ) {
+        self.theme = theme
         self.language = language
         self.highlightsData = highlightsData
         self.injectionsData = injectionsData
@@ -166,20 +172,20 @@ final class SyntaxHighlightCoordinator {
         // own editor font instead of resetting to the theme's.
         textView.font = theme.font(forToken: "plain") ?? textView.font
 
-        let textInterface = SyntaxHighlightTextInterface(textView: textView) { [weak textView] neonToken in
+        let textInterface = SyntaxHighlightTextInterface(textView: textView) { [weak self, weak textView] neonToken in
             // Metadata captures aren't colors — skip them so they don't repaint
             // a real capture on the same range. Swift captures comments as
             // `@comment @spell`; letting `spell` through (it resolves to the
             // plain fallback, applied after `comment`) turned comments black.
-            guard let textView, !Self.ignoredCaptures.contains(neonToken.name) else {
+            guard let self, let textView, !Self.ignoredCaptures.contains(neonToken.name) else {
                 return nil
             }
             var attributes: [NSAttributedString.Key: Any] = [:]
             attributes[.font] = textView.font
-            if let color = Self.themeColor(for: neonToken.name, theme: theme) {
+            if let color = Self.themeColor(for: neonToken.name, theme: self.theme) {
                 attributes[.foregroundColor] = color
             }
-            if let font = theme.font(forToken: TokenName(neonToken.name)) {
+            if let font = self.theme.font(forToken: TokenName(neonToken.name)) {
                 attributes[.font] = font
             }
             return attributes.isEmpty ? nil : attributes
@@ -202,6 +208,12 @@ final class SyntaxHighlightCoordinator {
         )
 
         installTokenProvider(textContentManager: textView.textContentManager)
+    }
+
+    /// 主题变更后重新请求所有可见 token 的渲染属性。
+    func update(theme: STPluginNeonAppKit.Theme) {
+        self.theme = theme
+        highlighter?.invalidate()
     }
 
     /// tree-sitter capture names that carry no color — spell-check hints,

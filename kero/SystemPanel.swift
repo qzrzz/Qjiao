@@ -177,16 +177,15 @@ struct SystemPanel: View {
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 28, alignment: .leading)
+            // 百分比等数字用等宽数字，刷新时宽度不跳。
             Text(percent ?? "—")
-                .font(SidebarTypography.section(.medium))
+                .font(SidebarTypography.section(.medium).monospacedDigit())
                 .foregroundStyle(.primary)
-                .monospacedDigit()
                 .lineLimit(1)
             if let detail {
                 Text(detail)
-                    .font(SidebarTypography.micro())
+                    .font(SidebarTypography.micro().monospacedDigit())
                     .foregroundStyle(.tertiary)
-                    .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -215,6 +214,7 @@ struct SystemPanel: View {
     }
 
     /// 内存 tooltip：总量 / 已用 / 可用 / Wired / Compressed / Swap。
+    /// 固定标签栏宽（pad 到 10）+ 数值；数字由 Tooltip monospacedDigit 渲染。
     private var memoryTooltip: String? {
         guard let used = model.snapshot.memoryUsedBytes else { return nil }
         var lines: [String] = []
@@ -223,27 +223,30 @@ struct SystemPanel: View {
             let usedPct = Double(used) / Double(total) * 100
             let freePct = Double(free) / Double(total) * 100
             lines = [
-                "Total:       \(formatBytes(total))",
-                "Used:        \(formatBytes(used))  (\(String(format: "%.1f", usedPct))%)",
-                "Free:        \(formatBytes(free))  (\(String(format: "%.1f", freePct))%)",
+                tooltipLine("Total", formatBytes(total)),
+                tooltipLine("Used", "\(formatBytes(used))  (\(formatPercent1(usedPct))%)"),
+                tooltipLine("Free", "\(formatBytes(free))  (\(formatPercent1(freePct))%)"),
             ]
         } else {
-            lines = ["Used:        \(formatBytes(used))"]
+            lines = [tooltipLine("Used", formatBytes(used))]
         }
         if let wired = model.snapshot.memoryWiredBytes {
-            lines.append("Wired:       \(formatBytes(wired))")
+            lines.append(tooltipLine("Wired", formatBytes(wired)))
         }
         if let compressed = model.snapshot.memoryCompressedBytes {
-            lines.append("Compressed:  \(formatBytes(compressed))")
+            lines.append(tooltipLine("Compressed", formatBytes(compressed)))
         }
         if let swapUsed = model.snapshot.memorySwapUsedBytes {
             if let swapTotal = model.snapshot.memorySwapTotalBytes, swapTotal > 0 {
                 let pct = Double(swapUsed) / Double(swapTotal) * 100
                 lines.append(
-                    "Swap:        \(formatBytes(swapUsed)) / \(formatBytes(swapTotal))  (\(String(format: "%.1f", pct))%)"
+                    tooltipLine(
+                        "Swap",
+                        "\(formatBytes(swapUsed)) / \(formatBytes(swapTotal))  (\(formatPercent1(pct))%)"
+                    )
                 )
             } else {
-                lines.append("Swap:        \(formatBytes(swapUsed))")
+                lines.append(tooltipLine("Swap", formatBytes(swapUsed)))
             }
         }
         return lines.joined(separator: "\n")
@@ -270,21 +273,27 @@ struct SystemPanel: View {
         let usedPct = Double(used) / Double(total) * 100
         let freePct = Double(free) / Double(total) * 100
         var lines = [
-            "Volume: /",
-            "Total:  \(formatBytes(total))",
-            "Used:   \(formatBytes(used))  (\(String(format: "%.1f", usedPct))%)",
-            "Free:   \(formatBytes(free))  (\(String(format: "%.1f", freePct))%)",
+            tooltipLine("Volume", "/"),
+            tooltipLine("Total", formatBytes(total)),
+            tooltipLine("Used", "\(formatBytes(used))  (\(formatPercent1(usedPct))%)"),
+            tooltipLine("Free", "\(formatBytes(free))  (\(formatPercent1(freePct))%)"),
         ]
         if let lastMin = model.snapshot.diskWriteBytesLastMinute {
-            lines.append("Write (last 1 min):  \(formatDiskWriteAmount(lastMin))")
+            lines.append(tooltipLine("Write 1m", formatDiskWriteAmount(lastMin)))
         }
         if let session = model.snapshot.diskWriteBytesSession {
-            lines.append("Write (session):     \(formatDiskWriteAmount(session))")
+            lines.append(tooltipLine("Write Σ", formatDiskWriteAmount(session)))
         }
         if let elapsed = model.snapshot.diskWriteElapsedSeconds {
-            lines.append("Elapsed:             \(formatElapsed(elapsed))")
+            lines.append(tooltipLine("Elapsed", formatElapsed(elapsed)))
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// tooltip 行：标签 pad 到固定字符宽，数值左起对齐（配合 monospacedDigit）。
+    private func tooltipLine(_ label: String, _ value: String, labelWidth: Int = 10) -> String {
+        let padded = label.padding(toLength: labelWidth, withPad: " ", startingAt: 0)
+        return "\(padded) \(value)"
     }
 
     /// 最近 1 分钟传输量按窗口内峰值归一到 0...1，便于折线纵向铺满。
@@ -345,9 +354,8 @@ struct SystemPanel: View {
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(tint)
             Text(rate.map(formatRate) ?? "—")
-                .font(SidebarTypography.section(.medium))
+                .font(SidebarTypography.section(.medium).monospacedDigit())
                 .foregroundStyle(.primary)
-                .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
@@ -367,13 +375,13 @@ struct SystemPanel: View {
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
+            // IP 数字等宽，段长变化时更稳。
             Text(display)
-                .font(SidebarTypography.section(.medium))
+                .font(SidebarTypography.section(.medium).monospacedDigit())
                 .foregroundStyle(.primary)
-                .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .help(localIPHelp)
+                .tooltip(localIPHelp, edge: .above)
             if let address {
                 Button {
                     copyToPasteboard(address)
@@ -397,7 +405,7 @@ struct SystemPanel: View {
     private var localIPHelp: String {
         if let address = model.snapshot.localIPv4Address {
             if let iface = model.snapshot.localIPv4Interface {
-                return "\(iface) · \(address)"
+                return "\(iface)  \(address)"
             }
             return address
         }
@@ -417,13 +425,13 @@ struct SystemPanel: View {
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
+            // host:port 中的数字与 IP 同样等宽。
             Text(endpoint)
-                .font(SidebarTypography.section(.medium))
+                .font(SidebarTypography.section(.medium).monospacedDigit())
                 .foregroundStyle(.primary)
-                .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .help(model.snapshot.proxy?.summary ?? "")
+                .tooltip(proxyRowTooltip, edge: .above)
             if let exportCmd = proxyShellExportCommand {
                 Button {
                     copyToPasteboard(exportCmd)
@@ -435,13 +443,17 @@ struct SystemPanel: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Copy terminal proxy env\n\(exportCmd)")
+                .tooltip("Copy terminal proxy env\n\(exportCmd)", edge: .above)
             }
             Spacer(minLength: 0)
         }
         .frame(height: 18)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Proxy \(endpoint)")
+    }
+
+    private var proxyRowTooltip: String {
+        model.snapshot.proxy?.summary ?? "—"
     }
 
     private var proxyEnabled: Bool {
@@ -535,8 +547,9 @@ struct SystemPanel: View {
                     }
                 }
             } label: {
+                // 间隔如 `30s` 用等宽数字，与行内延迟一致。
                 Text(model.reachabilityInterval.title)
-                    .font(SidebarTypography.micro())
+                    .font(SidebarTypography.micro().monospacedDigit())
             }
             // 不隐藏 menuIndicator，保留右侧系统下拉箭头；tint 与旁侧图标同为 secondary。
             .menuStyle(.borderlessButton)
@@ -734,6 +747,11 @@ struct SystemPanel: View {
         if hours == 0 { return "\(minutes)m" }
         return String(format: "%dh %02dm", hours, minutes)
     }
+
+    /// tooltip 内一位小数百分比，与 monospacedDigit 搭配宽度更稳。
+    private func formatPercent1(_ value: Double) -> String {
+        String(format: "%.1f", value)
+    }
 }
 
 // MARK: - Reachability row / bars
@@ -758,6 +776,7 @@ private struct ReachabilitySiteRow: View {
         return !error.isEmpty
     }
 
+    /// 站点 hover：名称 / URL / 方法 / 最近错误；URL 与数字走 monospacedDigit tooltip。
     private var rowHelp: String {
         var lines = [item.name, item.url, item.method.rawValue]
         if let error = item.lastError, !error.isEmpty {
@@ -777,9 +796,8 @@ private struct ReachabilitySiteRow: View {
                 .lineLimit(1)
                 .frame(width: 72, alignment: .leading)
             Text(latencyText)
-                .font(SidebarTypography.micro())
+                .font(SidebarTypography.micro().monospacedDigit())
                 .foregroundStyle(.secondary)
-                .monospacedDigit()
                 .lineLimit(1)
                 // 足够放下 `999ms` / `9.9s` / `...`，避免被截成 `523...`
                 .frame(width: 40, alignment: .trailing)
@@ -814,7 +832,7 @@ private struct ReachabilitySiteRow: View {
             Button("Copy error", action: onCopyError)
                 .disabled(!hasLastError)
         }
-        .help(rowHelp)
+        .tooltip(rowHelp, edge: .above)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.name) \(latencyText)")
     }
