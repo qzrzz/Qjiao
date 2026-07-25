@@ -306,8 +306,8 @@ struct SourceTextEditor: NSViewRepresentable {
             guard let textView, textView.text != file.text else { return }
             textView.text = file.text
             let textLength = (file.text as NSString).length
-            let location = min(file.editorState.selectionLocation, textLength)
-            let length = min(file.editorState.selectionLength, textLength - location)
+            let location = min(max(0, file.editorState.selectionLocation ?? 0), textLength)
+            let length = min(max(0, file.editorState.selectionLength ?? 0), textLength - location)
             let selection = NSRange(location: location, length: length)
             textView.textSelection = selection
             file.updateSelectionSummary(selection)
