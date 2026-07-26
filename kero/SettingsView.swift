@@ -1016,9 +1016,14 @@ private struct ProjectSettingsSectionView: View {
     @ObservedObject var settings: AppSettings
 
     var body: some View {
-        Group {
-            // ── Section 1: 代码编辑工具
-            Section {
+        Section {
+            VStack(alignment: .leading, spacing: 12) {
+                // 顶部说明文本
+                Text("快速打开可用的应用程序和 CLI")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                // ── 1. 代码编辑工具
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -1026,7 +1031,7 @@ private struct ProjectSettingsSectionView: View {
                                 .font(.system(size: 13, weight: .medium))
                             Text("用于“在编辑器中打开”操作。")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.tertiary)
                         }
                         Spacer()
                         Button("选择应用…") {
@@ -1078,11 +1083,10 @@ private struct ProjectSettingsSectionView: View {
                         .padding(.top, 2)
                     }
                 }
-                .settingsRowPadding()
-            }
 
-            // ── Section 2: CLI 工具
-            Section {
+                Divider()
+
+                // ── 2. CLI 工具
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("CLI 工具")
@@ -1118,8 +1122,8 @@ private struct ProjectSettingsSectionView: View {
                         .padding(.top, 2)
                     }
                 }
-                .settingsRowPadding()
             }
+            .settingsRowPadding()
         }
     }
 
