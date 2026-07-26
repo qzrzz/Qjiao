@@ -737,46 +737,56 @@ private struct FileTreePanel: View {
                 filterBarView
             }
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    let itemsToDisplay = filteredItems
-                    if itemsToDisplay.isEmpty && isFilterActive && !filterQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        VStack(spacing: 6) {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                                .font(.system(size: 18))
-                                .foregroundStyle(.tertiary)
-                            Text("No matching files")
-                                .font(SidebarTypography.caption())
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 24)
-                    } else {
-                        LazyVStack(spacing: 1) {
-                            ForEach(itemsToDisplay) { item in
-                                FileTreeRow(
-                                    model: model, item: item, session: session,
-                                    currentFilePath: currentFilePath,
-                                    openFile: openFile, openToSide: openToSide, onRename: onRename
-                                )
-                                .id(item.id)
+            GeometryReader { geo in
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            let itemsToDisplay = filteredItems
+                            if itemsToDisplay.isEmpty && isFilterActive && !filterQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                VStack(spacing: 6) {
+                                    Image(systemName: "line.3.horizontal.decrease.circle")
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(.tertiary)
+                                    Text("No matching files")
+                                        .font(SidebarTypography.caption())
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 24)
+                            } else {
+                                LazyVStack(spacing: 1) {
+                                    ForEach(itemsToDisplay) { item in
+                                        FileTreeRow(
+                                            model: model, item: item, session: session,
+                                            currentFilePath: currentFilePath,
+                                            openFile: openFile, openToSide: openToSide, onRename: onRename
+                                        )
+                                        .id(item.id)
+                                    }
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.bottom, 8)
+                                // 点击列表空白处清空选择；行上的手势优先命中。
+                                .frame(maxWidth: .infinity, alignment: .top)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    model.clearSelection()
+                                }
                             }
+
+                            // 填满 Files 面板底部剩余空白区域，允许拖拽移动窗口
+                            WindowDragArea()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .frame(minHeight: 20)
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.bottom, 8)
-                        // 点击列表空白处清空选择；行上的手势优先命中。
-                        .frame(maxWidth: .infinity, alignment: .top)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            model.clearSelection()
-                        }
+                        .frame(minHeight: geo.size.height, alignment: .top)
                     }
-                }
-                .focused($isTreeFocused)
-                .focusable(true)
-                .focusEffectDisabled()
-                .onAppear {
-                    scrollProxy = proxy
+                    .focused($isTreeFocused)
+                    .focusable(true)
+                    .focusEffectDisabled()
+                    .onAppear {
+                        scrollProxy = proxy
+                    }
                 }
             }
             // ⌘F 快捷键：仅在焦点位于 Files Tree 时激活 Filter，与终端/编辑器 ⌘F 隔离
@@ -2272,83 +2282,93 @@ private struct GitPanel: View {
     // MARK: Change list
 
     private var changeList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 1) {
-                if model.totalChangeCount == 0 {
-                    cleanState
-                } else if visibleChangeCount == 0 {
-                    inlinePlaceholder(icon: "line.3.horizontal.decrease", text: "No changed files match “\(filterText)”")
-                }
-                if !filteredMergeEntries.isEmpty {
-                    GitSectionHeader(
-                        title: "MERGE CHANGES",
-                        count: filteredMergeEntries.count,
-                        isCollapsed: $mergeCollapsed,
-                        actions: [],
-                        actionsDisabled: model.isBusy
-                    )
-                    if !mergeCollapsed {
-                        ForEach(filteredMergeEntries, id: \.mergeRowID) { entry in
-                            row(entry, status: "U", kind: .merge)
+        GeometryReader { geo in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        if model.totalChangeCount == 0 {
+                            cleanState
+                        } else if visibleChangeCount == 0 {
+                            inlinePlaceholder(icon: "line.3.horizontal.decrease", text: "No changed files match “\(filterText)”")
                         }
-                    }
-                }
-                if !filteredStagedEntries.isEmpty {
-                    GitSectionHeader(
-                        title: "STAGED CHANGES",
-                        count: filteredStagedEntries.count,
-                        isCollapsed: $stagedCollapsed,
-                        actions: filterText.isEmpty ? [
-                            .init(systemImage: "minus", help: "Unstage All Changes") {
-                                model.unstageAll()
+                        if !filteredMergeEntries.isEmpty {
+                            GitSectionHeader(
+                                title: "MERGE CHANGES",
+                                count: filteredMergeEntries.count,
+                                isCollapsed: $mergeCollapsed,
+                                actions: [],
+                                actionsDisabled: model.isBusy
+                            )
+                            if !mergeCollapsed {
+                                ForEach(filteredMergeEntries, id: \.mergeRowID) { entry in
+                                    row(entry, status: "U", kind: .merge)
+                                }
                             }
-                        ] : [],
-                        actionsDisabled: model.isBusy
-                    )
-                    if !stagedCollapsed {
-                        ForEach(filteredStagedEntries, id: \.stagedRowID) { entry in
-                            row(entry, status: entry.staged, kind: .staged)
+                        }
+                        if !filteredStagedEntries.isEmpty {
+                            GitSectionHeader(
+                                title: "STAGED CHANGES",
+                                count: filteredStagedEntries.count,
+                                isCollapsed: $stagedCollapsed,
+                                actions: filterText.isEmpty ? [
+                                    .init(systemImage: "minus", help: "Unstage All Changes") {
+                                        model.unstageAll()
+                                    }
+                                ] : [],
+                                actionsDisabled: model.isBusy
+                            )
+                            if !stagedCollapsed {
+                                ForEach(filteredStagedEntries, id: \.stagedRowID) { entry in
+                                    row(entry, status: entry.staged, kind: .staged)
+                                }
+                            }
+                        }
+                        if !filteredChangedEntries.isEmpty {
+                            GitSectionHeader(
+                                title: "CHANGES",
+                                count: filteredChangedEntries.count,
+                                isCollapsed: $changesCollapsed,
+                                actions: filterText.isEmpty ? [
+                                    .init(systemImage: "arrow.uturn.backward", help: "Discard All Changes") {
+                                        requestDiscardAll()
+                                    },
+                                    .init(systemImage: "plus", help: "Stage All Changes") {
+                                        model.stageAll()
+                                    },
+                                ] : [],
+                                actionsDisabled: model.isBusy
+                            )
+                            if !changesCollapsed {
+                                ForEach(filteredChangedEntries, id: \.changedRowID) { entry in
+                                    row(entry, status: entry.unstaged, kind: .unstaged)
+                                }
+                            }
+                        }
+                        if filterText.isEmpty, !model.recentCommits.isEmpty {
+                            GitSectionHeader(
+                                title: "RECENT COMMITS",
+                                count: model.recentCommits.count,
+                                isCollapsed: $historyCollapsed,
+                                actions: [],
+                                actionsDisabled: model.isBusy
+                            )
+                            if !historyCollapsed {
+                                ForEach(model.recentCommits) { commit in
+                                    GitCommitRow(commit: commit)
+                                }
+                            }
                         }
                     }
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 8)
+
+                    // 填满 Git 面板底部剩余空白区域，允许拖拽移动窗口
+                    WindowDragArea()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(minHeight: 20)
                 }
-                if !filteredChangedEntries.isEmpty {
-                    GitSectionHeader(
-                        title: "CHANGES",
-                        count: filteredChangedEntries.count,
-                        isCollapsed: $changesCollapsed,
-                        actions: filterText.isEmpty ? [
-                            .init(systemImage: "arrow.uturn.backward", help: "Discard All Changes") {
-                                requestDiscardAll()
-                            },
-                            .init(systemImage: "plus", help: "Stage All Changes") {
-                                model.stageAll()
-                            },
-                        ] : [],
-                        actionsDisabled: model.isBusy
-                    )
-                    if !changesCollapsed {
-                        ForEach(filteredChangedEntries, id: \.changedRowID) { entry in
-                            row(entry, status: entry.unstaged, kind: .unstaged)
-                        }
-                    }
-                }
-                if filterText.isEmpty, !model.recentCommits.isEmpty {
-                    GitSectionHeader(
-                        title: "RECENT COMMITS",
-                        count: model.recentCommits.count,
-                        isCollapsed: $historyCollapsed,
-                        actions: [],
-                        actionsDisabled: model.isBusy
-                    )
-                    if !historyCollapsed {
-                        ForEach(model.recentCommits) { commit in
-                            GitCommitRow(commit: commit)
-                        }
-                    }
-                }
+                .frame(minHeight: geo.size.height, alignment: .top)
             }
-            .padding(.horizontal, 6)
-            .padding(.bottom, 8)
         }
     }
 
@@ -4203,117 +4223,127 @@ private struct ProjectPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 1) {
-                    TopToolsOpenSection(path: model.rootPath, manager: manager)
-                    LaunchersSection(
-                        project: project,
-                        isCollapsed: $launchersCollapsed,
-                        runCommand: runLaunchCommand,
-                        runAllCommands: runAllLaunchCommands
-                    )
-                    PackageScriptsSection(
-                        scripts: model.packageScripts,
-                        records: manager.packageScriptRecords,
-                        isCollapsed: $packageScriptsCollapsed,
-                        runPackageScript: runPackageScript,
-                        stopPackageScript: { manager.stopPackageScript($0) },
-                        restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
-                        openPackageJSON: openPackageJSON
-                    )
-                    if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.rootPath) {
-                        GradleTasksSection(
-                            scripts: model.gradleScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $gradleTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+            GeometryReader { geo in
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            TopToolsOpenSection(path: model.rootPath, manager: manager)
+                            LaunchersSection(
+                                project: project,
+                                isCollapsed: $launchersCollapsed,
+                                runCommand: runLaunchCommand,
+                                runAllCommands: runAllLaunchCommands
+                            )
+                            PackageScriptsSection(
+                                scripts: model.packageScripts,
+                                records: manager.packageScriptRecords,
+                                isCollapsed: $packageScriptsCollapsed,
+                                runPackageScript: runPackageScript,
+                                stopPackageScript: { manager.stopPackageScript($0) },
+                                restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
+                                openPackageJSON: openPackageJSON
+                            )
+                            if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.rootPath) {
+                                GradleTasksSection(
+                                    scripts: model.gradleScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $gradleTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
-                    }
-                    if !model.justScripts.isEmpty || JustScriptProvider.isJustProject(at: model.rootPath) {
-                        JustTasksSection(
-                            scripts: model.justScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $justTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+                            if !model.justScripts.isEmpty || JustScriptProvider.isJustProject(at: model.rootPath) {
+                                JustTasksSection(
+                                    scripts: model.justScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $justTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
-                    }
-                    if !model.cargoScripts.isEmpty || CargoScriptProvider.isCargoProject(at: model.rootPath) {
-                        CargoTasksSection(
-                            scripts: model.cargoScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $cargoTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+                            if !model.cargoScripts.isEmpty || CargoScriptProvider.isCargoProject(at: model.rootPath) {
+                                CargoTasksSection(
+                                    scripts: model.cargoScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $cargoTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
-                    }
-                    if !model.cmakeScripts.isEmpty || CMakeScriptProvider.isCMakeProject(at: model.rootPath) {
-                        CMakeTasksSection(
-                            scripts: model.cmakeScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $cmakeTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+                            if !model.cmakeScripts.isEmpty || CMakeScriptProvider.isCMakeProject(at: model.rootPath) {
+                                CMakeTasksSection(
+                                    scripts: model.cmakeScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $cmakeTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
-                    }
-                    if !model.makefileScripts.isEmpty || MakefileScriptProvider.isMakefileProject(at: model.rootPath) {
-                        MakefileTasksSection(
-                            scripts: model.makefileScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $makefileTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+                            if !model.makefileScripts.isEmpty || MakefileScriptProvider.isMakefileProject(at: model.rootPath) {
+                                MakefileTasksSection(
+                                    scripts: model.makefileScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $makefileTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
+                            ProcessesSection(
+                                processes: model.processes,
+                                isCollapsed: $processesCollapsed,
+                                kill: { model.kill($0, force: $1) }
+                            )
+                            PortsSection(
+                                ports: model.ports,
+                                isCollapsed: $portsCollapsed,
+                                kill: { model.kill($0, force: $1) }
+                            )
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 8)
+
+                        // 填满 Project 面板底部剩余空白区域，允许拖拽移动窗口
+                        WindowDragArea()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .frame(minHeight: 20)
                     }
-                    ProcessesSection(
-                        processes: model.processes,
-                        isCollapsed: $processesCollapsed,
-                        kill: { model.kill($0, force: $1) }
-                    )
-                    PortsSection(
-                        ports: model.ports,
-                        isCollapsed: $portsCollapsed,
-                        kill: { model.kill($0, force: $1) }
-                    )
+                    .frame(minHeight: geo.size.height, alignment: .top)
                 }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 8)
             }
         }
         .onChange(of: model.packageScripts.count) { oldCount, newCount in
@@ -4997,111 +5027,121 @@ private struct SessionInfoPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 1) {
-                    TopToolsOpenSection(path: model.cwdPath, manager: manager)
-                    PackageScriptsSection(
-                        scripts: model.packageScripts,
-                        records: manager.packageScriptRecords,
-                        isCollapsed: $packageScriptsCollapsed,
-                        runPackageScript: runPackageScript,
-                        stopPackageScript: { manager.stopPackageScript($0) },
-                        restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
-                        openPackageJSON: openPackageJSON
-                    )
-                    if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.cwdPath) {
-                        GradleTasksSection(
-                            scripts: model.gradleScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $gradleTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+            GeometryReader { geo in
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            TopToolsOpenSection(path: model.cwdPath, manager: manager)
+                            PackageScriptsSection(
+                                scripts: model.packageScripts,
+                                records: manager.packageScriptRecords,
+                                isCollapsed: $packageScriptsCollapsed,
+                                runPackageScript: runPackageScript,
+                                stopPackageScript: { manager.stopPackageScript($0) },
+                                restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
+                                openPackageJSON: openPackageJSON
+                            )
+                            if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.cwdPath) {
+                                GradleTasksSection(
+                                    scripts: model.gradleScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $gradleTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
-                    }
-                    if !model.justScripts.isEmpty || JustScriptProvider.isJustProject(at: model.cwdPath) {
-                        JustTasksSection(
-                            scripts: model.justScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $justTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+                            if !model.justScripts.isEmpty || JustScriptProvider.isJustProject(at: model.cwdPath) {
+                                JustTasksSection(
+                                    scripts: model.justScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $justTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
-                    }
-                    if !model.cargoScripts.isEmpty || CargoScriptProvider.isCargoProject(at: model.cwdPath) {
-                        CargoTasksSection(
-                            scripts: model.cargoScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $cargoTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+                            if !model.cargoScripts.isEmpty || CargoScriptProvider.isCargoProject(at: model.cwdPath) {
+                                CargoTasksSection(
+                                    scripts: model.cargoScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $cargoTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
-                    }
-                    if !model.cmakeScripts.isEmpty || CMakeScriptProvider.isCMakeProject(at: model.cwdPath) {
-                        CMakeTasksSection(
-                            scripts: model.cmakeScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $cmakeTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+                            if !model.cmakeScripts.isEmpty || CMakeScriptProvider.isCMakeProject(at: model.cwdPath) {
+                                CMakeTasksSection(
+                                    scripts: model.cmakeScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $cmakeTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
-                    }
-                    if !model.makefileScripts.isEmpty || MakefileScriptProvider.isMakefileProject(at: model.cwdPath) {
-                        MakefileTasksSection(
-                            scripts: model.makefileScripts,
-                            records: manager.packageScriptRecords,
-                            isCollapsed: $makefileTasksCollapsed,
-                            runScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
-                            },
-                            stopScript: { scriptName in
-                                manager.stopPackageScript(scriptName)
-                            },
-                            restartScript: { script, mode in
-                                manager.runProjectScript(script, mode: mode)
+                            if !model.makefileScripts.isEmpty || MakefileScriptProvider.isMakefileProject(at: model.cwdPath) {
+                                MakefileTasksSection(
+                                    scripts: model.makefileScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $makefileTasksCollapsed,
+                                    runScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    },
+                                    stopScript: { scriptName in
+                                        manager.stopPackageScript(scriptName)
+                                    },
+                                    restartScript: { script, mode in
+                                        manager.runProjectScript(script, mode: mode)
+                                    }
+                                )
                             }
-                        )
+                            ProcessesSection(
+                                processes: model.processes,
+                                isCollapsed: $processesCollapsed,
+                                kill: { model.kill($0, force: $1) }
+                            )
+                            PortsSection(
+                                ports: model.ports,
+                                isCollapsed: $portsCollapsed,
+                                kill: { model.kill($0, force: $1) }
+                            )
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 8)
+
+                        // 填满 SessionInfo 面板底部剩余空白区域，允许拖拽移动窗口
+                        WindowDragArea()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .frame(minHeight: 20)
                     }
-                    ProcessesSection(
-                        processes: model.processes,
-                        isCollapsed: $processesCollapsed,
-                        kill: { model.kill($0, force: $1) }
-                    )
-                    PortsSection(
-                        ports: model.ports,
-                        isCollapsed: $portsCollapsed,
-                        kill: { model.kill($0, force: $1) }
-                    )
+                    .frame(minHeight: geo.size.height, alignment: .top)
                 }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 8)
             }
         }
         .onChange(of: model.packageScripts.count) { oldCount, newCount in

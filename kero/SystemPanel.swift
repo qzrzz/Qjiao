@@ -36,15 +36,25 @@ struct SystemPanel: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 8) {
-                resourceCard
-                // Net + Proxy 同一组，行距与资源区一致。
-                networkGroup
-                reachabilityCard
+        GeometryReader { geo in
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        resourceCard
+                        // Net + Proxy 同一组，行距与资源区一致。
+                        networkGroup
+                        reachabilityCard
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+
+                    // 填满 System 面板底部剩余空白区域，允许拖拽移动窗口
+                    WindowDragArea()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(minHeight: 20)
+                }
+                .frame(minHeight: geo.size.height, alignment: .top)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(.easeInOut(duration: 0.25), value: model.snapshot)
