@@ -6,6 +6,7 @@
 import AppKit
 import GhosttyTheme
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The app settings window (Cmd+,).
 struct SettingsView: View {
@@ -972,7 +973,7 @@ private struct ProjectSettingsSectionView: View {
         let panel = NSOpenPanel()
         panel.title = "选择代码编辑器应用"
         panel.prompt = "选择"
-        panel.allowedContentTypes = [.application, .applicationBundle]
+        panel.allowedContentTypes = [UTType.application, UTType.applicationBundle]
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
