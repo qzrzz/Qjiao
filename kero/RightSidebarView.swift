@@ -2679,10 +2679,10 @@ private struct GitSectionHeader: View {
                     if count > 0 {
                         Text("\(count)")
                             .font(SidebarTypography.micro())
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.primary.opacity(0.07)))
+                            .background(Capsule().fill(Color.primary.opacity(0.08)))
                     }
                 }
                 .contentShape(Rectangle())
