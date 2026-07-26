@@ -167,6 +167,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 用户首选 AI 工具的 ID（如 "desktop:com.openai.codex" 或 "cli:agy"）；空字符串表示使用检测到的首个工具。
+    @Published var preferredAIToolId: String {
+        didSet { save() }
+    }
+
     /// 毛玻璃 4 核心属性定制选项：Material 材质
     @Published var visualEffectMaterial: String {
         didSet { save() }
@@ -257,6 +262,7 @@ final class AppSettings: nonisolated ObservableObject {
         directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
         disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
         preferredCodeEditorBundleId = toml["editor.preferred-code-editor"]?.string ?? ""
+        preferredAIToolId = toml["ai.preferred-tool"]?.string ?? ""
         packageManagerCommand = toml["terminal.package-manager"]?.string
             .flatMap(PackageManagerCommand.init(rawValue:)) ?? .npm
         // 优先 config.toml；无则迁移旧 UserDefaults，最后回落默认 30s。
@@ -341,6 +347,7 @@ final class AppSettings: nonisolated ObservableObject {
         packageManagerCommand = .npm
         systemReachabilityInterval = .default
         preferredCodeEditorBundleId = ""
+        preferredAIToolId = ""
     }
 
     private func save() {
@@ -416,6 +423,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if !preferredCodeEditorBundleId.isEmpty {
             lines.append("editor.preferred-code-editor = \(TOML.quote(preferredCodeEditorBundleId))")
+        }
+        if !preferredAIToolId.isEmpty {
+            lines.append("ai.preferred-tool = \(TOML.quote(preferredAIToolId))")
         }
         if systemReachabilityInterval != .default {
             lines.append(

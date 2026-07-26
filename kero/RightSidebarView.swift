@@ -2950,8 +2950,9 @@ private struct PathDirectorySection: View {
     /// 分组标题，如 "PROJECT" / "CWD"。
     var sectionTitle: String = "DIRECTORY"
 
-    /// 订阅编辑器注册表，首选编辑器变化时自动刷新按钮标签。
+    /// 订阅编辑器与 AI 工具注册表，首选变更时自动刷新按钮。
     @ObservedObject private var registry = CodeEditorRegistry.shared
+    @ObservedObject private var aiRegistry = AIToolRegistry.shared
 
     var body: some View {
         GitSectionHeader(
@@ -3021,6 +3022,52 @@ private struct PathDirectorySection: View {
                                             }
                                         } else {
                                             Label(editor.displayName, systemImage: editor.symbolName)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // 若检测到已安装的 AI 工具则显示打开按钮。
+                    if let preferredAI = aiRegistry.preferredTool {
+                        Button {
+                            aiRegistry.open(path: path, with: preferredAI)
+                        } label: {
+                            HStack(spacing: 3) {
+                                AIToolIcon(tool: preferredAI, size: 12)
+                                Text(preferredAI.displayName)
+                                    .font(SidebarTypography.caption(.medium))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                            }
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.primary.opacity(0.05))
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(path.isEmpty)
+                        .help("Open in \(preferredAI.displayName)")
+                        .contextMenu {
+                            if aiRegistry.installedTools.count > 1 {
+                                ForEach(aiRegistry.installedTools) { tool in
+                                    Button {
+                                        aiRegistry.preferredToolId = tool.id
+                                        aiRegistry.open(path: path, with: tool)
+                                    } label: {
+                                        if let icon = tool.iconImage(size: 16) {
+                                            Label {
+                                                Text(tool.displayName)
+                                            } icon: {
+                                                Image(nsImage: icon)
+                                            }
+                                        } else {
+                                            Label(tool.displayName, systemImage: tool.symbolName)
                                         }
                                     }
                                 }
@@ -4099,7 +4146,7 @@ private struct ProjectPanel: View {
             header
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    CodeEditorOpenButton(path: model.rootPath)
+                    TopToolsOpenSection(path: model.rootPath, manager: manager)
                     LaunchersSection(
                         project: project,
                         isCollapsed: $launchersCollapsed,
@@ -4421,6 +4468,7 @@ private struct CodeEditorOpenButton: View {
                         CodeEditorIcon(editor: preferred, size: 16)
                         Text(preferred.displayName)
                             .font(SidebarTypography.caption(.medium))
+                            .lineLimit(1)
                         Spacer()
                     }
                     .foregroundStyle(.secondary)
@@ -4435,14 +4483,10 @@ private struct CodeEditorOpenButton: View {
 
                 // ── 右侧：下拉切换编辑器（仅在已安装多个时才显示）
                 if registry.installedEditors.count > 1 {
-                    // 分隔线
                     Rectangle()
                         .fill(Color.primary.opacity(0.1))
                         .frame(width: 1, height: 14)
 
-                    // 使用原生 NSButton + NSMenu 实现下拉：
-                    // NSMenuItem.image 直接赋值，图标 100% 可靠显示，
-                    // 外观完全自定义，不受 SwiftUI Picker/Menu 渲染限制。
                     EditorDropdownNSButton(
                         editors: registry.installedEditors,
                         preferredBundleId: registry.preferredBundleId
@@ -4453,7 +4497,6 @@ private struct CodeEditorOpenButton: View {
                     .frame(width: 22, height: 28)
                     .help("选择代码编辑器")
                 } else {
-                    // 只有一个编辑器时右侧显示跳转图标。
                     Image(systemName: "arrow.up.forward")
                         .font(SidebarTypography.micro())
                         .foregroundStyle(.secondary)
@@ -4465,6 +4508,189 @@ private struct CodeEditorOpenButton: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.primary.opacity(0.05))
             )
+        }
+    }
+}
+
+/// 显示 AI 工具图标的辅助视图：优先展示工具/应用真实图标，不可用时回退到 SF Symbol。
+private struct AIToolIcon: View {
+    let tool: AITool
+    var size: CGFloat = 16
+
+    var body: some View {
+        if let icon = tool.iconImage(size: size) {
+            Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: size, height: size)
+        } else {
+            Image(systemName: tool.symbolName)
+                .frame(width: size, height: size)
+        }
+    }
+}
+
+/// 用 AI 工具打开路径的按钮区域。
+/// 左半区点击使用默认 AI 工具打开；右侧下拉箭头展开菜单可切换首选 AI 工具。
+/// 若系统未检测到任何可用 AI 工具则隐藏。
+private struct AIToolOpenButton: View {
+    let path: String
+    var manager: TerminalManager? = nil
+
+    @ObservedObject private var registry = AIToolRegistry.shared
+
+    var body: some View {
+        if let preferred = registry.preferredTool {
+            HStack(spacing: 0) {
+                // 左半：主按钮（用默认 AI 工具打开）
+                Button {
+                    registry.open(path: path, with: preferred, terminalManager: manager)
+                } label: {
+                    HStack(spacing: 6) {
+                        AIToolIcon(tool: preferred, size: 16)
+                        Text(preferred.displayName)
+                            .font(SidebarTypography.caption(.medium))
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 10)
+                    .padding(.trailing, 4)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(path.isEmpty)
+                .help("在 \(preferred.displayName) 中打开")
+
+                // 右侧：下拉切换 AI 工具（仅在已检测到多个时才显示）
+                if registry.installedTools.count > 1 {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.1))
+                        .frame(width: 1, height: 14)
+
+                    AIDropdownNSButton(
+                        tools: registry.installedTools,
+                        preferredToolId: registry.preferredToolId
+                    ) { selected in
+                        registry.preferredToolId = selected.id
+                        registry.open(path: path, with: selected, terminalManager: manager)
+                    }
+                    .frame(width: 22, height: 28)
+                    .help("选择 AI 工具")
+                } else {
+                    Image(systemName: "arrow.up.forward")
+                        .font(SidebarTypography.micro())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 28)
+                        .allowsHitTesting(false)
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(0.05))
+            )
+        }
+    }
+}
+
+/// 原生 NSButton + NSMenu 包装的 AI 工具下拉选择按钮。
+private struct AIDropdownNSButton: NSViewRepresentable {
+    let tools: [AITool]
+    let preferredToolId: String
+    let onSelect: (AITool) -> Void
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton()
+        button.bezelStyle = .inline
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.contentTintColor = .secondaryLabelColor
+        if let chevron = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil) {
+            let cfg = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular)
+            button.image = chevron.withSymbolConfiguration(cfg)
+        }
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.showMenu(_:))
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.update(
+            tools: tools,
+            preferredToolId: preferredToolId,
+            onSelect: onSelect
+        )
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject {
+        private let menu = NSMenu()
+        private var tools: [AITool] = []
+        private var preferredToolId: String = ""
+        private var onSelect: ((AITool) -> Void)?
+
+        override init() {
+            super.init()
+            menu.autoenablesItems = false
+        }
+
+        func update(tools: [AITool], preferredToolId: String, onSelect: @escaping (AITool) -> Void) {
+            self.tools = tools
+            self.preferredToolId = preferredToolId
+            self.onSelect = onSelect
+            rebuildMenu()
+        }
+
+        private func rebuildMenu() {
+            menu.removeAllItems()
+            for tool in tools {
+                let item = NSMenuItem(
+                    title: tool.displayName,
+                    action: #selector(selectTool(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.isEnabled = true
+                item.representedObject = tool.id
+                item.image = tool.iconImage(size: 16)
+                item.state = (tool.id == preferredToolId) ? .on : .off
+                menu.addItem(item)
+            }
+        }
+
+        @objc func showMenu(_ sender: NSButton) {
+            menu.popUp(
+                positioning: nil,
+                at: NSPoint(x: 0, y: sender.bounds.height + 2),
+                in: sender
+            )
+        }
+
+        @objc func selectTool(_ sender: NSMenuItem) {
+            guard let id = sender.representedObject as? String,
+                  let tool = tools.first(where: { $0.id == id })
+            else { return }
+            onSelect?(tool)
+        }
+    }
+}
+
+/// 顶部工具打开区域：平铺 Code 编辑器打开按钮与 AI 工具打开按钮。
+private struct TopToolsOpenSection: View {
+    let path: String
+    var manager: TerminalManager? = nil
+
+    @ObservedObject private var editorRegistry = CodeEditorRegistry.shared
+    @ObservedObject private var aiRegistry = AIToolRegistry.shared
+
+    var body: some View {
+        if editorRegistry.preferredEditor != nil || aiRegistry.preferredTool != nil {
+            HStack(spacing: 8) {
+                CodeEditorOpenButton(path: path)
+                AIToolOpenButton(path: path, manager: manager)
+            }
             .padding(.horizontal, 12)
             .padding(.top, 4)
             .padding(.bottom, 6)
@@ -4596,7 +4822,7 @@ private struct SessionInfoPanel: View {
             header
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    CodeEditorOpenButton(path: model.cwdPath)
+                    TopToolsOpenSection(path: model.cwdPath, manager: manager)
                     PackageScriptsSection(
                         scripts: model.packageScripts,
                         records: manager.packageScriptRecords,

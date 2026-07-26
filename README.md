@@ -18,7 +18,7 @@
 - 等宽中文字体来显示终端和代码，可以对齐含有中文的表格、注释了。
   - 默认使用内置 `Source Han Sans CN VF Mono1200` 作为中文等宽回退字体，并可在设置中关闭。
 - 拖拽文件夹自动以该文件夹创建项目并在其中启动终端。
-- 项目支持自定义图标（Emoji 和 SF Symbols ）。
+- 项目支持自定义图标（Emoji 和 SF Symbols ）；图标选择器独立为 `ProjectIconPicker.swift`，含常用推荐、搜索防抖、多词过滤与当前图标预览。
 - 增加 Tabs 选择菜单；顶栏新建标签紧挨标签条，标签总览下拉固定在右侧侧栏按钮旁；左侧栏开关 / 新建 / 下拉 / 右侧栏 / Zoom 共用 `HeaderIconButton`（26pt 热区、caption 图标不变；仅 hover 浅底，按下/激活无底色，激活仅 tint）。右侧工具用 ZStack 固定叠层 + 左侧 padding 硬预留宽度，标签再多也不会挤占下拉/侧栏。
 - 终端可选启用直接点击移动光标。
 - 项目支持添加描述，并显示在项目列表中。
@@ -102,4 +102,5 @@
   - 自动读取 Settings 中配置的包管理器（`bun` / `pnpm` / `yarn` / `npm`），为启动的新终端 Tab 动态命名为 `<scriptName> (<pmCommand> run)` 格式（例如 `dev (npm run)`、`build (bun run)`）。
   - 抽象解耦出通用项目脚本执行引擎模块 `ProjectScriptEngine`：定义 `ProjectScriptCategory`、`UniversalProjectScript` 与 `ProjectScriptProvider` 探针协议，统一管理跨平台/多语言任务的构建、调度、生命周期监测与端口绑定，为后续扩展 Gradle、`tool.uv.scripts`、PDM、Rust alias 及 Makefile 等方案奠定架构基础。
 - 优化右侧边栏 Project 与 Info 面板 Header 与顶部布局：以 Project 面板为统一模板对齐 Info 面板 Header 样式；Info 面板顶部图标动态响应当前终端 Tab 的前台应用图标（如 Node/Python/Cargo/Antigravity）与运行状态；移除冗余的 CWD/PROJECT 分组，在 Header 标题下方集成单行无边框只读路径输入框（支持放置光标平移浏览）与 Finder / Copy 操作按钮，并在内容区顶部统一设立 VS Code 打开项目的专属区域。
-- 代码编辑器打开按钮支持多编辑器选择：Project / Info 面板顶部「在编辑器中打开」区域与路径栏编辑器按钮均通过 `CodeEditorRegistry` 动态检测系统已安装的代码编辑器（VS Code、VS Code Insiders、Cursor、Windsurf、Zed、Sublime Text、JetBrains 系列、Nova、Xcode 等）；默认以首个检测到的编辑器打开，安装多个时右侧 `[⌄]` 下拉菜单可切换默认编辑器（设置持久化到 `config.toml`：`editor.preferred-code-editor`）；无已安装编辑器时整体隐藏。
+- 代码编辑器打开按钮支持多编辑器选择：Project / Info 面板顶部「在编辑器中打开」区域与路径栏编辑器按钮均通过 `CodeEditorRegistry` 动态检测系统已安装的代码编辑器（VS Code、VS Code Insiders、Cursor、Windsurf、Zed、Sublime Text、JetBrains 系列、Nova、Xcode 等）；默认以首选编辑器打开，安装多个时右侧 `[⌄]` 下拉菜单可切换默认编辑器（设置持久化到 `config.toml`：`editor.preferred-code-editor`）；无已安装编辑器时整体隐藏。
+- 新增 AI 工具打开按钮与动态选择注册表：通过 `AIToolRegistry` 动态检测系统已安装的 AI 桌面 GUI 应用（Codex、Claude Code、Claude Desktop、OpenCode、Antigravity 等）与 CLI 命令行工具（`codex`、`agy`、`claude`、`opencode`、`grok` 等）；在 Project 与 Info 面板顶部形成「编辑器 + AI 工具」双核并列组合栏。桌面应用通过 `NSWorkspace` 激活打开目录，CLI 工具自动在新终端 Session 中携带目标路径启动；图标自动匹配 Material / App 真实图标，右侧 `[⌄]` 原生菜单支持一键切换并持久化至 `config.toml` (`ai.preferred-tool`)。
