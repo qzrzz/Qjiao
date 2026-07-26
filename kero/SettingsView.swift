@@ -879,93 +879,247 @@ private struct MiniWindow: View {
     }
 }
 
-/// Project 设置分类面板：配置自定义 Code 编辑工具与 CLI AI 工具。
+/// 自动折行排列标签的流式布局
+@available(macOS 13.0, *)
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = FlowResult(in: proposal.width ?? 0, subviews: subviews, spacing: spacing)
+        return result.bounds
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = FlowResult(in: bounds.width, subviews: subviews, spacing: spacing)
+        for (index, subview) in subviews.enumerated() {
+            let point = result.points[index]
+            subview.place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y), proposal: .unspecified)
+        }
+    }
+
+    struct FlowResult {
+        var bounds: CGSize = .zero
+        var points: [CGPoint] = []
+
+        init(in maxRowWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
+            var currentX: CGFloat = 0
+            var currentY: CGFloat = 0
+            var lineHeight: CGFloat = 0
+
+            for subview in subviews {
+                let size = subview.sizeThatFits(.unspecified)
+                if currentX + size.width > maxRowWidth && currentX > 0 {
+                    currentX = 0
+                    currentY += lineHeight + spacing
+                    lineHeight = 0
+                }
+                points.append(CGPoint(x: currentX, y: currentY))
+                lineHeight = max(lineHeight, size.height)
+                currentX += size.width + spacing
+                bounds.width = max(bounds.width, currentX)
+            }
+            bounds.height = currentY + lineHeight
+        }
+    }
+}
+
+/// CLI 命令标签 Chips 控件
+private struct CLIToolChip: View {
+    let text: String
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "terminal")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.primary)
+
+            Button(action: onDelete) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12, height: 12)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("移除 \(text)")
+        }
+        .padding(.leading, 7)
+        .padding(.trailing, 5)
+        .padding(.vertical, 3.5)
+        .background(
+            Capsule()
+                .fill(Color.primary.opacity(0.05))
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
+        )
+    }
+}
+
+/// 添加 CLI 命令的快捷输入框
+private struct AddCLIChipField: View {
+    @State private var newCommand: String = ""
+    let onAdd: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "plus")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+
+            TextField("添加命令…", text: $newCommand)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .frame(minWidth: 70, maxWidth: 110)
+                .onSubmit {
+                    submit()
+                }
+
+            if !newCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button("添加") {
+                    submit()
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color.accentColor)
+            }
+        }
+        .padding(.leading, 7)
+        .padding(.trailing, 6)
+        .padding(.vertical, 3)
+        .background(
+            Capsule()
+                .fill(Color.accentColor.opacity(0.08))
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color.accentColor.opacity(0.3), lineWidth: 0.5)
+        )
+    }
+
+    private func submit() {
+        let trimmed = newCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            onAdd(trimmed)
+            newCommand = ""
+        }
+    }
+}
+
+/// Project 设置分类面板：原生 macOS 风格的 Code 编辑工具与 CLI 工具配置。
 private struct ProjectSettingsSectionView: View {
     @ObservedObject var settings: AppSettings
 
-    @State private var cliToolsInputText: String = ""
-
     var body: some View {
         Group {
-            // ── Section 1: Code 编辑工具 (文件选择)
-            Section("Code 编辑工具") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("自定义代码编辑器 (.app)。选择已安装的应用程序包，将自动识别并加入编辑器打开列表。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if !settings.customCodeEditorPaths.isEmpty {
-                        VStack(spacing: 4) {
-                            ForEach(settings.customCodeEditorPaths, id: \.self) { path in
-                                HStack(spacing: 8) {
-                                    let url = URL(fileURLWithPath: path)
-                                    let icon = NSWorkspace.shared.icon(forFile: path)
-                                    Image(nsImage: icon)
-                                        .resizable()
-                                        .frame(width: 18, height: 18)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(url.deletingPathExtension().lastPathComponent)
-                                            .font(.system(size: 12, weight: .medium))
-                                        Text(path)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                    Spacer()
-                                    Button {
-                                        removeCustomEditor(path: path)
-                                    } label: {
-                                        Image(systemName: "minus.circle.fill")
-                                            .foregroundStyle(.red.opacity(0.8))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("移除此编辑器")
-                                }
-                                .padding(.vertical, 4)
-                                .padding(.horizontal, 6)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color.primary.opacity(0.04))
-                                )
-                            }
-                        }
-                    }
-
+            // ── Section 1: 代码编辑工具
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
                     HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("代码编辑工具")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("用于“在编辑器中打开”操作。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         Spacer()
-                        Button("选择文件…") {
+                        Button("选择应用…") {
                             selectCustomEditorApp()
                         }
+                        .controlSize(.small)
+                    }
+
+                    if settings.customCodeEditorPaths.isEmpty {
+                        HStack {
+                            Text("未选择自定义编辑器")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                        }
+                        .padding(.top, 2)
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(Array(settings.customCodeEditorPaths.enumerated()), id: \.element) { index, path in
+                                let url = URL(fileURLWithPath: path)
+                                let icon = NSWorkspace.shared.icon(forFile: path)
+                                HStack(spacing: 8) {
+                                    Image(nsImage: icon)
+                                        .resizable()
+                                        .frame(width: 16, height: 16)
+                                    Text(url.deletingPathExtension().lastPathComponent)
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text(path)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Spacer()
+
+                                    Button("移除") {
+                                        removeCustomEditor(path: path)
+                                    }
+                                    .font(.system(size: 11))
+                                    .buttonStyle(.borderless)
+                                    .foregroundStyle(.red.opacity(0.85))
+                                }
+                                .padding(.vertical, 4)
+
+                                if index < settings.customCodeEditorPaths.count - 1 {
+                                    Divider()
+                                }
+                            }
+                        }
+                        .padding(.top, 2)
                     }
                 }
                 .settingsRowPadding()
             }
 
-            // ── Section 2: CLI 工具 (文本列表 一行一个)
-            Section("CLI 工具") {
+            // ── Section 2: CLI 工具
+            Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("自定义 CLI 命令行工具。填写可执行命令名称，一行一个：")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("CLI 工具")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("用于在项目中快速启动常用命令。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
-                    TextEditor(text: $cliToolsInputText)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(height: 100)
-                        .padding(4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color.primary.opacity(0.15), lineWidth: 1)
-                        )
-                        .onChange(of: cliToolsInputText) {
-                            updateCustomCLITools(from: cliToolsInputText)
+                    if #available(macOS 13.0, *) {
+                        FlowLayout(spacing: 6) {
+                            ForEach(settings.customCLITools, id: \.self) { cmd in
+                                CLIToolChip(text: cmd) {
+                                    removeCLITool(cmd)
+                                }
+                            }
+                            AddCLIChipField { newCmd in
+                                addCLITool(newCmd)
+                            }
                         }
+                        .padding(.top, 2)
+                    } else {
+                        HStack(spacing: 6) {
+                            ForEach(settings.customCLITools, id: \.self) { cmd in
+                                CLIToolChip(text: cmd) {
+                                    removeCLITool(cmd)
+                                }
+                            }
+                            AddCLIChipField { newCmd in
+                                addCLITool(newCmd)
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
                 }
                 .settingsRowPadding()
             }
-        }
-        .onAppear {
-            cliToolsInputText = settings.customCLITools.joined(separator: "\n")
         }
     }
 
@@ -995,11 +1149,15 @@ private struct ProjectSettingsSectionView: View {
         CodeEditorRegistry.shared.refresh()
     }
 
-    private func updateCustomCLITools(from text: String) {
-        let lines = text.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        settings.customCLITools = lines
+    private func addCLITool(_ cmd: String) {
+        if !settings.customCLITools.contains(cmd) {
+            settings.customCLITools.append(cmd)
+            AIToolRegistry.shared.refresh()
+        }
+    }
+
+    private func removeCLITool(_ cmd: String) {
+        settings.customCLITools.removeAll { $0 == cmd }
         AIToolRegistry.shared.refresh()
     }
 }
