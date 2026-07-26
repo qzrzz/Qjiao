@@ -262,6 +262,47 @@ enum SidebarProbe {
 
     // MARK: - SemVer & Version bump
 
+    /// 智能将版本号中最后一个连续的数字片段 +1
+    nonisolated static func bumpVersion(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return raw }
+        let pattern = #"\d+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return raw }
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        let matches = regex.matches(in: trimmed, range: range)
+        guard let lastMatch = matches.last, let matchRange = Range(lastMatch.range, in: trimmed) else {
+            return trimmed + ".1"
+        }
+        let numString = String(trimmed[matchRange])
+        if let num = Int(numString) {
+            var result = trimmed
+            result.replaceSubrange(matchRange, with: String(num + 1))
+            return result
+        }
+        return raw
+    }
+
+    /// 智能将版本号中最后一个连续的数字片段 -1
+    nonisolated static func decrementVersion(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return raw }
+        let pattern = #"\d+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return raw }
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        let matches = regex.matches(in: trimmed, range: range)
+        guard let lastMatch = matches.last, let matchRange = Range(lastMatch.range, in: trimmed) else {
+            return trimmed
+        }
+        let numString = String(trimmed[matchRange])
+        if let num = Int(numString) {
+            let prev = max(0, num - 1)
+            var result = trimmed
+            result.replaceSubrange(matchRange, with: String(prev))
+            return result
+        }
+        return raw
+    }
+
     /// SemVer 版本号计算与更新辅助工具
     struct SemVerComponents: Equatable {
         let raw: String
@@ -270,53 +311,36 @@ enum SidebarProbe {
 
         /// 主版本号递增（例：1.2.3 -> 2.0.0）
         var major: String {
-            guard !numbers.isEmpty else { return raw }
             var nums = numbers
+            if nums.isEmpty { nums = [0, 0, 0] }
             nums[0] += 1
+            while nums.count < 3 { nums.append(0) }
             for i in 1..<nums.count { nums[i] = 0 }
             return prefix + nums.map(String.init).joined(separator: ".")
         }
 
         /// 次版本号递增（例：1.2.3 -> 1.3.0）
         var minor: String {
-            guard numbers.count >= 2 else { return raw }
             var nums = numbers
+            while nums.count < 2 { nums.append(0) }
             nums[1] += 1
+            while nums.count < 3 { nums.append(0) }
             for i in 2..<nums.count { nums[i] = 0 }
             return prefix + nums.map(String.init).joined(separator: ".")
         }
 
         /// 补丁版本号递增（例：1.2.3 -> 1.2.4）
         var patch: String {
-            guard !numbers.isEmpty else { return raw }
             var nums = numbers
-            nums[nums.count - 1] += 1
-            return prefix + nums.map(String.init).joined(separator: ".")
-        }
-
-        /// 默认递增最后一个版本的数字
-        var bumpLast: String {
-            patch
-        }
-
-        /// 默认递减最后一个版本的数字（例：1.2.4 -> 1.2.3）
-        var decrementLast: String {
-            guard !numbers.isEmpty else { return raw }
-            var nums = numbers
-            if nums[nums.count - 1] > 0 {
-                nums[nums.count - 1] -= 1
-            }
+            while nums.count < 3 { nums.append(0) }
+            nums[2] += 1
             return prefix + nums.map(String.init).joined(separator: ".")
         }
     }
 
     /// 解析语义化版本号
-    /// - Parameter versionString: 原始版本号字符串（如 "1.0.0" 或 "v0.1.2"）
-    /// - Returns: 解析到的 SemVerComponents
-    nonisolated static func parseSemVer(_ versionString: String) -> SemVerComponents? {
+    nonisolated static func parseSemVer(_ versionString: String) -> SemVerComponents {
         let trimmed = versionString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
         var prefix = ""
         var body = trimmed
         if trimmed.lowercased().hasPrefix("v") {
@@ -324,9 +348,7 @@ enum SidebarProbe {
             body = String(trimmed.dropFirst(1))
         }
 
-        let parts = body.split(separator: ".").compactMap { Int($0) }
-        guard !parts.isEmpty else { return nil }
-
+        let parts = body.split(separator: ".").compactMap { Int($0.prefix(while: { $0.isNumber })) }
         return SemVerComponents(raw: versionString, prefix: prefix, numbers: parts)
     }
 

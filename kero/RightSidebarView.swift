@@ -3225,9 +3225,8 @@ private struct PackageInfoSection: View {
     @FocusState private var isVersionFocused: Bool
     @State private var versionDraft: String = ""
 
-    private var parsedSemVer: SidebarProbe.SemVerComponents? {
-        guard let version = info.version else { return nil }
-        return SidebarProbe.parseSemVer(version)
+    private var parsedSemVer: SidebarProbe.SemVerComponents {
+        SidebarProbe.parseSemVer(info.version ?? "")
     }
 
     private var pmInfo: SidebarProbe.PackageManagerInfo {
@@ -3432,62 +3431,64 @@ private struct PackageInfoSection: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .onHover { isHoveringVersionBox = $0 }
 
-                        if let parsed = parsedSemVer {
-                            // 连贯一体式的 Segmented Split Control (+ / - / ⌵)
-                            HStack(spacing: 0) {
-                                // [增加按钮 +]
-                                Button {
-                                    let newVer = parsed.bumpLast
-                                    if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: newVer) {
-                                        onVersionUpdated()
-                                    }
-                                } label: {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 9, weight: .bold))
-                                        .foregroundStyle(isHoveringPlus ? Color.primary : Color.secondary)
-                                        .frame(width: 18, height: 16)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 3)
-                                                .fill(isHoveringPlus ? Color.primary.opacity(0.08) : Color.clear)
-                                        )
-                                        .contentShape(Rectangle())
+                        let targetVer = info.version ?? ""
+                        let nextBumpVer = SidebarProbe.bumpVersion(targetVer)
+                        let nextDecVer = SidebarProbe.decrementVersion(targetVer)
+                        let parsed = parsedSemVer
+
+                        // 连贯一体式的 Segmented Split Control (+ / - / ⌵)
+                        HStack(spacing: 0) {
+                            // [增加按钮 +]
+                            Button {
+                                if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: nextBumpVer) {
+                                    onVersionUpdated()
                                 }
-                                .buttonStyle(.plain)
-                                .onHover { isHoveringPlus = $0 }
-                                .help("Bump version to \(parsed.bumpLast)")
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(isHoveringPlus ? Color.primary : Color.secondary)
+                                    .frame(width: 18, height: 16)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .fill(isHoveringPlus ? Color.primary.opacity(0.08) : Color.clear)
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .onHover { isHoveringPlus = $0 }
+                            .help("Bump version to \(nextBumpVer)")
 
-                                Divider()
-                                    .frame(height: 10)
-                                    .opacity(0.3)
+                            Divider()
+                                .frame(height: 10)
+                                .opacity(0.3)
 
-                                // [减少按钮 -]
-                                Button {
-                                    let newVer = parsed.decrementLast
-                                    if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: newVer) {
-                                        onVersionUpdated()
-                                    }
-                                } label: {
-                                    Image(systemName: "minus")
-                                        .font(.system(size: 9, weight: .bold))
-                                        .foregroundStyle(isHoveringMinus ? Color.primary : Color.secondary)
-                                        .frame(width: 18, height: 16)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 3)
-                                                .fill(isHoveringMinus ? Color.primary.opacity(0.08) : Color.clear)
-                                        )
-                                        .contentShape(Rectangle())
+                            // [减少按钮 -]
+                            Button {
+                                if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: nextDecVer) {
+                                    onVersionUpdated()
                                 }
-                                .buttonStyle(.plain)
-                                .onHover { isHoveringMinus = $0 }
-                                .help("Decrement version to \(parsed.decrementLast)")
+                            } label: {
+                                Image(systemName: "minus")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(isHoveringMinus ? Color.primary : Color.secondary)
+                                    .frame(width: 18, height: 16)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .fill(isHoveringMinus ? Color.primary.opacity(0.08) : Color.clear)
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .onHover { isHoveringMinus = $0 }
+                            .help("Decrement version to \(nextDecVer)")
 
-                                Divider()
-                                    .frame(height: 10)
-                                    .opacity(0.3)
+                            Divider()
+                                .frame(height: 10)
+                                .opacity(0.3)
 
                                 // [下拉菜单 ⌵] Button 点击弹出 NSMenu
                                 Button {
-                                    let tagVersion = parsed.raw.lowercased().hasPrefix("v") ? parsed.raw : "v\(parsed.raw)"
+                                    let tagVersion = targetVer.lowercased().hasPrefix("v") ? targetVer : "v\(targetVer)"
                                     let menu = NSMenu()
 
                                     let itemMajor = NSMenuItem(title: "+ MAJOR ( \(parsed.major) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
@@ -3551,7 +3552,6 @@ private struct PackageInfoSection: View {
                                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                                     .fill(Color.primary.opacity(0.06))
                             )
-                        }
 
                         Spacer(minLength: 0)
                     }
