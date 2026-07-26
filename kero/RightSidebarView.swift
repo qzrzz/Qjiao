@@ -4472,16 +4472,63 @@ private struct CodeEditorOpenButton: View {
     }
 }
 
+/// 下拉菜单项的 SwiftUI 自定义视图：包含勾选标记、应用图标与名称，支持 hover 高亮。
+private struct CodeEditorMenuItemView: View {
+    let editor: CodeEditor
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 7) {
+                // 左侧勾选标记对齐区
+                ZStack {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(isHovered ? .white : .primary)
+                    }
+                }
+                .frame(width: 12, height: 12)
+
+                // 编辑器 App 真实图标
+                CodeEditorIcon(editor: editor, size: 16)
+
+                // 编辑器显示名称
+                Text(editor.displayName)
+                    .font(SidebarTypography.caption(.medium))
+                    .foregroundStyle(isHovered ? .white : .primary)
+
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isHovered ? Color.accentColor : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+}
+
 /// 原生 NSButton + NSMenu 包装的编辑器下拉选择按钮。
 ///
-/// 直接使用 `NSMenuItem.image` 赋值应用图标，`NSMenuItem.state` 显示勾选，
-/// 绕过 SwiftUI `Menu`/`Picker` 无法可靠渲染 `NSImage` 图标的限制。
+/// 使用 NSHostingView 渲染每个 NSMenuItem 的视图，
+/// 彻底突破 AppKit 原生 NSMenuItem.image 在 Selection 勾选模式下自动隐藏图标的硬限制。
 private struct EditorDropdownNSButton: NSViewRepresentable {
     /// 可用编辑器列表。
     let editors: [CodeEditor]
     /// 当前选中编辑器的 Bundle ID。
     let preferredBundleId: String
-    /// 用户选择编辑器后的回调（已在主线程）。
+    /// 用户选择编辑器后的回调。
     let onSelect: (CodeEditor) -> Void
 
     func makeNSView(context: Context) -> NSButton {
@@ -4501,7 +4548,6 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
     }
 
     func updateNSView(_ button: NSButton, context: Context) {
-
         // 每次数据变化时更新 Coordinator 状态并重建菜单。
         context.coordinator.update(
             editors: editors,
@@ -4512,8 +4558,7 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    // ⚠️ 不标 @MainActor：@objc target-action 由 AppKit 在主线程调用，
-    //    额外的 actor 注解反而会干扰 Objective-C 运行时的方法查找。
+    // ⚠️ 不标 @MainActor：@objc target-action 由 AppKit 在主线程调用。
     final class Coordinator: NSObject {
         private let menu = NSMenu()
         private var editors: [CodeEditor] = []
@@ -4522,7 +4567,6 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
 
         override init() {
             super.init()
-            // 关闭自动启用验证，防止 AppKit 因找不到 responder 而禁用菜单项导致图标不显示。
             menu.autoenablesItems = false
         }
 
@@ -4534,23 +4578,27 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
             rebuildMenu()
         }
 
-        /// 重建 NSMenuItem 列表：直接赋值 image 和 state，100% 可靠。
+        /// 使用 NSHostingView 重建 NSMenuItem 列表：100% 渲染图标、勾选与高亮。
         private func rebuildMenu() {
             menu.removeAllItems()
             for editor in editors {
-                let item = NSMenuItem(
-                    title: editor.displayName,
-                    action: #selector(selectEditor(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = self
+                let item = NSMenuItem()
                 item.isEnabled = true
-                // 用 bundleId 字符串作为 representedObject，避免跨线程传递 struct 的潜在问题。
-                item.representedObject = editor.bundleId
-                // 使用在具体 Canvas 绘制的实体图标 iconImage(size: 16)，确保 NSMenuItem 弹出列表 100% 渲染呈现图标
-                item.image = editor.iconImage(size: 16)
-                // 勾选当前默认编辑器。
-                item.state = editor.bundleId == preferredBundleId ? .on : .off
+
+                let isSelected = (editor.bundleId == preferredBundleId)
+                let menuItemView = CodeEditorMenuItemView(
+                    editor: editor,
+                    isSelected: isSelected,
+                    onSelect: { [weak self] in
+                        self?.menu.cancelTracking()
+                        self?.onSelect?(editor)
+                    }
+                )
+
+                let hostingView = NSHostingView(rootView: menuItemView)
+                // 确保菜单项尺寸合适
+                hostingView.frame = NSRect(x: 0, y: 0, width: 160, height: 26)
+                item.view = hostingView
                 menu.addItem(item)
             }
         }
@@ -4562,14 +4610,6 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
                 at: NSPoint(x: 0, y: sender.bounds.height + 2),
                 in: sender
             )
-        }
-
-        /// 菜单项被点击时调用。
-        @objc func selectEditor(_ sender: NSMenuItem) {
-            guard let bundleId = sender.representedObject as? String,
-                  let editor = editors.first(where: { $0.bundleId == bundleId })
-            else { return }
-            onSelect?(editor)
         }
     }
 }
