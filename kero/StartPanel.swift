@@ -104,22 +104,22 @@ struct StartPanel: View {
                             Divider().padding(.leading, 12)
                         }
                     }
-                    // 展开时：整个条目+编辑区用选中背景+圆角包裹
+                    // 展开时：整个条目+编辑区独立卡片，深色背景 + 圆角
                     .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(isExpanded ? Color.primary.opacity(0.07) : Color.clear)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(isExpanded ? Color.primary.opacity(0.1) : Color.clear)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .strokeBorder(
-                                isExpanded ? Color.primary.opacity(0.1) : Color.clear,
+                                isExpanded ? Color.primary.opacity(0.14) : Color.clear,
                                 lineWidth: 1
                             )
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .padding(.horizontal, isExpanded ? 2 : 0)
-                    .padding(.vertical, isExpanded ? 2 : 0)
-                    .animation(.snappy(duration: 0.2), value: isExpanded)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.horizontal, isExpanded ? 4 : 0)
+                    .padding(.vertical, isExpanded ? 3 : 0)
+                    .animation(.snappy(duration: 0.22), value: isExpanded)
                 }
             }
             .background(
