@@ -364,29 +364,12 @@ struct LauncherItemWrapper: View {
     let onDrag: (CGPoint) -> Void
     let onDragEnded: () -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         ZStack {
             if isExpanded {
-                // 使用真实的背景层，而不是依赖 modifier 合成，确保材质侧边栏内仍有明确层级。
+                // 与行 hover 共用同一背景色，展开后保持轻量且不产生额外视觉层级。
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.white)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(
-                                colorScheme == .dark
-                                    ? Color.white.opacity(0.16)
-                                    : Color.black.opacity(0.12),
-                                lineWidth: 1
-                            )
-                    }
-                    .shadow(
-                        color: .black.opacity(colorScheme == .dark ? 0.28 : 0.1),
-                        radius: 4,
-                        x: 0,
-                        y: 1.5
-                    )
+                    .fill(Color.primary.opacity(0.06))
                     .transition(.opacity)
             }
 
@@ -406,7 +389,7 @@ struct LauncherItemWrapper: View {
                         command: $commandBinding,
                         delete: delete
                     )
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
                 }
             }
             .padding(.vertical, isExpanded ? 4 : 0)
@@ -418,6 +401,6 @@ struct LauncherItemWrapper: View {
                 Divider().padding(.leading, 12)
             }
         }
-        .animation(.snappy(duration: 0.22), value: isExpanded)
+        .animation(.easeInOut(duration: 0.16), value: isExpanded)
     }
 }
