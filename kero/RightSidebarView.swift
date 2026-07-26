@@ -3418,6 +3418,11 @@ private struct PackageInfoSection: View {
                                     .onChange(of: info.version) { _ in
                                         syncVersionDraft()
                                     }
+                                    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                                        if !isVersionFocused {
+                                            syncVersionDraft()
+                                        }
+                                    }
                             }
                         }
                         .padding(.vertical, 1.5)
