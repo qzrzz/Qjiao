@@ -194,21 +194,12 @@ struct StartCommandRow: View {
             StartCommandIcon(command: command)
                 .frame(width: 14, height: 14)
 
-            HStack(spacing: 4) {
-                Text(command.displayTitle)
-                    .font(SidebarTypography.secondary(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text("•")
-                    .font(SidebarTypography.micro())
-                    .foregroundStyle(.tertiary)
-                Text(command.type.title)
-                    .font(SidebarTypography.micro())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .help(commandTooltip)
+            Text(command.displayTitle)
+                .font(SidebarTypography.secondary())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(commandTooltip)
 
             Button(action: run) {
                 Image(systemName: "play.fill")
