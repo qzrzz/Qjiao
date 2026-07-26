@@ -81,7 +81,8 @@ struct StartCommandRow: View {
         .opacity(isDragged ? 0.4 : 1.0)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(isHovering && !isDragged ? Color.primary.opacity(0.06) : Color.clear)
+                // 展开卡片已有同色背景，避免行头 hover 再叠一层而局部变深。
+                .fill(isHovering && !isDragged && !isExpanded ? Color.primary.opacity(0.06) : Color.clear)
         )
         .contentShape(RoundedRectangle(cornerRadius: 5))
         .onHover { isHovering = $0 }
