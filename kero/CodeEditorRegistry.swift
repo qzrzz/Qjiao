@@ -38,6 +38,19 @@ struct CodeEditor: Identifiable, Equatable {
         icon.size = NSSize(width: 32, height: 32)
         return icon
     }
+
+    /// 返回适合 NSMenuItem 的图标（16×16 逻辑点）。
+    ///
+    /// `NSMenuItem.image` 只识别 `NSImage.size` 作为图标尺寸，不支持 SwiftUI 的
+    /// `.resizable().frame()` 修饰符，因此需要单独提供正确逻辑尺寸的图像。
+    /// - Returns: 16×16 pt 的图标；未安装时返回 nil。
+    func menuIcon() -> NSImage? {
+        guard let url = appURL else { return nil }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        // NSMenuItem 按 NSImage.size 的逻辑点尺寸渲染图标。
+        icon.size = NSSize(width: 16, height: 16)
+        return icon
+    }
 }
 
 // MARK: - CodeEditorRegistry

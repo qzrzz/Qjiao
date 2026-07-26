@@ -3013,15 +3013,12 @@ private struct PathDirectorySection: View {
                                         registry.preferredBundleId = editor.bundleId
                                         registry.open(path: path, with: editor)
                                     } label: {
-                                        // 菜单中使用 16pt 尺寸，系统自动选取高清表示层。
-                                        if let icon = editor.appIcon() {
+                                        // NSMenuItem 图标用 menuIcon()（16pt），不加修饰符。
+                                        if let icon = editor.menuIcon() {
                                             Label {
                                                 Text(editor.displayName)
                                             } icon: {
                                                 Image(nsImage: icon)
-                                                    .resizable()
-                                                    .interpolation(.high)
-                                                    .frame(width: 16, height: 16)
                                             }
                                         } else {
                                             Label(editor.displayName, systemImage: editor.symbolName)
@@ -4443,45 +4440,44 @@ private struct CodeEditorOpenButton: View {
                         .fill(Color.primary.opacity(0.1))
                         .frame(width: 1, height: 14)
 
-                    Menu {
-                        // 列出全部已安装编辑器供切换。
-                        ForEach(registry.installedEditors) { editor in
-                            Button {
-                                // 直接用此编辑器打开，同时设为默认。
-                                registry.preferredBundleId = editor.bundleId
-                                registry.open(path: path, with: editor)
-                            } label: {
-                                // macOS 菜单项：图标 + 名称，当前选中项显示勾选。
-                                // 使用 appIcon() 取 32×32 图， frame(16,16) 在 Retina 下清晰。
-                                if let icon = editor.appIcon() {
-                                    Label {
-                                        Text(editor.displayName)
-                                    } icon: {
-                                        Image(nsImage: icon)
-                                            .resizable()
-                                            .interpolation(.high)
-                                            .frame(width: 16, height: 16)
-                                    }
-                                } else {
-                                    Label(editor.displayName, systemImage: editor.symbolName)
-                                }
-                                if editor.bundleId == registry.preferredEditor?.bundleId {
-                                    // 已选中项显示勾选状态（SwiftUI Menu 自动处理）
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    } label: {
+                    // 使用 Picker 绑定 preferredBundleId：
+                    // - 自动为当前选中项渲染勾选标记
+                    // - didSet 写回 AppSettings 持久化
+                    // - preferredEditor 随之更新，主按钮图标与名称同步刷新
+                    Picker(selection: $registry.preferredBundleId, label:
                         Image(systemName: "chevron.down")
                             .font(SidebarTypography.micro())
                             .foregroundStyle(.secondary)
                             .frame(width: 22, height: 28)
                             .contentShape(Rectangle())
+                    ) {
+                        ForEach(registry.installedEditors) { editor in
+                            // NSMenuItem 图标：直接传 NSImage，不加任何 SwiftUI 修饰符。
+                            // Label icon 闭包内的 .resizable()/.frame() 会被菜单渲染器忽略，
+                            // 必须通过 NSImage.size 控制尺寸（menuIcon() 已设为 16pt）。
+                            if let icon = editor.menuIcon() {
+                                Label {
+                                    Text(editor.displayName)
+                                } icon: {
+                                    Image(nsImage: icon)
+                                }
+                                .tag(editor.bundleId)
+                            } else {
+                                Label(editor.displayName, systemImage: editor.symbolName)
+                                    .tag(editor.bundleId)
+                            }
+                        }
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
+                    .pickerStyle(.menu)
+                    .labelsHidden()
                     .frame(width: 22)
                     .help("选择代码编辑器")
+                    // 切换默认编辑器后自动用新编辑器打开当前路径。
+                    .onChange(of: registry.preferredBundleId) { newId in
+                        if let editor = registry.installedEditors.first(where: { $0.bundleId == newId }) {
+                            registry.open(path: path, with: editor)
+                        }
+                    }
                 } else {
                     // 只有一个编辑器时右侧显示跳转图标。
                     Image(systemName: "arrow.up.forward")
