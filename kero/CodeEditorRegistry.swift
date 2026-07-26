@@ -28,24 +28,34 @@ struct CodeEditor: Identifiable, Equatable {
 
     /// 从应用包路径生成特定尺寸的系统应用图标。
     ///
-    /// 使用 `NSImage(size:flipped:drawingHandler:)` 重新在具体 Canvas 上绘制，
-    /// 解决 `NSWorkspace` 图标代理对象在 `NSMenuItem` / SwiftUI 菜单视图中绘制空白的问题，
-    /// 并在 Retina 高分屏下自动保留高清像素。
+    /// 通过 `lockFocus()`/`CGImage` 将图标强行离屏像素化绘制为实体 `NSImage`，
+    /// 解决 AppKit `NSMenuItem` 不触发 `drawingHandler` 闭包导致菜单项图标显示空白的问题。
     /// - Parameter size: 图标边长（逻辑点，正方形），默认 16。
-    /// - Returns: 已画好具体 Canvas 的图标；未安装时返回 nil。
+    /// - Returns: 含有真实像素 Rep 的实体图标；未安装时返回 nil。
     func iconImage(size: CGFloat = 16) -> NSImage? {
         guard let url = appURL else { return nil }
         let rawIcon = NSWorkspace.shared.icon(forFile: url.path)
         let targetSize = NSSize(width: size, height: size)
 
-        let image = NSImage(size: targetSize, flipped: false) { rect in
-            rawIcon.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
-            return true
+        var proposedRect = CGRect(origin: .zero, size: targetSize)
+        if let cgImage = rawIcon.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) {
+            let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
+            bitmapRep.size = targetSize
+            let image = NSImage(size: targetSize)
+            image.addRepresentation(bitmapRep)
+            return image
         }
-        image.size = targetSize
+
+        // 回退机制：使用 lockFocus 强制将图标渲染进离屏 CGContext 画布中
+        let image = NSImage(size: targetSize)
+        image.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        rawIcon.draw(in: NSRect(origin: .zero, size: targetSize), from: .zero, operation: .copy, fraction: 1.0)
+        image.unlockFocus()
         return image
     }
 }
+
 
 
 // MARK: - CodeEditorRegistry
