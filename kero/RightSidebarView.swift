@@ -4481,42 +4481,53 @@ private struct CodeEditorMenuItemView: View {
     @State private var isHovered = false
 
     var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 6) {
-                // 左侧勾选标记对齐区（固定 14pt 宽）
-                ZStack {
-                    if isSelected {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(isHovered ? .white : .primary)
-                    }
+        HStack(spacing: 6) {
+            // 左侧勾选标记对齐区（固定 14pt 宽）
+            ZStack {
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(isHovered ? .white : .primary)
                 }
-                .frame(width: 14, height: 14)
-
-                // 编辑器 App 真实图标（16pt）
-                CodeEditorIcon(editor: editor, size: 16)
-
-                // 编辑器显示名称
-                Text(editor.displayName)
-                    .font(SidebarTypography.caption(.medium))
-                    .foregroundStyle(isHovered ? .white : .primary)
-
-                Spacer(minLength: 12)
             }
-            .padding(.horizontal, 4)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(isHovered ? Color.accentColor : Color.clear)
-                    .padding(.horizontal, 2)
-            )
-            .contentShape(Rectangle())
+            .frame(width: 14, height: 14)
+
+            // 编辑器 App 真实图标（16pt）
+            CodeEditorIcon(editor: editor, size: 16)
+
+            // 编辑器显示名称
+            Text(editor.displayName)
+                .font(SidebarTypography.caption(.medium))
+                .foregroundStyle(isHovered ? .white : .primary)
+
+            Spacer(minLength: 12)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isHovered ? Color.accentColor : Color.clear)
+                .padding(.horizontal, 2)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isHovered = false
+            onSelect()
+        }
         .onHover { hovering in
             isHovered = hovering
         }
+        .onDisappear {
+            isHovered = false
+        }
+        .focusable(false) // 拒绝参与 SwiftUI 键盘 Tab 聚焦环
     }
+}
+
+/// 拒绝 Focus 焦点的 NSHostingView 子类，防止菜单项被 Tab 键聚焦。
+private final class MenuItemHostingView<Content: View>: NSHostingView<Content> {
+    override var acceptsFirstResponder: Bool { false }
+    override var canBecomeKeyView: Bool { false }
 }
 
 /// 原生 NSButton + NSMenu 包装的编辑器下拉选择按钮。
@@ -4578,7 +4589,7 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
             rebuildMenu()
         }
 
-        /// 使用 NSHostingView 重建 NSMenuItem 列表：100% 渲染图标、勾选与高亮。
+        /// 使用 MenuItemHostingView 重建 NSMenuItem 列表：100% 渲染图标、勾选与高亮。
         private func rebuildMenu() {
             menu.removeAllItems()
             for editor in editors {
@@ -4595,7 +4606,7 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
                     }
                 )
 
-                let hostingView = NSHostingView(rootView: menuItemView)
+                let hostingView = MenuItemHostingView(rootView: menuItemView)
                 // 确保菜单项尺寸与行高精致规范（24pt 标准菜单行高）
                 hostingView.frame = NSRect(x: 0, y: 0, width: 165, height: 24)
                 item.view = hostingView
