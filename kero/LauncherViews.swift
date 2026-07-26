@@ -365,11 +365,13 @@ struct LauncherItemWrapper: View {
     let onDragEnded: () -> Void
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topLeading) {
             if isExpanded {
-                // 与行 hover 共用同一背景色，展开后保持轻量且不产生额外视觉层级。
+                // 只缩进背景，不改变行头坐标；编辑区始终从原条目下方向下展开。
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.primary.opacity(0.06))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 3)
                     .transition(.opacity)
             }
 
@@ -392,10 +394,7 @@ struct LauncherItemWrapper: View {
                     .transition(.opacity)
                 }
             }
-            .padding(.vertical, isExpanded ? 4 : 0)
         }
-        .padding(.horizontal, isExpanded ? 4 : 0)
-        .padding(.vertical, isExpanded ? 3 : 0)
         .overlay(alignment: .bottom) {
             if showDivider {
                 Divider().padding(.leading, 12)
