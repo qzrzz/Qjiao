@@ -488,6 +488,7 @@ enum TOML {
         case string(String)
         case number(Double)
         case bool(Bool)
+        case array([Value])
 
         var string: String? {
             if case .string(let s) = self { return s }
@@ -501,6 +502,11 @@ enum TOML {
 
         var bool: Bool? {
             if case .bool(let b) = self { return b }
+            return nil
+        }
+
+        var array: [Value]? {
+            if case .array(let a) = self { return a }
             return nil
         }
     }
@@ -530,6 +536,16 @@ enum TOML {
     }
 
     private static func parseValue(_ raw: String) -> Value? {
+        if raw.hasPrefix("[") && raw.hasSuffix("]") {
+            let content = raw.dropFirst().dropLast().trimmingCharacters(in: .whitespaces)
+            if content.isEmpty { return .array([]) }
+            let items = content.split(separator: ",").compactMap { item -> Value? in
+                let trimmed = item.trimmingCharacters(in: .whitespaces)
+                return parseValue(trimmed)
+            }
+            return .array(items)
+        }
+
         if raw.hasPrefix("\"") {
             var out = ""
             var escaped = false
