@@ -17,7 +17,7 @@ struct StartPanel: View {
 
     @State private var expandedCommandID: UUID?
     @State private var draggedCommandID: UUID?
-    @State private var dropTargetCommandID: UUID?
+    @State private var commandFrames: [UUID: CGRect] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -164,6 +164,24 @@ struct StartPanel: View {
         } set: { updated in
             project.updateLaunchCommand(updated)
         }
+    }
+
+    private func updateCommandDrag(source: UUID, location: CGPoint) {
+        draggedCommandID = source
+        NSCursor.closedHand.set()
+        guard let targetID = commandFrames.first(where: {
+            $0.key != source && $0.value.contains(location)
+        })?.key else { return }
+        withAnimation(.snappy(duration: 0.2, extraBounce: 0.05)) {
+            project.moveLaunchCommand(id: source, before: targetID)
+        }
+    }
+
+    private func endCommandDrag() {
+        withAnimation(.snappy(duration: 0.2)) {
+            draggedCommandID = nil
+        }
+        NSCursor.arrow.set()
     }
 }
 
