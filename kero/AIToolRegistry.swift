@@ -107,7 +107,7 @@ final class AIToolRegistry: nonisolated ObservableObject {
     static let shared = AIToolRegistry()
 
     /// 常见 PATH 路径列表，用于探测 CLI 可执行文件。
-    private static let commonPathDirectories: [String] = {
+    private nonisolated static let commonPathDirectories: [String] = {
         var dirs = [
             "/usr/local/bin",
             "/opt/homebrew/bin",
@@ -136,7 +136,7 @@ final class AIToolRegistry: nonisolated ObservableObject {
     }()
 
     /// 检查指定 CLI 命令是否在系统 PATH 目录中可用，并返回绝对路径。
-    private static func findExecutable(name: String) -> String? {
+    private nonisolated static func findExecutable(name: String) -> String? {
         let fm = FileManager.default
         for dir in commonPathDirectories {
             let path = "\(dir)/\(name)"
@@ -148,7 +148,7 @@ final class AIToolRegistry: nonisolated ObservableObject {
     }
 
     /// 所有已知 AI 工具原型定义（按桌面应用与 CLI 分组排列）。
-    private static let knownTools: [AITool] = {
+    private nonisolated static let knownTools: [AITool] = {
         let ws = NSWorkspace.shared
 
         /// 构造桌面 GUI 应用定义
