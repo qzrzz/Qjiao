@@ -3224,10 +3224,13 @@ private struct PackageInfoSection: View {
 
     @FocusState private var isVersionFocused: Bool
     @State private var versionDraft: String = ""
-    @State private var lastSyncedVersion: String = ""
 
-    private var parsedSemVer: SidebarProbe.SemVerComponents {
-        SidebarProbe.parseSemVer(info.version ?? "")
+    private var currentDisplayVersion: String {
+        if !versionDraft.isEmpty {
+            return versionDraft
+        }
+        let ver = info.version ?? ""
+        return (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
     }
 
     private var pmInfo: SidebarProbe.PackageManagerInfo {
@@ -3237,24 +3240,20 @@ private struct PackageInfoSection: View {
         )
     }
 
-    private var cleanVersion: String {
-        let ver = info.version ?? ""
-        return (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
-    }
-
-    private func syncVersionDraftIfNeeded() {
-        let currentClean = cleanVersion
-        guard !currentClean.isEmpty else { return }
-        if versionDraft.isEmpty || (currentClean != lastSyncedVersion && !isVersionFocused) {
-            lastSyncedVersion = currentClean
-            versionDraft = currentClean
+    private func syncDraftFromInfo() {
+        if !isVersionFocused {
+            let ver = info.version ?? ""
+            let clean = (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
+            if !clean.isEmpty {
+                versionDraft = clean
+            }
         }
     }
 
-    private func applyNewVersion(_ newVersion: String) {
-        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: newVersion) {
-            versionDraft = newVersion
-            lastSyncedVersion = newVersion
+    private func applyVersion(_ newVersion: String) {
+        let cleanNew = (newVersion.hasPrefix("v") || newVersion.hasPrefix("V")) ? String(newVersion.dropFirst()) : newVersion
+        versionDraft = cleanNew
+        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: cleanNew) {
             onVersionUpdated()
         }
     }
@@ -3262,13 +3261,10 @@ private struct PackageInfoSection: View {
     private func commitVersionChange() {
         let trimmed = versionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            syncVersionDraftIfNeeded()
+            syncDraftFromInfo()
             return
         }
-        let cleanNew = (trimmed.hasPrefix("v") || trimmed.hasPrefix("V")) ? String(trimmed.dropFirst()) : trimmed
-        if cleanNew != lastSyncedVersion {
-            applyNewVersion(cleanNew)
-        }
+        applyVersion(trimmed)
     }
 
     private var headerMoreMenu: AnyView {
@@ -3400,7 +3396,7 @@ private struct PackageInfoSection: View {
                                 .padding(.leading, 5)
 
                             ZStack(alignment: .leading) {
-                                let currentText = versionDraft.isEmpty ? cleanVersion : versionDraft
+                                let currentText = currentDisplayVersion
                                 Text(currentText.isEmpty ? "0.0.0" : currentText)
                                     .font(SidebarTypography.caption(design: .monospaced))
                                     .opacity(0)
@@ -3424,13 +3420,13 @@ private struct PackageInfoSection: View {
                                         }
                                     }
                                     .onAppear {
-                                        syncVersionDraftIfNeeded()
+                                        syncDraftFromInfo()
                                     }
                                     .onChange(of: info.version) { _ in
-                                        syncVersionDraftIfNeeded()
+                                        syncDraftFromInfo()
                                     }
                                     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                                        syncVersionDraftIfNeeded()
+                                        syncDraftFromInfo()
                                     }
                             }
                         }
@@ -3446,16 +3442,16 @@ private struct PackageInfoSection: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .onHover { isHoveringVersionBox = $0 }
 
-                        let targetVer = cleanVersion
+                        let targetVer = currentDisplayVersion
                         let nextBumpVer = SidebarProbe.bumpVersion(targetVer)
                         let nextDecVer = SidebarProbe.decrementVersion(targetVer)
-                        let parsed = parsedSemVer
+                        let parsed = SidebarProbe.parseSemVer(targetVer)
 
                         // 连贯一体式的 Segmented Split Control (+ / - / ⌵)
                         HStack(spacing: 0) {
                             // [增加按钮 +]
                             Button {
-                                applyNewVersion(nextBumpVer)
+                                applyVersion(nextBumpVer)
                             } label: {
                                 Image(systemName: "plus")
                                     .font(.system(size: 9, weight: .bold))
@@ -3477,7 +3473,7 @@ private struct PackageInfoSection: View {
 
                             // [减少按钮 -]
                             Button {
-                                applyNewVersion(nextDecVer)
+                                applyVersion(nextDecVer)
                             } label: {
                                 Image(systemName: "minus")
                                     .font(.system(size: 9, weight: .bold))
@@ -3504,21 +3500,21 @@ private struct PackageInfoSection: View {
 
                                     let itemMajor = NSMenuItem(title: "+ MAJOR ( \(parsed.major) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tMajor = MenuActionTarget {
-                                        applyNewVersion(parsed.major)
+                                        applyVersion(parsed.major)
                                     }
                                     itemMajor.target = tMajor
                                     menu.addItem(itemMajor)
 
                                     let itemMinor = NSMenuItem(title: "+ MINOR ( \(parsed.minor) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tMinor = MenuActionTarget {
-                                        applyNewVersion(parsed.minor)
+                                        applyVersion(parsed.minor)
                                     }
                                     itemMinor.target = tMinor
                                     menu.addItem(itemMinor)
 
                                     let itemPatch = NSMenuItem(title: "+ PATCH ( \(parsed.patch) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tPatch = MenuActionTarget {
-                                        applyNewVersion(parsed.patch)
+                                        applyVersion(parsed.patch)
                                     }
                                     itemPatch.target = tPatch
                                     menu.addItem(itemPatch)
