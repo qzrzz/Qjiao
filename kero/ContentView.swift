@@ -494,6 +494,8 @@ private struct SessionTabsView: View {
     @ObservedObject private var settings = AppSettings.shared
     let maxStripWidth: CGFloat
     @State private var overflow = StripOverflow()
+    /// 标签条已挤满时把单 Tab 最大宽度从 220 压到 140，腾出可见数量。
+    @State private var stripIsFull = false
     @State private var draggedTabID: UUID?
     @State private var tabFrames: [UUID: CGRect] = [:]
     @State private var renamingTabID: UUID?
@@ -502,6 +504,22 @@ private struct SessionTabsView: View {
     private struct StripOverflow: Equatable {
         var left = false
         var right = false
+    }
+
+    /// Scroll 几何快照：边缘淡入 + 是否挤满（用于压缩 Tab 最大宽度）。
+    private struct StripGeometry: Equatable {
+        var overflow = StripOverflow()
+        var contentWidth: CGFloat = 0
+        var containerWidth: CGFloat = 0
+    }
+
+    /// 标签条未满时的单 Tab 最大宽度。
+    private static let relaxedTabMaxWidth: CGFloat = 220
+    /// 标签条已满（需要滚动）时的单 Tab 最大宽度。
+    private static let compressedTabMaxWidth: CGFloat = 140
+
+    private var tabMaxWidth: CGFloat {
+        stripIsFull ? Self.compressedTabMaxWidth : Self.relaxedTabMaxWidth
     }
 
     var body: some View {
@@ -513,6 +531,7 @@ private struct SessionTabsView: View {
                         PaneTabItem(
                             tab: tab,
                             isSelected: tab.id == project.selectedTabID,
+                            maxWidth: tabMaxWidth,
                             select: { project.selectedTabID = tab.id },
                             close: { project.close(tab) },
                             renamingTabID: $renamingTabID
@@ -538,13 +557,25 @@ private struct SessionTabsView: View {
                     }
                 }
             }
-            .onScrollGeometryChange(for: StripOverflow.self) { geo in
-                StripOverflow(
-                    left: geo.contentOffset.x > 0.5,
-                    right: geo.contentOffset.x + geo.containerSize.width < geo.contentSize.width - 0.5
+            .onScrollGeometryChange(for: StripGeometry.self) { geo in
+                StripGeometry(
+                    overflow: StripOverflow(
+                        left: geo.contentOffset.x > 0.5,
+                        right: geo.contentOffset.x + geo.containerSize.width < geo.contentSize.width - 0.5
+                    ),
+                    contentWidth: geo.contentSize.width,
+                    containerWidth: geo.containerSize.width
                 )
             } action: { _, new in
-                overflow = new
+                overflow = new.overflow
+                updateStripFullness(
+                    contentWidth: new.contentWidth,
+                    containerWidth: new.containerWidth
+                )
+            }
+            .onChange(of: project.tabs.count) { _, _ in
+                // 关 Tab 后可能立刻腾出空间，用条带上限估一次是否可恢复宽松宽度。
+                reevaluateStripFullnessAfterTabCountChange()
             }
             // Keep the active tab visible: scrolls the minimum distance to
             // reveal it (anchor: nil is a no-op when it's already fully in view).
@@ -592,6 +623,35 @@ private struct SessionTabsView: View {
             .tooltip("New Session (⌘T)", edge: .below)
         }
         .onPreferenceChange(TabFramePreferenceKey.self) { tabFrames = $0 }
+    }
+
+    /// 内容超出可视宽度 → 压缩；仅当按宽松最大宽度也一定放得下时才恢复，避免 140/220 来回抖。
+    private func updateStripFullness(contentWidth: CGFloat, containerWidth: CGFloat) {
+        let overflowing = contentWidth > containerWidth + 0.5
+        if overflowing {
+            if !stripIsFull { stripIsFull = true }
+            return
+        }
+        guard stripIsFull else { return }
+        // 当前已是压缩态且不再溢出；若全部扩到 relaxed 仍不超过条带，才解除压缩。
+        let tabCount = max(project.tabs.count, 1)
+        let spacing = CGFloat(max(tabCount - 1, 0)) * 3
+        let maxRelaxedTotal =
+            CGFloat(tabCount) * Self.relaxedTabMaxWidth + spacing
+        if maxRelaxedTotal <= maxStripWidth + 0.5 {
+            stripIsFull = false
+        }
+    }
+
+    private func reevaluateStripFullnessAfterTabCountChange() {
+        guard stripIsFull else { return }
+        let tabCount = max(project.tabs.count, 1)
+        let spacing = CGFloat(max(tabCount - 1, 0)) * 3
+        let maxRelaxedTotal =
+            CGFloat(tabCount) * Self.relaxedTabMaxWidth + spacing
+        if maxRelaxedTotal <= maxStripWidth + 0.5 {
+            stripIsFull = false
+        }
     }
 
     /// Reorders immediately as the pointer crosses another tab. This direct
@@ -658,6 +718,8 @@ private struct TabFramePreferenceKey: PreferenceKey {
 private struct PaneTabItem: View {
     @ObservedObject var tab: PaneTab
     let isSelected: Bool
+    /// 由标签条是否挤满决定：宽松 220 / 压缩 140。
+    var maxWidth: CGFloat = 220
     let select: () -> Void
     let close: () -> Void
     @Binding var renamingTabID: UUID?
@@ -683,6 +745,7 @@ private struct PaneTabItem: View {
                     customTitle: tab.customName,
                     paneCount: paneCount,
                     isSelected: isSelected,
+                    maxWidth: maxWidth,
                     select: select,
                     close: close
                 )
@@ -692,6 +755,7 @@ private struct PaneTabItem: View {
                     customTitle: tab.customName,
                     paneCount: paneCount,
                     isSelected: isSelected,
+                    maxWidth: maxWidth,
                     select: select,
                     close: close
                 )
@@ -703,6 +767,7 @@ private struct PaneTabItem: View {
                     manualTitle: tab.customName,
                     paneCount: paneCount,
                     isSelected: isSelected,
+                    maxWidth: maxWidth,
                     select: select,
                     close: close
                 )
@@ -772,6 +837,7 @@ private struct SessionTabLabel: View {
     var customTitle: String?
     let paneCount: Int
     let isSelected: Bool
+    var maxWidth: CGFloat = 220
     let select: () -> Void
     let close: () -> Void
 
@@ -788,6 +854,7 @@ private struct SessionTabLabel: View {
                 isSelected: isSelected,
                 isTerminalRunning: session.isForegroundCommandRunning,
                 terminalAppIcon: appIcon,
+                maxWidth: maxWidth,
                 select: select,
                 close: close
             )
@@ -800,6 +867,7 @@ private struct FileTabLabel: View {
     var customTitle: String?
     let paneCount: Int
     let isSelected: Bool
+    var maxWidth: CGFloat = 220
     let select: () -> Void
     let close: () -> Void
 
@@ -812,6 +880,7 @@ private struct FileTabLabel: View {
             paneCount: paneCount,
             isSelected: isSelected,
             isDirty: file.isDirty,
+            maxWidth: maxWidth,
             select: select,
             close: close
         )
@@ -846,8 +915,6 @@ private struct TabStripIconView: View {
 private struct TabItemChrome: View {
     /// 常规 Tab 的最小宽度，避免短标题让标签过于紧凑。
     private static let minimumWidth: CGFloat = 136
-    /// 标题再长也不继续挤占整个标签栏，超出部分使用截断显示。
-    private static let maximumWidth: CGFloat = 220
     /// 标题缩短后保留当前宽度的时长，避免命令状态频繁变化造成标签抖动。
     private static let shrinkDelay: Duration = .seconds(2)
 
@@ -863,6 +930,8 @@ private struct TabItemChrome: View {
     var isTerminalRunning = false
     /// 终端前台进程匹配到的应用图标；有值时优先于转圈动画。
     var terminalAppIcon: TerminalAppIconSource? = nil
+    /// 由标签条挤满状态决定：默认 220，挤满时 140。
+    var maxWidth: CGFloat = 220
     let select: () -> Void
     let close: () -> Void
 
@@ -942,25 +1011,39 @@ private struct TabItemChrome: View {
                 .fill(isSelected ? Color.primary.opacity(0.09) : (isHovering ? Color.primary.opacity(0.04) : .clear))
         )
         .onHover { isHovering = $0 }
-        .onAppear(perform: updateRetainedWidth)
+        .onAppear { updateRetainedWidth() }
         .onChange(of: title) { updateRetainedWidth() }
         .onChange(of: manualTitle) { applyManualTitleWidth() }
         .onChange(of: paneCount) { updateRetainedWidth() }
+        .onChange(of: maxWidth) { updateRetainedWidth(immediate: true) }
         .onDisappear { shrinkTask?.cancel() }
     }
 
     /// 根据 AppKit 测得的标题自然宽度更新显示宽度：扩张即时生效，收缩等待一段时间后再执行。
-    private func updateRetainedWidth() {
+    /// `immediate` 用于最大宽度上限被标签条挤满/放宽时立刻应用，避免仍卡在旧的 retainedWidth。
+    private func updateRetainedWidth(immediate: Bool = false) {
         // 图标、关闭/修改状态、左右内边距和元素间距占用的固定宽度。
         let accessoryWidth: CGFloat = paneCount > 1 ? 73 : 44
         // 与 Tab 标题 SwiftUI 字号保持一致，避免测宽偏小导致文字被裁切。
         let titleWidth = (title as NSString).size(
             withAttributes: [.font: SidebarTypography.bodyNSFont]
         ).width
+        // 挤满时 maxWidth 可能小于 minimumWidth（140 vs 136 仍 ≥）；始终保证不超过上限。
+        let floorWidth = min(Self.minimumWidth, maxWidth)
         let desiredWidth = min(
-            max(titleWidth + accessoryWidth, Self.minimumWidth),
-            Self.maximumWidth
+            max(titleWidth + accessoryWidth, floorWidth),
+            maxWidth
         )
+
+        if immediate {
+            shrinkTask?.cancel()
+            shrinkTask = nil
+            guard desiredWidth != retainedWidth else { return }
+            withAnimation(.easeInOut(duration: 0.16)) {
+                retainedWidth = desiredWidth
+            }
+            return
+        }
 
         guard desiredWidth < retainedWidth else {
             shrinkTask?.cancel()
@@ -985,18 +1068,7 @@ private struct TabItemChrome: View {
 
     /// 用户完成手动改名后不等待自动标题的防抖时间，立即更新为新标题所需宽度。
     private func applyManualTitleWidth() {
-        shrinkTask?.cancel()
-        shrinkTask = nil
-        let accessoryWidth: CGFloat = paneCount > 1 ? 73 : 44
-        let titleWidth = (title as NSString).size(
-            withAttributes: [.font: SidebarTypography.bodyNSFont]
-        ).width
-        let desiredWidth = min(
-            max(titleWidth + accessoryWidth, Self.minimumWidth), Self.maximumWidth
-        )
-        withAnimation(.easeInOut(duration: 0.2)) {
-            retainedWidth = desiredWidth
-        }
+        updateRetainedWidth(immediate: true)
     }
 }
 
