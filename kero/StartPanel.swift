@@ -75,51 +75,19 @@ struct StartPanel: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(Array(project.launchCommands.enumerated()), id: \.element.id) { index, command in
-                    let isExpanded = expandedCommandID == command.id
-                    let showDivider = !isExpanded && index < project.launchCommands.count - 1
-                    VStack(spacing: 0) {
-                        StartCommandRow(
-                            command: command,
-                            isExpanded: isExpanded,
-                            isDragged: draggedCommandID == command.id,
-                            run: { runCommand(command) },
-                            toggleExpanded: { toggleExpanded(command.id) },
-                            onDrag: { location in
-                                updateCommandDrag(source: command.id, location: location)
-                            },
-                            onDragEnded: {
-                                endCommandDrag()
-                            }
-                        )
-                        .background(LauncherFrameReader(commandID: command.id))
-
-                        if isExpanded {
-                            StartCommandInlineEditor(
-                                command: binding(for: command.id),
-                                delete: { delete(command.id) }
-                            )
-                        }
-
-                        if showDivider {
-                            Divider().padding(.leading, 12)
-                        }
-                    }
-                    // 展开时：先加内边距再叠背景 → 背景覆盖含边距的完整区域
-                    .padding(.horizontal, isExpanded ? 4 : 0)
-                    .padding(.vertical, isExpanded ? 3 : 0)
-                    .background {
-                        if isExpanded {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.8))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-                                }
-                                .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 1)
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 8 : 0, style: .continuous))
-                    .animation(.snappy(duration: 0.22), value: isExpanded)
+                    LauncherItemWrapper(
+                        command: command,
+                        commandBinding: binding(for: command.id),
+                        isExpanded: expandedCommandID == command.id,
+                        isDragged: draggedCommandID == command.id,
+                        showDivider: expandedCommandID != command.id && index < project.launchCommands.count - 1,
+                        run: { runCommand(command) },
+                        toggleExpanded: { toggleExpanded(command.id) },
+                        delete: { delete(command.id) },
+                        onDrag: { location in updateCommandDrag(source: command.id, location: location) },
+                        onDragEnded: { endCommandDrag() }
+                    )
+                    .background(LauncherFrameReader(commandID: command.id))
                 }
             }
             .background(
@@ -539,5 +507,64 @@ private final class FaviconLoader: ObservableObject {
         let directory = AppSettings.configURL.deletingLastPathComponent()
             .appendingPathComponent("favicons", isDirectory: true)
         return directory.appendingPathComponent(String(key, radix: 16) + ".ico")
+    }
+}
+
+// MARK: - LauncherItemWrapper
+
+/// 单个 Launcher 条目容器。
+/// 独立 View struct 保证 SwiftUI 能正确追踪 isExpanded 变化，
+/// 从而在展开时可靠地渲染卡片背景和圆角。
+private struct LauncherItemWrapper: View {
+    let command: ProjectLaunchCommand
+    @Binding var commandBinding: ProjectLaunchCommand
+    let isExpanded: Bool
+    let isDragged: Bool
+    let showDivider: Bool
+    let run: () -> Void
+    let toggleExpanded: () -> Void
+    let delete: () -> Void
+    let onDrag: (CGPoint) -> Void
+    let onDragEnded: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            StartCommandRow(
+                command: command,
+                isExpanded: isExpanded,
+                isDragged: isDragged,
+                run: run,
+                toggleExpanded: toggleExpanded,
+                onDrag: onDrag,
+                onDragEnded: onDragEnded
+            )
+
+            if isExpanded {
+                StartCommandInlineEditor(
+                    command: $commandBinding,
+                    delete: delete
+                )
+            }
+
+            if showDivider {
+                Divider().padding(.leading, 12)
+            }
+        }
+        // 展开时：内边距 → 背景 → 圆角裁剪，确保背景覆盖完整区域
+        .padding(.horizontal, isExpanded ? 4 : 0)
+        .padding(.vertical, isExpanded ? 3 : 0)
+        .background {
+            if isExpanded {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 1)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                    }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 8 : 0, style: .continuous))
+        .animation(.snappy(duration: 0.22), value: isExpanded)
     }
 }
