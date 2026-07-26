@@ -954,8 +954,8 @@ private struct ProjectSettingsSectionView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(Color.primary.opacity(0.15), lineWidth: 1)
                         )
-                        .onChange(of: cliToolsInputText) { newValue in
-                            updateCustomCLITools(from: newValue)
+                        .onChange(of: cliToolsInputText) {
+                            updateCustomCLITools(from: cliToolsInputText)
                         }
                 }
                 .settingsRowPadding()
