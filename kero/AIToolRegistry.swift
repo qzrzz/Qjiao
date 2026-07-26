@@ -193,11 +193,11 @@ final class AIToolRegistry: nonisolated ObservableObject {
             desktop("com.gemini.antigravity",          name: "Antigravity App",  symbol: "globe.americas"),
 
             // ── 命令行 CLI 工具
-            cli("codex",    name: "codex (CLI)",    symbol: "terminal"),
-            cli("agy",      name: "agy (CLI)",      symbol: "terminal"),
-            cli("claude",   name: "claude (CLI)",   symbol: "terminal"),
-            cli("opencode", name: "opencode (CLI)", symbol: "terminal"),
-            cli("grok",     name: "grok (CLI)",     symbol: "terminal"),
+            cli("codex",    name: "codex",    symbol: "terminal"),
+            cli("agy",      name: "agy",      symbol: "terminal"),
+            cli("claude",   name: "claude",   symbol: "terminal"),
+            cli("opencode", name: "opencode", symbol: "terminal"),
+            cli("grok",     name: "grok",     symbol: "terminal"),
         ]
     }()
 

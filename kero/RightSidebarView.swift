@@ -4464,17 +4464,18 @@ private struct CodeEditorOpenButton: View {
                 Button {
                     registry.open(path: path)
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         CodeEditorIcon(editor: preferred, size: 16)
                         Text(preferred.displayName)
                             .font(SidebarTypography.caption(.medium))
                             .lineLimit(1)
-                        Spacer()
+                            .minimumScaleFactor(0.85)
+                        Spacer(minLength: 2)
                     }
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 10)
-                    .padding(.trailing, 4)
-                    .padding(.vertical, 6)
+                    .padding(.leading, 6)
+                    .padding(.trailing, 2)
+                    .padding(.vertical, 5)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -4494,13 +4495,13 @@ private struct CodeEditorOpenButton: View {
                         registry.preferredBundleId = selected.bundleId
                         registry.open(path: path, with: selected)
                     }
-                    .frame(width: 22, height: 28)
+                    .frame(width: 18, height: 26)
                     .help("选择代码编辑器")
                 } else {
                     Image(systemName: "arrow.up.forward")
                         .font(SidebarTypography.micro())
                         .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 28)
+                        .frame(width: 18, height: 26)
                         .allowsHitTesting(false)
                 }
             }
@@ -4546,17 +4547,18 @@ private struct AIToolOpenButton: View {
                 Button {
                     registry.open(path: path, with: preferred, terminalManager: manager)
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         AIToolIcon(tool: preferred, size: 16)
                         Text(preferred.displayName)
                             .font(SidebarTypography.caption(.medium))
                             .lineLimit(1)
-                        Spacer()
+                            .minimumScaleFactor(0.85)
+                        Spacer(minLength: 2)
                     }
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 10)
-                    .padding(.trailing, 4)
-                    .padding(.vertical, 6)
+                    .padding(.leading, 6)
+                    .padding(.trailing, 2)
+                    .padding(.vertical, 5)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -4576,13 +4578,13 @@ private struct AIToolOpenButton: View {
                         registry.preferredToolId = selected.id
                         registry.open(path: path, with: selected, terminalManager: manager)
                     }
-                    .frame(width: 22, height: 28)
+                    .frame(width: 18, height: 26)
                     .help("选择 AI 工具")
                 } else {
                     Image(systemName: "arrow.up.forward")
                         .font(SidebarTypography.micro())
                         .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 28)
+                        .frame(width: 18, height: 26)
                         .allowsHitTesting(false)
                 }
             }
@@ -4687,7 +4689,7 @@ private struct TopToolsOpenSection: View {
 
     var body: some View {
         if editorRegistry.preferredEditor != nil || aiRegistry.preferredTool != nil {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 CodeEditorOpenButton(path: path)
                 AIToolOpenButton(path: path, manager: manager)
             }
