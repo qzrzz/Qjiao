@@ -136,23 +136,6 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Project") {
-                Group {
-                    settingWithDescription(
-                        "Package manager",
-                        "Used for package scripts launched from the Info panel."
-                    ) {
-                        Picker("", selection: $settings.packageManagerCommand) {
-                            ForEach(PackageManagerCommand.allCases) { command in
-                                Text(command.rawValue).tag(command)
-                            }
-                        }
-                        .labelsHidden()
-                    }
-                }
-                .settingsRowPadding()
-            }
-
             Section("Defaults") {
                 Group {
                 HStack {
@@ -945,7 +928,7 @@ private struct CLIToolChip: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("移除 \(text)")
+            .help("Remove \(text)")
         }
         .padding(.leading, 7)
         .padding(.trailing, 5)
@@ -972,16 +955,16 @@ private struct AddCLIChipField: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
 
-            TextField("添加命令…", text: $newCommand)
+            TextField("Add…", text: $newCommand)
                 .textFieldStyle(.plain)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .frame(minWidth: 70, maxWidth: 110)
+                .frame(minWidth:  80, maxWidth: 80)
                 .onSubmit {
                     submit()
                 }
 
             if !newCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button("添加") {
+                Button("Add") {
                     submit()
                 }
                 .font(.system(size: 10, weight: .semibold))
@@ -1019,22 +1002,39 @@ private struct ProjectSettingsSectionView: View {
         Section {
             VStack(alignment: .leading, spacing: 12) {
                 // 顶部说明文本
-                Text("快速打开可用的应用程序和 CLI")
-                    .font(.caption)
+                Text("\"快速打开\"可用的应用程序和 CLI")
+                    .font(.body)
                     .foregroundStyle(.secondary)
 
+                // ── 包管理器 Package manager
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Package manager")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("Used for package scripts launched from the Info panel.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Picker("", selection: $settings.packageManagerCommand) {
+                        ForEach(PackageManagerCommand.allCases) { command in
+                            Text(command.rawValue).tag(command)
+                        }
+                    }
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+
+                Divider()
                 // ── 1. 代码编辑工具
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("代码编辑工具")
+                            Text("Code Editor Application")
                                 .font(.system(size: 13, weight: .medium))
-                            Text("用于“在编辑器中打开”操作。")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
                         }
                         Spacer()
-                        Button("选择应用…") {
+                        Button("Select Application...") {
                             selectCustomEditorApp()
                         }
                         .controlSize(.small)
@@ -1042,7 +1042,7 @@ private struct ProjectSettingsSectionView: View {
 
                     if settings.customCodeEditorPaths.isEmpty {
                         HStack {
-                            Text("未选择自定义编辑器")
+                            Text("Empty")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.tertiary)
                             Spacer()
@@ -1066,7 +1066,7 @@ private struct ProjectSettingsSectionView: View {
                                         .truncationMode(.middle)
                                     Spacer()
 
-                                    Button("移除") {
+                                    Button("Remove") {
                                         removeCustomEditor(path: path)
                                     }
                                     .font(.system(size: 11))
@@ -1089,11 +1089,8 @@ private struct ProjectSettingsSectionView: View {
                 // ── 2. CLI 工具
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("CLI 工具")
+                        Text("CLI")
                             .font(.system(size: 13, weight: .medium))
-                        Text("用于在项目中快速启动常用命令。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
 
                     if #available(macOS 13.0, *) {
