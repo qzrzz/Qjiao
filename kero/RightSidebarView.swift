@@ -3221,6 +3221,9 @@ private struct PackageInfoSection: View {
     @State private var isHoveringMinus = false
     @State private var isHoveringMenu = false
 
+    @FocusState private var isVersionFocused: Bool
+    @State private var versionDraft: String = ""
+
     private var parsedSemVer: SidebarProbe.SemVerComponents? {
         guard let version = info.version else { return nil }
         return SidebarProbe.parseSemVer(version)
@@ -3231,6 +3234,27 @@ private struct PackageInfoSection: View {
             directory: rootPath,
             globalSetting: AppSettings.shared.packageManagerCommand.rawValue
         )
+    }
+
+    private func syncVersionDraft() {
+        if !isVersionFocused {
+            let ver = info.version ?? ""
+            versionDraft = ver.lowercased().hasPrefix("v") ? ver : (ver.isEmpty ? "" : "v\(ver)")
+        }
+    }
+
+    private func commitVersionChange() {
+        let trimmed = versionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            syncVersionDraft()
+            return
+        }
+        let cleanVersion = (trimmed.hasPrefix("v") || trimmed.hasPrefix("V")) ? String(trimmed.dropFirst()) : trimmed
+        if cleanVersion != info.version {
+            if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: cleanVersion) {
+                onVersionUpdated()
+            }
+        }
     }
 
     private var headerMoreMenu: AnyView {
@@ -3352,20 +3376,38 @@ private struct PackageInfoSection: View {
                 }
                 .frame(height: 20)
 
-                // 第二行：v1.0.0 [ + | - | ⌵ ]
-                if let version = info.version, !version.isEmpty {
+                // 第二行：版本输入框 [ v1.0.0 ] [ + | - | ⌵ ]
+                if info.version != nil {
                     HStack(spacing: 6) {
-                        let displayVersion = version.lowercased().hasPrefix("v") ? version : "v\(version)"
-                        Text(displayVersion)
+                        TextField("v0.0.0", text: $versionDraft)
                             .font(SidebarTypography.caption(design: .monospaced))
                             .foregroundStyle(.secondary)
+                            .textFieldStyle(.plain)
+                            .focused($isVersionFocused)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1.5)
                             .background(
                                 RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.primary.opacity(0.06))
+                                    .fill(isVersionFocused ? Color.primary.opacity(0.1) : Color.primary.opacity(0.06))
                             )
-                            .textSelection(.enabled)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(isVersionFocused ? Color.primary.opacity(0.25) : Color.clear, lineWidth: 1)
+                            )
+                            .onSubmit {
+                                commitVersionChange()
+                            }
+                            .onChange(of: isVersionFocused) { focused in
+                                if !focused {
+                                    commitVersionChange()
+                                }
+                            }
+                            .onAppear {
+                                syncVersionDraft()
+                            }
+                            .onChange(of: info.version) { _ in
+                                syncVersionDraft()
+                            }
 
                         if let parsed = parsedSemVer {
                             // 连贯一体式的 Segmented Split Control (+ / - / ⌵)
