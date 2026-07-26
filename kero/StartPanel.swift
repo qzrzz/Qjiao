@@ -193,7 +193,7 @@ struct StartCommandRow: View {
                 .contentShape(Rectangle())
                 .onHover { isHoveringHandle = $0 }
                 .onDrag(startDrag) {
-                    StartCommandDragPreview(command: command)
+                    Image(nsImage: NSImage())
                 }
 
             StartCommandIcon(command: command)
