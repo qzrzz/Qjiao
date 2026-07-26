@@ -3236,11 +3236,14 @@ private struct PackageInfoSection: View {
         )
     }
 
+    private var cleanVersion: String {
+        let ver = info.version ?? ""
+        return (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
+    }
+
     private func syncVersionDraft() {
         if !isVersionFocused {
-            let ver = info.version ?? ""
-            let clean = (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
-            versionDraft = clean
+            versionDraft = cleanVersion
         }
     }
 
@@ -3387,13 +3390,17 @@ private struct PackageInfoSection: View {
                                 .padding(.leading, 5)
 
                             ZStack(alignment: .leading) {
-                                Text(versionDraft.isEmpty ? "0.0.0" : versionDraft)
+                                let currentText = versionDraft.isEmpty ? cleanVersion : versionDraft
+                                Text(currentText.isEmpty ? "0.0.0" : currentText)
                                     .font(SidebarTypography.caption(design: .monospaced))
                                     .opacity(0)
                                     .padding(.trailing, 5)
                                     .padding(.leading, 1)
 
-                                TextField("0.0.0", text: $versionDraft)
+                                TextField("0.0.0", text: Binding(
+                                    get: { versionDraft.isEmpty ? cleanVersion : versionDraft },
+                                    set: { versionDraft = $0 }
+                                ))
                                     .font(SidebarTypography.caption(design: .monospaced))
                                     .foregroundStyle(.secondary)
                                     .textFieldStyle(.plain)
