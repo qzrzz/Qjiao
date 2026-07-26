@@ -3224,6 +3224,7 @@ private struct PackageInfoSection: View {
 
     @FocusState private var isVersionFocused: Bool
     @State private var versionDraft: String = ""
+    @State private var isUpdatingVersion: Bool = false
 
     private var currentDisplayVersion: String {
         if !versionDraft.isEmpty {
@@ -3241,20 +3242,32 @@ private struct PackageInfoSection: View {
     }
 
     private func syncDraftFromInfo() {
-        if !isVersionFocused {
-            let ver = info.version ?? ""
-            let clean = (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
-            if !clean.isEmpty {
-                versionDraft = clean
-            }
+        guard !isVersionFocused && !isUpdatingVersion else { return }
+        let ver = info.version ?? ""
+        let clean = (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
+        if !clean.isEmpty {
+            versionDraft = clean
         }
     }
 
     private func applyVersion(_ newVersion: String) {
         let cleanNew = (newVersion.hasPrefix("v") || newVersion.hasPrefix("V")) ? String(newVersion.dropFirst()) : newVersion
+        isUpdatingVersion = true
         versionDraft = cleanNew
         if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: cleanNew) {
             onVersionUpdated()
+        }
+    }
+
+    private func handleInfoVersionChanged() {
+        let ver = info.version ?? ""
+        let clean = (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
+        if isUpdatingVersion {
+            if clean == versionDraft {
+                isUpdatingVersion = false
+            }
+        } else {
+            syncDraftFromInfo()
         }
     }
 
@@ -3423,7 +3436,7 @@ private struct PackageInfoSection: View {
                                         syncDraftFromInfo()
                                     }
                                     .onChange(of: info.version) { _ in
-                                        syncDraftFromInfo()
+                                        handleInfoVersionChanged()
                                     }
                                     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                                         syncDraftFromInfo()
