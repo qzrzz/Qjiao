@@ -371,21 +371,24 @@ struct SystemPanel: View {
         }
     }
 
-    /// [图标] IP  192.168.x.x [复制]  …（复制按钮紧跟文本）
+    /// [图标] IP  192.168.x.x [复制]    🇯🇵 133.18.140.32 [复制]
     private var localIPRow: some View {
         let address = model.snapshot.localIPv4Address
         let display = address ?? "—"
+        let publicAddr = model.snapshot.publicIPv4Address
+        let publicEmoji = model.snapshot.publicIPLocationEmoji
+
         return HStack(spacing: 4) {
             Image(systemName: "point.3.filled.connected.trianglepath.dotted")
                 .font(SidebarTypography.micro())
-                .foregroundStyle(address != nil ? accent : .secondary)
+                .foregroundStyle((address != nil || publicAddr != nil) ? accent : .secondary)
                 .frame(width: 11, height: 11)
                 .padding(.trailing, 2)
             Text("IP")
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
-            // IP 数字等宽，段长变化时更稳。
+            // 内网 IP 数字等宽，段长变化时更稳。
             Text(display)
                 .font(SidebarTypography.section(.medium).monospacedDigit())
                 .foregroundStyle(.primary)
@@ -403,15 +406,45 @@ struct SystemPanel: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Copy IP address")
+                .help("Copy local IP address")
             }
+
+            // 出口 IP 添加到现有内网 IP 后面，添加 gap 间隔与复制按钮
+            if let publicAddr {
+                HStack(spacing: 3) {
+                    if let publicEmoji, !publicEmoji.isEmpty {
+                        Text(publicEmoji)
+                            .font(SidebarTypography.section(.medium))
+                    }
+                    Text(publicAddr)
+                        .font(SidebarTypography.section(.medium).monospacedDigit())
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .tooltip(publicIPHelp, edge: .above)
+                    Button {
+                        copyToPasteboard(publicAddr)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(SidebarTypography.micro())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy public IP address")
+                }
+                .padding(.leading, 8)
+            }
+
             Spacer(minLength: 0)
         }
         .frame(height: 18)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("IP \(display)")
+        .accessibilityLabel(ipRowAccessibilityLabel)
     }
 
+    /// 内网 IP 的悬浮提示信息。
     private var localIPHelp: String {
         if let address = model.snapshot.localIPv4Address {
             if let iface = model.snapshot.localIPv4Interface {
@@ -420,6 +453,26 @@ struct SystemPanel: View {
             return address
         }
         return "No local IPv4"
+    }
+
+    /// 出口 IP 的悬浮提示信息（含 Location 代码）。
+    private var publicIPHelp: String {
+        if let publicAddr = model.snapshot.publicIPv4Address {
+            if let loc = model.snapshot.publicIPLocation {
+                return "Public IP: \(publicAddr) (\(loc))"
+            }
+            return "Public IP: \(publicAddr)"
+        }
+        return "No public IP"
+    }
+
+    /// IP 行的可访问性说明文本。
+    private var ipRowAccessibilityLabel: String {
+        var label = "Local IP \(model.snapshot.localIPv4Address ?? "—")"
+        if let publicAddr = model.snapshot.publicIPv4Address {
+            label += ", Public IP \(publicAddr)"
+        }
+        return label
     }
 
     /// [图标] Proxy  127.0.0.1:1886 [复制]  …（复制按钮紧跟文本，不右对齐）

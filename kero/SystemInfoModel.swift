@@ -144,6 +144,12 @@ struct SystemSnapshot: Equatable {
     var localIPv4Address: String?
     /// 对应网卡名，如 `en0` / `en6`。
     var localIPv4Interface: String?
+    /// 本机出口 IP（通过 Cloudflare trace 获取）。
+    var publicIPv4Address: String?
+    /// 出口 IP 所在国家/地区代码（如 `JP`）。
+    var publicIPLocation: String?
+    /// 出口 IP 所在国家/地区的 Emoji 国旗（如 `🇯🇵`）。
+    var publicIPLocationEmoji: String?
     var proxy: SystemProxyInfo?
     var reachability: [SystemReachabilityItem] = []
     var updatedAt: Date?
@@ -246,6 +252,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
     private var lastDiskCapacityAt: Date?
     private var lastProxyAt: Date?
     private var lastLocalIPAt: Date?
+    private var lastPublicIPAt: Date?
     private var lastMemTotalAt: Date?
     private var cachedMemTotal: UInt64?
     /// 各站点历史采样（按 id）。
@@ -448,6 +455,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         let wantDisk = forceSlow || lastDiskCapacityAt.map { Date().timeIntervalSince($0) >= 10 } ?? true
         let wantProxy = forceSlow || lastProxyAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
         let wantLocalIP = forceSlow || lastLocalIPAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
+        let wantPublicIP = forceSlow || lastPublicIPAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
         let wantMemTotal = cachedMemTotal == nil
             || lastMemTotalAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
         // 磁盘写入量：每 30s 一拍（手动/force 可立刻采）。
@@ -477,6 +485,10 @@ final class SystemInfoModel: nonisolated ObservableObject {
         async let nwiResult = wantLocalIP
             ? optionalRun(runner, ["scutil", "--nwi"], timeout: .seconds(3))
             : nil
+        // 本机出口 IP：请求 Cloudflare trace 获取 ip 与 loc。
+        async let publicIPResult = wantPublicIP
+            ? optionalRun(runner, ["curl", "-sS", "--connect-timeout", "3", "--max-time", "5", "https://cloudflare.com/cdn-cgi/trace"], timeout: .seconds(6))
+            : nil
         async let memTotalResult = wantMemTotal
             ? optionalRun(runner, ["sysctl", "-n", "hw.memsize"], timeout: .seconds(2))
             : nil
@@ -491,6 +503,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         let proxyOut = await proxyResult
         let routeOut = await routeResult
         let nwiOut = await nwiResult
+        let publicIPOut = await publicIPResult
         let memTotalOut = await memTotalResult
         let swapOut = await swapResult
 
@@ -562,6 +575,23 @@ final class SystemInfoModel: nonisolated ObservableObject {
         } else {
             next.localIPv4Address = snapshot.localIPv4Address
             next.localIPv4Interface = snapshot.localIPv4Interface
+        }
+
+        if wantPublicIP {
+            if let publicIPOut, let parsed = Self.parseCloudflareTrace(publicIPOut) {
+                next.publicIPv4Address = parsed.ip
+                next.publicIPLocation = parsed.loc
+                next.publicIPLocationEmoji = parsed.emoji
+            } else {
+                next.publicIPv4Address = nil
+                next.publicIPLocation = nil
+                next.publicIPLocationEmoji = nil
+            }
+            lastPublicIPAt = Date()
+        } else {
+            next.publicIPv4Address = snapshot.publicIPv4Address
+            next.publicIPLocation = snapshot.publicIPLocation
+            next.publicIPLocationEmoji = snapshot.publicIPLocationEmoji
         }
 
         // 可达性由独立 reachTask 按间隔探测，避免拖慢 2s 资源轮询。
@@ -1201,5 +1231,43 @@ final class SystemInfoModel: nonisolated ObservableObject {
             return UInt64(value * mult)
         }
         return UInt64(trimmed)
+    }
+
+    /// 解析 `cloudflare.com/cdn-cgi/trace` 输出，提取出口 `ip` 与位置代码 `loc`，并将 `loc` 转换为 Emoji 国旗图标。
+    /// - Parameter text: cloudflare trace 返回的 Key-Value 文本
+    /// - Returns: 包含出口 IP、位置代码与 Emoji 图标的元组，若未找到 IP 则返回 nil
+    private nonisolated static func parseCloudflareTrace(_ text: String) -> (ip: String, loc: String?, emoji: String?)? {
+        var ip: String?
+        var loc: String?
+        for line in text.components(separatedBy: .newlines) {
+            let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
+            if parts.count == 2 {
+                let key = parts[0].trimmingCharacters(in: .whitespaces)
+                let val = parts[1].trimmingCharacters(in: .whitespaces)
+                if key == "ip" && !val.isEmpty {
+                    ip = val
+                } else if key == "loc" && !val.isEmpty {
+                    loc = val
+                }
+            }
+        }
+        guard let ip = ip else { return nil }
+        let emoji = loc.flatMap { countryCodeToEmoji($0) }
+        return (ip, loc, emoji)
+    }
+
+    /// 将两位 ISO 3166-1 alpha-2 国家/地区代码转换为 Emoji 国旗图标（例如 "JP" -> "🇯🇵"）。
+    /// - Parameter code: 两位大写或小写的 ISO 国家/地区代码
+    /// - Returns: 对应的 Emoji 国旗字符串，格式不合法时返回 nil
+    private nonisolated static func countryCodeToEmoji(_ code: String) -> String? {
+        let uppercase = code.uppercased()
+        guard uppercase.count == 2 else { return nil }
+        var emoji = ""
+        for scalar in uppercase.unicodeScalars {
+            guard scalar.value >= 0x41 && scalar.value <= 0x5A else { return nil }
+            guard let regionalScalar = UnicodeScalar(0x1F1E6 + (scalar.value - 0x41)) else { return nil }
+            emoji.unicodeScalars.append(regionalScalar)
+        }
+        return emoji
     }
 }

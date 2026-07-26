@@ -68,13 +68,17 @@
 - System 面板数字与 IP/代理地址统一 `monospacedDigit`；自定义 Tooltip 单行等宽数字、多行等宽字体以对齐 Mem/Disk 等指标详情。
 - 右侧 Files / CWD / Git 文件列表按文件名与扩展名显示 Material Icon Theme 彩色图标（[vscode-material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme)）；目录名匹配专用文件夹图标，展开/收起使用 open 变体；可用 `bun run scripts/vendor-material-icons.ts` 更新图标资源。
 - 顶栏 Tabs（含 Tab 总览、重命名与分栏拖拽缩略图）对打开的文件 / Diff 使用与文件树相同的 Material Icon；终端 Tab 仍为 SF Symbol，运行中仍显示转圈。
+- 终端应用图标识别：检测前台进程（如 `agy` / `grok` / `codex` / `claude` / `node` 等）并切换 Tab 图标；图标来源为 Material Icon Theme 与 Iconify Boxicons Brands（`bxl:*`）等本地 SVG。通过 `kero/TerminalAppIcons/apps.json` + `icons/*.svg` 配置，用户可在 `~/.config/qjiao/terminal-app-icons.json` 覆盖；`bun run vendor:terminal-app-icons` 同步 Iconify 资源。同一 foreground PID 缓存进程名与匹配结果，避免 TimelineView 轮询时重复查进程。
 - 左侧面板底部 Theme 按钮支持左键点击立即切换主题（Light ↔ Dark，System 模式按系统实际外观反转），右键菜单提供主题选择、分割线及 Appearance Settings 快捷入口。
 - 右侧面板下半区底部 Tabs（System/Note 选项卡栏）的最小高度调整为 36，并优化展开逻辑（若之前拖拽将高度缩至最小，点击展开/双击 tabs 时自动恢复至默认 70/30 高度）。
 - 图片查看器增强：
   - 放缩 > 100% 自动无缝切换像素插值模式（`.none`），≤ 100% 自动高质量插值（`.high`）。
   - 支持以鼠标指针位置为中心的视口滚轮放缩与 Cmd/Shift 快捷平移；支持原图与对比图左右双图叠加对比与竖线分界。
   - 内置专业级像素标尺与参考线系统：支持顶部/左侧标尺自适应像素刻度与指针指示；从标尺向内拖拽或双击标尺快速创建水平/垂直参考线；参考线支持悬停/拖动实时 `X: 320 px / Y: 180 px` 坐标提示气泡；参考线支持锁定防止误触；拖拽参考线至标尺内部或超出画布释放自动清除，并支持一键清除所有参考线；标尺数字支持中心精准对齐与 -90° 纵向排布；参考线支持靠近图片边缘与中心智能磁吸（Edge Snapping）。
+  - 修复标尺在缩放时与图像错位：图像视口改为固定坐标系（中心 + offset），与 `originX/Y`、`pixelScale` 及参考线换算一致；多阶刻度改用整数索引 10 等分，避免浮点累加漏画主刻度；滚轮缩放中心按图像视口（不含工具栏）计算。
   - 增强画布右键上下文菜单（Context Menu）：快捷支持复制图片到剪贴板、复制文件路径、缩放适应/100% 重置、旋转 90°、切换背景模式（含 Light/Dark 棋盘格）、标尺/参考线开关控制、开启双图对比、拷贝元数据信息以及在 Finder 中高亮定位文件。
   - 支持背景模式跨标签与应用重启 `@AppStorage` 持久化记忆，并全新推出 Dark Checkerboard（深色棋盘格）背景模式。
   - 适配 Retina 高清屏 (High DPI Display)：自动响应 `screenBackingScale`，实现 1:1 绝对物理像素点对点精准对齐渲染。
+- 优化 System 面板 IP 显示：请求 Cloudflare trace (`https://cloudflare.com/cdn-cgi/trace`) 获取出口 IP 与位置代码，并将 loc 转换为 Emoji 国旗图标（如 🇯🇵）；出口 IP 显示在内网 IP 后面（带有 gap 间隔与独立复制按钮）。
+
 
