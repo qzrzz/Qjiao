@@ -567,7 +567,7 @@ private enum SettingsSection: CaseIterable, Identifiable {
         case .terminal: "terminal"
         case .editor: "text.cursor"
         case .files: "folder"
-        case .project: "folder.badge.gear"
+        case .project: "shippingbox"
         case .about: "info.circle"
         }
     }
@@ -1023,7 +1023,7 @@ private struct ProjectSettingsSectionView: View {
             }
 
             // ── Section 2: 快捷打开应用程序与 CLI
-            Section {
+            Section("External Tools") {
                 VStack(alignment: .leading, spacing: 12) {
                     // 顶部说明文本
                     Text("\"快速打开\"可用的应用程序和 CLI")
