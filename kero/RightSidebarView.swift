@@ -3266,8 +3266,10 @@ private struct PackageInfoSection: View {
         )
         if !isCollapsed {
             VStack(alignment: .leading, spacing: 5) {
-                // 第一行：[包名] [复制图标] ------------------ [仓库跳转链接，仅图标]
+                // 第一行：[npm图标] [包名] [复制图标] ------------------ [仓库跳转链接，仅图标]
                 HStack(spacing: 4) {
+                    ProjectPresetIconImage(preset: .bundled("bxl-npm.svg"), size: 14)
+
                     if let name = info.name, !name.isEmpty {
                         Text(name)
                             .font(SidebarTypography.secondary(.regular))
