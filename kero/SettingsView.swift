@@ -999,14 +999,9 @@ private struct ProjectSettingsSectionView: View {
     @ObservedObject var settings: AppSettings
 
     var body: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 12) {
-                // 顶部说明文本
-                Text("\"快速打开\"可用的应用程序和 CLI")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-
-                // ── 包管理器 Package manager
+        Group {
+            // ── Section 1: Package Manager 独立分组
+            Section("Package Manager") {
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Package manager")
@@ -1024,9 +1019,19 @@ private struct ProjectSettingsSectionView: View {
                     .labelsHidden()
                     .controlSize(.small)
                 }
+                .settingsRowPadding()
+            }
 
-                Divider()
-                // ── 1. 代码编辑工具
+            // ── Section 2: 快捷打开应用程序与 CLI
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    // 顶部说明文本
+                    Text("\"快速打开\"可用的应用程序和 CLI")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+
+                    Divider()
+                    // ── 1. 代码编辑工具
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
