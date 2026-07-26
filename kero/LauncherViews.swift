@@ -358,7 +358,6 @@ struct LauncherItemWrapper: View {
     @Binding var commandBinding: ProjectLaunchCommand
     let isExpanded: Bool
     let isDragged: Bool
-    let showDivider: Bool
     let run: () -> Void
     let toggleExpanded: () -> Void
     let delete: () -> Void
@@ -392,11 +391,6 @@ struct LauncherItemWrapper: View {
                     )
                     .transition(.opacity)
                 }
-            }
-        }
-        .overlay(alignment: .bottom) {
-            if showDivider {
-                Divider().padding(.leading, 12)
             }
         }
         .animation(.easeInOut(duration: 0.16), value: isExpanded)

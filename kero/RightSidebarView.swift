@@ -4092,15 +4092,13 @@ private struct LaunchersSection: View {
     }
 
     private var commandList: some View {
-        VStack(spacing: 1) {
-            ForEach(Array(project.launchCommands.enumerated()), id: \.element.id) { index, command in
+        VStack(spacing: 0) {
+            ForEach(project.launchCommands) { command in
                 LauncherItemWrapper(
                     command: command,
                     commandBinding: binding(for: command.id),
                     isExpanded: expandedCommandID == command.id,
                     isDragged: draggedCommandID == command.id,
-                    showDivider: expandedCommandID != command.id
-                        && index < project.launchCommands.count - 1,
                     run: { runCommand(command) },
                     toggleExpanded: { toggleExpanded(command.id) },
                     delete: { delete(command.id) },
