@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Combine
 import Foundation
 
 // MARK: - CodeEditor 模型
