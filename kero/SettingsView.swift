@@ -376,6 +376,8 @@ struct SettingsView: View {
                 }
                 .settingsRowPadding()
             }
+            }
+
             if selectedSection == .project {
                 ProjectSettingsSectionView(settings: settings)
             }
