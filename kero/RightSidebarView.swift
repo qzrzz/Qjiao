@@ -4149,20 +4149,49 @@ private struct ProjectPanel: View {
     @State private var processesCollapsed = false
     @State private var portsCollapsed = false
 
-    private var projectTitle: String {
-        let name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty { return name }
-        guard !model.rootPath.isEmpty else { return "Project" }
-        return (model.rootPath as NSString).lastPathComponent
+    @State private var isIconHovered = false
+    @State private var isIconPickerPresented = false
+
+    @FocusState private var isNameFocused: Bool
+    @State private var nameDraft = ""
+
+    @FocusState private var isDescFocused: Bool
+    @State private var descDraft = ""
+
+    private func syncDrafts() {
+        if !isNameFocused {
+            nameDraft = project.name
+        }
+        if !isDescFocused {
+            descDraft = project.description ?? ""
+        }
     }
 
-    private var headerSubtitle: String? {
+    private func commitName() {
+        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            project.customName = nil
+            nameDraft = project.name
+        } else {
+            project.customName = trimmed
+        }
+    }
+
+    private func commitDescription() {
+        let trimmed = descDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        project.description = trimmed.isEmpty ? nil : trimmed
+    }
+
+    private var descriptionPlaceholder: String {
+        if isDescFocused { return "Description" }
         if let desc = project.description?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
             return desc
         }
         let n = model.sessionShellCount
-        guard n > 0 else { return nil }
-        return n == 1 ? "1 session" : "\(n) sessions"
+        if n > 0 {
+            return n == 1 ? "1 session" : "\(n) sessions"
+        }
+        return "Add description..."
     }
 
     var body: some View {
@@ -4365,6 +4394,28 @@ private struct ProjectPanel: View {
         }
     }
 
+    private var iconButton: some View {
+        Button {
+            isIconPickerPresented = true
+        } label: {
+            headerIcon
+                .padding(4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isIconHovered ? Color.primary.opacity(0.08) : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isIconHovered = hovering
+        }
+        .help("Set Project Icon")
+        .popover(isPresented: $isIconPickerPresented, arrowEdge: .bottom) {
+            ProjectIconPicker(project: project)
+        }
+    }
+
     private var pathRow: some View {
         HStack(spacing: 6) {
             TextField("", text: .constant(model.rootPath.isEmpty ? "—" : model.rootPath))
@@ -4421,14 +4472,62 @@ private struct ProjectPanel: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                headerIcon
-                PanelHeader(
-                    title: projectTitle,
-                    subtitle: headerSubtitle,
-                    titleFont: SidebarTypography.body(.semibold),
-                    subtitleTruncationMode: (project.description != nil && !(project.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)) ? .tail : .head
-                )
+            HStack(spacing: 4) {
+                iconButton
+
+                VStack(alignment: .leading, spacing: 1) {
+                    TextField("Project Name", text: $nameDraft)
+                        .textFieldStyle(.plain)
+                        .font(SidebarTypography.body(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .focused($isNameFocused)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(isNameFocused ? Color.primary.opacity(0.06) : Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(isNameFocused ? Color(nsColor: Theme.cursor).opacity(0.6) : Color.clear, lineWidth: 1)
+                        )
+                        .onSubmit {
+                            commitName()
+                        }
+                        .onChange(of: isNameFocused) {
+                            if !isNameFocused {
+                                commitName()
+                            }
+                        }
+
+                    TextField(descriptionPlaceholder, text: $descDraft)
+                        .textFieldStyle(.plain)
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .focused($isDescFocused)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(isDescFocused ? Color.primary.opacity(0.06) : Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(isDescFocused ? Color(nsColor: Theme.cursor).opacity(0.6) : Color.clear, lineWidth: 1)
+                        )
+                        .onSubmit {
+                            commitDescription()
+                        }
+                        .onChange(of: isDescFocused) {
+                            if !isDescFocused {
+                                commitDescription()
+                            }
+                        }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
                 Button {
                     model.refresh()
                 } label: {
@@ -4446,6 +4545,19 @@ private struct ProjectPanel: View {
         .padding(.horizontal, 12)
         .padding(.top, 8)
         .padding(.bottom, 8)
+        .onAppear {
+            syncDrafts()
+        }
+        .onChange(of: project.name) {
+            if !isNameFocused {
+                nameDraft = project.name
+            }
+        }
+        .onChange(of: project.description) {
+            if !isDescFocused {
+                descDraft = project.description ?? ""
+            }
+        }
     }
 }
 
