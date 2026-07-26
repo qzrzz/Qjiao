@@ -168,4 +168,10 @@ extension NSWindow {
             performZoom(nil)
         }
     }
+
+    /// 窗口是否保持在其他普通窗口之上（`level == .floating`）。
+    var isAlwaysOnTop: Bool {
+        get { level == .floating }
+        set { level = newValue ? .floating : .normal }
+    }
 }

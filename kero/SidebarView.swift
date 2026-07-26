@@ -18,24 +18,38 @@ struct SidebarView: View {
     @AppStorage("leftSidebarWidth") private var width: Double = 220
     @State private var draggedProjectID: UUID?
     @State private var projectFrames: [UUID: CGRect] = [:]
+    /// 当前窗口是否置顶（`NSWindow.level == .floating`）。
+    @State private var isWindowAlwaysOnTop = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header-height strip: traffic lights on the left, collapse control
+            // Header-height strip: traffic lights on the left; pin + collapse
             // on the right (outer margin matches the main header's right-sidebar
             // button so both edges read as the same inset).
             ZStack(alignment: .trailing) {
                 WindowDragArea()
-                HeaderIconButton(
-                    systemImage: "sidebar.left",
-                    isActive: true,
-                    help: "Toggle Left Sidebar (⌘B)",
-                    helpAlignment: .trailing,
-                    action: { manager.toggleLeftSidebar() }
-                )
+                HStack(spacing: HeaderTabActionMetrics.spacing) {
+                    HeaderIconButton(
+                        systemImage: isWindowAlwaysOnTop ? "pin.fill" : "pin",
+                        isActive: isWindowAlwaysOnTop,
+                        help: isWindowAlwaysOnTop
+                            ? "Stop Keeping on Top"
+                            : "Keep Window on Top",
+                        helpAlignment: .trailing,
+                        action: toggleWindowAlwaysOnTop
+                    )
+                    HeaderIconButton(
+                        systemImage: "sidebar.left",
+                        isActive: true,
+                        help: "Toggle Left Sidebar (⌘B)",
+                        helpAlignment: .trailing,
+                        action: { manager.toggleLeftSidebar() }
+                    )
+                }
                 .padding(.trailing, HeaderTabActionMetrics.edgePadding)
             }
             .frame(height: 38)
+            .background(WindowLevelReader(isAlwaysOnTop: $isWindowAlwaysOnTop))
 
             GeometryReader { viewport in
                 ScrollView {
@@ -148,6 +162,40 @@ struct SidebarView: View {
         }
         // 预留 VStack 行间距，避免拖拽区把 ScrollView 内容撑出滚动范围。
         return max(0, viewport.maxY - lastRowBottom - 3)
+    }
+
+    /// 切换侧栏所在窗口的置顶状态。
+    private func toggleWindowAlwaysOnTop() {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
+        window.isAlwaysOnTop.toggle()
+        isWindowAlwaysOnTop = window.isAlwaysOnTop
+    }
+}
+
+/// 读取并同步宿主 `NSWindow` 的置顶状态，供侧栏 pin 按钮展示激活态。
+private struct WindowLevelReader: NSViewRepresentable {
+    @Binding var isAlwaysOnTop: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            sync(from: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            sync(from: view)
+        }
+    }
+
+    private func sync(from view: NSView) {
+        guard let window = view.window else { return }
+        let pinned = window.isAlwaysOnTop
+        if isAlwaysOnTop != pinned {
+            isAlwaysOnTop = pinned
+        }
     }
 }
 

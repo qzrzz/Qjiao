@@ -191,28 +191,31 @@ struct ContentView: View {
 private struct MainHeaderView: View {
     @ObservedObject var manager: TerminalManager
 
-    /// 左侧栏收起时，为红绿灯预留的宽度（不含 edgePadding）。
+    /// 左侧栏收起时，为红绿灯预留的宽度（不含开关左边距）。
     private static let trafficLightInset: CGFloat = 68
+    /// 收起时 Tabs 栏上左边栏开关的左边距（红绿灯之后）。
+    private static let leftToggleLeadingPadding: CGFloat = 16
+    /// 收起时 Tabs 栏上左边栏开关的右边距（与标签条之间）。
+    private static let leftToggleTrailingPadding: CGFloat = 12
     /// 「+」与右侧工具、以及工具彼此之间的间距（满栏时与按钮间距一致）。
     private static var actionSpacing: CGFloat { HeaderTabActionMetrics.spacing }
     /// 标签条与「+」间距。
     private static let tabNewSpacing: CGFloat = 4
-    /// 左侧栏开关与标签条之间的间距。
-    private static var leftToggleSpacing: CGFloat { HeaderTabActionMetrics.spacing }
 
-    /// 左侧栏开关占用宽度（按钮 + 与后续内容间距）；仅在 Tabs 栏展示时计入。
+    /// 左侧栏开关占用宽度（按钮 + 右侧间距）；仅在 Tabs 栏展示时计入。
     private static var leftToggleWidth: CGFloat {
-        HeaderTabActionMetrics.size + leftToggleSpacing
+        HeaderTabActionMetrics.size + leftToggleTrailingPadding
     }
 
     /// With the left sidebar hidden the header slides under the window's
-    /// traffic-light buttons, so inset its content to clear them. Outer
-    /// padding matches the right-sidebar button's trailing margin.
+    /// traffic-light buttons, so inset its content to clear them. When the
+    /// left toggle is shown it gets a larger leading pad than the open-state
+    /// tabs inset.
     private var leadingInset: CGFloat {
         if manager.isLeftSidebarVisible {
             return HeaderTabActionMetrics.edgePadding
         }
-        return Self.trafficLightInset + HeaderTabActionMetrics.edgePadding
+        return Self.trafficLightInset + Self.leftToggleLeadingPadding
     }
 
     /// 右侧固定工具簇固有宽度（zoom 可选 + 下拉 + 侧栏）。
@@ -256,7 +259,7 @@ private struct MainHeaderView: View {
                 WindowDragArea()
 
                 // 左侧：收起时的左边栏开关 + 标签 + 新建。trailing 用 padding 硬预留。
-                HStack(spacing: Self.leftToggleSpacing) {
+                HStack(spacing: 0) {
                     if showLeftToggle {
                         HeaderIconButton(
                             systemImage: "sidebar.left",
@@ -264,6 +267,7 @@ private struct MainHeaderView: View {
                             help: "Toggle Left Sidebar (⌘B)",
                             action: { manager.toggleLeftSidebar() }
                         )
+                        .padding(.trailing, Self.leftToggleTrailingPadding)
                     }
                     HStack(spacing: Self.tabNewSpacing) {
                         if let project = manager.selectedProject {
