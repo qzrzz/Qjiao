@@ -1128,6 +1128,7 @@ private struct ProjectSettingsSectionView: View {
             .settingsRowPadding()
         }
     }
+    }
 
     private func selectCustomEditorApp() {
         let panel = NSOpenPanel()
