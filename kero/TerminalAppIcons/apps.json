@@ -169,27 +169,13 @@
     {
       "label": "Webpack",
       "match": ["webpack"],
-      "material": "webpack"
-    },
+      "icon": "webpack.svg"
+    }
+    ,
     {
-      "label": "Make",
-      "match": ["make", "gmake"],
-      "material": "makefile"
-    },
-    {
-      "label": "SSH",
-      "match": ["ssh", "ssh-agent", "scp", "sftp"],
-      "material": "console"
-    },
-    {
-      "label": "Process monitor",
-      "match": ["htop", "btop", "top", "glances"],
-      "material": "console"
-    },
-    {
-      "label": "tmux",
-      "match": ["tmux"],
-      "material": "console"
+      "label": "opencode",
+      "match": ["opencode"],
+      "icon": "opencode.svg"
     }
   ]
 }

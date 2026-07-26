@@ -305,19 +305,61 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
     }
 }
 
-/// Root of the tab-owned hosting view: keeps the PierreDiffView (and its
+/// 为 WebKit Diff 生成与终端设置一致的字体配置。
+private enum DiffViewerFont {
+    static func renderOptions(settings: AppSettings) -> PierreDiffRenderOptions {
+        let usesBundledFont =
+            settings.fontFamily.isEmpty || settings.fontFamily == TerminalFont.bundledFamily
+        return PierreDiffRenderOptions(
+            font: .bundled(
+                familyName: usesBundledFont
+                    ? TerminalFont.bundledFamily
+                    : settings.fontFamily,
+                faces: usesBundledFont ? bundledFaces : [],
+                sizePoints: settings.fontSize
+            )
+        )
+    }
+
+    /// WebKit 内容进程看不到仅在主进程注册的字体，因此将内置字形嵌入渲染配置。
+    private static let bundledFaces: [PierreDiffFontFace] = {
+        [
+            ("JetBrainsMono-Regular", "400", "normal"),
+            ("JetBrainsMono-Bold", "700", "normal"),
+            ("JetBrainsMono-Italic", "400", "italic"),
+            ("JetBrainsMono-BoldItalic", "700", "italic"),
+        ].compactMap { resource, weight, style in
+            PierreDiffFontFace.load(
+                family: TerminalFont.bundledFamily,
+                resource: resource,
+                extension: "ttf",
+                weight: weight,
+                style: style
+            )
+        }
+    }()
+}
+
+/// Root of the tab-owned hosting view: keeps the virtualized diff view (and its
 /// WKWebView) alive for the tab's lifetime, re-rendering when the model's
 /// inputs change.
 private struct DiffWebRoot: View {
     @ObservedObject var model: DiffWebModel
+    @ObservedObject private var settings = AppSettings.shared
 
     var body: some View {
-        PierreDiffView(
-            oldContent: model.oldContent,
-            newContent: model.newContent,
-            fileName: model.fileName,
+        PierreMultiDiffView(
+            files: [
+                PierreDiffFile(
+                    id: model.fileName,
+                    name: model.fileName,
+                    oldContents: model.oldContent,
+                    newContents: model.newContent
+                )
+            ],
             diffStyle: $model.diffStyle,
             overflowMode: $model.overflowMode,
+            renderOptions: DiffViewerFont.renderOptions(settings: settings),
             onReady: {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     model.isReady = true

@@ -267,25 +267,64 @@ final class TerminalManager: nonisolated ObservableObject {
         projects = reorderedProjects
     }
 
-    func selectProject(index: Int) {
-        guard projects.indices.contains(index) else { return }
-        selectedProjectID = projects[index].id
+    /// 当前所有未归档的正常项目列表。
+    var activeProjects: [Project] {
+        projects.filter { !$0.isArchived }
     }
 
+    /// 当前所有已归档的项目列表。
+    var archivedProjects: [Project] {
+        projects.filter { $0.isArchived }
+    }
+
+    /// 将指定项目归档。
+    /// - Parameter project: 需要归档的项目
+    func archiveProject(_ project: Project) {
+        guard !project.isArchived else { return }
+        project.isArchived = true
+        // 若归档的项目正好是当前选中项目，则切到下一个未归档项目
+        if selectedProjectID == project.id {
+            if let next = activeProjects.first {
+                selectedProjectID = next.id
+            }
+        }
+        objectWillChange.send()
+    }
+
+    /// 将指定项目解除归档，并将其设为当前选中项目。
+    /// - Parameter project: 需要解除归档的项目
+    func unarchiveProject(_ project: Project) {
+        guard project.isArchived else { return }
+        project.isArchived = false
+        selectedProjectID = project.id
+        objectWillChange.send()
+    }
+
+    /// 按索引选中未归档项目（对应快捷键 ⌘1 ~ ⌘9）。
+    /// - Parameter index: 未归档项目列表中的索引
+    func selectProject(index: Int) {
+        let active = activeProjects
+        guard active.indices.contains(index) else { return }
+        selectedProjectID = active[index].id
+    }
+
+    /// 循环切换上一个/下一个未归档项目。
     func selectNextProject() {
         shiftProjectSelection(by: 1)
     }
 
+    /// 循环切换上一个/下一个未归档项目。
     func selectPreviousProject() {
         shiftProjectSelection(by: -1)
     }
 
     private func shiftProjectSelection(by offset: Int) {
-        guard !projects.isEmpty,
-              let current = projects.firstIndex(where: { $0.id == selectedProjectID })
+        let active = activeProjects
+        guard !active.isEmpty,
+              let current = active.firstIndex(where: { $0.id == selectedProjectID })
         else { return }
-        let next = (current + offset + projects.count) % projects.count
-        selectedProjectID = projects[next].id
+        let next = (current + offset + active.count) % active.count
+        selectedProjectID = active[next].id
     }
 
     // MARK: - Sessions
@@ -445,6 +484,22 @@ final class TerminalManager: nonisolated ObservableObject {
         let dir = directory ?? selectedProject?.projectDirectory ?? selectedSession?.currentDirectoryPath ?? ""
         let script = UniversalProjectScript(name: scriptName, command: "", category: .npm, directory: dir)
         runProjectScript(script, mode: mode)
+    }
+
+    /// 在指定项目/目录下新开终端 Session 并执行任意 shell 命令
+    /// - Parameters:
+    ///   - command: 准备执行的 shell 命令字符串（如 "bun install"）
+    ///   - title: 终端 Tab 显示的名字
+    ///   - directory: 可选工作目录；若未传则优先使用 selectedProject 根路径
+    func runRawCommand(_ command: String, title: String, directory: String? = nil) {
+        guard let project = selectedProject else { return }
+        let dir = directory ?? (!project.projectDirectory.isEmpty ? project.projectDirectory : (selectedSession?.currentDirectoryPath ?? ""))
+        guard !dir.isEmpty else { return }
+
+        let session = project.newSession(directory: dir)
+        project.selectedTab?.customName = title
+        session.title = title
+        session.sendCommandWhenReady(command + "\n")
     }
 
     /// 停止指定的 package script
@@ -885,7 +940,8 @@ final class TerminalManager: nonisolated ObservableObject {
                         icon: project.icon,
                         theme: project.theme,
                         projectDirectory: project.projectDirectory,
-                        launchCommands: project.launchCommands
+                        launchCommands: project.launchCommands,
+                        isArchived: project.isArchived
                     ),
                     for: project.id
                 )
@@ -896,6 +952,7 @@ final class TerminalManager: nonisolated ObservableObject {
                     icon: nil,
                     theme: project.theme,
                     projectDirectory: nil,
+                    isArchived: project.isArchived,
                     tabs: tabs,
                     selectedTabIndex: project.tabs.firstIndex { $0.id == project.selectedTabID }
                 )
@@ -946,6 +1003,7 @@ final class TerminalManager: nonisolated ObservableObject {
             project.theme = config?.theme ?? saved.theme ?? .global
             project.projectDirectory = config?.projectDirectory ?? saved.projectDirectory ?? ""
             project.launchCommands = config?.launchCommands ?? []
+            project.isArchived = config?.isArchived ?? saved.isArchived ?? false
             let targetTabIndex = saved.selectedTabIndex ?? 0
             for (tabIndex, tab) in saved.tabs.enumerated() {
                 let isSelectedActiveTab = (projectIndex == targetProjectIndex && tabIndex == targetTabIndex)
@@ -963,7 +1021,7 @@ final class TerminalManager: nonisolated ObservableObject {
             }
             // 旧版快照中的项目配置在首次恢复时迁移到独立配置文件。
             if config == nil || config?.theme == nil
-                || config?.projectDirectory == nil || config?.launchCommands == nil {
+                || config?.projectDirectory == nil || config?.launchCommands == nil || config?.isArchived == nil {
                 ProjectConfigStore.save(
                     ProjectConfig(
                         customName: project.customName,
@@ -971,7 +1029,8 @@ final class TerminalManager: nonisolated ObservableObject {
                         icon: project.icon,
                         theme: project.theme,
                         projectDirectory: project.projectDirectory,
-                        launchCommands: project.launchCommands
+                        launchCommands: project.launchCommands,
+                        isArchived: project.isArchived
                     ),
                     for: project.id
                 )

@@ -13,6 +13,7 @@ struct ContentView: View {
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var tabSwitcher = TabSwitcherController()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -88,6 +89,16 @@ struct ContentView: View {
             if manager.isCommandPaletteVisible {
                 CommandPaletteView(manager: manager)
             }
+        }
+        .overlay {
+            if tabSwitcher.isPresented, let project = manager.selectedProject {
+                TabSwitcherOverlay(project: project, controller: tabSwitcher)
+                    .zIndex(20)
+            }
+        }
+        .background {
+            TabSwitcherEventMonitor(manager: manager, controller: tabSwitcher)
+                .frame(width: 0, height: 0)
         }
         .background(
             WindowChromeAccessor(
@@ -1242,7 +1253,7 @@ private struct TabItemChrome: View {
 
 /// Terminal: idle → SF Symbol；前台已知应用 → TerminalAppIcon；未知忙 → spinner。
 /// Open files / diffs use Material icons (same as the Files tree).
-private struct TabContentIcon: View {
+struct TabContentIcon: View {
     let content: PaneContent?
     let tint: Color
     private static let materialSize: CGFloat = 14

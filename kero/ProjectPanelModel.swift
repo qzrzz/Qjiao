@@ -12,10 +12,12 @@ import Foundation
 @MainActor
 final class ProjectPanelModel: nonisolated ObservableObject {
     typealias PackageScript = SidebarProbe.PackageScript
+    typealias PackageInfo = SidebarProbe.PackageInfo
     typealias ProcessItem = SidebarProbe.ProcessItem
     typealias PortItem = SidebarProbe.PortItem
 
     @Published private(set) var rootPath = ""
+    @Published private(set) var packageInfo: PackageInfo?
     @Published private(set) var packageScripts: [PackageScript] = []
     @Published private(set) var gradleScripts: [UniversalProjectScript] = []
     @Published private(set) var justScripts: [UniversalProjectScript] = []
@@ -82,6 +84,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
             cargoFileState = nil
             cmakeFileState = nil
             makefileFileState = nil
+            if packageInfo != nil { packageInfo = nil }
             if !packageScripts.isEmpty { packageScripts = [] }
             if !gradleScripts.isEmpty { gradleScripts = [] }
             if !justScripts.isEmpty { justScripts = [] }
@@ -125,6 +128,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         packageLoadID = loadID
 
         guard state.exists || gState.isGradleProject || jState.hasJustfile || cState.isCargoProject || cmState.isCMakeProject || mkState.hasMakefile else {
+            if packageInfo != nil { packageInfo = nil }
             if !packageScripts.isEmpty { packageScripts = [] }
             if !gradleScripts.isEmpty { gradleScripts = [] }
             if !justScripts.isEmpty { justScripts = [] }
@@ -135,6 +139,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         }
 
         Task.detached(priority: .utility) { [weak self] in
+            let info = SidebarProbe.loadPackageInfo(directory: root)
             let scripts = SidebarProbe.loadPackageScripts(directory: root)
             let gradle = await GradleScriptProvider().detectScripts(in: root)
             let just = await JustScriptProvider().detectScripts(in: root)
@@ -143,6 +148,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
             let makefile = await MakefileScriptProvider().detectScripts(in: root)
             await MainActor.run {
                 guard let self, self.packageLoadID == loadID else { return }
+                if self.packageInfo != info { self.packageInfo = info }
                 if self.packageScripts != scripts { self.packageScripts = scripts }
                 if self.gradleScripts != gradle { self.gradleScripts = gradle }
                 if self.justScripts != just { self.justScripts = just }

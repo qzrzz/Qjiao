@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import GhosttyTerminal
 import SwiftUI
 
 /// Hosts a session's long-lived Ghostty terminal view in SwiftUI,
@@ -31,6 +32,8 @@ struct TerminalHostView: NSViewRepresentable {
         container.focusOnAppear = isFocused
         container.updateCornerRadius(hasMultiplePanes: hasMultiplePanes)
         let terminal = session.terminalView
+        // 从后台停车区回到前台时恢复 GPU surface 合成。
+        terminal.setSurfaceVisible(true)
         terminal.onBecomeFirstResponder = onFocused
         terminal.splitTarget.onSplit = onSplit
         terminal.splitTarget.onClose = onClose
@@ -54,6 +57,7 @@ struct TerminalHostView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSView, context: Context) {
+        session.terminalView.setSurfaceVisible(true)
         session.terminalView.onBecomeFirstResponder = onFocused
         session.terminalView.splitTarget.onSplit = onSplit
         session.terminalView.splitTarget.onClose = onClose
@@ -120,6 +124,8 @@ final class TerminalParkingContainerView: NSView {
 
         for session in activeSessions {
             let terminal = session.terminalView
+            // 后台会话仍保持挂载和事件处理，但不再持有持续合成的可见 surface。
+            terminal.setSurfaceVisible(false)
             guard terminal.superview !== self else { continue }
             let parkedSize = terminal.frame.size
             if terminal.window?.firstResponder === terminal {

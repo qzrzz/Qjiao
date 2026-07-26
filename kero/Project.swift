@@ -153,6 +153,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     @Published var icon: ProjectIcon?
     /// 项目级主题覆盖；默认跟随全局设置。
     @Published var theme: ProjectTheme = .global
+    /// 项目是否已归档，归档后会移至左侧边栏底部的归档栏中。
+    @Published var isArchived: Bool = false
     /// User-configured actions displayed in the right sidebar's Start panel.
     @Published var launchCommands: [ProjectLaunchCommand] = []
     @Published var tabs: [PaneTab] = []

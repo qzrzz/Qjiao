@@ -2658,6 +2658,7 @@ private struct GitSectionHeader: View {
     @Binding var isCollapsed: Bool
     let actions: [Action]
     var actionsDisabled = false
+    var trailingView: AnyView? = nil
 
     @State private var isHovering = false
 
@@ -2694,6 +2695,9 @@ private struct GitSectionHeader: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 5) {
+                if let trailingView {
+                    trailingView
+                }
                 ForEach(actions) { action in
                     Button(action: action.perform) {
                         Image(systemName: action.systemImage)
@@ -3188,6 +3192,256 @@ private func formatScriptDuration(_ duration: TimeInterval) -> String {
         let formattedSec = String(format: "%.1fs", sec)
         let cleanSec = formattedSec.replacingOccurrences(of: ".0s", with: "s")
         return "\(min)m\(cleanSec)"
+    }
+}
+
+/// package.json 信息展示分组（包含 name、version、repository 链接与 SemVer 快速递增/Git Tag）
+private struct PackageInfoSection: View {
+    let info: SidebarProbe.PackageInfo
+    let rootPath: String
+    @ObservedObject var manager: TerminalManager
+    @Binding var isCollapsed: Bool
+    let openPackageJSON: () -> Void
+    let onVersionUpdated: () -> Void
+
+    @State private var isHoveringCopyName = false
+    @State private var isHoveringRepo = false
+    @State private var isHoveringPlus = false
+    @State private var isHoveringMinus = false
+    @State private var isHoveringMenu = false
+
+    private var parsedSemVer: SidebarProbe.SemVerComponents? {
+        guard let version = info.version else { return nil }
+        return SidebarProbe.parseSemVer(version)
+    }
+
+    private var pmInfo: SidebarProbe.PackageManagerInfo {
+        SidebarProbe.detectPackageManager(
+            directory: rootPath,
+            globalSetting: AppSettings.shared.packageManagerCommand.rawValue
+        )
+    }
+
+    private var headerMoreMenu: AnyView {
+        AnyView(
+            Menu {
+                Button("Open package.json") {
+                    openPackageJSON()
+                }
+                Divider()
+                Button(pmInfo.installCommand) {
+                    manager.runRawCommand(pmInfo.installCommand, title: pmInfo.installCommand, directory: rootPath)
+                }
+                Button(pmInfo.publishCommand) {
+                    manager.runRawCommand(pmInfo.publishCommand, title: pmInfo.publishCommand, directory: rootPath)
+                }
+                Button(pmInfo.updateCommand) {
+                    manager.runRawCommand(pmInfo.updateCommand, title: pmInfo.updateCommand, directory: rootPath)
+                }
+                Divider()
+                Button("Update  Deps (npx taze)") {
+                    manager.runRawCommand("npx taze", title: "npx taze", directory: rootPath)
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(SidebarTypography.micro())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 18, height: 18)
+            .help("More Package Options")
+        )
+    }
+
+    var body: some View {
+        GitSectionHeader(
+            title: "PACKAGE",
+            count: 0,
+            isCollapsed: $isCollapsed,
+            actions: [],
+            trailingView: headerMoreMenu
+        )
+        if !isCollapsed {
+            VStack(alignment: .leading, spacing: 5) {
+                // 第一行：[包名] [复制图标] ------------------ [仓库跳转链接，仅图标]
+                HStack(spacing: 4) {
+                    if let name = info.name, !name.isEmpty {
+                        Text(name)
+                            .font(SidebarTypography.secondary(.regular))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .textSelection(.enabled)
+
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(name, forType: .string)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 9))
+                                .foregroundStyle(isHoveringCopyName ? Color.primary : Color.secondary)
+                                .frame(width: 16, height: 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(isHoveringCopyName ? Color.primary.opacity(0.08) : Color.clear)
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: 3))
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { isHoveringCopyName = $0 }
+                        .help("Copy package name (\(name))")
+                    } else {
+                        Text("package.json")
+                            .font(SidebarTypography.secondary(.regular))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    if let repoUrl = info.repositoryUrl, !repoUrl.isEmpty, let url = URL(string: repoUrl) {
+                        Button {
+                            NSWorkspace.shared.open(url)
+                        } label: {
+                            Image(systemName: "link")
+                                .font(.system(size: 11))
+                                .foregroundStyle(isHoveringRepo ? Color.primary : Color.secondary)
+                                .frame(width: 20, height: 20)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(isHoveringRepo ? Color.primary.opacity(0.08) : Color.clear)
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { isHoveringRepo = $0 }
+                        .help("Open Repository: \(repoUrl)")
+                    }
+                }
+                .frame(height: 20)
+
+                // 第二行：v1.0.0 [ + | - | ⌵ ]
+                if let version = info.version, !version.isEmpty {
+                    HStack(spacing: 6) {
+                        let displayVersion = version.lowercased().hasPrefix("v") ? version : "v\(version)"
+                        Text(displayVersion)
+                            .font(SidebarTypography.caption(design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.primary.opacity(0.06))
+                            )
+                            .textSelection(.enabled)
+
+                        if let parsed = parsedSemVer {
+                            // 连贯一体式的 Segmented Split Control (+ / - / ⌵)
+                            HStack(spacing: 0) {
+                                // [增加按钮 +]
+                                Button {
+                                    let newVer = parsed.bumpLast
+                                    if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: newVer) {
+                                        onVersionUpdated()
+                                    }
+                                } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(isHoveringPlus ? Color.primary : Color.secondary)
+                                        .frame(width: 18, height: 16)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(isHoveringPlus ? Color.primary.opacity(0.08) : Color.clear)
+                                        )
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .onHover { isHoveringPlus = $0 }
+                                .help("Bump version to \(parsed.bumpLast)")
+
+                                Divider()
+                                    .frame(height: 10)
+                                    .opacity(0.3)
+
+                                // [减少按钮 -]
+                                Button {
+                                    let newVer = parsed.decrementLast
+                                    if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: newVer) {
+                                        onVersionUpdated()
+                                    }
+                                } label: {
+                                    Image(systemName: "minus")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(isHoveringMinus ? Color.primary : Color.secondary)
+                                        .frame(width: 18, height: 16)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(isHoveringMinus ? Color.primary.opacity(0.08) : Color.clear)
+                                        )
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .onHover { isHoveringMinus = $0 }
+                                .help("Decrement version to \(parsed.decrementLast)")
+
+                                Divider()
+                                    .frame(height: 10)
+                                    .opacity(0.3)
+
+                                // [下拉菜单 ⌵] Menu
+                                Menu {
+                                    Button("+ MAJOR ( \(parsed.major) )") {
+                                        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.major) {
+                                            onVersionUpdated()
+                                        }
+                                    }
+                                    Button("+ MINOR ( \(parsed.minor) )") {
+                                        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.minor) {
+                                            onVersionUpdated()
+                                        }
+                                    }
+                                    Button("+ PATCH ( \(parsed.patch) )") {
+                                        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.patch) {
+                                            onVersionUpdated()
+                                        }
+                                    }
+                                    Divider()
+                                    Button("Git tag \(displayVersion)") {
+                                        SidebarProbe.createGitTag(directory: rootPath, tagName: displayVersion)
+                                    }
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(isHoveringMenu ? Color.primary : Color.secondary)
+                                        .frame(width: 16, height: 16)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(isHoveringMenu ? Color.primary.opacity(0.08) : Color.clear)
+                                        )
+                                        .contentShape(Rectangle())
+                                }
+                                .menuStyle(.borderlessButton)
+                                .menuIndicator(.hidden)
+                                .frame(width: 16, height: 16)
+                                .onHover { isHoveringMenu = $0 }
+                                .help("Version Options")
+                            }
+                            .padding(1)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(Color.primary.opacity(0.06))
+                            )
+                        }
+                    }
+                    .frame(height: 20)
+                }
+            }
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+            .padding(.trailing, 6)
+            .padding(.vertical, 3)
+        }
     }
 }
 
@@ -4073,6 +4327,7 @@ private struct LaunchersSection: View {
         }
     }
 
+    /// 空状态视图：无 launcher 时显示提示文案与添加按钮，包含内容左边距
     private var emptyView: some View {
         HStack(spacing: 6) {
             Text("No launchers")
@@ -4086,7 +4341,7 @@ private struct LaunchersSection: View {
             .font(SidebarTypography.caption(.medium))
             .foregroundStyle(Color(nsColor: Theme.cursor))
         }
-        .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        .padding(.leading, SidebarPanelMetrics.expandedContentLeading + 8)
         .padding(.trailing, 8)
         .padding(.vertical, 4)
     }
@@ -4173,6 +4428,7 @@ private struct ProjectPanel: View {
     let runLaunchCommand: (ProjectLaunchCommand) -> Void
     let runAllLaunchCommands: () -> Void
 
+    @State private var packageInfoCollapsed = false
     @State private var launchersCollapsed = false
     @State private var packageScriptsCollapsed = false
     @State private var gradleTasksCollapsed = false
@@ -4236,6 +4492,18 @@ private struct ProjectPanel: View {
                     VStack(alignment: .leading, spacing: 0) {
                         LazyVStack(alignment: .leading, spacing: 1) {
                             TopToolsOpenSection(path: model.rootPath, manager: manager)
+                            if let packageInfo = model.packageInfo {
+                                PackageInfoSection(
+                                    info: packageInfo,
+                                    rootPath: model.rootPath,
+                                    manager: manager,
+                                    isCollapsed: $packageInfoCollapsed,
+                                    openPackageJSON: openPackageJSON,
+                                    onVersionUpdated: {
+                                        model.refresh()
+                                    }
+                                )
+                            }
                             LaunchersSection(
                                 project: project,
                                 isCollapsed: $launchersCollapsed,

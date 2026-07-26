@@ -612,7 +612,8 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             let path = shellQuote(replayFileURL.path)
             commands.append("if [ -r \(path) ]; then /bin/cat \(path); /bin/rm -f \(path); fi")
         }
-        commands.append("export TERM_PROGRAM=Qjiao")
+        // 部分终端应用通过 Ghostty 标识启用图片等扩展协议。
+        commands.append("export TERM_PROGRAM=ghostty")
         if let version = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String, !version.isEmpty {

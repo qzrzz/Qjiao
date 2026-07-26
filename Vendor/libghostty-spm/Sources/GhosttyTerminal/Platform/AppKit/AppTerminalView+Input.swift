@@ -110,13 +110,47 @@
         }
 
         @IBAction func paste(_: Any?) {
-            if let text = NSPasteboard.general.string(forType: .string) {
+            let pasteboard = NSPasteboard.general
+            let text = TerminalPasteboard.terminalText(from: pasteboard)
+            if let text {
                 TerminalDebugLog.log(
                     .input,
                     "paste binding bytes=\(text.utf8.count) lines=\(TerminalInputText.lineCount(in: text))"
                 )
             }
+            if text == nil, TerminalPasteboard.containsImage(pasteboard) {
+                sendImagePasteShortcut()
+                return
+            }
             _ = surface?.performBindingAction("paste_from_clipboard")
+        }
+
+        /// 图片型 TUI 监听 Ctrl-V 后直接读取 NSPasteboard；标准菜单粘贴需模拟同一路径。
+        private func sendImagePasteShortcut() {
+            let timestamp = ProcessInfo.processInfo.systemUptime
+            let events: [(NSEvent.EventType, TimeInterval)] = [
+                (.keyDown, 0),
+                (.keyUp, 0.001),
+            ]
+            for (type, offset) in events {
+                guard let event = NSEvent.keyEvent(
+                    with: type,
+                    location: .zero,
+                    modifierFlags: .control,
+                    timestamp: timestamp + offset,
+                    windowNumber: window?.windowNumber ?? 0,
+                    context: nil,
+                    characters: "\u{16}",
+                    charactersIgnoringModifiers: "v",
+                    isARepeat: false,
+                    keyCode: 0x09
+                ) else { continue }
+                if type == .keyDown {
+                    keyDown(with: event)
+                } else {
+                    keyUp(with: event)
+                }
+            }
         }
 
         @IBAction override open func selectAll(_: Any?) {

@@ -22,6 +22,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>A program running within Qjiao would like to use your microphone.</string>
 	<key>SUFeedURL</key>
 	<string>https://releases.kero.sh/appcast.xml</string>
 	<key>SUPublicEDKey</key>

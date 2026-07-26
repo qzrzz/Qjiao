@@ -17,6 +17,8 @@ struct ProjectConfig: Codable {
     /// Optional so project configuration written before Start existed keeps
     /// decoding without migration.
     var launchCommands: [ProjectLaunchCommand]?
+    /// 可选，记录项目是否已被归档。
+    var isArchived: Bool?
 }
 
 /// 项目配置文件存储。每个项目使用稳定 UUID 对应一个 JSON 文件。
@@ -206,6 +208,8 @@ struct SessionSnapshot: Codable {
         var theme: ProjectTheme?
         /// 项目目录由独立配置文件保存；该字段仅用于旧快照兼容。
         var projectDirectory: String?
+        /// 可选，记录项目是否已被归档。
+        var isArchived: Bool?
         var tabs: [TabSnapshot]
         var selectedTabIndex: Int?
     }

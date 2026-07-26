@@ -37,6 +37,68 @@ enum TerminalHistorySerializer {
         return .captured(normalizedHistory(from: capturedVT, maxLines: maxLines))
     }
 
+    /// 为标签切换器读取终端可见文本。Metal Surface 无法稳定生成位图，
+    /// 因此通过 Ghostty 导出的 VT 内容构造轻量预览，并限制尾部读取量。
+    @MainActor
+    static func previewText(
+        from view: KeroTerminalView,
+        maxLines: Int,
+        maxColumns: Int
+    ) -> String? {
+        guard maxLines > 0,
+              maxColumns > 0,
+              let captureFile = exportedFile(
+                  from: view,
+                  action: "write_screen_file:open,vt"
+              )
+        else { return nil }
+        defer { removeCaptureFile(captureFile) }
+
+        guard let handle = try? FileHandle(forReadingFrom: captureFile.fileURL) else {
+            return nil
+        }
+        defer { try? handle.close() }
+
+        let byteLimit: UInt64 = 128 * 1024
+        guard let fileSize = try? handle.seekToEnd() else { return nil }
+        let offset = fileSize > byteLimit ? fileSize - byteLimit : 0
+        do {
+            try handle.seek(toOffset: offset)
+        } catch {
+            return nil
+        }
+        guard let data = try? handle.read(upToCount: Int(fileSize - offset)),
+              !data.isEmpty
+        else { return nil }
+
+        var text = String(decoding: data, as: UTF8.self)
+        // 从文件尾部截取时可能落在半行或半个 ANSI 序列中，首个残行不参与预览。
+        if offset > 0, let firstNewline = text.firstIndex(of: "\n") {
+            text.removeSubrange(...firstNewline)
+        }
+        text = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        var rows = text
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { visibleText(in: String($0)) }
+        while let last = rows.last,
+              last.trimmingCharacters(in: .whitespaces).isEmpty {
+            rows.removeLast()
+        }
+        guard !rows.isEmpty else { return nil }
+
+        return rows.suffix(maxLines).map { row in
+            var cropped = String(row.prefix(maxColumns))
+            while cropped.last == " " || cropped.last == "\t" {
+                cropped.removeLast()
+            }
+            return cropped
+        }
+        .joined(separator: "\n")
+    }
+
     /// A positive-only probe for a primary-buffer scrollback snapshot. Ghostty
     /// does not export scrollback while an alternate buffer is active, but an
     /// empty primary buffer can also produce no file, so false is inconclusive.

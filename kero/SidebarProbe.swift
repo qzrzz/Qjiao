@@ -18,6 +18,18 @@ enum SidebarProbe {
         var id: String { name }
     }
 
+    /// `package.json` 中的包元数据信息（名称、版本、仓库地址）。
+    struct PackageInfo: Equatable {
+        let name: String?
+        let version: String?
+        let repositoryUrl: String?
+
+        /// 是否包含至少一项有效数据。
+        var hasContent: Bool {
+            !(name?.isEmpty ?? true) || !(version?.isEmpty ?? true) || !(repositoryUrl?.isEmpty ?? true)
+        }
+    }
+
     struct ProcessItem: Identifiable, Equatable {
         var id: pid_t { pid }
         let pid: pid_t
@@ -60,21 +72,23 @@ enum SidebarProbe {
         let roots = Array(Set(shellPids.filter { $0 > 0 })).sorted()
         guard !roots.isEmpty else { return ([], []) }
 
-        let psOut = run("/bin/ps", ["-axo", "pid=,ppid=,pcpu=,rss=,comm="])
+        let psOut = run("/bin/ps", ["-axo", "pid=,ppid=,state=,pcpu=,rss=,comm="])
         var itemsByPid: [pid_t: ProcessItem] = [:]
         var childPids: [pid_t: [pid_t]] = [:]
         for line in psOut.split(separator: "\n") {
-            let fields = line.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
-            guard fields.count == 5,
+            let fields = line.split(separator: " ", maxSplits: 5, omittingEmptySubsequences: true)
+            guard fields.count == 6,
                   let pid = pid_t(fields[0]),
                   let ppid = pid_t(fields[1]) else { continue }
-            let executable = String(fields[4])
+            // Z 状态是已经退出、等待父进程回收的条目，既无可查看输出也无法终止。
+            guard !fields[2].hasPrefix("Z") else { continue }
+            let executable = String(fields[5])
             itemsByPid[pid] = ProcessItem(
                 pid: pid,
                 name: (executable as NSString).lastPathComponent,
                 executable: executable,
-                cpu: Double(fields[2]) ?? 0,
-                memoryKB: Int(fields[3]) ?? 0
+                cpu: Double(fields[3]) ?? 0,
+                memoryKB: Int(fields[4]) ?? 0
             )
             childPids[ppid, default: []].append(pid)
         }
@@ -129,6 +143,232 @@ enum SidebarProbe {
         return scripts
             .map { PackageScript(name: $0.key, command: $0.value) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// 读取 `<directory>/package.json` 的 `name`、`version` 与 `repository` 信息。
+    /// - Parameter directory: 目标目录路径
+    /// - Returns: 解析到的 PackageInfo 结构体；若文件不存在或全空则返回 nil
+    nonisolated static func loadPackageInfo(directory: String) -> PackageInfo? {
+        let url = URL(fileURLWithPath: directory).appendingPathComponent("package.json")
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let package = object as? [String: Any]
+        else { return nil }
+
+        let name = package["name"] as? String
+        let version = package["version"] as? String
+
+        var repoUrlString: String? = nil
+        if let repoString = package["repository"] as? String {
+            repoUrlString = sanitizeRepositoryUrl(repoString)
+        } else if let repoDict = package["repository"] as? [String: Any],
+                  let urlString = repoDict["url"] as? String {
+            repoUrlString = sanitizeRepositoryUrl(urlString)
+        }
+
+        let info = PackageInfo(
+            name: name?.trimmingCharacters(in: .whitespacesAndNewlines),
+            version: version?.trimmingCharacters(in: .whitespacesAndNewlines),
+            repositoryUrl: repoUrlString?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        return info.hasContent ? info : nil
+    }
+
+    /// 清理并规范化 repository 仓库 URL，转为适合浏览器直接打开的 http(s) 链接
+    /// - Parameter raw: 原始 package.json 中的 repository 字符串
+    /// - Returns: 格式化后的 URL 字符串
+    private nonisolated static func sanitizeRepositoryUrl(_ raw: String) -> String {
+        var url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if url.hasPrefix("git+") {
+            url = String(url.dropFirst(4))
+        }
+        if url.hasPrefix("git://") {
+            url = "https://" + url.dropFirst(6)
+        }
+        if url.hasPrefix("github:") {
+            url = "https://github.com/" + url.dropFirst(7)
+        }
+        if url.hasPrefix("git@") {
+            let parts = url.dropFirst(4).split(separator: ":")
+            if parts.count == 2 {
+                url = "https://\(parts[0])/\(parts[1])"
+            }
+        }
+        if url.hasSuffix(".git") {
+            url = String(url.dropLast(4))
+        }
+        if !url.hasPrefix("http://") && !url.hasPrefix("https://") {
+            url = "https://" + url
+        }
+        return url
+    }
+
+    // MARK: - Package Manager Detection
+
+    /// 包管理工具信息与命令生成结构体
+    struct PackageManagerInfo: Equatable {
+        let name: String
+
+        var installCommand: String { "\(name) install" }
+        var publishCommand: String { "\(name) publish" }
+        var updateCommand: String {
+            name == "yarn" ? "yarn upgrade" : "\(name) update"
+        }
+    }
+
+    /// 智能检测目标项目所使用的包管理工具（优先级：package.json packageManager > lockfile > 全局设置 > npm）
+    /// - Parameters:
+    ///   - directory: 项目根目录路径
+    ///   - globalSetting: 全局设置中配置的包管理器命令
+    /// - Returns: 检测到的 PackageManagerInfo
+    nonisolated static func detectPackageManager(directory: String, globalSetting: String = "") -> PackageManagerInfo {
+        let packageUrl = URL(fileURLWithPath: directory).appendingPathComponent("package.json")
+        if let data = try? Data(contentsOf: packageUrl),
+           let object = try? JSONSerialization.jsonObject(with: data),
+           let package = object as? [String: Any],
+           let pmField = (package["packageManager"] as? String)?.lowercased() {
+            if pmField.contains("bun") { return PackageManagerInfo(name: "bun") }
+            if pmField.contains("pnpm") { return PackageManagerInfo(name: "pnpm") }
+            if pmField.contains("yarn") { return PackageManagerInfo(name: "yarn") }
+            if pmField.contains("npm") { return PackageManagerInfo(name: "npm") }
+        }
+
+        let fm = FileManager.default
+        let path = { (filename: String) -> String in
+            URL(fileURLWithPath: directory).appendingPathComponent(filename).path
+        }
+
+        if fm.fileExists(atPath: path("bun.lock")) || fm.fileExists(atPath: path("bun.lockb")) {
+            return PackageManagerInfo(name: "bun")
+        }
+        if fm.fileExists(atPath: path("pnpm-lock.yaml")) {
+            return PackageManagerInfo(name: "pnpm")
+        }
+        if fm.fileExists(atPath: path("yarn.lock")) {
+            return PackageManagerInfo(name: "yarn")
+        }
+        if fm.fileExists(atPath: path("package-lock.json")) || fm.fileExists(atPath: path("npm-shrinkwrap.json")) {
+            return PackageManagerInfo(name: "npm")
+        }
+
+        let lowerGlobal = globalSetting.lowercased()
+        if lowerGlobal.contains("bun") { return PackageManagerInfo(name: "bun") }
+        if lowerGlobal.contains("pnpm") { return PackageManagerInfo(name: "pnpm") }
+        if lowerGlobal.contains("yarn") { return PackageManagerInfo(name: "yarn") }
+        if lowerGlobal.contains("npm") { return PackageManagerInfo(name: "npm") }
+
+        return PackageManagerInfo(name: "npm")
+    }
+
+    // MARK: - SemVer & Version bump
+
+    /// SemVer 版本号计算与更新辅助工具
+    struct SemVerComponents: Equatable {
+        let raw: String
+        let prefix: String
+        let numbers: [Int]
+
+        /// 主版本号递增（例：1.2.3 -> 2.0.0）
+        var major: String {
+            guard !numbers.isEmpty else { return raw }
+            var nums = numbers
+            nums[0] += 1
+            for i in 1..<nums.count { nums[i] = 0 }
+            return prefix + nums.map(String.init).joined(separator: ".")
+        }
+
+        /// 次版本号递增（例：1.2.3 -> 1.3.0）
+        var minor: String {
+            guard numbers.count >= 2 else { return raw }
+            var nums = numbers
+            nums[1] += 1
+            for i in 2..<nums.count { nums[i] = 0 }
+            return prefix + nums.map(String.init).joined(separator: ".")
+        }
+
+        /// 补丁版本号递增（例：1.2.3 -> 1.2.4）
+        var patch: String {
+            guard !numbers.isEmpty else { return raw }
+            var nums = numbers
+            nums[nums.count - 1] += 1
+            return prefix + nums.map(String.init).joined(separator: ".")
+        }
+
+        /// 默认递增最后一个版本的数字
+        var bumpLast: String {
+            patch
+        }
+
+        /// 默认递减最后一个版本的数字（例：1.2.4 -> 1.2.3）
+        var decrementLast: String {
+            guard !numbers.isEmpty else { return raw }
+            var nums = numbers
+            if nums[nums.count - 1] > 0 {
+                nums[nums.count - 1] -= 1
+            }
+            return prefix + nums.map(String.init).joined(separator: ".")
+        }
+    }
+
+    /// 解析语义化版本号
+    /// - Parameter versionString: 原始版本号字符串（如 "1.0.0" 或 "v0.1.2"）
+    /// - Returns: 解析到的 SemVerComponents
+    nonisolated static func parseSemVer(_ versionString: String) -> SemVerComponents? {
+        let trimmed = versionString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        var prefix = ""
+        var body = trimmed
+        if trimmed.lowercased().hasPrefix("v") {
+            prefix = String(trimmed.prefix(1))
+            body = String(trimmed.dropFirst(1))
+        }
+
+        let parts = body.split(separator: ".").compactMap { Int($0) }
+        guard !parts.isEmpty else { return nil }
+
+        return SemVerComponents(raw: versionString, prefix: prefix, numbers: parts)
+    }
+
+    /// 修改指定目录 package.json 中的 version 字段，保留原 JSON 的排版与缩进
+    /// - Parameters:
+    ///   - directory: 项目根目录
+    ///   - newVersion: 目标新版本号
+    /// - Returns: 是否更新成功
+    @discardableResult
+    nonisolated static func updatePackageVersion(directory: String, newVersion: String) -> Bool {
+        let url = URL(fileURLWithPath: directory).appendingPathComponent("package.json")
+        guard let data = try? Data(contentsOf: url),
+              var content = String(data: data, encoding: .utf8) else { return false }
+
+        let pattern = #"("version"\s*:\s*")[^"]+(")"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return false }
+        let range = NSRange(location: 0, length: content.utf16.count)
+
+        if regex.firstMatch(in: content, options: [], range: range) != nil {
+            content = regex.stringByReplacingMatches(in: content, options: [], range: range, withTemplate: "$1\(newVersion)$2")
+            do {
+                try content.write(to: url, atomically: true, encoding: .utf8)
+                return true
+            } catch {
+                return false
+            }
+        }
+        return false
+    }
+
+    /// 在后台异步创建 Git Tag
+    /// - Parameters:
+    ///   - directory: Git 仓库工作目录
+    ///   - tagName: 目标 Tag 标签名（如 "v1.0.0"）
+    nonisolated static func createGitTag(directory: String, tagName: String) {
+        Task.detached(priority: .utility) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["tag", tagName]
+            process.currentDirectoryURL = URL(fileURLWithPath: directory)
+            try? process.run()
+        }
     }
 
     // MARK: - Private

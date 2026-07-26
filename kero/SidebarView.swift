@@ -54,8 +54,9 @@ struct SidebarView: View {
             GeometryReader { viewport in
                 ScrollView {
                     VStack(spacing: 3) {
-                        ForEach(Array(manager.projects.enumerated()), id: \.element.id) { index, project in
+                        ForEach(Array(manager.activeProjects.enumerated()), id: \.element.id) { index, project in
                             SidebarProjectRow(
+                                manager: manager,
                                 project: project,
                                 index: index,
                                 isSelected: project.id == manager.selectedProjectID,
@@ -79,6 +80,14 @@ struct SidebarView: View {
                     .padding(.top, 8)
                 }
             }
+
+            // 左侧边栏底部的项目归档区：通常收起，可展开显示归档列表
+            SidebarArchiveSection(
+                manager: manager,
+                draggedProjectID: draggedProjectID,
+                onDrag: updateProjectDrag(source:location:),
+                onDragEnded: endProjectDrag
+            )
 
             ZStack {
                 // 底部按钮之间的空白区域可用于拖动窗口，按钮本身仍保持可点击。
@@ -311,6 +320,7 @@ private struct ProjectFrameReader: View {
 }
 
 private struct SidebarProjectRow: View {
+    @ObservedObject var manager: TerminalManager
     @ObservedObject var project: Project
     let index: Int
     let isSelected: Bool
@@ -394,6 +404,24 @@ private struct SidebarProjectRow: View {
                 }
             }
             Divider()
+            if project.isArchived {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        manager.unarchiveProject(project)
+                    }
+                } label: {
+                    Label("Unarchive Project", systemImage: "tray.and.arrow.up")
+                }
+            } else {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        manager.archiveProject(project)
+                    }
+                } label: {
+                    Label("Archive Project", systemImage: "archivebox")
+                }
+            }
+            Divider()
             Button("Close Project") {
                 close()
             }
@@ -438,17 +466,34 @@ private struct SidebarProjectRow: View {
             Spacer(minLength: 0)
 
             if isHovering, !isRenaming, !isEditingDescription {
-                Button(action: requestClose) {
-                    Image(systemName: "xmark")
-                        .font(SidebarTypography.micro(.bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16, height: 16)
-                        .contentShape(Rectangle())
+                HStack(spacing: 4) {
+                    if project.isArchived {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                manager.unarchiveProject(project)
+                            }
+                        } label: {
+                            Image(systemName: "tray.and.arrow.up")
+                                .font(SidebarTypography.micro(.bold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16, height: 16)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Unarchive Project")
+                    }
+                    Button(action: requestClose) {
+                        Image(systemName: "xmark")
+                            .font(SidebarTypography.micro(.bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-            } else if index < 9, !isRenaming, !isEditingDescription {
+            } else if !project.isArchived, index < 9, !isRenaming, !isEditingDescription {
                 Text("⌘\(index + 1)")
-                    .font(SidebarTypography.section())
+                    .font(SidebarTypography.section().monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
         }
@@ -627,7 +672,7 @@ private struct SidebarProjectRow: View {
                 .lineLimit(1)
         } else if project.sessions.count > 1 {
             Text("\(project.sessions.count) sessions")
-                .font(SidebarTypography.section())
+                .font(SidebarTypography.section().monospacedDigit())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         } else if let session = project.selectedSession {
@@ -647,6 +692,89 @@ private struct SessionDirectoryLabel: View {
                 .font(SidebarTypography.section())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
+        }
+    }
+}
+
+/// 左侧边栏底部的项目归档区组件。通常收起，可点击展开显示已归档的项目列表。
+private struct SidebarArchiveSection: View {
+    @ObservedObject var manager: TerminalManager
+    let draggedProjectID: UUID?
+    let onDrag: (UUID, CGPoint) -> Void
+    let onDragEnded: () -> Void
+
+    @State private var isExpanded: Bool = false
+
+    var body: some View {
+        let archivedProjects = manager.archivedProjects
+        if !archivedProjects.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                // 归档栏 Header：显示图标、标题、数量与折叠箭头，点击可展开/收起
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(SidebarTypography.micro(.medium))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 12, height: 12)
+
+                        Image(systemName: "archivebox")
+                            .font(SidebarTypography.secondary(.medium))
+                            .foregroundStyle(.secondary)
+
+                        Text("Archived")
+                            .font(SidebarTypography.secondary(.medium))
+                            .foregroundStyle(.secondary)
+
+                        Spacer(minLength: 0)
+
+                        Text("\(archivedProjects.count)")
+                            .font(SidebarTypography.micro(.medium).monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(
+                                Capsule()
+                                    .fill(Color.primary.opacity(0.06))
+                            )
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Collapse Archived Projects" : "Expand Archived Projects")
+
+                // 展开时显示归档的项目列表
+                if isExpanded {
+                    VStack(spacing: 3) {
+                        ForEach(Array(archivedProjects.enumerated()), id: \.element.id) { index, project in
+                            SidebarProjectRow(
+                                manager: manager,
+                                project: project,
+                                index: index,
+                                isSelected: project.id == manager.selectedProjectID,
+                                select: { manager.selectedProjectID = project.id },
+                                close: { manager.close(project) },
+                                isDragging: draggedProjectID == project.id,
+                                onDrag: { location in onDrag(project.id, location) },
+                                onDragEnded: onDragEnded
+                            )
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color(nsColor: Theme.divider).opacity(0.6))
+                    .frame(height: 1)
+            }
         }
     }
 }

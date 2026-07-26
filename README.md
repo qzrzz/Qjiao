@@ -11,6 +11,7 @@
 > 相对于 Kero 原版的改动
 
 - 左边栏开关（`sidebar.left`，⌘B）：展开时显示在左侧边栏顶栏右侧；收起后移到 Tabs 顶栏左侧（开关左右边距加大：左 16pt / 右 12pt）。
+- 左侧边栏项目归档功能：支持归档与解除归档；归档项目默认收起居于左侧边栏底部，点击可展开查看列表；解除归档后自动回到上方正常项目列表。
 - 左侧边栏顶栏在侧栏开关左侧增加窗口置顶按钮（`pin` / `pin.fill`）：切换当前窗口 `NSWindow.level` 为 floating / normal，激活时 tint。
 - 增加窗口拖拽区域。
   - 顶部、右侧边栏添加可拖拽区域。
@@ -44,7 +45,11 @@
   - 终端启动项可指定新标签标题，并与手动 Tab 重命名共用。
 - 终端启动项可指定新标签或上、下、左、右分屏，并支持一键按顺序启动全部项目命令。
 - 终端通过 OSC 52 读取系统剪贴板时需要确认，并对可能执行命令的粘贴内容显示安全警告。
+- 终端粘贴增强：Finder 复制的文件粘贴为 shell 安全绝对路径；纯图片剪贴板通过原生 Ctrl-V 交给支持图片的 TUI 读取。
+- 新建终端声明 `TERM_PROGRAM=ghostty`，让支持 Ghostty 的 CLI/TUI 自动启用图片等扩展能力。
+- 为终端内 CLI 增加麦克风输入权限声明，支持语音输入类命令行工具。
 - 升级 PierreDiffsSwift，修复 Git Diff 中中文等非 ASCII 字符的显示问题。
+- Git Diff 升级为虚拟化渲染，仅绘制可见行并在后台高亮，大文件不再阻塞窗口；Diff 字体同步终端字体设置。
 - 记住左右侧栏的显示状态和右侧面板选项，重启后自动恢复。
 - Tab 支持手动重命名；Start 新标签标题与手动名称使用同一机制，可恢复自动标题。
 - 修复 Vim、htop 等全屏终端程序的背景延伸和底部提示行间距。
@@ -93,6 +98,12 @@
 - 优化右侧边栏窄宽度布局与防错位溢出：
   - 顶栏与底栏 Tabs 引入三阶响应式展缩机制（宽屏全文字、中屏仅选中项显示文字非选中项显示图标、极窄屏自动全图标排列），移除阻断鼠标手势的 ScrollView，完全恢复顶部 `WindowDragArea` 的窗口拖拽与双击动作体验。
   - System 面板 IP 行引入 `ViewThatFits` 自适应机制，宽屏单行展示，窄屏自动切为双行分层，彻底解决内网/公网 IP 宽度溢出导致界面错位的问题。
+- Project Tab 的 Launchers 分组空状态（No launchers）增加内容左边距，保持与其他分组及条目垂直对齐。
+- 新增 Project 面板 `PACKAGE` 信息与操作分组：
+  - 自动解析根目录 `package.json` 中的 `name`、`version` 与 `repository` 仓库链接。
+  - 支持包名与 SemVer 版本号文本选择 (`textSelection`)，并在包名后新增一键复制包名按钮 (`doc.on.doc`)。
+  - `PACKAGE` 分组 Header 右侧新增更多操作菜单 (`ellipsis`)，包含 `Open package.json`、`<pm> install`、`<pm> publish`、`<pm> update` 及 `Update Deps (npx taze)`。
+  - 接入智能包管理器 (Package Manager) 识别机制（优先级：`package.json` 中的 `"packageManager"` > `bun.lock`/`pnpm-lock.yaml`/`yarn.lock`/`package-lock.json` > 全局配置 > `npm` 默认），点击菜单在独立终端 Tab 中开 Shell 执行。
   - System 面板指标折线图、站点延迟柱状图及 Detail 文字改用弹性 Width 与布局优先级，并在侧栏外层施加 `.clipped()` 剪裁保护，保障任何窄宽度下的精致排版与稳定性。
   - 路径区操作按钮（Finder / VS Code / Copy）限制单行显示（`.lineLimit(1)`）与自适应字号缩放（`.minimumScaleFactor(0.7)`），防止在极窄边栏下按钮文字折行撑高。
 - 移除右侧边栏顶栏 Start tab，并将项目启动项（Project launchers）整合为 Project 面板中的 `LAUNCHERS` 分组：
@@ -109,8 +120,17 @@
   - 处于「待运行」状态时，自动在条目右侧格式化展示上一次运行耗时（如 `4.2s`、`522.4ms`、`1m12.5s`，精准保留 1 位小数，整数时无多余 `.0`，配合 `monospacedDigit` 等宽数字字体显示）。
   - 自动读取 Settings 中配置的包管理器（`bun` / `pnpm` / `yarn` / `npm`），为启动的新终端 Tab 动态命名为 `<scriptName> (<pmCommand> run)` 格式（例如 `dev (npm run)`、`build (bun run)`）。
   - 抽象解耦出通用项目脚本执行引擎模块 `ProjectScriptEngine`：定义 `ProjectScriptCategory`、`UniversalProjectScript` 与 `ProjectScriptProvider` 探针协议，统一管理跨平台/多语言任务的构建、调度、生命周期监测与端口绑定，为后续扩展 Gradle、`tool.uv.scripts`、PDM、Rust alias 及 Makefile 等方案奠定架构基础。
-- 优化右侧边栏 Project 与 Info 面板 Header 与顶部布局：以 Project 面板为统一模板对齐 Info 面板 Header 样式；Info 面板顶部图标动态响应当前终端 Tab 的前台应用图标（如 Node/Python/Cargo/Antigravity）与运行状态；移除冗余的 CWD/PROJECT 分组，在 Header 标题下方集成单行无边框只读路径输入框（支持放置光标平移浏览）与 Finder / Copy 操作按钮，并在内容区顶部统一设立 VS Code 打开项目的专属区域。
+- 优化右侧边栏 Project 与 Info 面板 Header 与顶部布局：以 Project 面板为统一模板对齐 Info 面板 Header 样式；Info 面板顶部图标动态响应当前终端 Tab 的前台应用图标（如 Node/Python/Cargo/Antigravity）与运行状态；移除冗余的 CWD/PROJECT 分组，在 Header 标题下方集成单行无边框只读路径输入框（支持放置光标平移浏览，右侧添加 20pt 渐隐遮罩提示内容超出隐藏）与 Finder / Copy 操作按钮，并在内容区顶部统一设立 VS Code 打开项目的专属区域。
 - 新增 AI 工具打开按钮与动态选择注册表：通过 `AIToolRegistry` 动态检测系统已安装的 AI 桌面 GUI 应用（Codex、Claude Code、Claude Desktop、OpenCode、Antigravity 等）与 CLI 命令行工具（`codex`、`agy`、`claude`、`opencode`、`grok` 等）；在 Project 与 Info 面板顶部形成「编辑器 + AI 工具」双核并列组合栏。桌面应用通过 `NSWorkspace` 激活打开目录，CLI 工具自动在新终端 Session 中携带目标路径启动；图标自动匹配 Material / App 真实图标，右侧 `[⌄]` 原生菜单支持一键切换并持久化至 `config.toml` (`ai.preferred-tool`)。
 - 优化右侧栏 Project 面板 Header：Project 图标变为带 hover 浅底高亮可点击按钮，点击弹窗设置项目图标；Project 名称与 Project 描述均升级为就地编辑输入框，常规状态无背景无描边，获取焦点后高亮显示描边与背景色并即时保存。
 - 终端 Tab 惰性加载机制（Lazy Allocation）：启动时反序列化快照仅为当前活跃选中的 Tab 实例化 LibGhostty 引擎与 Shell 进程，所有后台 Tab 保持惰性装载；在首次切换到目标 Tab 时低于 10ms 瞬间无感激活，将包含数十个历史 Tab 时的 App 启动内存占用从 ~1.0GB 降低至 ~60MB。
+- 已初始化但位于后台的终端停止 GPU surface 合成，回到前台时自动恢复，降低多 Tab / 多分栏的 GPU 显存占用。
+- 优化 Ctrl-Tab / Ctrl-Shift-Tab 标签切换器：按住 Control 预选、松开确认、Esc 取消；采用与上游一致的自适应预览卡片网格，展示终端、文件、图片与 Diff 缩略内容；复用顶部终端 Tab 的动态图标，可显示当前前台应用；并且只截取已经初始化的终端，打开切换器不会启动后台惰性 Shell。
+- Project / Info 的 Processes 列表过滤已经退出且等待回收的僵尸进程。
 - 优化右侧栏 Tabs 与 Project 等面板空白区域拖拽逻辑：为右侧 Tabs 顶栏、Project / Info / Files / Git 面板 Header 及 Project 面板空白背景配置 `WindowDragArea`，允许用户拖拽空白区域直接移动窗口。
+- 右侧栏 Project 面板增加 PACKAGE 分组：双行紧凑布局（首行包名与右侧独占仓库跳转图标按钮，次行版本号与 SemVer `[+]` 递增按钮及 `MAJOR` / `MINOR` / `PATCH` / `Git tag` 下拉菜单）；点击快速递增并改写 `package.json` 中的 `version` 字段或生成 Git 标签；若未检测到 `package.json` 或无有效字段则自动隐藏该分组。
+
+## 上游移植记录
+
+- 最近完成比对与移植的上游版本：Kero `v0.1.26`（`1d34745e23dfb420ccada48628a2c9b17e99e76f`）。
+- 已采用上游 `v0.1.24` 的兼容策略，将新建终端的 `TERM_PROGRAM` 设置为 `ghostty`。
