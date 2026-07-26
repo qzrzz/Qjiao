@@ -104,21 +104,20 @@ struct StartPanel: View {
                             Divider().padding(.leading, 12)
                         }
                     }
-                    // 展开时：整个条目+编辑区独立卡片，深色背景 + 圆角
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(isExpanded ? Color.primary.opacity(0.1) : Color.clear)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(
-                                isExpanded ? Color.primary.opacity(0.14) : Color.clear,
-                                lineWidth: 1
-                            )
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    // 展开时：先内边距，再背景 → 背景覆盖含内边距的整个区域
                     .padding(.horizontal, isExpanded ? 4 : 0)
                     .padding(.vertical, isExpanded ? 3 : 0)
+                    .background {
+                        if isExpanded {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.primary.opacity(0.09))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
+                                }
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 8 : 0, style: .continuous))
                     .animation(.snappy(duration: 0.22), value: isExpanded)
                 }
             }
