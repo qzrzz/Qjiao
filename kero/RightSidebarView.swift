@@ -3410,6 +3410,7 @@ private struct PackageInfoSection: View {
                                     .padding(.leading, 1)
                                     .onSubmit {
                                         commitVersionChange()
+                                        isVersionFocused = false
                                     }
                                     .onChange(of: isVersionFocused) { focused in
                                         if !focused {
