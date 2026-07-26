@@ -4094,31 +4094,24 @@ private struct LaunchersSection: View {
     private var commandList: some View {
         VStack(spacing: 1) {
             ForEach(Array(project.launchCommands.enumerated()), id: \.element.id) { index, command in
-                VStack(spacing: 0) {
-                    StartCommandRow(
-                        command: command,
-                        isExpanded: expandedCommandID == command.id,
-                        isDragged: draggedCommandID == command.id,
-                        run: { runCommand(command) },
-                        toggleExpanded: { toggleExpanded(command.id) },
-                        onDrag: { location in
-                            updateCommandDrag(source: command.id, location: location)
-                        },
-                        onDragEnded: {
-                            endCommandDrag()
-                        }
-                    )
-                    .background(LauncherFrameReader(commandID: command.id))
-
-                    if expandedCommandID == command.id {
-                        StartCommandInlineEditor(
-                            command: binding(for: command.id),
-                            delete: { delete(command.id) }
-                        )
-                        .padding(.top, 2)
-                        .padding(.bottom, 4)
+                LauncherItemWrapper(
+                    command: command,
+                    commandBinding: binding(for: command.id),
+                    isExpanded: expandedCommandID == command.id,
+                    isDragged: draggedCommandID == command.id,
+                    showDivider: expandedCommandID != command.id
+                        && index < project.launchCommands.count - 1,
+                    run: { runCommand(command) },
+                    toggleExpanded: { toggleExpanded(command.id) },
+                    delete: { delete(command.id) },
+                    onDrag: { location in
+                        updateCommandDrag(source: command.id, location: location)
+                    },
+                    onDragEnded: {
+                        endCommandDrag()
                     }
-                }
+                )
+                .background(LauncherFrameReader(commandID: command.id))
             }
         }
         .padding(.leading, SidebarPanelMetrics.expandedContentLeading)

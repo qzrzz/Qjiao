@@ -512,10 +512,8 @@ private final class FaviconLoader: ObservableObject {
 
 // MARK: - LauncherItemWrapper
 
-/// 单个 Launcher 条目容器。
-/// 独立 View struct 保证 SwiftUI 能正确追踪 isExpanded 变化，
-/// 从而在展开时可靠地渲染卡片背景和圆角。
-private struct LauncherItemWrapper: View {
+/// 单个 Launcher 条目容器，供独立 Start 面板与 Project 侧边栏共用。
+struct LauncherItemWrapper: View {
     let command: ProjectLaunchCommand
     @Binding var commandBinding: ProjectLaunchCommand
     let isExpanded: Bool
@@ -527,44 +525,60 @@ private struct LauncherItemWrapper: View {
     let onDrag: (CGPoint) -> Void
     let onDragEnded: () -> Void
 
-    var body: some View {
-        VStack(spacing: 0) {
-            StartCommandRow(
-                command: command,
-                isExpanded: isExpanded,
-                isDragged: isDragged,
-                run: run,
-                toggleExpanded: toggleExpanded,
-                onDrag: onDrag,
-                onDragEnded: onDragEnded
-            )
+    @Environment(\.colorScheme) private var colorScheme
 
+    var body: some View {
+        ZStack {
             if isExpanded {
-                StartCommandInlineEditor(
-                    command: $commandBinding,
-                    delete: delete
-                )
+                // 使用真实的背景层，而不是依赖 modifier 合成，确保材质侧边栏内仍有明确层级。
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.white)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                colorScheme == .dark
+                                    ? Color.white.opacity(0.16)
+                                    : Color.black.opacity(0.12),
+                                lineWidth: 1
+                            )
+                    }
+                    .shadow(
+                        color: .black.opacity(colorScheme == .dark ? 0.28 : 0.1),
+                        radius: 4,
+                        x: 0,
+                        y: 1.5
+                    )
+                    .transition(.opacity)
             }
 
+            VStack(spacing: 0) {
+                StartCommandRow(
+                    command: command,
+                    isExpanded: isExpanded,
+                    isDragged: isDragged,
+                    run: run,
+                    toggleExpanded: toggleExpanded,
+                    onDrag: onDrag,
+                    onDragEnded: onDragEnded
+                )
+
+                if isExpanded {
+                    StartCommandInlineEditor(
+                        command: $commandBinding,
+                        delete: delete
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(.vertical, isExpanded ? 4 : 0)
+        }
+        .padding(.horizontal, isExpanded ? 4 : 0)
+        .padding(.vertical, isExpanded ? 3 : 0)
+        .overlay(alignment: .bottom) {
             if showDivider {
                 Divider().padding(.leading, 12)
             }
         }
-        // 展开时：内边距 → 背景 → 圆角裁剪，确保背景覆盖完整区域
-        .padding(.horizontal, isExpanded ? 4 : 0)
-        .padding(.vertical, isExpanded ? 3 : 0)
-        .background {
-            if isExpanded {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                    .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 1)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
-                    }
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 8 : 0, style: .continuous))
         .animation(.snappy(duration: 0.22), value: isExpanded)
     }
 }
