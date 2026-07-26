@@ -3292,6 +3292,539 @@ private struct PackageScriptRow: View {
     }
 }
 
+private struct GradleTasksSection: View {
+    let scripts: [UniversalProjectScript]
+    let records: [String: TerminalManager.PackageScriptExecutionRecord]
+    @Binding var isCollapsed: Bool
+    let runScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+    let stopScript: (String) -> Void
+    let restartScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+
+    @State private var selectedScriptName: String? = nil
+
+    var body: some View {
+        GitSectionHeader(
+            title: "GRADLE TASKS",
+            count: scripts.count,
+            isCollapsed: $isCollapsed,
+            actions: []
+        )
+        if !isCollapsed {
+            Group {
+                if scripts.isEmpty {
+                    sidebarEmptyRow("No Gradle tasks found")
+                } else {
+                    ForEach(scripts) { script in
+                        UniversalScriptRow(
+                            script: script,
+                            record: records[script.name],
+                            isSelected: selectedScriptName == script.name,
+                            onSelect: {
+                                selectedScriptName = script.name
+                            },
+                            onDoubleClick: {
+                                selectedScriptName = script.name
+                                runScript(script, .normal)
+                            },
+                            run: { mode in
+                                selectedScriptName = script.name
+                                runScript(script, mode)
+                            },
+                            stop: {
+                                stopScript(script.name)
+                            },
+                            restart: { mode in
+                                selectedScriptName = script.name
+                                restartScript(script, mode)
+                            }
+                        )
+                    }
+                }
+            }
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        }
+    }
+}
+
+private struct JustTasksSection: View {
+    let scripts: [UniversalProjectScript]
+    let records: [String: TerminalManager.PackageScriptExecutionRecord]
+    @Binding var isCollapsed: Bool
+    let runScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+    let stopScript: (String) -> Void
+    let restartScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+
+    @State private var selectedScriptName: String? = nil
+
+    private var isJustInstalled: Bool {
+        JustToolChecker.isJustInstalled
+    }
+
+    var body: some View {
+        GitSectionHeader(
+            title: "JUSTFILE",
+            count: scripts.count,
+            isCollapsed: $isCollapsed,
+            actions: []
+        )
+        if !isCollapsed {
+            Group {
+                if !isJustInstalled {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(SidebarTypography.micro())
+                            .foregroundStyle(.orange)
+                        Text("Install just to run tasks")
+                            .font(SidebarTypography.caption())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                }
+
+                if scripts.isEmpty {
+                    sidebarEmptyRow("No tasks in Justfile")
+                } else {
+                    ForEach(scripts) { script in
+                        UniversalScriptRow(
+                            script: script,
+                            record: records[script.name],
+                            isSelected: selectedScriptName == script.name,
+                            onSelect: {
+                                selectedScriptName = script.name
+                            },
+                            onDoubleClick: {
+                                selectedScriptName = script.name
+                                runScript(script, .normal)
+                            },
+                            run: { mode in
+                                selectedScriptName = script.name
+                                runScript(script, mode)
+                            },
+                            stop: {
+                                stopScript(script.name)
+                            },
+                            restart: { mode in
+                                selectedScriptName = script.name
+                                restartScript(script, mode)
+                            }
+                        )
+                    }
+                }
+            }
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        }
+    }
+}
+
+private struct CargoTasksSection: View {
+    let scripts: [UniversalProjectScript]
+    let records: [String: TerminalManager.PackageScriptExecutionRecord]
+    @Binding var isCollapsed: Bool
+    let runScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+    let stopScript: (String) -> Void
+    let restartScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+
+    @State private var selectedScriptName: String? = nil
+
+    private var isCargoInstalled: Bool {
+        CargoToolChecker.isCargoInstalled
+    }
+
+    var body: some View {
+        GitSectionHeader(
+            title: "CARGO",
+            count: scripts.count,
+            isCollapsed: $isCollapsed,
+            actions: []
+        )
+        if !isCollapsed {
+            Group {
+                if !isCargoInstalled {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(SidebarTypography.micro())
+                            .foregroundStyle(.orange)
+                        Text("Install Rust/Cargo to run tasks")
+                            .font(SidebarTypography.caption())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                }
+
+                if scripts.isEmpty {
+                    sidebarEmptyRow("No Cargo tasks")
+                } else {
+                    ForEach(scripts) { script in
+                        UniversalScriptRow(
+                            script: script,
+                            record: records[script.name],
+                            isSelected: selectedScriptName == script.name,
+                            onSelect: {
+                                selectedScriptName = script.name
+                            },
+                            onDoubleClick: {
+                                selectedScriptName = script.name
+                                runScript(script, .normal)
+                            },
+                            run: { mode in
+                                selectedScriptName = script.name
+                                runScript(script, mode)
+                            },
+                            stop: {
+                                stopScript(script.name)
+                            },
+                            restart: { mode in
+                                selectedScriptName = script.name
+                                restartScript(script, mode)
+                            }
+                        )
+                    }
+                }
+            }
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        }
+    }
+}
+
+private struct CMakeTasksSection: View {
+    let scripts: [UniversalProjectScript]
+    let records: [String: TerminalManager.PackageScriptExecutionRecord]
+    @Binding var isCollapsed: Bool
+    let runScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+    let stopScript: (String) -> Void
+    let restartScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+
+    @State private var selectedScriptName: String? = nil
+
+    private var isCMakeInstalled: Bool {
+        CMakeToolChecker.isCMakeInstalled
+    }
+
+    var body: some View {
+        GitSectionHeader(
+            title: "CMAKE TASKS",
+            count: scripts.count,
+            isCollapsed: $isCollapsed,
+            actions: []
+        )
+        if !isCollapsed {
+            Group {
+                if !isCMakeInstalled {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(SidebarTypography.micro())
+                            .foregroundStyle(.orange)
+                        Text("Install CMake to run tasks")
+                            .font(SidebarTypography.caption())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                }
+
+                if scripts.isEmpty {
+                    sidebarEmptyRow("No CMake tasks")
+                } else {
+                    ForEach(scripts) { script in
+                        UniversalScriptRow(
+                            script: script,
+                            record: records[script.name],
+                            isSelected: selectedScriptName == script.name,
+                            onSelect: {
+                                selectedScriptName = script.name
+                            },
+                            onDoubleClick: {
+                                selectedScriptName = script.name
+                                runScript(script, .normal)
+                            },
+                            run: { mode in
+                                selectedScriptName = script.name
+                                runScript(script, mode)
+                            },
+                            stop: {
+                                stopScript(script.name)
+                            },
+                            restart: { mode in
+                                selectedScriptName = script.name
+                                restartScript(script, mode)
+                            }
+                        )
+                    }
+                }
+            }
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        }
+    }
+}
+
+private struct MakefileTasksSection: View {
+    let scripts: [UniversalProjectScript]
+    let records: [String: TerminalManager.PackageScriptExecutionRecord]
+    @Binding var isCollapsed: Bool
+    let runScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+    let stopScript: (String) -> Void
+    let restartScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
+
+    @State private var selectedScriptName: String? = nil
+
+    private var isMakeInstalled: Bool {
+        MakeToolChecker.isMakeInstalled
+    }
+
+    var body: some View {
+        GitSectionHeader(
+            title: "MAKEFILE",
+            count: scripts.count,
+            isCollapsed: $isCollapsed,
+            actions: []
+        )
+        if !isCollapsed {
+            Group {
+                if !isMakeInstalled {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(SidebarTypography.micro())
+                            .foregroundStyle(.orange)
+                        Text("Install make to run tasks")
+                            .font(SidebarTypography.caption())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                }
+
+                if scripts.isEmpty {
+                    sidebarEmptyRow("No Makefile tasks")
+                } else {
+                    ForEach(scripts) { script in
+                        UniversalScriptRow(
+                            script: script,
+                            record: records[script.name],
+                            isSelected: selectedScriptName == script.name,
+                            onSelect: {
+                                selectedScriptName = script.name
+                            },
+                            onDoubleClick: {
+                                selectedScriptName = script.name
+                                runScript(script, .normal)
+                            },
+                            run: { mode in
+                                selectedScriptName = script.name
+                                runScript(script, mode)
+                            },
+                            stop: {
+                                stopScript(script.name)
+                            },
+                            restart: { mode in
+                                selectedScriptName = script.name
+                                restartScript(script, mode)
+                            }
+                        )
+                    }
+                }
+            }
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        }
+    }
+}
+
+/// 通用 Project Script 行展示组件 (支持 Gradle, Cargo, uv, Just 等)
+private struct UniversalScriptRow: View {
+    let script: UniversalProjectScript
+    let record: TerminalManager.PackageScriptExecutionRecord?
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onDoubleClick: () -> Void
+    let run: (UniversalScriptRunMode) -> Void
+    let stop: () -> Void
+    let restart: (UniversalScriptRunMode) -> Void
+
+    @State private var isHoveringRow = false
+    @State private var isHoveringActionBtn = false
+    @State private var isHoveringRestartBtn = false
+    @State private var isHoveringBrowserBtn = false
+
+    private var status: TerminalManager.PackageScriptStatus {
+        record?.status ?? .idle
+    }
+
+    private var boundPort: Int? {
+        record?.boundPort
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            actionButton
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(script.name)
+                    .font(SidebarTypography.secondary(.medium))
+                    .foregroundStyle(isSelected ? .primary : (isHoveringRow ? .primary : .secondary))
+                    .lineLimit(1)
+
+                if !script.depends.isEmpty {
+                    Text(" └─ depends on \(script.depends.joined(separator: ", "))")
+                        .font(SidebarTypography.micro(.regular))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                } else if let desc = script.scriptDescription, !desc.isEmpty, desc != script.name && desc != "cargo \(script.name)" {
+                    Text(" └─ \(desc)")
+                        .font(SidebarTypography.micro(.regular))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            rightContent
+        }
+        .frame(height: SidebarTypography.rowMinHeight)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(
+                    isSelected
+                    ? Color.primary.opacity(0.09)
+                    : (isHoveringRow ? Color.primary.opacity(0.05) : Color.clear)
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 5))
+        .onHover { isHoveringRow = $0 }
+        .onTapGesture(count: 2) {
+            guard status == .idle else { return }
+            onDoubleClick()
+        }
+        .onTapGesture(count: 1) {
+            onSelect()
+        }
+        .help(script.category.buildExecutionCommand(scriptName: script.name, rawCommand: script.command))
+        .contextMenu {
+            if let port = boundPort {
+                Button("Open http://localhost:\(port) in Browser") {
+                    if let url = URL(string: "http://localhost:\(port)") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                Divider()
+            }
+            if status == .running {
+                Button("Stop") { stop() }
+                Button("Restart") { restart(.normal) }
+            } else {
+                Button("Run") { run(.normal) }
+            }
+            Divider()
+            Button("Run with time") { run(.withTime) }
+        }
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        switch status {
+        case .idle:
+            Button {
+                run(.normal)
+            } label: {
+                Image(systemName: "play.fill")
+                    .font(SidebarTypography.micro(.semibold))
+                    .foregroundStyle(isHoveringActionBtn ? Color.white : Color(nsColor: Theme.cursor))
+                    .frame(width: 18, height: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isHoveringActionBtn ? Color(nsColor: Theme.cursor) : (isHoveringRow ? Color.primary.opacity(0.08) : Color.clear))
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringActionBtn = $0 }
+
+        case .running:
+            Button {
+                stop()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(SidebarTypography.micro(.semibold))
+                    .foregroundStyle(isHoveringActionBtn ? Color.white : Color.red)
+                    .frame(width: 18, height: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isHoveringActionBtn ? Color.red : Color.red.opacity(0.12))
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringActionBtn = $0 }
+
+        case .stopping:
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 18, height: 18)
+        }
+    }
+
+    @ViewBuilder
+    private var rightContent: some View {
+        HStack(spacing: 4) {
+            if let port = boundPort {
+                Button {
+                    if let url = URL(string: "http://localhost:\(port)") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Image(systemName: "globe")
+                        .font(SidebarTypography.micro(.semibold))
+                        .foregroundStyle(isHoveringBrowserBtn ? Color.white : Color(nsColor: Theme.cursor))
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(isHoveringBrowserBtn ? Color(nsColor: Theme.cursor) : Color(nsColor: Theme.cursor).opacity(0.12))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringBrowserBtn = $0 }
+                .help("Open http://localhost:\(port) in browser")
+            }
+
+            switch status {
+            case .idle:
+                if let duration = record?.lastDuration {
+                    Text(formatScriptDuration(duration))
+                        .font(SidebarTypography.micro(.medium).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .padding(.trailing, 2)
+                }
+
+            case .running:
+                Button {
+                    restart(.normal)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(SidebarTypography.micro(.semibold))
+                        .foregroundStyle(isHoveringRestartBtn ? Color.white : Color.secondary)
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(isHoveringRestartBtn ? Color.primary.opacity(0.8) : (isHoveringRow ? Color.primary.opacity(0.08) : Color.clear))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringRestartBtn = $0 }
+
+            case .stopping:
+                Text("Stopping...")
+                    .font(SidebarTypography.micro())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+}
+
 private struct ProcessesSection: View {
     let processes: [SidebarProbe.ProcessItem]
     @Binding var isCollapsed: Bool
@@ -3496,6 +4029,11 @@ private struct ProjectPanel: View {
     @State private var directoryCollapsed = false
     @State private var launchersCollapsed = false
     @State private var packageScriptsCollapsed = false
+    @State private var gradleTasksCollapsed = false
+    @State private var justTasksCollapsed = false
+    @State private var cargoTasksCollapsed = false
+    @State private var cmakeTasksCollapsed = false
+    @State private var makefileTasksCollapsed = false
     @State private var processesCollapsed = false
     @State private var portsCollapsed = false
 
@@ -3535,6 +4073,86 @@ private struct ProjectPanel: View {
                         restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
                         openPackageJSON: openPackageJSON
                     )
+                    if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.rootPath) {
+                        GradleTasksSection(
+                            scripts: model.gradleScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $gradleTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
+                    if !model.justScripts.isEmpty || JustScriptProvider.isJustProject(at: model.rootPath) {
+                        JustTasksSection(
+                            scripts: model.justScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $justTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
+                    if !model.cargoScripts.isEmpty || CargoScriptProvider.isCargoProject(at: model.rootPath) {
+                        CargoTasksSection(
+                            scripts: model.cargoScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $cargoTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
+                    if !model.cmakeScripts.isEmpty || CMakeScriptProvider.isCMakeProject(at: model.rootPath) {
+                        CMakeTasksSection(
+                            scripts: model.cmakeScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $cmakeTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
+                    if !model.makefileScripts.isEmpty || MakefileScriptProvider.isMakefileProject(at: model.rootPath) {
+                        MakefileTasksSection(
+                            scripts: model.makefileScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $makefileTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
                     ProcessesSection(
                         processes: model.processes,
                         isCollapsed: $processesCollapsed,
@@ -3555,6 +4173,31 @@ private struct ProjectPanel: View {
                 oldCount: oldCount, newCount: newCount, isCollapsed: $packageScriptsCollapsed
             )
         }
+        .onChange(of: model.gradleScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $gradleTasksCollapsed
+            )
+        }
+        .onChange(of: model.justScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $justTasksCollapsed
+            )
+        }
+        .onChange(of: model.cargoScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $cargoTasksCollapsed
+            )
+        }
+        .onChange(of: model.cmakeScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $cmakeTasksCollapsed
+            )
+        }
+        .onChange(of: model.makefileScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $makefileTasksCollapsed
+            )
+        }
         .onChange(of: model.processes.count) { oldCount, newCount in
             sidebarAutoCollapse(
                 oldCount: oldCount, newCount: newCount, isCollapsed: $processesCollapsed
@@ -3567,6 +4210,21 @@ private struct ProjectPanel: View {
         }
         .onAppear {
             if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
+            if model.gradleScripts.isEmpty && !GradleScriptProvider.isGradleProject(at: model.rootPath) {
+                gradleTasksCollapsed = true
+            }
+            if model.justScripts.isEmpty && !JustScriptProvider.isJustProject(at: model.rootPath) {
+                justTasksCollapsed = true
+            }
+            if model.cargoScripts.isEmpty && !CargoScriptProvider.isCargoProject(at: model.rootPath) {
+                cargoTasksCollapsed = true
+            }
+            if model.cmakeScripts.isEmpty && !CMakeScriptProvider.isCMakeProject(at: model.rootPath) {
+                cmakeTasksCollapsed = true
+            }
+            if model.makefileScripts.isEmpty && !MakefileScriptProvider.isMakefileProject(at: model.rootPath) {
+                makefileTasksCollapsed = true
+            }
             if model.processes.isEmpty { processesCollapsed = true }
             if model.ports.isEmpty { portsCollapsed = true }
         }
@@ -3598,7 +4256,7 @@ private struct ProjectPanel: View {
 
 // MARK: - Info panel（当前终端会话）
 
-/// 当前终端 cwd + cwd 下 scripts + 本 session 进程/端口。
+/// 当前终端 cwd + cwd 下 scripts / Gradle / Just / Cargo / CMake / Makefile Tasks + 本 session 进程/端口。
 private struct SessionInfoPanel: View {
     @ObservedObject var model: SessionInfoModel
     @ObservedObject var manager: TerminalManager
@@ -3607,6 +4265,11 @@ private struct SessionInfoPanel: View {
 
     @State private var directoryCollapsed = false
     @State private var packageScriptsCollapsed = false
+    @State private var gradleTasksCollapsed = false
+    @State private var justTasksCollapsed = false
+    @State private var cargoTasksCollapsed = false
+    @State private var cmakeTasksCollapsed = false
+    @State private var makefileTasksCollapsed = false
     @State private var processesCollapsed = false
     @State private var portsCollapsed = false
 
@@ -3629,6 +4292,86 @@ private struct SessionInfoPanel: View {
                         restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
                         openPackageJSON: openPackageJSON
                     )
+                    if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.cwdPath) {
+                        GradleTasksSection(
+                            scripts: model.gradleScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $gradleTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
+                    if !model.justScripts.isEmpty || JustScriptProvider.isJustProject(at: model.cwdPath) {
+                        JustTasksSection(
+                            scripts: model.justScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $justTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
+                    if !model.cargoScripts.isEmpty || CargoScriptProvider.isCargoProject(at: model.cwdPath) {
+                        CargoTasksSection(
+                            scripts: model.cargoScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $cargoTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
+                    if !model.cmakeScripts.isEmpty || CMakeScriptProvider.isCMakeProject(at: model.cwdPath) {
+                        CMakeTasksSection(
+                            scripts: model.cmakeScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $cmakeTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
+                    if !model.makefileScripts.isEmpty || MakefileScriptProvider.isMakefileProject(at: model.cwdPath) {
+                        MakefileTasksSection(
+                            scripts: model.makefileScripts,
+                            records: manager.packageScriptRecords,
+                            isCollapsed: $makefileTasksCollapsed,
+                            runScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            },
+                            stopScript: { scriptName in
+                                manager.stopPackageScript(scriptName)
+                            },
+                            restartScript: { script, mode in
+                                manager.runProjectScript(script, mode: mode)
+                            }
+                        )
+                    }
                     ProcessesSection(
                         processes: model.processes,
                         isCollapsed: $processesCollapsed,
@@ -3649,6 +4392,31 @@ private struct SessionInfoPanel: View {
                 oldCount: oldCount, newCount: newCount, isCollapsed: $packageScriptsCollapsed
             )
         }
+        .onChange(of: model.gradleScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $gradleTasksCollapsed
+            )
+        }
+        .onChange(of: model.justScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $justTasksCollapsed
+            )
+        }
+        .onChange(of: model.cargoScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $cargoTasksCollapsed
+            )
+        }
+        .onChange(of: model.cmakeScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $cmakeTasksCollapsed
+            )
+        }
+        .onChange(of: model.makefileScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $makefileTasksCollapsed
+            )
+        }
         .onChange(of: model.processes.count) { oldCount, newCount in
             sidebarAutoCollapse(
                 oldCount: oldCount, newCount: newCount, isCollapsed: $processesCollapsed
@@ -3661,6 +4429,21 @@ private struct SessionInfoPanel: View {
         }
         .onAppear {
             if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
+            if model.gradleScripts.isEmpty && !GradleScriptProvider.isGradleProject(at: model.cwdPath) {
+                gradleTasksCollapsed = true
+            }
+            if model.justScripts.isEmpty && !JustScriptProvider.isJustProject(at: model.cwdPath) {
+                justTasksCollapsed = true
+            }
+            if model.cargoScripts.isEmpty && !CargoScriptProvider.isCargoProject(at: model.cwdPath) {
+                cargoTasksCollapsed = true
+            }
+            if model.cmakeScripts.isEmpty && !CMakeScriptProvider.isCMakeProject(at: model.cwdPath) {
+                cmakeTasksCollapsed = true
+            }
+            if model.makefileScripts.isEmpty && !MakefileScriptProvider.isMakefileProject(at: model.cwdPath) {
+                makefileTasksCollapsed = true
+            }
             if model.processes.isEmpty { processesCollapsed = true }
             if model.ports.isEmpty { portsCollapsed = true }
         }

@@ -19,11 +19,21 @@ final class SessionInfoModel: nonisolated ObservableObject {
     @Published private(set) var shellName = ""
     @Published private(set) var shellPid: pid_t = 0
     @Published private(set) var packageScripts: [PackageScript] = []
+    @Published private(set) var gradleScripts: [UniversalProjectScript] = []
+    @Published private(set) var justScripts: [UniversalProjectScript] = []
+    @Published private(set) var cargoScripts: [UniversalProjectScript] = []
+    @Published private(set) var cmakeScripts: [UniversalProjectScript] = []
+    @Published private(set) var makefileScripts: [UniversalProjectScript] = []
     @Published private(set) var processes: [ProcessItem] = []
     @Published private(set) var ports: [PortItem] = []
 
     private var packageRoot = ""
     private var packageFileState: SidebarProbe.PackageFileState?
+    private var gradleFileState: GradleFileState?
+    private var justFileState: JustFileState?
+    private var cargoFileState: CargoFileState?
+    private var cmakeFileState: CMakeFileState?
+    private var makefileFileState: MakefileFileState?
     private var packageLoadID = UUID()
 
     private var isRefreshingProcesses = false
@@ -53,33 +63,84 @@ final class SessionInfoModel: nonisolated ObservableObject {
         }
     }
 
-    // MARK: - Scripts（cwd 下 package.json）
+    // MARK: - Scripts（cwd 下 package.json / Gradle / Just / Cargo / CMake / Makefile Tasks）
 
     private func syncPackageScripts(root: String, force: Bool = false) {
         guard !root.isEmpty else {
             packageRoot = ""
             packageFileState = nil
+            gradleFileState = nil
+            justFileState = nil
+            cargoFileState = nil
+            cmakeFileState = nil
+            makefileFileState = nil
             if !packageScripts.isEmpty { packageScripts = [] }
+            if !gradleScripts.isEmpty { gradleScripts = [] }
+            if !justScripts.isEmpty { justScripts = [] }
+            if !cargoScripts.isEmpty { cargoScripts = [] }
+            if !cmakeScripts.isEmpty { cmakeScripts = [] }
+            if !makefileScripts.isEmpty { makefileScripts = [] }
             return
         }
 
         let state = SidebarProbe.packageFileState(directory: root)
-        guard force || packageRoot != root || packageFileState != state else { return }
+        let gState = GradleScriptProvider.gradleFileState(directory: root)
+        let jState = JustScriptProvider.justFileState(directory: root)
+        let cState = CargoScriptProvider.cargoFileState(directory: root)
+        let cmState = CMakeScriptProvider.cmakeFileState(directory: root)
+        let mkState = MakefileScriptProvider.makefileFileState(directory: root)
+
+        let needsSync = force
+            || packageRoot != root
+            || packageFileState != state
+            || gradleFileState != gState
+            || justFileState != jState
+            || cargoFileState != cState
+            || cmakeFileState != cmState
+            || makefileFileState != mkState
+            || (gState.isGradleProject && gradleScripts.isEmpty)
+            || (jState.hasJustfile && justScripts.isEmpty)
+            || (cState.isCargoProject && cargoScripts.isEmpty)
+            || (cmState.isCMakeProject && cmakeScripts.isEmpty)
+            || (mkState.hasMakefile && makefileScripts.isEmpty)
+
+        guard needsSync else { return }
 
         packageRoot = root
         packageFileState = state
+        gradleFileState = gState
+        justFileState = jState
+        cargoFileState = cState
+        cmakeFileState = cmState
+        makefileFileState = mkState
         let loadID = UUID()
         packageLoadID = loadID
-        guard state.exists else {
+
+        guard state.exists || gState.isGradleProject || jState.hasJustfile || cState.isCargoProject || cmState.isCMakeProject || mkState.hasMakefile else {
             if !packageScripts.isEmpty { packageScripts = [] }
+            if !gradleScripts.isEmpty { gradleScripts = [] }
+            if !justScripts.isEmpty { justScripts = [] }
+            if !cargoScripts.isEmpty { cargoScripts = [] }
+            if !cmakeScripts.isEmpty { cmakeScripts = [] }
+            if !makefileScripts.isEmpty { makefileScripts = [] }
             return
         }
 
         Task.detached(priority: .utility) { [weak self] in
             let scripts = SidebarProbe.loadPackageScripts(directory: root)
+            let gradle = await GradleScriptProvider().detectScripts(in: root)
+            let just = await JustScriptProvider().detectScripts(in: root)
+            let cargo = await CargoScriptProvider().detectScripts(in: root)
+            let cmake = await CMakeScriptProvider().detectScripts(in: root)
+            let makefile = await MakefileScriptProvider().detectScripts(in: root)
             await MainActor.run {
                 guard let self, self.packageLoadID == loadID else { return }
                 if self.packageScripts != scripts { self.packageScripts = scripts }
+                if self.gradleScripts != gradle { self.gradleScripts = gradle }
+                if self.justScripts != just { self.justScripts = just }
+                if self.cargoScripts != cargo { self.cargoScripts = cargo }
+                if self.cmakeScripts != cmake { self.cmakeScripts = cmake }
+                if self.makefileScripts != makefile { self.makefileScripts = makefile }
             }
         }
     }
