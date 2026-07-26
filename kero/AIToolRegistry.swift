@@ -257,17 +257,18 @@ final class AIToolRegistry: nonisolated ObservableObject {
 
         case .cli:
             guard let cmd = targetTool.cliCommand else { return }
-            let execCmd = "\(cmd) \(shellQuote(path))"
+            let cdCmd = "cd \(shellQuote(path))"
+            let fullCommand = "\(cdCmd) && \(cmd)"
 
             if let manager = terminalManager, let project = manager.selectedProject {
-                // 在 Project 中新建 Session，设置 cwd 为目标目录并运行 CLI 命令
+                // 在 Project 中新建 Session，先 cd 到目标目录，然后打开 cli
                 let session = project.newSession(directory: path)
                 let tabName = "\(targetTool.displayName)"
                 project.selectedTab?.customName = tabName
                 session.title = tabName
-                session.sendCommandWhenReady("\(execCmd)\n")
+                session.sendCommandWhenReady("\(fullCommand)\n")
             } else {
-                // 回退机制：使用 Process 直接通过 Terminal 或 open 执行 CLI
+                // 回退机制：使用 Process 直接通过 Terminal 启动
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
                 process.arguments = ["-a", "Terminal", path]
