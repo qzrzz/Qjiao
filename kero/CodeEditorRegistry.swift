@@ -17,7 +17,7 @@ struct CodeEditor: Identifiable, Equatable {
     let bundleId: String
     /// 显示名称，如 "VS Code"。
     let displayName: String
-    /// 用于界面的 SF Symbol 图标名称。
+    /// 无法获取应用图标时的回退 SF Symbol 图标名称。
     let symbolName: String
     /// 应用程序在磁盘上的 URL（nil 表示未安装）。
     let appURL: URL?
@@ -25,6 +25,13 @@ struct CodeEditor: Identifiable, Equatable {
     var id: String { bundleId }
     /// 是否已安装。
     var isInstalled: Bool { appURL != nil }
+
+    /// 从应用包路径读取系统图标（16pt 渲染友好）。
+    /// 未安装时返回 nil，由调用方回退到 SF Symbol。
+    var appIcon: NSImage? {
+        guard let url = appURL else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
 }
 
 // MARK: - CodeEditorRegistry

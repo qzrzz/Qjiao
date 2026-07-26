@@ -2981,28 +2981,50 @@ private struct PathDirectorySection: View {
                     .disabled(path.isEmpty)
                     // 若检测到已安装的代码编辑器则显示打开按钮。
                     if let preferred = registry.preferredEditor {
-                        if registry.installedEditors.count > 1 {
-                            // 多个编辑器时：按钮本身触发打开，右键菜单切换默认。
-                            pathActionButton(preferred.displayName, systemImage: preferred.symbolName) {
-                                registry.open(path: path)
+                        // 编辑器按钮：使用应用真实图标。
+                        Button {
+                            registry.open(path: path)
+                        } label: {
+                            HStack(spacing: 3) {
+                                CodeEditorIcon(editor: preferred, size: 12)
+                                Text(preferred.displayName)
+                                    .font(SidebarTypography.caption(.medium))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
                             }
-                            .disabled(path.isEmpty)
-                            .contextMenu {
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.primary.opacity(0.05))
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(path.isEmpty)
+                        .help("Open in \(preferred.displayName)")
+                        // 多个编辑器时右键菜单切换默认。
+                        .contextMenu {
+                            if registry.installedEditors.count > 1 {
                                 ForEach(registry.installedEditors) { editor in
                                     Button {
                                         registry.preferredBundleId = editor.bundleId
                                         registry.open(path: path, with: editor)
                                     } label: {
-                                        Label(editor.displayName, systemImage: editor.symbolName)
+                                        if let icon = editor.appIcon {
+                                            Label {
+                                                Text(editor.displayName)
+                                            } icon: {
+                                                Image(nsImage: icon)
+                                            }
+                                        } else {
+                                            Label(editor.displayName, systemImage: editor.symbolName)
+                                        }
                                     }
                                 }
                             }
-                        } else {
-                            // 只有一个编辑器时直接点击打开。
-                            pathActionButton(preferred.displayName, systemImage: preferred.symbolName) {
-                                registry.open(path: path)
-                            }
-                            .disabled(path.isEmpty)
                         }
                     }
                     pathActionButton("Copy", systemImage: "doc.on.doc") {
@@ -4356,6 +4378,26 @@ private struct ProjectPanel: View {
     }
 }
 
+/// 显示代码编辑器图标的辅助视图：优先展示应用真实图标，不可用时回退到 SF Symbol。
+private struct CodeEditorIcon: View {
+    let editor: CodeEditor
+    /// 图标边长（正方形）。
+    var size: CGFloat = 16
+
+    var body: some View {
+        if let icon = editor.appIcon {
+            Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: size, height: size)
+        } else {
+            // 应用未安装或图标读取失败时回退到 SF Symbol。
+            Image(systemName: editor.symbolName)
+                .frame(width: size, height: size)
+        }
+    }
+}
+
 /// 用代码编辑器打开路径的按钮区域。
 /// 左半区点击使用默认编辑器打开；右侧下拉箭头展开菜单可切换默认编辑器。
 /// 若系统未检测到任何已知编辑器则隐藏整个区域。
@@ -4374,8 +4416,7 @@ private struct CodeEditorOpenButton: View {
                     registry.open(path: path)
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: preferred.symbolName)
-                            .font(SidebarTypography.caption(.medium))
+                        CodeEditorIcon(editor: preferred, size: 14)
                         Text(preferred.displayName)
                             .font(SidebarTypography.caption(.medium))
                         Spacer()
@@ -4405,7 +4446,18 @@ private struct CodeEditorOpenButton: View {
                                 registry.preferredBundleId = editor.bundleId
                                 registry.open(path: path, with: editor)
                             } label: {
-                                Label(editor.displayName, systemImage: editor.symbolName)
+                                // macOS 菜单项：图标 + 名称，当前选中项显示勾选。
+                                if let icon = editor.appIcon {
+                                    Label {
+                                        Text(editor.displayName)
+                                    } icon: {
+                                        Image(nsImage: icon)
+                                            .resizable()
+                                            .frame(width: 16, height: 16)
+                                    }
+                                } else {
+                                    Label(editor.displayName, systemImage: editor.symbolName)
+                                }
                                 if editor.bundleId == registry.preferredEditor?.bundleId {
                                     // 已选中项显示勾选状态（SwiftUI Menu 自动处理）
                                     Image(systemName: "checkmark")
@@ -4442,6 +4494,7 @@ private struct CodeEditorOpenButton: View {
         }
     }
 }
+
 
 // MARK: - Info panel（当前终端会话）
 
