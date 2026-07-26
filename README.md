@@ -79,6 +79,6 @@
   - 增强画布右键上下文菜单（Context Menu）：快捷支持复制图片到剪贴板、复制文件路径、缩放适应/100% 重置、旋转 90°、切换背景模式（含 Light/Dark 棋盘格）、标尺/参考线开关控制、开启双图对比、拷贝元数据信息以及在 Finder 中高亮定位文件。
   - 支持背景模式跨标签与应用重启 `@AppStorage` 持久化记忆，并全新推出 Dark Checkerboard（深色棋盘格）背景模式。
   - 适配 Retina 高清屏 (High DPI Display)：自动响应 `screenBackingScale`，实现 1:1 绝对物理像素点对点精准对齐渲染。
-- 优化 System 面板 IP 显示：请求 Cloudflare trace (`https://cloudflare.com/cdn-cgi/trace`) 获取出口 IP 与位置代码，并将 loc 转换为 Emoji 国旗图标（如 🇯🇵）；出口 IP 显示在内网 IP 后面（带有 gap 间隔与独立复制按钮）；支持点击 IP 区域/标签手动触发刷新，且刷新过程中 IP 图标平滑旋转转圈。
+- 优化 System 面板 IP 显示：请求 Cloudflare trace (`https://cloudflare.com/cdn-cgi/trace`) 获取出口 IP 与位置代码，并将 loc 转换为 Emoji 国旗图标（如 🇯🇵）；出口 IP 显示在内网 IP 后面（带有 gap 间隔与独立复制按钮）；支持仅点击 `[图标] IP` 标题区域触发刷新（刷新时 IP 图标平滑旋转转圈）；IP 值与 Net 网络速率值均支持鼠标文本选择。
 
 

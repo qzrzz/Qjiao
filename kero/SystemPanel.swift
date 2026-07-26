@@ -368,6 +368,7 @@ struct SystemPanel: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
+                .textSelection(.enabled)
         }
     }
 
@@ -379,7 +380,7 @@ struct SystemPanel: View {
         let publicEmoji = model.snapshot.publicIPLocationEmoji
 
         return HStack(spacing: 4) {
-            // 点击 IP 标签与图标触发 IP 刷新，刷新时图标旋转
+            // 点击仅限于 IP 标题与图标触发刷新，刷新时图标旋转
             HStack(spacing: 4) {
                 ipIcon
                 Text("IP")
@@ -393,17 +394,14 @@ struct SystemPanel: View {
             }
             .help(model.isRefreshingIP ? "Refreshing IP…" : "Click to refresh IP address")
 
-            // 内网 IP 数字等宽，段长变化时更稳。点击同样触发刷新。
+            // 内网 IP 数字等宽，支持文本选中
             Text(display)
                 .font(SidebarTypography.section(.medium).monospacedDigit())
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
+                .textSelection(.enabled)
                 .tooltip(localIPHelp, edge: .above)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    Task { await model.refreshIP() }
-                }
             if let address {
                 Button {
                     copyToPasteboard(address)
@@ -418,7 +416,7 @@ struct SystemPanel: View {
                 .help("Copy local IP address")
             }
 
-            // 出口 IP 添加到现有内网 IP 后面，添加 gap 间隔与复制按钮
+            // 出口 IP 添加到现有内网 IP 后面，添加 gap 间隔与复制按钮，支持文本选中
             if let publicAddr {
                 HStack(spacing: 3) {
                     if let publicEmoji, !publicEmoji.isEmpty {
@@ -430,11 +428,8 @@ struct SystemPanel: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
+                        .textSelection(.enabled)
                         .tooltip(publicIPHelp, edge: .above)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            Task { await model.refreshIP() }
-                        }
                     Button {
                         copyToPasteboard(publicAddr)
                     } label: {
