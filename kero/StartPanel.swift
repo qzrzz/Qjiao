@@ -179,6 +179,7 @@ struct StartCommandRow: View {
     let startDrag: () -> NSItemProvider
 
     @State private var isHovering = false
+    @State private var isHoveringRunBtn = false
 
     var body: some View {
         HStack(spacing: 5) {
@@ -204,11 +205,16 @@ struct StartCommandRow: View {
             Button(action: run) {
                 Image(systemName: "play.fill")
                     .font(SidebarTypography.micro(.semibold))
-                    .foregroundStyle(Color(nsColor: Theme.cursor))
+                    .foregroundStyle(isHoveringRunBtn ? Color.white : Color(nsColor: Theme.cursor))
                     .frame(width: 18, height: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isHoveringRunBtn ? Color(nsColor: Theme.cursor) : (isHovering ? Color.primary.opacity(0.08) : Color.clear))
+                    )
                     .contentShape(RoundedRectangle(cornerRadius: 4))
             }
             .buttonStyle(.plain)
+            .onHover { isHoveringRunBtn = $0 }
             .help("Run \(command.displayTitle)")
 
             Button(action: toggleExpanded) {
