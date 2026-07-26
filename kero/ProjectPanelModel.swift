@@ -1,48 +1,56 @@
 //
-//  SessionInfoModel.swift
+//  ProjectPanelModel.swift
 //  kero
 //
 
 import Combine
 import Foundation
 
-/// 右侧 Info 面板：
-/// - 路径 / npm scripts：当前终端 cwd
-/// - 进程 / 端口：仅当前 session 的 shell 子孙
+/// 右侧 Project 面板：
+/// - 路径 / npm scripts：项目根
+/// - 进程 / 端口：项目下全部 session 的 shell 子孙并集
 @MainActor
-final class SessionInfoModel: nonisolated ObservableObject {
+final class ProjectPanelModel: nonisolated ObservableObject {
     typealias PackageScript = SidebarProbe.PackageScript
     typealias ProcessItem = SidebarProbe.ProcessItem
     typealias PortItem = SidebarProbe.PortItem
 
-    @Published private(set) var cwdPath = ""
-    @Published private(set) var shellName = ""
-    @Published private(set) var shellPid: pid_t = 0
+    @Published private(set) var rootPath = ""
     @Published private(set) var packageScripts: [PackageScript] = []
     @Published private(set) var processes: [ProcessItem] = []
     @Published private(set) var ports: [PortItem] = []
+    /// 参与聚合的 shell 数量（header 副标题）。
+    @Published private(set) var sessionShellCount = 0
 
     private var packageRoot = ""
     private var packageFileState: SidebarProbe.PackageFileState?
     private var packageLoadID = UUID()
 
+    /// 当前用于进程聚合的 shell pid 集合（有序，便于比较）。
+    private var shellPids: [pid_t] = []
     private var isRefreshingProcesses = false
+    /// 每次启动采集递增，丢弃过期结果。
     private var processGeneration = 0
 
-    func sync(cwd: String, shellName: String, shellPid: pid_t?) {
-        if cwdPath != cwd { cwdPath = cwd }
-        if self.shellName != shellName { self.shellName = shellName }
-        let pid = shellPid ?? 0
-        let pidChanged = self.shellPid != pid
-        if pidChanged { self.shellPid = pid }
-
-        syncPackageScripts(root: cwd)
-        refreshProcesses(force: pidChanged)
+    /// - Parameters:
+    ///   - root: 项目根路径
+    ///   - shellPids: 项目内全部 session 的 shell pid
+    func sync(root: String, shellPids: [pid_t]) {
+        if rootPath != root { rootPath = root }
+        let unique = Array(Set(shellPids.filter { $0 > 0 })).sorted()
+        let pidsChanged = unique != self.shellPids
+        if pidsChanged {
+            self.shellPids = unique
+            sessionShellCount = unique.count
+        }
+        syncPackageScripts(root: root)
+        // pid 集合变化或定时轮询都会走到这里；始终刷新进程视图。
+        refreshProcesses(force: pidsChanged)
     }
 
-    /// 手动刷新：强制 scripts + 进程。
+    /// 手动刷新：强制重读 package.json + 进程。
     func refresh() {
-        syncPackageScripts(root: cwdPath, force: true)
+        syncPackageScripts(root: rootPath, force: true)
         refreshProcesses(force: true)
     }
 
@@ -53,7 +61,7 @@ final class SessionInfoModel: nonisolated ObservableObject {
         }
     }
 
-    // MARK: - Scripts（cwd 下 package.json）
+    // MARK: - Scripts
 
     private func syncPackageScripts(root: String, force: Bool = false) {
         guard !root.isEmpty else {
@@ -87,28 +95,36 @@ final class SessionInfoModel: nonisolated ObservableObject {
     // MARK: - Processes
 
     private func refreshProcesses(force: Bool) {
-        let pid = shellPid
-        guard pid > 0 else {
+        let pids = shellPids
+        guard !pids.isEmpty else {
             if !processes.isEmpty { processes = [] }
             if !ports.isEmpty { ports = [] }
             return
         }
-        if isRefreshingProcesses, !force { return }
-
+        // 非 force 时若已在采，跳过本轮，避免 2s timer 叠 ps/lsof。
+        if isRefreshingProcesses {
+            if force {
+                // 强制刷新排队：当前轮结束后由 generation 保证目标 pid 仍有效即可。
+            } else {
+                return
+            }
+        }
+        // force 时也允许并发一轮被跳过会导致卡死；改为取消语义：只认最新 generation。
         isRefreshingProcesses = true
         processGeneration &+= 1
         let generation = processGeneration
-        let expectedPid = pid
+        let expectedPids = pids
 
         Task.detached(priority: .utility) { [weak self] in
-            let (processes, ports) = SidebarProbe.collect(shellPids: [expectedPid])
+            let (processes, ports) = SidebarProbe.collect(shellPids: expectedPids)
             await MainActor.run {
                 guard let self else { return }
+                // 仅最新一轮写回；中间被 force 打断的旧结果丢弃。
                 if self.processGeneration == generation {
                     self.isRefreshingProcesses = false
                 }
                 guard self.processGeneration == generation,
-                      self.shellPid == expectedPid else { return }
+                      self.shellPids == expectedPids else { return }
                 if self.processes != processes { self.processes = processes }
                 if self.ports != ports { self.ports = ports }
             }

@@ -297,11 +297,12 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         return foregroundPid > 0 && foregroundPid != idleProcessGroup
     }
 
-    // 前台进程图标缓存：命中结果按 foreground pgid 复用；未命中不长期缓存，
-    // 以便 node 包装脚本 spawn 出真实二进制后能尽快匹配。
+    // 前台进程图标缓存：按 foreground pgid 节流复用；弱运行时命中（仅 node）
+    // 会较短时间后重扫，以便从 argv 识别出 rsbuild 等真实 CLI。
     private var cachedForegroundAppIconPid: pid_t = 0
     private var cachedForegroundAppIcon: TerminalAppIconSource?
-    private var cachedForegroundAppIconMissAt: ContinuousClock.Instant?
+    private var cachedForegroundAppIconResolvedAt: ContinuousClock.Instant?
+    private var cachedForegroundAppIconIsStrong = false
 
     /// 当前前台进程若在 `TerminalAppIcons/apps.json`（或用户配置）中有映射，
     /// 返回对应图标来源；空闲或未知程序为 nil。
@@ -314,22 +315,23 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             if cachedForegroundAppIconPid != 0 {
                 cachedForegroundAppIconPid = 0
                 cachedForegroundAppIcon = nil
-                cachedForegroundAppIconMissAt = nil
+                cachedForegroundAppIconResolvedAt = nil
+                cachedForegroundAppIconIsStrong = false
             }
             return nil
         }
 
-        // 已命中：同 pgid 直接复用。
-        if cachedForegroundAppIconPid == foregroundPid, let cached = cachedForegroundAppIcon {
-            return cached
-        }
-        // 未命中：短暂节流后再扫进程树（避免 0.3s Timeline 每次全量 walk）。
+        // 强命中（具体 CLI）可较长复用；弱命中 / 未命中约 0.25s 重试。
         if cachedForegroundAppIconPid == foregroundPid,
-           cachedForegroundAppIcon == nil,
-           let missAt = cachedForegroundAppIconMissAt,
-           ContinuousClock.now - missAt < .milliseconds(400)
+           let resolvedAt = cachedForegroundAppIconResolvedAt
         {
-            return nil
+            let age = ContinuousClock.now - resolvedAt
+            if cachedForegroundAppIconIsStrong, age < .seconds(2) {
+                return cachedForegroundAppIcon
+            }
+            if !cachedForegroundAppIconIsStrong, age < .milliseconds(250) {
+                return cachedForegroundAppIcon
+            }
         }
 
         let names = TerminalProcessIdentity.foregroundExecutableNames(
@@ -337,9 +339,15 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             foregroundPgid: foregroundPid
         )
         let source = TerminalAppIconCatalog.shared.source(forProcessNames: names)
+        // 候选里若出现非 node/npm 的名字且成功匹配，视为强命中。
+        let strong = source != nil && names.contains { name in
+            !TerminalAppIconCatalog.isWeakRuntimeName(name)
+                && TerminalAppIconCatalog.shared.source(forProcessName: name) != nil
+        }
         cachedForegroundAppIconPid = foregroundPid
         cachedForegroundAppIcon = source
-        cachedForegroundAppIconMissAt = source == nil ? ContinuousClock.now : nil
+        cachedForegroundAppIconResolvedAt = ContinuousClock.now
+        cachedForegroundAppIconIsStrong = strong
         return source
     }
 

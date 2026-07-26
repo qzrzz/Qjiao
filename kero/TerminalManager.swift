@@ -8,13 +8,16 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// Panels available in the right sidebar. Raw values are persisted in snapshots.
+/// 右侧栏上半区面板。rawValue 会写入会话快照，新增 case 勿改已有值。
 enum RightPanel: String, Codable {
     case start
+    /// 项目根路径与 package.json scripts（与当前终端 cwd 无关）。
+    case project
+    /// 当前终端会话：cwd、shell pid、子进程与监听端口。
+    case info
     case files
     case cwd
     case git
-    case info
 }
 
 /// One Find menu command, routed from the menu bar to whichever find
@@ -294,14 +297,21 @@ final class TerminalManager: nonisolated ObservableObject {
         case withProf
     }
 
-    /// Opens a fresh terminal in the selected project's root and runs one
-    /// package script using the package manager selected in Settings.
-    func runPackageScript(_ scriptName: String, mode: PackageScriptRunMode = .normal) {
+    /// 在指定目录（或项目根）新开终端，用 Settings 中的包管理器跑 script。
+    /// - Parameter directory: nil 时用项目根；Info 面板应传入当前 cwd。
+    func runPackageScript(
+        _ scriptName: String,
+        mode: PackageScriptRunMode = .normal,
+        directory: String? = nil
+    ) {
         guard let project = selectedProject, !scriptName.isEmpty else { return }
-        let directory = project.projectDirectory.isEmpty
-            ? selectedSession?.currentDirectoryPath
-            : project.projectDirectory
-        let session = project.newSession(directory: directory)
+        let resolvedDirectory: String = {
+            if let directory, !directory.isEmpty { return directory }
+            if !project.projectDirectory.isEmpty { return project.projectDirectory }
+            return selectedSession?.currentDirectoryPath ?? ""
+        }()
+        guard !resolvedDirectory.isEmpty else { return }
+        let session = project.newSession(directory: resolvedDirectory)
         let run = "\(AppSettings.shared.packageManagerCommand.rawValue) \(shellQuote(scriptName))"
         let command: String
         switch mode {

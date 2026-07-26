@@ -26,9 +26,11 @@
 - 右侧面板区分项目目录 Files 和终端当前目录 CWD，相同时自动隐藏 CWD。
 - 分栏终端的右键菜单支持直接关闭当前面板。
 - 终端未设置标题时默认显示启动工作目录的最后一级名称。
-- Info 面板读取项目根目录的 `package.json` 并显示 npm scripts，可选择包管理器后在新终端中运行。
-  - 展开分组内容增加左边距；数量徽章紧跟分组标题（不再右对齐）；内容为空的分组自动收起。
-  - npm script 条目有 hover 高亮；右键菜单支持 Edit package.json、Run with time（优先 `/usr/bin/time`）、Run with `--inspect` / `--prof`（`NODE_OPTIONS`）。
+- 右侧栏 **Project** / **Info** 语义与采集：
+  - **Project**：项目根路径 + 根 `package.json` scripts；进程/端口为项目下**全部 session** shell 子孙的并集（一次 `ps` + 一次 `lsof`）。
+  - **Info**：当前终端 CWD + 该 cwd 下 `package.json` scripts；进程/端口仅当前 session；shell 名 / pid。
+  - npm script 在对应路径新开终端运行（Settings 包管理器）；右键 time / `--inspect` / `--prof`；采集逻辑集中于 `SidebarProbe`。
+  - 展开分组有左边距；数量徽章紧跟标题；空分组自动收起。
 - 终端前台命令运行时，标签图标显示转圈动画。
 - 右侧 Start 面板可保存、排序并一键启动项目的终端命令、应用程序、Finder 文件夹和网页。
   - 终端启动项可指定新标签标题，并与手动 Tab 重命名共用。
@@ -68,7 +70,7 @@
 - System 面板数字与 IP/代理地址统一 `monospacedDigit`；自定义 Tooltip 单行等宽数字、多行等宽字体以对齐 Mem/Disk 等指标详情。
 - 右侧 Files / CWD / Git 文件列表按文件名与扩展名显示 Material Icon Theme 彩色图标（[vscode-material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme)）；目录名匹配专用文件夹图标，展开/收起使用 open 变体；可用 `bun run scripts/vendor-material-icons.ts` 更新图标资源。
 - 顶栏 Tabs（含 Tab 总览、重命名与分栏拖拽缩略图）对打开的文件 / Diff 使用与文件树相同的 Material Icon；终端 Tab 仍为 SF Symbol，运行中仍显示转圈。
-- 终端应用图标识别：检测前台进程（如 `agy` / `grok` / `codex` / `claude` / `node` 等）并切换 Tab 图标；图标来源为 Material Icon Theme 与 Iconify Boxicons Brands（`bxl:*`）等本地 SVG。通过 `kero/TerminalAppIcons/apps.json` + `icons/*.svg` 配置，用户可在 `~/.config/qjiao/terminal-app-icons.json` 覆盖；`bun run vendor:terminal-app-icons` 同步 Iconify 资源。同一 foreground PID 缓存进程名与匹配结果，避免 TimelineView 轮询时重复查进程。
+- 终端应用图标识别：检测前台进程（如 `agy` / `grok` / `codex` / `claude` / `rsbuild` / `node` 等）并切换 Tab 图标；图标来源为 Material Icon Theme 与本地文件（`icon` 字段指定 `icons/` 下的 `.png` / `.svg` 等文件名，如 `antigravity-color.png`）。配置见 `kero/TerminalAppIcons/apps.json`，用户可在 `~/.config/qjiao/terminal-app-icons.json` 覆盖；`bun run vendor:terminal-app-icons` 可同步 Iconify 资源。枚举前台进程组内全部 PID 并解析 argv（支持 `npm run dev` → `node …/rsbuild`）。
 - 左侧面板底部 Theme 按钮支持左键点击立即切换主题（Light ↔ Dark，System 模式按系统实际外观反转），右键菜单提供主题选择、分割线及 Appearance Settings 快捷入口。
 - 右侧面板下半区底部 Tabs（System/Note 选项卡栏）的最小高度调整为 36，并优化展开逻辑（若之前拖拽将高度缩至最小，点击展开/双击 tabs 时自动恢复至默认 70/30 高度）。
 - 图片查看器增强：

@@ -31,15 +31,18 @@ private enum RightBottomPanel: String, CaseIterable, Identifiable {
 }
 
 /// Right sidebar: hidden by default, toggled from the terminal's corner
-/// button or ⇧⌘B. 上半区沿用 Start/Files/Git 等顶栏面板；下半区为
-/// System / Note；中间可拖分割。
+/// button or ⇧⌘B. 上半区 Start / Project / Info / Files / CWD / Git；
+/// 下半区 System / Note；中间可拖分割。
 struct RightSidebarView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject private var settings = AppSettings.shared
     @StateObject private var fileTree = FileTreeModel()
     @StateObject private var git = GitStatusModel()
-    @StateObject private var info = SessionInfoModel()
+    /// 项目根路径 + npm scripts（Project tab）。
+    @StateObject private var projectInfo = ProjectPanelModel()
+    /// 当前终端 cwd / 进程 / 端口（Info tab）。
+    @StateObject private var sessionInfo = SessionInfoModel()
     @StateObject private var systemInfo = SystemInfoModel()
     @StateObject private var noteModel = NoteModel()
     @AppStorage("rightSidebarWidth") private var width: Double = 240
@@ -234,6 +237,38 @@ struct RightSidebarView: View {
                     runAllCommands: { manager.runAllLaunchCommands() }
                 )
             }
+        case .project:
+            ProjectPanel(
+                model: projectInfo,
+                runPackageScript: { name, mode in
+                    manager.runPackageScript(
+                        name, mode: mode, directory: projectInfo.rootPath
+                    )
+                },
+                openPackageJSON: {
+                    let root = projectInfo.rootPath
+                    guard !root.isEmpty else { return }
+                    manager.openFile(
+                        (root as NSString).appendingPathComponent("package.json")
+                    )
+                }
+            )
+        case .info:
+            SessionInfoPanel(
+                model: sessionInfo,
+                runPackageScript: { name, mode in
+                    manager.runPackageScript(
+                        name, mode: mode, directory: sessionInfo.cwdPath
+                    )
+                },
+                openPackageJSON: {
+                    let root = sessionInfo.cwdPath
+                    guard !root.isEmpty else { return }
+                    manager.openFile(
+                        (root as NSString).appendingPathComponent("package.json")
+                    )
+                }
+            )
         case .files:
             FileTreePanel(
                 manager: manager,
@@ -267,21 +302,6 @@ struct RightSidebarView: View {
                         staged: staged,
                         untracked: entry.isUntracked,
                         origPath: entry.origPath
-                    )
-                }
-            )
-        case .info:
-            InfoPanel(
-                model: info,
-                session: manager.selectedSession,
-                runPackageScript: { name, mode in
-                    manager.runPackageScript(name, mode: mode)
-                },
-                openPackageJSON: {
-                    let root = info.rootPath
-                    guard !root.isEmpty else { return }
-                    manager.openFile(
-                        (root as NSString).appendingPathComponent("package.json")
                     )
                 }
             )
@@ -385,6 +405,7 @@ struct RightSidebarView: View {
 
             HStack(spacing: 4) {
                 tabButton(.start, systemImage: "play.circle", title: "Start", help: "Start")
+                tabButton(.project, systemImage: "shippingbox", title: "Project", help: "Project")
                 tabButton(.info, systemImage: "info.circle", title: "Info", help: "Info (⇧⌘I)")
                 tabButton(.files, systemImage: "folder", title: "Files", help: "Files (⇧⌘E)")
                 if showsCWD {
@@ -452,15 +473,21 @@ struct RightSidebarView: View {
         switch manager.panelTab {
         case .start:
             break
-        case .files: fileTree.sync(root: projectRoot(for: project, fallback: session))
-        case .cwd: fileTree.sync(root: session.currentDirectoryPath)
-        case .git: git.sync(root: session.currentDirectoryPath)
+        case .project:
+            // 项目根 + 全 session shell 的进程/端口并集。
+            let root = projectRoot(for: project, fallback: session)
+            let shellPids = project.sessions.compactMap(\.shellPid)
+            projectInfo.sync(root: root, shellPids: shellPids)
         case .info:
-            info.sync(
-                root: projectRoot(for: project, fallback: session),
+            // 当前终端 cwd 的 scripts + 本 session 进程/端口。
+            sessionInfo.sync(
+                cwd: session.currentDirectoryPath,
                 shellName: session.shellName,
                 shellPid: session.shellPid
             )
+        case .files: fileTree.sync(root: projectRoot(for: project, fallback: session))
+        case .cwd: fileTree.sync(root: session.currentDirectoryPath)
+        case .git: git.sync(root: session.currentDirectoryPath)
         }
     }
 
@@ -2747,138 +2774,89 @@ private struct GitEntryRow: View {
     }
 }
 
-// MARK: - Info panel
+// MARK: - Project / Info 共用
 
-/// Session dashboard: working directory (with reveal/open/copy actions),
-/// processes running under the shell, and ports they are listening on.
-private struct InfoPanel: View {
-    @ObservedObject var model: SessionInfoModel
-    let session: TerminalSession?
-    let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
-    let openPackageJSON: () -> Void
+/// 展开分组内容相对标题的左边距。
+private enum SidebarPanelMetrics {
+    static let expandedContentLeading: CGFloat = 12
+}
 
-    @State private var directoryCollapsed = false
-    @State private var packageScriptsCollapsed = false
-    @State private var processesCollapsed = false
-    @State private var portsCollapsed = false
+/// 空 → 收起；0→有内容 → 展开；其余保持用户选择。
+private func sidebarAutoCollapse(
+    oldCount: Int, newCount: Int, isCollapsed: Binding<Bool>
+) {
+    if newCount == 0 {
+        isCollapsed.wrappedValue = true
+    } else if oldCount == 0 {
+        isCollapsed.wrappedValue = false
+    }
+}
 
-    /// 展开分组内容相对标题的左边距，形成层级缩进。
-    private static let expandedContentLeading: CGFloat = 12
+private func sidebarEmptyRow(_ text: String) -> some View {
+    Text(text)
+        .font(SidebarTypography.secondary())
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+}
+
+/// 路径区：展示绝对路径 + Finder / VS Code / Copy。
+private struct PathDirectorySection: View {
+    let path: String
+    @Binding var isCollapsed: Bool
+    /// 分组标题，如 "PROJECT" / "CWD"。
+    var sectionTitle: String = "DIRECTORY"
 
     private static let vsCodeURL = NSWorkspace.shared
         .urlForApplication(withBundleIdentifier: "com.microsoft.VSCode")
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 1) {
-                    directorySection
-                    packageScriptsSection
-                    processesSection
-                    portsSection
-                }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 8)
-            }
-        }
-        // 分组内容为空时自动收起；从空变为有内容时展开以便查看。
-        .onChange(of: model.packageScripts.count) { oldCount, newCount in
-            autoCollapse(oldCount: oldCount, newCount: newCount, isCollapsed: $packageScriptsCollapsed)
-        }
-        .onChange(of: model.processes.count) { oldCount, newCount in
-            autoCollapse(oldCount: oldCount, newCount: newCount, isCollapsed: $processesCollapsed)
-        }
-        .onChange(of: model.ports.count) { oldCount, newCount in
-            autoCollapse(oldCount: oldCount, newCount: newCount, isCollapsed: $portsCollapsed)
-        }
-        .onAppear {
-            if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
-            if model.processes.isEmpty { processesCollapsed = true }
-            if model.ports.isEmpty { portsCollapsed = true }
-        }
-    }
-
-    /// 空 → 收起；0→有内容 → 展开；其余保持用户选择。
-    private func autoCollapse(
-        oldCount: Int, newCount: Int, isCollapsed: Binding<Bool>
-    ) {
-        if newCount == 0 {
-            isCollapsed.wrappedValue = true
-        } else if oldCount == 0 {
-            isCollapsed.wrappedValue = false
-        }
-    }
-
-    // MARK: Header
-
-    private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "info.circle")
-                .font(SidebarTypography.secondary(.medium))
-                .foregroundStyle(Color(nsColor: Theme.cursor))
-            PanelHeader(
-                title: model.shellName.isEmpty ? "Session" : model.shellName,
-                subtitle: model.shellPid > 0 ? "pid \(String(model.shellPid))" : nil
-            )
-            Button {
-                model.refresh()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(SidebarTypography.caption(.medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18, height: 18)
-                    .contentShape(RoundedRectangle(cornerRadius: 4))
-            }
-            .buttonStyle(.plain)
-            .help("Refresh")
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
-    }
-
-    // MARK: Directory
-
-    @ViewBuilder
-    private var directorySection: some View {
         GitSectionHeader(
-            title: "DIRECTORY", count: 0, isCollapsed: $directoryCollapsed, actions: []
+            title: sectionTitle, count: 0, isCollapsed: $isCollapsed, actions: []
         )
-        if !directoryCollapsed {
+        if !isCollapsed {
             VStack(alignment: .leading, spacing: 8) {
-                Text(model.rootPath)
+                Text(path.isEmpty ? "—" : path)
                     .font(SidebarTypography.secondary(design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .truncationMode(.head)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .help(model.rootPath)
+                    .help(path)
                     .contextMenu {
                         Button("Copy Path") { copyPath() }
+                            .disabled(path.isEmpty)
                     }
 
                 HStack(spacing: 4) {
-                    actionButton("Finder", systemImage: "arrow.up.forward.app") {
+                    pathActionButton("Finder", systemImage: "arrow.up.forward.app") {
+                        guard !path.isEmpty else { return }
                         NSWorkspace.shared.activateFileViewerSelecting(
-                            [URL(fileURLWithPath: model.rootPath)]
+                            [URL(fileURLWithPath: path)]
                         )
                     }
+                    .disabled(path.isEmpty)
                     if let vsCode = Self.vsCodeURL {
-                        actionButton("VS Code", systemImage: "chevron.left.forwardslash.chevron.right") {
+                        pathActionButton(
+                            "VS Code",
+                            systemImage: "chevron.left.forwardslash.chevron.right"
+                        ) {
+                            guard !path.isEmpty else { return }
                             NSWorkspace.shared.open(
-                                [URL(fileURLWithPath: model.rootPath)],
+                                [URL(fileURLWithPath: path)],
                                 withApplicationAt: vsCode,
                                 configuration: NSWorkspace.OpenConfiguration()
                             )
                         }
+                        .disabled(path.isEmpty)
                     }
-                    actionButton("Copy", systemImage: "doc.on.doc") {
+                    pathActionButton("Copy", systemImage: "doc.on.doc") {
                         copyPath()
                     }
+                    .disabled(path.isEmpty)
                 }
             }
-            .padding(.leading, Self.expandedContentLeading)
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
             .padding(.trailing, 6)
             .padding(.top, 2)
             .padding(.bottom, 4)
@@ -2886,11 +2864,12 @@ private struct InfoPanel: View {
     }
 
     private func copyPath() {
+        guard !path.isEmpty else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(model.rootPath, forType: .string)
+        NSPasteboard.general.setString(path, forType: .string)
     }
 
-    private func actionButton(
+    private func pathActionButton(
         _ title: String, systemImage: String, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -2912,24 +2891,31 @@ private struct InfoPanel: View {
         .buttonStyle(.plain)
         .help(title == "Copy" ? "Copy Path" : "Open in \(title)")
     }
+}
 
-    // MARK: Package scripts
+// MARK: - Package scripts / processes 共用区块
 
-    @ViewBuilder
-    private var packageScriptsSection: some View {
+/// npm scripts 列表；scriptsRoot 仅用于空状态文案区分。
+private struct PackageScriptsSection: View {
+    let scripts: [SidebarProbe.PackageScript]
+    @Binding var isCollapsed: Bool
+    let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
+    let openPackageJSON: () -> Void
+
+    var body: some View {
         GitSectionHeader(
             title: "NPM SCRIPTS",
-            count: model.packageScripts.count,
-            isCollapsed: $packageScriptsCollapsed,
+            count: scripts.count,
+            isCollapsed: $isCollapsed,
             actions: []
         )
-        if !packageScriptsCollapsed {
+        if !isCollapsed {
             Group {
-                if model.packageScripts.isEmpty {
-                    emptyRow("No package scripts in package.json")
+                if scripts.isEmpty {
+                    sidebarEmptyRow("No package scripts in package.json")
                 } else {
-                    ForEach(model.packageScripts) { script in
-                        InfoPackageScriptRow(
+                    ForEach(scripts) { script in
+                        PackageScriptRow(
                             script: script,
                             run: { mode in runPackageScript(script.name, mode) },
                             editPackageJSON: openPackageJSON
@@ -2937,75 +2923,14 @@ private struct InfoPanel: View {
                     }
                 }
             }
-            .padding(.leading, Self.expandedContentLeading)
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
         }
-    }
-
-    // MARK: Processes
-
-    @ViewBuilder
-    private var processesSection: some View {
-        GitSectionHeader(
-            title: "PROCESSES",
-            count: model.processes.count,
-            isCollapsed: $processesCollapsed,
-            actions: []
-        )
-        if !processesCollapsed {
-            Group {
-                if model.processes.isEmpty {
-                    emptyRow("No running processes")
-                } else {
-                    ForEach(model.processes) { process in
-                        InfoProcessRow(process: process) { force in
-                            model.kill(process.pid, force: force)
-                        }
-                    }
-                }
-            }
-            .padding(.leading, Self.expandedContentLeading)
-        }
-    }
-
-    // MARK: Ports
-
-    @ViewBuilder
-    private var portsSection: some View {
-        GitSectionHeader(
-            title: "PORTS",
-            count: model.ports.count,
-            isCollapsed: $portsCollapsed,
-            actions: []
-        )
-        if !portsCollapsed {
-            Group {
-                if model.ports.isEmpty {
-                    emptyRow("No listening ports")
-                } else {
-                    ForEach(model.ports) { port in
-                        InfoPortRow(port: port) { force in
-                            model.kill(port.pid, force: force)
-                        }
-                    }
-                }
-            }
-            .padding(.leading, Self.expandedContentLeading)
-        }
-    }
-
-    private func emptyRow(_ text: String) -> some View {
-        Text(text)
-            .font(SidebarTypography.secondary())
-            // 空状态提示不再使用过浅的三级文字色。
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
     }
 }
 
-/// npm script 行：单击运行、hover 高亮、右键菜单提供编辑与包装运行方式。
-private struct InfoPackageScriptRow: View {
-    let script: SessionInfoModel.PackageScript
+/// npm script 行：单击运行、hover、右键 time / inspect / prof。
+private struct PackageScriptRow: View {
+    let script: SidebarProbe.PackageScript
     let run: (TerminalManager.PackageScriptRunMode) -> Void
     let editPackageJSON: () -> Void
 
@@ -3048,8 +2973,260 @@ private struct InfoPackageScriptRow: View {
     }
 }
 
+private struct ProcessesSection: View {
+    let processes: [SidebarProbe.ProcessItem]
+    @Binding var isCollapsed: Bool
+    let kill: (_ pid: pid_t, _ force: Bool) -> Void
+
+    var body: some View {
+        GitSectionHeader(
+            title: "PROCESSES",
+            count: processes.count,
+            isCollapsed: $isCollapsed,
+            actions: []
+        )
+        if !isCollapsed {
+            Group {
+                if processes.isEmpty {
+                    sidebarEmptyRow("No running processes")
+                } else {
+                    ForEach(processes) { process in
+                        InfoProcessRow(process: process) { force in
+                            kill(process.pid, force)
+                        }
+                    }
+                }
+            }
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        }
+    }
+}
+
+private struct PortsSection: View {
+    let ports: [SidebarProbe.PortItem]
+    @Binding var isCollapsed: Bool
+    let kill: (_ pid: pid_t, _ force: Bool) -> Void
+
+    var body: some View {
+        GitSectionHeader(
+            title: "PORTS",
+            count: ports.count,
+            isCollapsed: $isCollapsed,
+            actions: []
+        )
+        if !isCollapsed {
+            Group {
+                if ports.isEmpty {
+                    sidebarEmptyRow("No listening ports")
+                } else {
+                    ForEach(ports) { port in
+                        InfoPortRow(port: port) { force in
+                            kill(port.pid, force)
+                        }
+                    }
+                }
+            }
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        }
+    }
+}
+
+// MARK: - Project panel
+
+/// 项目根路径 + 根 package.json scripts + 全 session 进程/端口并集。
+private struct ProjectPanel: View {
+    @ObservedObject var model: ProjectPanelModel
+    let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
+    let openPackageJSON: () -> Void
+
+    @State private var directoryCollapsed = false
+    @State private var packageScriptsCollapsed = false
+    @State private var processesCollapsed = false
+    @State private var portsCollapsed = false
+
+    private var projectTitle: String {
+        guard !model.rootPath.isEmpty else { return "Project" }
+        return (model.rootPath as NSString).lastPathComponent
+    }
+
+    private var headerSubtitle: String? {
+        let n = model.sessionShellCount
+        guard n > 0 else { return nil }
+        return n == 1 ? "1 session" : "\(n) sessions"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    PathDirectorySection(
+                        path: model.rootPath,
+                        isCollapsed: $directoryCollapsed,
+                        sectionTitle: "PROJECT"
+                    )
+                    PackageScriptsSection(
+                        scripts: model.packageScripts,
+                        isCollapsed: $packageScriptsCollapsed,
+                        runPackageScript: runPackageScript,
+                        openPackageJSON: openPackageJSON
+                    )
+                    ProcessesSection(
+                        processes: model.processes,
+                        isCollapsed: $processesCollapsed,
+                        kill: { model.kill($0, force: $1) }
+                    )
+                    PortsSection(
+                        ports: model.ports,
+                        isCollapsed: $portsCollapsed,
+                        kill: { model.kill($0, force: $1) }
+                    )
+                }
+                .padding(.horizontal, 6)
+                .padding(.bottom, 8)
+            }
+        }
+        .onChange(of: model.packageScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $packageScriptsCollapsed
+            )
+        }
+        .onChange(of: model.processes.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $processesCollapsed
+            )
+        }
+        .onChange(of: model.ports.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $portsCollapsed
+            )
+        }
+        .onAppear {
+            if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
+            if model.processes.isEmpty { processesCollapsed = true }
+            if model.ports.isEmpty { portsCollapsed = true }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "shippingbox")
+                .font(SidebarTypography.secondary(.medium))
+                .foregroundStyle(Color(nsColor: Theme.cursor))
+            PanelHeader(title: projectTitle, subtitle: headerSubtitle)
+            Button {
+                model.refresh()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(SidebarTypography.caption(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .help("Refresh")
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+}
+
+// MARK: - Info panel（当前终端会话）
+
+/// 当前终端 cwd + cwd 下 scripts + 本 session 进程/端口。
+private struct SessionInfoPanel: View {
+    @ObservedObject var model: SessionInfoModel
+    let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
+    let openPackageJSON: () -> Void
+
+    @State private var directoryCollapsed = false
+    @State private var packageScriptsCollapsed = false
+    @State private var processesCollapsed = false
+    @State private var portsCollapsed = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    PathDirectorySection(
+                        path: model.cwdPath,
+                        isCollapsed: $directoryCollapsed,
+                        sectionTitle: "CWD"
+                    )
+                    PackageScriptsSection(
+                        scripts: model.packageScripts,
+                        isCollapsed: $packageScriptsCollapsed,
+                        runPackageScript: runPackageScript,
+                        openPackageJSON: openPackageJSON
+                    )
+                    ProcessesSection(
+                        processes: model.processes,
+                        isCollapsed: $processesCollapsed,
+                        kill: { model.kill($0, force: $1) }
+                    )
+                    PortsSection(
+                        ports: model.ports,
+                        isCollapsed: $portsCollapsed,
+                        kill: { model.kill($0, force: $1) }
+                    )
+                }
+                .padding(.horizontal, 6)
+                .padding(.bottom, 8)
+            }
+        }
+        .onChange(of: model.packageScripts.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $packageScriptsCollapsed
+            )
+        }
+        .onChange(of: model.processes.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $processesCollapsed
+            )
+        }
+        .onChange(of: model.ports.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $portsCollapsed
+            )
+        }
+        .onAppear {
+            if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
+            if model.processes.isEmpty { processesCollapsed = true }
+            if model.ports.isEmpty { portsCollapsed = true }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(SidebarTypography.secondary(.medium))
+                .foregroundStyle(Color(nsColor: Theme.cursor))
+            PanelHeader(
+                title: model.shellName.isEmpty ? "Session" : model.shellName,
+                subtitle: model.shellPid > 0 ? "pid \(String(model.shellPid))" : nil
+            )
+            Button {
+                model.refresh()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(SidebarTypography.caption(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .help("Refresh")
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+}
+
 private struct InfoProcessRow: View {
-    let process: SessionInfoModel.ProcessItem
+    let process: SidebarProbe.ProcessItem
     let kill: (_ force: Bool) -> Void
 
     @State private var isHovering = false
@@ -3066,7 +3243,7 @@ private struct InfoProcessRow: View {
                 .layoutPriority(1)
                 .help(process.executable)
             Text(String(process.pid))
-                .font(SidebarTypography.caption(design: .monospaced))
+                .font(SidebarTypography.caption(design: .monospaced).monospacedDigit())
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
             if isHovering {
@@ -3083,7 +3260,7 @@ private struct InfoProcessRow: View {
                 .help("Terminate Process")
             } else {
                 Text(String(format: "%.0f%% · %@", process.cpu, process.memoryLabel))
-                    .font(SidebarTypography.caption())
+                    .font(SidebarTypography.caption().monospacedDigit())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
@@ -3115,7 +3292,7 @@ private struct InfoProcessRow: View {
 }
 
 private struct InfoPortRow: View {
-    let port: SessionInfoModel.PortItem
+    let port: SidebarProbe.PortItem
     let kill: (_ force: Bool) -> Void
 
     @State private var isHovering = false
@@ -3134,7 +3311,7 @@ private struct InfoPortRow: View {
                     .foregroundStyle(Color(red: 0.35, green: 0.65, blue: 1.0))
                     .frame(width: 12)
                 Text(String(port.port))
-                    .font(SidebarTypography.body(.medium, design: .monospaced))
+                    .font(SidebarTypography.body(.medium, design: .monospaced).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .layoutPriority(1)
                 Text(port.processName)
