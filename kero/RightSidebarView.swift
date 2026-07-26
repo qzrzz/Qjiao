@@ -3013,7 +3013,8 @@ private struct PathDirectorySection: View {
                                         registry.preferredBundleId = editor.bundleId
                                         registry.open(path: path, with: editor)
                                     } label: {
-                                        if let icon = editor.appIcon {
+                                        // 菜单中使用 16pt 尺寸，系统自动选取高清表示层。
+                                        if let icon = editor.appIcon(size: 16) {
                                             Label {
                                                 Text(editor.displayName)
                                             } icon: {
@@ -4379,17 +4380,17 @@ private struct ProjectPanel: View {
 }
 
 /// 显示代码编辑器图标的辅助视图：优先展示应用真实图标，不可用时回退到 SF Symbol。
+///
+/// 通过设置 `NSImage.size` 为逻辑点尺寸，让系统自动选择 Retina 对应的高清表示层，
+/// 避免 `.resizable()` 强制缩放低分辨率层导致模糊。
 private struct CodeEditorIcon: View {
     let editor: CodeEditor
-    /// 图标边长（正方形）。
+    /// 图标边长（逻辑点，正方形）。
     var size: CGFloat = 16
 
     var body: some View {
-        if let icon = editor.appIcon {
+        if let icon = editor.appIcon(size: size) {
             Image(nsImage: icon)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: size, height: size)
         } else {
             // 应用未安装或图标读取失败时回退到 SF Symbol。
             Image(systemName: editor.symbolName)
@@ -4447,13 +4448,12 @@ private struct CodeEditorOpenButton: View {
                                 registry.open(path: path, with: editor)
                             } label: {
                                 // macOS 菜单项：图标 + 名称，当前选中项显示勾选。
-                                if let icon = editor.appIcon {
+                                // 使用 appIcon(size: 16) 让系统选择 Retina 对应的高清表示层。
+                                if let icon = editor.appIcon(size: 16) {
                                     Label {
                                         Text(editor.displayName)
                                     } icon: {
                                         Image(nsImage: icon)
-                                            .resizable()
-                                            .frame(width: 16, height: 16)
                                     }
                                 } else {
                                     Label(editor.displayName, systemImage: editor.symbolName)
