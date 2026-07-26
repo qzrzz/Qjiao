@@ -3195,6 +3195,17 @@ private func formatScriptDuration(_ duration: TimeInterval) -> String {
     }
 }
 
+@MainActor
+private final class MenuActionTarget: NSObject {
+    let closure: () -> Void
+    init(_ closure: @escaping () -> Void) {
+        self.closure = closure
+    }
+    @objc func performAction() {
+        closure()
+    }
+}
+
 /// package.json 信息展示分组（包含 name、version、repository 链接与 SemVer 快速递增/Git Tag）
 private struct PackageInfoSection: View {
     let info: SidebarProbe.PackageInfo
@@ -3224,23 +3235,42 @@ private struct PackageInfoSection: View {
 
     private var headerMoreMenu: AnyView {
         AnyView(
-            Menu {
-                Button("Open package.json") {
-                    openPackageJSON()
-                }
-                Divider()
-                Button(pmInfo.installCommand) {
-                    manager.runRawCommand(pmInfo.installCommand, title: pmInfo.installCommand, directory: rootPath)
-                }
-                Button(pmInfo.publishCommand) {
-                    manager.runRawCommand(pmInfo.publishCommand, title: pmInfo.publishCommand, directory: rootPath)
-                }
-                Button(pmInfo.updateCommand) {
-                    manager.runRawCommand(pmInfo.updateCommand, title: pmInfo.updateCommand, directory: rootPath)
-                }
-                Divider()
-                Button("Update  Deps (npx taze)") {
-                    manager.runRawCommand("npx taze", title: "npx taze", directory: rootPath)
+            Button {
+                let menu = NSMenu()
+
+                let itemOpen = NSMenuItem(title: "Open package.json", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                let tOpen = MenuActionTarget { openPackageJSON() }
+                itemOpen.target = tOpen
+                menu.addItem(itemOpen)
+
+                menu.addItem(NSMenuItem.separator())
+
+                let itemInstall = NSMenuItem(title: pmInfo.installCommand, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                let tInstall = MenuActionTarget { manager.runRawCommand(pmInfo.installCommand, title: pmInfo.installCommand, directory: rootPath) }
+                itemInstall.target = tInstall
+                menu.addItem(itemInstall)
+
+                let itemPublish = NSMenuItem(title: pmInfo.publishCommand, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                let tPublish = MenuActionTarget { manager.runRawCommand(pmInfo.publishCommand, title: pmInfo.publishCommand, directory: rootPath) }
+                itemPublish.target = tPublish
+                menu.addItem(itemPublish)
+
+                let itemUpdate = NSMenuItem(title: pmInfo.updateCommand, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                let tUpdate = MenuActionTarget { manager.runRawCommand(pmInfo.updateCommand, title: pmInfo.updateCommand, directory: rootPath) }
+                itemUpdate.target = tUpdate
+                menu.addItem(itemUpdate)
+
+                menu.addItem(NSMenuItem.separator())
+
+                let itemTaze = NSMenuItem(title: "Update  Deps (npx taze)", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                let tTaze = MenuActionTarget { manager.runRawCommand("npx taze", title: "npx taze", directory: rootPath) }
+                itemTaze.target = tTaze
+                menu.addItem(itemTaze)
+
+                objc_setAssociatedObject(menu, "targets", [tOpen, tInstall, tPublish, tUpdate, tTaze], .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+                if let event = NSApp.currentEvent, let window = event.window, let contentView = window.contentView {
+                    NSMenu.popUpContextMenu(menu, with: event, for: contentView)
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -3249,9 +3279,7 @@ private struct PackageInfoSection: View {
                     .frame(width: 18, height: 18)
                     .contentShape(RoundedRectangle(cornerRadius: 4))
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 18, height: 18)
+            .buttonStyle(.plain)
             .help("More Package Options")
         )
     }
@@ -3392,41 +3420,63 @@ private struct PackageInfoSection: View {
                                     .frame(height: 10)
                                     .opacity(0.3)
 
-                                // [下拉菜单 ⌵] Menu
-                                Menu {
-                                    Button("+ MAJOR ( \(parsed.major) )") {
+                                // [下拉菜单 ⌵] Button 点击弹出 NSMenu
+                                Button {
+                                    let menu = NSMenu()
+
+                                    let itemMajor = NSMenuItem(title: "+ MAJOR ( \(parsed.major) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                                    let tMajor = MenuActionTarget {
                                         if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.major) {
                                             onVersionUpdated()
                                         }
                                     }
-                                    Button("+ MINOR ( \(parsed.minor) )") {
+                                    itemMajor.target = tMajor
+                                    menu.addItem(itemMajor)
+
+                                    let itemMinor = NSMenuItem(title: "+ MINOR ( \(parsed.minor) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                                    let tMinor = MenuActionTarget {
                                         if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.minor) {
                                             onVersionUpdated()
                                         }
                                     }
-                                    Button("+ PATCH ( \(parsed.patch) )") {
+                                    itemMinor.target = tMinor
+                                    menu.addItem(itemMinor)
+
+                                    let itemPatch = NSMenuItem(title: "+ PATCH ( \(parsed.patch) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                                    let tPatch = MenuActionTarget {
                                         if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.patch) {
                                             onVersionUpdated()
                                         }
                                     }
-                                    Divider()
-                                    Button("Git tag \(displayVersion)") {
+                                    itemPatch.target = tPatch
+                                    menu.addItem(itemPatch)
+
+                                    menu.addItem(NSMenuItem.separator())
+
+                                    let itemTag = NSMenuItem(title: "Git tag \(displayVersion)", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                                    let tTag = MenuActionTarget {
                                         SidebarProbe.createGitTag(directory: rootPath, tagName: displayVersion)
+                                    }
+                                    itemTag.target = tTag
+                                    menu.addItem(itemTag)
+
+                                    objc_setAssociatedObject(menu, "targets", [tMajor, tMinor, tPatch, tTag], .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+                                    if let event = NSApp.currentEvent, let window = event.window, let contentView = window.contentView {
+                                        NSMenu.popUpContextMenu(menu, with: event, for: contentView)
                                     }
                                 } label: {
                                     Image(systemName: "chevron.down")
                                         .font(.system(size: 8, weight: .bold))
                                         .foregroundStyle(isHoveringMenu ? Color.primary : Color.secondary)
-                                        .frame(width: 16, height: 16)
+                                        .frame(width: 18, height: 16)
                                         .background(
                                             RoundedRectangle(cornerRadius: 3)
                                                 .fill(isHoveringMenu ? Color.primary.opacity(0.08) : Color.clear)
                                         )
                                         .contentShape(Rectangle())
                                 }
-                                .menuStyle(.borderlessButton)
-                                .menuIndicator(.hidden)
-                                .frame(width: 16, height: 16)
+                                .buttonStyle(.plain)
                                 .onHover { isHoveringMenu = $0 }
                                 .help("Version Options")
                             }
