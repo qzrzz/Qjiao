@@ -368,11 +368,9 @@ struct LauncherItemWrapper: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if isExpanded {
-                // 只缩进背景，不改变行头坐标；编辑区始终从原条目下方向下展开。
+                // 背景完整覆盖行头与编辑区；内容不添加条件 padding，确保行头坐标不变。
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.primary.opacity(0.06))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 3)
                     .transition(.opacity)
             }
 
