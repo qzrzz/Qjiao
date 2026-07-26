@@ -7,10 +7,20 @@ import AppKit
 import Combine
 import Foundation
 
+/// 应用内置预置图标（随 Bundle 打包的 Material / TerminalAppIcons 资源）。
+enum ProjectPresetIcon: Codable, Equatable, Hashable {
+    /// Material Icon Theme 逻辑名（如 `typescript`、`nodejs`）。
+    case material(String)
+    /// `TerminalAppIcons/icons` 下的文件名（如 `bxl-github.svg`、`antigravity-color.png`）。
+    case bundled(String)
+}
+
 /// 项目列表中显示的自定义图标。
 enum ProjectIcon: Codable, Equatable {
     case sfSymbol(String)
     case emoji(String)
+    /// 本应用内置预置图标。
+    case preset(ProjectPresetIcon)
 }
 
 /// A reusable project launch target shown in the Start panel.
@@ -277,8 +287,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         else { return }
 
         let command = launchCommands.remove(at: sourceIndex)
-        let insertionIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
-        launchCommands.insert(command, at: insertionIndex)
+        launchCommands.insert(command, at: targetIndex)
     }
 
     /// Builds a session wired for exit + change observation, without placing

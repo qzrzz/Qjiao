@@ -4099,6 +4099,7 @@ private struct LaunchersSection: View {
                         command: command,
                         isExpanded: expandedCommandID == command.id,
                         isDropTarget: dropTargetCommandID == command.id,
+                        isDragged: draggedCommandID == command.id,
                         run: { runCommand(command) },
                         toggleExpanded: { toggleExpanded(command.id) },
                         startDrag: {

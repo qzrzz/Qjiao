@@ -80,6 +80,7 @@ struct StartPanel: View {
                             command: command,
                             isExpanded: expandedCommandID == command.id,
                             isDropTarget: dropTargetCommandID == command.id,
+                            isDragged: draggedCommandID == command.id,
                             run: { runCommand(command) },
                             toggleExpanded: { toggleExpanded(command.id) },
                             startDrag: {
@@ -174,20 +175,23 @@ struct StartCommandRow: View {
     let command: ProjectLaunchCommand
     let isExpanded: Bool
     let isDropTarget: Bool
+    var isDragged: Bool = false
     let run: () -> Void
     let toggleExpanded: () -> Void
     let startDrag: () -> NSItemProvider
 
     @State private var isHovering = false
+    @State private var isHoveringHandle = false
     @State private var isHoveringRunBtn = false
 
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "line.3.horizontal")
                 .font(SidebarTypography.micro())
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(isHoveringHandle ? .primary : .tertiary)
                 .frame(width: 14, height: 14)
                 .contentShape(Rectangle())
+                .onHover { isHoveringHandle = $0 }
                 .onDrag(startDrag) {
                     StartCommandDragPreview(command: command)
                 }
@@ -229,20 +233,28 @@ struct StartCommandRow: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
+        .opacity(isDragged ? 0.35 : 1.0)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(isHovering ? Color.primary.opacity(0.06) : .clear)
+                .fill(
+                    isDropTarget
+                    ? Color(nsColor: Theme.cursor).opacity(0.12)
+                    : (isHovering ? Color.primary.opacity(0.06) : Color.clear)
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .strokeBorder(
+                    isDropTarget
+                    ? Color(nsColor: Theme.cursor).opacity(0.4)
+                    : Color.clear,
+                    lineWidth: 1
+                )
         )
         .contentShape(RoundedRectangle(cornerRadius: 5))
         .onHover { isHovering = $0 }
-        .overlay(alignment: .top) {
-            if isDropTarget {
-                Capsule()
-                    .fill(Color(nsColor: Theme.cursor))
-                    .frame(height: 2)
-                    .padding(.horizontal, 4)
-            }
-        }
+        .animation(.snappy(duration: 0.2), value: isDragged)
+        .animation(.snappy(duration: 0.2), value: isDropTarget)
     }
 
     private var commandTooltip: String {
@@ -366,22 +378,27 @@ struct StartCommandDragPreview: View {
 
     var body: some View {
         HStack(spacing: 7) {
+            Image(systemName: "line.3.horizontal")
+                .font(SidebarTypography.micro())
+                .foregroundStyle(.secondary)
             StartCommandIcon(command: command)
-                .frame(width: 16, height: 16)
+                .frame(width: 14, height: 14)
             Text(command.displayTitle)
-                .font(SidebarTypography.body(.medium))
+                .font(SidebarTypography.secondary())
+                .foregroundStyle(.primary)
                 .lineLimit(1)
         }
-        .foregroundStyle(.primary)
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .frame(width: 210, alignment: .leading)
-        .background(Color(nsColor: Theme.sidebar))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color(nsColor: Theme.sidebar))
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Color(nsColor: Theme.cursor).opacity(0.4), lineWidth: 1)
         }
+        .shadow(color: Color.black.opacity(0.15), radius: 5, x: 0, y: 2)
     }
 }
 
@@ -396,9 +413,11 @@ struct StartCommandDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
-        guard let draggedCommandID else { return }
+        guard let draggedCommandID, draggedCommandID != targetID else { return }
         dropTargetCommandID = targetID
-        project.moveLaunchCommand(id: draggedCommandID, before: targetID)
+        withAnimation(.snappy(duration: 0.22, extraBounce: 0.05)) {
+            project.moveLaunchCommand(id: draggedCommandID, before: targetID)
+        }
     }
 
     func dropExited(info: DropInfo) {
@@ -410,8 +429,10 @@ struct StartCommandDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        draggedCommandID = nil
-        dropTargetCommandID = nil
+        withAnimation(.snappy(duration: 0.2)) {
+            draggedCommandID = nil
+            dropTargetCommandID = nil
+        }
         return true
     }
 }
