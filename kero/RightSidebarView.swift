@@ -3013,8 +3013,7 @@ private struct PathDirectorySection: View {
                                         registry.preferredBundleId = editor.bundleId
                                         registry.open(path: path, with: editor)
                                     } label: {
-                                        // NSMenuItem 图标用 menuIcon()（16pt），不加修饰符。
-                                        if let icon = editor.menuIcon() {
+                                        if let icon = editor.iconImage(size: 16) {
                                             Label {
                                                 Text(editor.displayName)
                                             } icon: {
@@ -4385,17 +4384,18 @@ private struct ProjectPanel: View {
 /// Retina 2× 屏下正好 1:1 物理像素对应，渲染清晰锐利。
 private struct CodeEditorIcon: View {
     let editor: CodeEditor
+    var size: CGFloat = 16
 
     var body: some View {
-        if let icon = editor.appIcon() {
+        if let icon = editor.iconImage(size: size) {
             Image(nsImage: icon)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 16, height: 16)
+                .frame(width: size, height: size)
         } else {
             // 应用未安装或图标读取失败时回退到 SF Symbol。
             Image(systemName: editor.symbolName)
-                .frame(width: 16, height: 16)
+                .frame(width: size, height: size)
         }
     }
 }
@@ -4418,7 +4418,7 @@ private struct CodeEditorOpenButton: View {
                     registry.open(path: path)
                 } label: {
                     HStack(spacing: 6) {
-                        CodeEditorIcon(editor: preferred)
+                        CodeEditorIcon(editor: preferred, size: 16)
                         Text(preferred.displayName)
                             .font(SidebarTypography.caption(.medium))
                         Spacer()
@@ -4547,12 +4547,8 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
                 item.isEnabled = true
                 // 用 bundleId 字符串作为 representedObject，避免跨线程传递 struct 的潜在问题。
                 item.representedObject = editor.bundleId
-                // NSMenuItem.image 直接接受 NSImage，无需任何 SwiftUI 修饰符。
-                if let appURL = editor.appURL {
-                    let icon = NSWorkspace.shared.icon(forFile: appURL.path)
-                    icon.size = NSSize(width: 16, height: 16)
-                    item.image = icon
-                }
+                // 使用在具体 Canvas 绘制的实体图标 iconImage(size: 16)，确保 NSMenuItem 弹出列表 100% 渲染呈现图标
+                item.image = editor.iconImage(size: 16)
                 // 勾选当前默认编辑器。
                 item.state = editor.bundleId == preferredBundleId ? .on : .off
                 menu.addItem(item)

@@ -26,32 +26,27 @@ struct CodeEditor: Identifiable, Equatable {
     /// 是否已安装。
     var isInstalled: Bool { appURL != nil }
 
-    /// 从应用包路径读取系统图标。
+    /// 从应用包路径生成特定尺寸的系统应用图标。
     ///
-    /// 设置 `NSImage.size` 为 32×32（物理像素），再以 `frame(16, 16)` 显示在 16pt 逻辑尺寸上。
-    /// Retina 2× 屏下 16pt = 32 物理像素，正好 1:1 对应，渲染清晰。
-    /// - Returns: 已设定尺寸的图标；未安装时返回 nil。
-    func appIcon() -> NSImage? {
+    /// 使用 `NSImage(size:flipped:drawingHandler:)` 重新在具体 Canvas 上绘制，
+    /// 解决 `NSWorkspace` 图标代理对象在 `NSMenuItem` / SwiftUI 菜单视图中绘制空白的问题，
+    /// 并在 Retina 高分屏下自动保留高清像素。
+    /// - Parameter size: 图标边长（逻辑点，正方形），默认 16。
+    /// - Returns: 已画好具体 Canvas 的图标；未安装时返回 nil。
+    func iconImage(size: CGFloat = 16) -> NSImage? {
         guard let url = appURL else { return nil }
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
-        // 以 32×32 物理尺寸读取图标，显示时 frame(16, 16) 在 Retina 屏下恰好清晰。
-        icon.size = NSSize(width: 32, height: 32)
-        return icon
-    }
+        let rawIcon = NSWorkspace.shared.icon(forFile: url.path)
+        let targetSize = NSSize(width: size, height: size)
 
-    /// 返回适合 NSMenuItem 的图标（16×16 逻辑点）。
-    ///
-    /// `NSMenuItem.image` 只识别 `NSImage.size` 作为图标尺寸，不支持 SwiftUI 的
-    /// `.resizable().frame()` 修饰符，因此需要单独提供正确逻辑尺寸的图像。
-    /// - Returns: 16×16 pt 的图标；未安装时返回 nil。
-    func menuIcon() -> NSImage? {
-        guard let url = appURL else { return nil }
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
-        // NSMenuItem 按 NSImage.size 的逻辑点尺寸渲染图标。
-        icon.size = NSSize(width: 16, height: 16)
-        return icon
+        let image = NSImage(size: targetSize, flipped: false) { rect in
+            rawIcon.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
+            return true
+        }
+        image.size = targetSize
+        return image
     }
 }
+
 
 // MARK: - CodeEditorRegistry
 
