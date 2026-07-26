@@ -3220,6 +3220,7 @@ private struct PackageInfoSection: View {
     @State private var isHoveringPlus = false
     @State private var isHoveringMinus = false
     @State private var isHoveringMenu = false
+    @State private var isHoveringVersionBox = false
 
     @FocusState private var isVersionFocused: Bool
     @State private var versionDraft: String = ""
@@ -3426,12 +3427,14 @@ private struct PackageInfoSection: View {
                         .padding(.vertical, 1.5)
                         .background(
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(isVersionFocused ? Color.primary.opacity(0.1) : Color.primary.opacity(0.06))
+                                .fill(isHoveringVersionBox || isVersionFocused ? Color.primary.opacity(0.1) : Color.primary.opacity(0.06))
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 4)
                                 .stroke(isVersionFocused ? Color.primary.opacity(0.25) : Color.clear, lineWidth: 1)
                         )
+                        .fixedSize(horizontal: true, vertical: false)
+                        .onHover { isHoveringVersionBox = $0 }
 
                         if let parsed = parsedSemVer {
                             // 连贯一体式的 Segmented Split Control (+ / - / ⌵)
@@ -3553,6 +3556,8 @@ private struct PackageInfoSection: View {
                                     .fill(Color.primary.opacity(0.06))
                             )
                         }
+
+                        Spacer(minLength: 0)
                     }
                     .frame(height: 20)
                 }
