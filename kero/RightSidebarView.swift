@@ -4482,8 +4482,8 @@ private struct CodeEditorMenuItemView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 7) {
-                // 左侧勾选标记对齐区
+            HStack(spacing: 6) {
+                // 左侧勾选标记对齐区（固定 14pt 宽）
                 ZStack {
                     if isSelected {
                         Image(systemName: "checkmark")
@@ -4491,9 +4491,9 @@ private struct CodeEditorMenuItemView: View {
                             .foregroundStyle(isHovered ? .white : .primary)
                     }
                 }
-                .frame(width: 12, height: 12)
+                .frame(width: 14, height: 14)
 
-                // 编辑器 App 真实图标
+                // 编辑器 App 真实图标（16pt）
                 CodeEditorIcon(editor: editor, size: 16)
 
                 // 编辑器显示名称
@@ -4501,14 +4501,14 @@ private struct CodeEditorMenuItemView: View {
                     .font(SidebarTypography.caption(.medium))
                     .foregroundStyle(isHovered ? .white : .primary)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 12)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 4)
                     .fill(isHovered ? Color.accentColor : Color.clear)
+                    .padding(.horizontal, 2)
             )
             .contentShape(Rectangle())
         }
@@ -4596,8 +4596,8 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
                 )
 
                 let hostingView = NSHostingView(rootView: menuItemView)
-                // 确保菜单项尺寸合适
-                hostingView.frame = NSRect(x: 0, y: 0, width: 160, height: 26)
+                // 确保菜单项尺寸与行高精致规范（24pt 标准菜单行高）
+                hostingView.frame = NSRect(x: 0, y: 0, width: 165, height: 24)
                 item.view = hostingView
                 menu.addItem(item)
             }
