@@ -2986,7 +2986,7 @@ private struct PathDirectorySection: View {
                             registry.open(path: path)
                         } label: {
                             HStack(spacing: 3) {
-                                CodeEditorIcon(editor: preferred, size: 12)
+                                CodeEditorIcon(editor: preferred)
                                 Text(preferred.displayName)
                                     .font(SidebarTypography.caption(.medium))
                                     .lineLimit(1)
@@ -3014,11 +3014,14 @@ private struct PathDirectorySection: View {
                                         registry.open(path: path, with: editor)
                                     } label: {
                                         // 菜单中使用 16pt 尺寸，系统自动选取高清表示层。
-                                        if let icon = editor.appIcon(size: 16) {
+                                        if let icon = editor.appIcon() {
                                             Label {
                                                 Text(editor.displayName)
                                             } icon: {
                                                 Image(nsImage: icon)
+                                                    .resizable()
+                                                    .interpolation(.high)
+                                                    .frame(width: 16, height: 16)
                                             }
                                         } else {
                                             Label(editor.displayName, systemImage: editor.symbolName)
@@ -4381,20 +4384,21 @@ private struct ProjectPanel: View {
 
 /// 显示代码编辑器图标的辅助视图：优先展示应用真实图标，不可用时回退到 SF Symbol。
 ///
-/// 通过设置 `NSImage.size` 为逻辑点尺寸，让系统自动选择 Retina 对应的高清表示层，
-/// 避免 `.resizable()` 强制缩放低分辨率层导致模糊。
+/// 固定以 32×32 物理像素取图（`appIcon()`），再以 `frame(16, 16)` 显示，
+/// Retina 2× 屏下正好 1:1 物理像素对应，渲染清晰锐利。
 private struct CodeEditorIcon: View {
     let editor: CodeEditor
-    /// 图标边长（逻辑点，正方形）。
-    var size: CGFloat = 16
 
     var body: some View {
-        if let icon = editor.appIcon(size: size) {
+        if let icon = editor.appIcon() {
             Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 16, height: 16)
         } else {
             // 应用未安装或图标读取失败时回退到 SF Symbol。
             Image(systemName: editor.symbolName)
-                .frame(width: size, height: size)
+                .frame(width: 16, height: 16)
         }
     }
 }
@@ -4417,7 +4421,7 @@ private struct CodeEditorOpenButton: View {
                     registry.open(path: path)
                 } label: {
                     HStack(spacing: 6) {
-                        CodeEditorIcon(editor: preferred, size: 14)
+                        CodeEditorIcon(editor: preferred)
                         Text(preferred.displayName)
                             .font(SidebarTypography.caption(.medium))
                         Spacer()
@@ -4448,12 +4452,15 @@ private struct CodeEditorOpenButton: View {
                                 registry.open(path: path, with: editor)
                             } label: {
                                 // macOS 菜单项：图标 + 名称，当前选中项显示勾选。
-                                // 使用 appIcon(size: 16) 让系统选择 Retina 对应的高清表示层。
-                                if let icon = editor.appIcon(size: 16) {
+                                // 使用 appIcon() 取 32×32 图， frame(16,16) 在 Retina 下清晰。
+                                if let icon = editor.appIcon() {
                                     Label {
                                         Text(editor.displayName)
                                     } icon: {
                                         Image(nsImage: icon)
+                                            .resizable()
+                                            .interpolation(.high)
+                                            .frame(width: 16, height: 16)
                                     }
                                 } else {
                                     Label(editor.displayName, systemImage: editor.symbolName)

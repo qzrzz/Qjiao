@@ -26,17 +26,16 @@ struct CodeEditor: Identifiable, Equatable {
     /// 是否已安装。
     var isInstalled: Bool { appURL != nil }
 
-    /// 从应用包路径读取系统图标，并将其逻辑尺寸设为 `size` 点。
+    /// 从应用包路径读取系统图标。
     ///
-    /// 通过设置 `NSImage.size`，macOS 会在渲染时自动选择最接近的高清表示层
-    /// （如 Retina 屏下 16pt → 实际读取 32×32 物理像素的表示层），无需手动缩放。
-    /// - Parameter size: 逻辑点边长（正方形），默认 16。
-    /// - Returns: 已调整尺寸的图标；未安装时返回 nil。
-    func appIcon(size: CGFloat = 16) -> NSImage? {
+    /// 设置 `NSImage.size` 为 32×32（物理像素），再以 `frame(16, 16)` 显示在 16pt 逻辑尺寸上。
+    /// Retina 2× 屏下 16pt = 32 物理像素，正好 1:1 对应，渲染清晰。
+    /// - Returns: 已设定尺寸的图标；未安装时返回 nil。
+    func appIcon() -> NSImage? {
         guard let url = appURL else { return nil }
         let icon = NSWorkspace.shared.icon(forFile: url.path)
-        // 设置逻辑尺寸，系统自动匹配 Retina 对应的高清表示层。
-        icon.size = NSSize(width: size, height: size)
+        // 以 32×32 物理尺寸读取图标，显示时 frame(16, 16) 在 Retina 屏下恰好清晰。
+        icon.size = NSSize(width: 32, height: 32)
         return icon
     }
 }
