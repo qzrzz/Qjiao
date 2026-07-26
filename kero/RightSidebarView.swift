@@ -236,6 +236,7 @@ struct RightSidebarView: View {
             }
         case .files:
             FileTreePanel(
+                manager: manager,
                 model: fileTree,
                 session: manager.selectedSession,
                 currentFilePath: openFilePath,
@@ -245,6 +246,7 @@ struct RightSidebarView: View {
             )
         case .cwd:
             FileTreePanel(
+                manager: manager,
                 model: fileTree,
                 session: manager.selectedSession,
                 currentFilePath: openFilePath,
@@ -508,6 +510,7 @@ private struct PanelHeader: View {
 // MARK: - File tree
 
 private struct FileTreePanel: View {
+    @ObservedObject var manager: TerminalManager
     @ObservedObject var model: FileTreeModel
     let session: TerminalSession?
     let currentFilePath: String?
@@ -515,10 +518,69 @@ private struct FileTreePanel: View {
     let openToSide: (String) -> Void
     let onRename: (_ oldPath: String, _ newPath: String) -> Void
 
+    @State private var isFilterActive = false
+    @State private var filterQuery = ""
+    @State private var isPanelHovered = false
+    @State private var isPanelClicked = false
+    @State private var eventMonitor: Any? = nil
+
+    @FocusState private var isFilterFieldFocused: Bool
+    @FocusState private var isTreeFocused: Bool
+
+    /// 根据当前 Filter 过滤已在 Tree 中存在的节点，同时保留匹配节点的所有父路径。
+    private var filteredItems: [FileTreeModel.Item] {
+        let trimmed = filterQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isFilterActive, !trimmed.isEmpty else {
+            return model.items
+        }
+
+        let directMatches = model.items.filter { !$0.isDraft && $0.name.localizedCaseInsensitiveContains(trimmed) }
+        var keepPaths = Set<String>()
+
+        for item in directMatches {
+            keepPaths.insert(item.path)
+            if item.isDirectory {
+                // 若匹配项为文件夹，保留其所有直属/深层子节点
+                for child in model.items where child.path.hasPrefix(item.path + "/") {
+                    keepPaths.insert(child.path)
+                }
+            }
+        }
+
+        // 向上补齐父路径，保持树型层级关系
+        let allItemPaths = Set(model.items.map(\.path))
+        for path in keepPaths {
+            var current = (path as NSString).deletingLastPathComponent
+            while !current.isEmpty && current != "/" && current != model.rootPath {
+                if allItemPaths.contains(current) {
+                    keepPaths.insert(current)
+                }
+                current = (current as NSString).deletingLastPathComponent
+            }
+        }
+
+        return model.items.filter { keepPaths.contains($0.path) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 PanelHeader(title: model.rootName, subtitle: model.rootPath)
+                Button {
+                    isFilterActive.toggle()
+                    if isFilterActive {
+                        isFilterFieldFocused = true
+                    } else {
+                        dismissFilter()
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(SidebarTypography.secondary())
+                        .foregroundStyle(isFilterActive ? Color(nsColor: Theme.cursor) : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Filter files (⌘F)")
+
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.rootPath)])
                 } label: {
@@ -533,27 +595,62 @@ private struct FileTreePanel: View {
             .padding(.top, 8)
             .padding(.bottom, 8)
 
-            ScrollView {
-                LazyVStack(spacing: 1) {
-                    ForEach(model.items) { item in
-                        FileTreeRow(
-                            model: model, item: item, session: session,
-                            currentFilePath: currentFilePath,
-                            openFile: openFile, openToSide: openToSide, onRename: onRename
-                        )
+            if isFilterActive {
+                filterBarView
+            }
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    let itemsToDisplay = filteredItems
+                    if itemsToDisplay.isEmpty && isFilterActive && !filterQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        VStack(spacing: 6) {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .font(.system(size: 18))
+                                .foregroundStyle(.tertiary)
+                            Text("No matching files")
+                                .font(SidebarTypography.caption())
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 24)
+                    } else {
+                        LazyVStack(spacing: 1) {
+                            ForEach(itemsToDisplay) { item in
+                                FileTreeRow(
+                                    model: model, item: item, session: session,
+                                    currentFilePath: currentFilePath,
+                                    openFile: openFile, openToSide: openToSide, onRename: onRename
+                                )
+                                .id(item.id)
+                            }
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 8)
+                        // 点击列表空白处清空选择；行上的手势优先命中。
+                        .frame(maxWidth: .infinity, alignment: .top)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            model.clearSelection()
+                        }
                     }
                 }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 8)
-                // 点击列表空白处清空选择；行上的手势优先命中。
-                .frame(maxWidth: .infinity, alignment: .top)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    model.clearSelection()
+                .focused($isTreeFocused)
+                .focusable(true)
+                .focusEffectDisabled()
+                .onAppear {
+                    scrollProxy = proxy
                 }
             }
-            .focusable(true)
-            .focusEffectDisabled()
+            // ⌘F 快捷键：仅在焦点位于 Files Tree 时激活 Filter，与终端/编辑器 ⌘F 隔离
+            .onKeyPress(keys: [.init("f")], phases: .down) { press in
+                guard press.modifiers.contains(.command),
+                      !press.modifiers.contains(.shift),
+                      !press.modifiers.contains(.option)
+                else { return .ignored }
+                isFilterActive = true
+                isFilterFieldFocused = true
+                return .handled
+            }
             // 文件树快捷键：⌘A 全选、⌘C 复制、⌘V 粘贴（需面板焦点）。
             .onKeyPress(keys: [.init("a")], phases: .down) { press in
                 guard press.modifiers.contains(.command) else { return .ignored }
@@ -579,6 +676,203 @@ private struct FileTreePanel: View {
                 return .handled
             }
         }
+        .onAppear {
+            setupKeyboardMonitor()
+        }
+        .onDisappear {
+            removeKeyboardMonitor()
+        }
+        .onHover { isHovered in
+            isPanelHovered = isHovered
+        }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                isPanelClicked = true
+            }
+        )
+        .onChange(of: manager.selectedProject?.selectedTab?.focusedPaneID) { _ in
+            // 当主编辑区/终端被点击或切换焦点时，标记侧边栏无独立点击响应
+            isPanelClicked = false
+        }
+        .onChange(of: manager.panelTab) { _ in
+            if manager.panelTab != .files && manager.panelTab != .cwd {
+                dismissFilter()
+                isPanelClicked = false
+            }
+        }
+    }
+
+    @State private var scrollProxy: ScrollViewProxy? = nil
+
+    /// 根据首字母定位并选中目标文件，连续触发时在相同首字母文件间循环切换。
+    private func jumpToNextItem(startingWith char: Character) {
+        let prefix = String(char).lowercased()
+        let visible = filteredItems.filter { !$0.isDraft }
+        let candidates = visible.filter { $0.name.lowercased().hasPrefix(prefix) }
+        guard !candidates.isEmpty else { return }
+
+        let targetItem: FileTreeModel.Item
+        if let currentPath = model.selectedPaths.first,
+           let selectedIndexInCandidates = candidates.firstIndex(where: { $0.path == currentPath }) {
+            // 当前已选中该首字母的某个候选文件：循环切换到下一个
+            let nextIndex = (selectedIndexInCandidates + 1) % candidates.count
+            targetItem = candidates[nextIndex]
+        } else {
+            // 当前选中的项不在候选列表中：从目前选中项后方开始找到第一个候选，或者直接取首个候选
+            if let currentPath = model.selectedPaths.first,
+               let currentIndexInVisible = visible.firstIndex(where: { $0.path == currentPath }),
+               let firstCandidateAfter = candidates.first(where: { candidate in
+                   if let candidateIndex = visible.firstIndex(where: { $0.path == candidate.path }) {
+                       return candidateIndex > currentIndexInVisible
+                   }
+                   return false
+               }) {
+                targetItem = firstCandidateAfter
+            } else {
+                targetItem = candidates[0]
+            }
+        }
+
+        // 选中目标并平滑滚动到可见区域中央
+        model.selectClick(targetItem, modifiers: [])
+        if let proxy = scrollProxy {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                proxy.scrollTo(targetItem.id, anchor: .center)
+            }
+        }
+    }
+
+    /// 注册 NSEvent 本地按键监听，处理 ⌘F 及字母数字文件定位。
+    private func setupKeyboardMonitor() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+            // 1. ⌘F 快捷键：激活 Filter 输入栏
+            if flags == .command, event.keyCode == 3 || event.charactersIgnoringModifiers?.lowercased() == "f" {
+                if isFilesTreeActiveOrFocused() {
+                    Task { @MainActor in
+                        isFilterActive = true
+                        isFilterFieldFocused = true
+                    }
+                    return nil // 拦截 ⌘F，不触发主菜单 Find 命令
+                }
+            }
+
+            // 2. 字母数字按键文件定位 (a-z, 0-9)：在非 Filter 激活且非内联重命名/新建草稿状态下触发
+            if (flags.isEmpty || flags == .shift),
+               !isFilterActive,
+               !isFilterFieldFocused,
+               model.renamingPath == nil,
+               model.draft == nil,
+               isFilesTreeActiveOrFocused() {
+                if let chars = event.charactersIgnoringModifiers, chars.count == 1,
+                   let scalar = chars.unicodeScalars.first,
+                   CharacterSet.alphanumerics.contains(scalar) {
+                    let char = Character(chars.lowercased())
+                    Task { @MainActor in
+                        jumpToNextItem(startingWith: char)
+                    }
+                    return nil // 消费该按键，屏蔽系统提示音
+                }
+            }
+
+            return event
+        }
+    }
+
+    private func removeKeyboardMonitor() {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
+        }
+    }
+
+    /// 判断当前 ⌘F 是否应该作用于 Files Tree。
+    private func isFilesTreeActiveOrFocused() -> Bool {
+        guard manager.isPanelVisible,
+              (manager.panelTab == .files || manager.panelTab == .cwd)
+        else { return false }
+
+        if isFilterActive || isFilterFieldFocused || isTreeFocused || isPanelClicked {
+            return true
+        }
+
+        if let window = NSApp.keyWindow, let responder = window.firstResponder as? NSView {
+            let className = String(describing: type(of: responder))
+            if className.contains("Ghostty") || className.contains("STTextView") || className.contains("SourceTextEditor") {
+                return false
+            }
+            var current: NSView? = responder
+            while let v = current {
+                let name = String(describing: type(of: v))
+                if name.contains("FileTree") || name.contains("RightSidebar") {
+                    return true
+                }
+                current = v.superview
+            }
+        }
+
+        return isPanelHovered
+    }
+
+    /// 顶部 Filter 输入栏。
+    @ViewBuilder
+    private var filterBarView: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            TextField("Filter files…", text: $filterQuery)
+                .textFieldStyle(.plain)
+                .font(SidebarTypography.body())
+                .focused($isFilterFieldFocused)
+                .onKeyPress(.escape) {
+                    dismissFilter()
+                    return .handled
+                }
+
+            if !filterQuery.isEmpty {
+                Button {
+                    filterQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear filter")
+            }
+
+            Button {
+                dismissFilter()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close filter (Esc)")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(0.06))
+        )
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+    }
+
+    /// 关闭与重置 Filter 状态，复位焦点至文件树列表。
+    private func dismissFilter() {
+        filterQuery = ""
+        isFilterActive = false
+        isFilterFieldFocused = false
+        isTreeFocused = true
     }
 }
 

@@ -689,7 +689,8 @@ struct GuideLine: Identifiable, Equatable, Hashable {
     }
 }
 
-/// 根据图像 1 物理像素在 View 中的实际 Point 比例 (pixelScale = unrotatedWidth / pixelWidth) 计算刻度步长 (px)
+/// 根据图像 1 物理像素在 View 中的实际 Point 比例 (pixelScale = unrotatedWidth / pixelWidth) 计算主刻度步长 (px)
+/// 目标：主刻度在屏幕上约 60pt 间距，自动进位到 1/2/5 × 10^n
 func calculateRulerStep(pixelScale: CGFloat) -> CGFloat {
     let targetPointStep: CGFloat = 60.0
     let rawPxStep = targetPointStep / max(pixelScale, 0.0001)
@@ -712,6 +713,17 @@ func calculateRulerStep(pixelScale: CGFloat) -> CGFloat {
     return base * stepFactor
 }
 
+/// 标尺细分数量：主刻度之间固定 10 等分；半步为次刻度，其余为微刻度
+/// 使用整数索引迭代，避免浮点累加导致主刻度漏画或错位
+private let rulerSubdivisionsPerMajor = 10
+
+/// 参考线视觉线宽：1pt，无投影
+private let guideLineVisualThickness: CGFloat = 1
+/// 参考线可拖拽命中带厚度（大于视觉线宽，便于鼠标捕获）
+private let guideLineHitThickness: CGFloat = 20
+/// 图像查看器画布坐标系名称（参考线拖拽 location 换算用）
+private let imageViewerCanvasCoordinateSpace = "ImageViewerCanvas"
+
 /// 顶部水平像素标尺绘制组件 (专业级多阶刻度：主刻度+数字、次刻度、细分微刻度)
 struct TopRulerCanvas: View {
     let originX: CGFloat
@@ -730,29 +742,34 @@ struct TopRulerCanvas: View {
             }
             context.stroke(bottomLine, with: .color(Color.primary.opacity(0.15)), lineWidth: 1)
 
+            guard pixelScale > 0.0001 else { return }
+
             let stepPx = calculateRulerStep(pixelScale: pixelScale)
-            let subStepPx = stepPx / 5.0
+            let subStepPx = stepPx / CGFloat(rulerSubdivisionsPerMajor)
+            // 可见视口对应的图像像素范围 → 细分刻度索引（含边距）
+            let leftPx = -originX / pixelScale
+            let rightPx = (size.width - originX) / pixelScale
+            let startIndex = Int(floor(leftPx / subStepPx)) - 1
+            let endIndex = Int(ceil(rightPx / subStepPx)) + 1
 
-            let startSubPx = floor(-originX / (pixelScale * subStepPx)) * subStepPx
-            let endSubPx = ceil((size.width - originX) / (pixelScale * subStepPx)) * subStepPx
+            if startIndex <= endIndex {
+                for i in startIndex...endIndex {
+                    let currentPx = CGFloat(i) * subStepPx
+                    let x = originX + currentPx * pixelScale
+                    // 避开左侧 20pt 角标区域
+                    guard x >= 20 && x <= size.width else { continue }
 
-            var currentPx = startSubPx
-            while currentPx <= endSubPx {
-                let x = originX + currentPx * pixelScale
-                if x >= 20 && x <= size.width {
-                    // 判断是否为主刻度
-                    let isMajor = abs(currentPx.truncatingRemainder(dividingBy: stepPx)) < 0.001 || abs(currentPx.truncatingRemainder(dividingBy: stepPx) - stepPx) < 0.001
-                    let isMedium = !isMajor && (abs(currentPx.truncatingRemainder(dividingBy: stepPx / 2.0)) < 0.001)
+                    let mod = ((i % rulerSubdivisionsPerMajor) + rulerSubdivisionsPerMajor) % rulerSubdivisionsPerMajor
+                    let isMajor = mod == 0
+                    let isMedium = mod == rulerSubdivisionsPerMajor / 2
 
                     if isMajor {
-                        // 1. 主刻度线 (长 6px，深色)
                         let tickPath = Path { p in
                             p.move(to: CGPoint(x: x, y: size.height - 6))
                             p.addLine(to: CGPoint(x: x, y: size.height))
                         }
                         context.stroke(tickPath, with: .color(Color.primary.opacity(0.55)), lineWidth: 1)
 
-                        // 主刻度数字 (居中对齐刻度线)
                         let text = Text("\(Int(round(currentPx)))")
                             .font(.system(size: 9, weight: .regular))
                             .monospacedDigit()
@@ -760,14 +777,12 @@ struct TopRulerCanvas: View {
                         let resolvedText = context.resolve(text)
                         context.draw(resolvedText, at: CGPoint(x: x, y: 6), anchor: .center)
                     } else if isMedium {
-                        // 2. 次级半步刻度线 (长 4px)
                         let tickPath = Path { p in
                             p.move(to: CGPoint(x: x, y: size.height - 4))
                             p.addLine(to: CGPoint(x: x, y: size.height))
                         }
                         context.stroke(tickPath, with: .color(Color.primary.opacity(0.35)), lineWidth: 1)
                     } else {
-                        // 3. 细分微刻度线 (长 2.5px)
                         let tickPath = Path { p in
                             p.move(to: CGPoint(x: x, y: size.height - 2.5))
                             p.addLine(to: CGPoint(x: x, y: size.height))
@@ -775,7 +790,6 @@ struct TopRulerCanvas: View {
                         context.stroke(tickPath, with: .color(Color.primary.opacity(0.20)), lineWidth: 1)
                     }
                 }
-                currentPx += subStepPx
             }
 
             // 鼠标位置活动指示线
@@ -810,28 +824,34 @@ struct LeftRulerCanvas: View {
             }
             context.stroke(rightLine, with: .color(Color.primary.opacity(0.15)), lineWidth: 1)
 
+            guard pixelScale > 0.0001 else { return }
+
             let stepPx = calculateRulerStep(pixelScale: pixelScale)
-            let subStepPx = stepPx / 5.0
+            let subStepPx = stepPx / CGFloat(rulerSubdivisionsPerMajor)
+            let topPy = -originY / pixelScale
+            let bottomPy = (size.height - originY) / pixelScale
+            let startIndex = Int(floor(topPy / subStepPx)) - 1
+            let endIndex = Int(ceil(bottomPy / subStepPx)) + 1
 
-            let startSubPy = floor(-originY / (pixelScale * subStepPx)) * subStepPx
-            let endSubPy = ceil((size.height - originY) / (pixelScale * subStepPx)) * subStepPx
+            if startIndex <= endIndex {
+                for i in startIndex...endIndex {
+                    let currentPy = CGFloat(i) * subStepPx
+                    let y = originY + currentPy * pixelScale
+                    // 避开顶部 20pt 角标区域
+                    guard y >= 20 && y <= size.height else { continue }
 
-            var currentPy = startSubPy
-            while currentPy <= endSubPy {
-                let y = originY + currentPy * pixelScale
-                if y >= 20 && y <= size.height {
-                    let isMajor = abs(currentPy.truncatingRemainder(dividingBy: stepPx)) < 0.001 || abs(currentPy.truncatingRemainder(dividingBy: stepPx) - stepPx) < 0.001
-                    let isMedium = !isMajor && (abs(currentPy.truncatingRemainder(dividingBy: stepPx / 2.0)) < 0.001)
+                    let mod = ((i % rulerSubdivisionsPerMajor) + rulerSubdivisionsPerMajor) % rulerSubdivisionsPerMajor
+                    let isMajor = mod == 0
+                    let isMedium = mod == rulerSubdivisionsPerMajor / 2
 
                     if isMajor {
-                        // 1. 主刻度线 (长 6px)
                         let tickPath = Path { p in
                             p.move(to: CGPoint(x: size.width - 6, y: y))
                             p.addLine(to: CGPoint(x: size.width, y: y))
                         }
                         context.stroke(tickPath, with: .color(Color.primary.opacity(0.55)), lineWidth: 1)
 
-                        // 纵向主刻度数字 (逆时针 90 度旋转)
+                        // 纵向主刻度数字 (逆时针 90 度旋转，中心对齐刻度)
                         var textContext = context
                         textContext.translateBy(x: 6, y: y)
                         textContext.rotate(by: .degrees(-90))
@@ -843,14 +863,12 @@ struct LeftRulerCanvas: View {
                         let resolvedText = textContext.resolve(text)
                         textContext.draw(resolvedText, at: .zero, anchor: .center)
                     } else if isMedium {
-                        // 2. 次级半步刻度线 (长 4px)
                         let tickPath = Path { p in
                             p.move(to: CGPoint(x: size.width - 4, y: y))
                             p.addLine(to: CGPoint(x: size.width, y: y))
                         }
                         context.stroke(tickPath, with: .color(Color.primary.opacity(0.35)), lineWidth: 1)
                     } else {
-                        // 3. 细分微刻度线 (长 2.5px)
                         let tickPath = Path { p in
                             p.move(to: CGPoint(x: size.width - 2.5, y: y))
                             p.addLine(to: CGPoint(x: size.width, y: y))
@@ -858,7 +876,6 @@ struct LeftRulerCanvas: View {
                         context.stroke(tickPath, with: .color(Color.primary.opacity(0.20)), lineWidth: 1)
                     }
                 }
-                currentPy += subStepPx
             }
 
             // 鼠标位置活动指示线
@@ -873,29 +890,6 @@ struct LeftRulerCanvas: View {
         .frame(width: 20)
         .clipped()
     }
-}
-
-/// 根据当前缩放比例动态计算合理的标尺大刻度步长 (单位：像素 px)
-private func calculateRulerStep(scale: CGFloat) -> CGFloat {
-    let targetScreenDistance: CGFloat = 60
-    let rawPx = targetScreenDistance / max(scale, 0.001)
-
-    let exponent = floor(log10(rawPx))
-    let base = pow(10, exponent)
-    let fraction = rawPx / base
-
-    let stepFactor: CGFloat
-    if fraction <= 1.5 {
-        stepFactor = 1
-    } else if fraction <= 3.5 {
-        stepFactor = 2
-    } else if fraction <= 7.5 {
-        stepFactor = 5
-    } else {
-        stepFactor = 10
-    }
-
-    return base * stepFactor
 }
 
 /// 增强版图像查看器视图，默认开启像素模式，图标化轻量工具栏，支持旋转、自由拖拽、滚轮自由缩放、双图对比模式与标尺参考线系统。
@@ -1021,7 +1015,8 @@ struct ImageViewerView: View {
                 let boundingWidth = isRotated90or270 ? unrotatedHeight : unrotatedWidth
                 let boundingHeight = isRotated90or270 ? unrotatedWidth : unrotatedHeight
 
-                // 计算图像物理原点 (0,0) 在 View 视口中的准确屏幕坐标 (100% 精确与图片左上角物理边缘对齐，零误差)
+                // 图像物理原点 (0,0) 在视口坐标系中的位置：视口中心 − 半宽高 + 平移
+                // 与下方固定视口 ZStack 居中布局 + offset 严格对应（不再使用 ScrollView 内容坐标系）
                 let originX = (containerSize.width / 2) - (unrotatedWidth / 2) + offset.width + dragOffset.width
                 let originY = (containerSize.height / 2) - (unrotatedHeight / 2) + offset.height + dragOffset.height
 
@@ -1040,44 +1035,44 @@ struct ImageViewerView: View {
                     height: offset.height + dragOffset.height
                 )
 
-                ScrollView([.horizontal, .vertical]) {
-                    ZStack(alignment: .center) {
-                        // 背景图层 (根据包围盒大小拉伸，填充全视口)
-                        backgroundView
-                            .frame(width: max(boundingWidth, containerSize.width),
-                                   height: max(boundingHeight, containerSize.height))
+                // 固定视口画布（不用 ScrollView）：图像始终以视口中心 + offset 定位，
+                // 与 originX/Y = container/2 - size/2 + offset 及标尺/参考线坐标系严格一致。
+                // 放大超出视口时由 .clipped() 裁剪，平移仅依赖 offset（拖拽 / Cmd·Shift 滚轮）。
+                ZStack(alignment: .center) {
+                    // 背景铺满整个视口
+                    backgroundView
+                        .frame(width: containerSize.width, height: containerSize.height)
 
-                        if isCompareMode {
-                            // 对比模式视图 (原图与对比图双图叠加，同步平移/缩放/旋转)
-                            compareCanvasView(
-                                boundingWidth: max(boundingWidth, containerSize.width),
-                                boundingHeight: max(boundingHeight, containerSize.height),
-                                unrotatedWidth: unrotatedWidth,
-                                unrotatedHeight: unrotatedHeight,
-                                totalOffset: totalOffset,
-                                currentScale: currentScale
-                            )
-                        } else {
-                            // 单图正常视图
-                            singleImageView(
-                                unrotatedWidth: unrotatedWidth,
-                                unrotatedHeight: unrotatedHeight,
-                                totalOffset: totalOffset,
-                                currentScale: currentScale
-                            )
-                        }
+                    if isCompareMode {
+                        // 对比模式：内容包围盒可大于视口，仍以中心 + offset 对齐
+                        compareCanvasView(
+                            boundingWidth: max(boundingWidth, containerSize.width),
+                            boundingHeight: max(boundingHeight, containerSize.height),
+                            unrotatedWidth: unrotatedWidth,
+                            unrotatedHeight: unrotatedHeight,
+                            totalOffset: totalOffset,
+                            currentScale: currentScale
+                        )
+                    } else {
+                        singleImageView(
+                            unrotatedWidth: unrotatedWidth,
+                            unrotatedHeight: unrotatedHeight,
+                            totalOffset: totalOffset,
+                            currentScale: currentScale
+                        )
                     }
-                    .frame(minWidth: containerSize.width, minHeight: containerSize.height, alignment: .center)
-                    .contentShape(Rectangle())
-                    .gesture(dragGesture)
-                    .onTapGesture(count: 2) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            offset = .zero
-                        }
+                }
+                .frame(width: containerSize.width, height: containerSize.height)
+                .clipped()
+                .contentShape(Rectangle())
+                .gesture(dragGesture)
+                .onTapGesture(count: 2) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        offset = .zero
                     }
-                    .contextMenu {
-                        imageContextMenu
-                    }
+                }
+                .contextMenu {
+                    imageContextMenu
                 }
                 .gesture(
                     MagnificationGesture()
@@ -1085,7 +1080,7 @@ struct ImageViewerView: View {
                             state = val
                         }
                         .onEnded { val in
-                            let current = computeScale(containerSize: containerSize, baseSize: effectiveBaseSize)
+                            let current = computeScale(containerSize: canvasAvailableSize, baseSize: effectiveBaseSize)
                             customZoomScale = max(0.05, min(20.0, current * val))
                         }
                 )
@@ -1134,9 +1129,15 @@ struct ImageViewerView: View {
                             let mouseY = winHeight - event.locationInWindow.y
                             let mousePoint = CGPoint(x: mouseX, y: mouseY)
 
-                            // 仅当鼠标位于图片查看器容器区域内部时才响应缩放与平移，否则放行事件
-                            let containerFrame = geometry.frame(in: .global)
-                            guard containerFrame.contains(mousePoint) else {
+                            // 仅当鼠标位于「图像视口」内时才响应（排除顶部工具栏与分割线）
+                            let fullFrame = geometry.frame(in: .global)
+                            let imageAreaFrame = CGRect(
+                                x: fullFrame.minX,
+                                y: fullFrame.minY + toolbarHeight + 1,
+                                width: fullFrame.width,
+                                height: containerSize.height
+                            )
+                            guard imageAreaFrame.contains(mousePoint) else {
                                 return event
                             }
 
@@ -1159,20 +1160,17 @@ struct ImageViewerView: View {
                                 // 默认无修饰键：以鼠标指针当前位置为中心缩放 (Zoom around mouse location)
                                 let step = deltaY > 0 ? 1.08 : 0.92
                                 DispatchQueue.main.async {
-                                    let current = self.computeScale(containerSize: containerSize, baseSize: effectiveBaseSize)
+                                    let current = self.computeScale(containerSize: canvasAvailableSize, baseSize: effectiveBaseSize)
                                     let targetScale = max(0.05, min(20.0, current * step))
                                     guard current > 0, abs(targetScale - current) > 0.0001 else { return }
 
                                     let k = targetScale / current
 
-                                    let containerCenterX = containerFrame.midX
-                                    let containerCenterY = containerFrame.midY
+                                    // 鼠标相对于图像视口中心的偏移（与 origin 公式同一坐标系）
+                                    let mX = mouseX - imageAreaFrame.midX
+                                    let mY = mouseY - imageAreaFrame.midY
 
-                                    // 鼠标相对于容器中心的偏移向量
-                                    let mX = mouseX - containerCenterX
-                                    let mY = mouseY - containerCenterY
-
-                                    // 保持鼠标下的图片像素点位置不变：O_new = M - (M - O_old) * k
+                                    // 保持鼠标下的图片像素点位置不变：offset_new = m - (m - offset_old) * k
                                     let newOffsetX = mX - (mX - self.offset.width) * k
                                     let newOffsetY = mY - (mY - self.offset.height) * k
 
@@ -1484,6 +1482,7 @@ struct ImageViewerView: View {
             }
         }
         .frame(width: containerSize.width, height: containerSize.height)
+        .coordinateSpace(name: imageViewerCanvasCoordinateSpace)
         .allowsHitTesting(isRulerEnabled || !guideLines.isEmpty || newGuideOrientation != nil)
     }
 
@@ -1493,9 +1492,10 @@ struct ImageViewerView: View {
     private func snapPixelPosition(
         rawPixelPos: CGFloat,
         orientation: GuideOrientation,
-        currentScale: CGFloat
+        pixelScale: CGFloat
     ) -> (snappedPos: CGFloat, snapLabel: String?) {
-        let snapThresholdPx: CGFloat = 7.0 / max(currentScale, 0.001)
+        // 约 7pt 屏幕距离换算为图像像素阈值（与 pixelScale 对齐，Retina 下也稳定）
+        let snapThresholdPx: CGFloat = 7.0 / max(pixelScale, 0.0001)
 
         if orientation == .horizontal {
             let targets: [(pos: CGFloat, label: String)] = [
@@ -1537,7 +1537,7 @@ struct ImageViewerView: View {
         let isHovered = hoveredGuideId == guide.id
         let isDragging = draggingGuideId == guide.id
         let activePos = isDragging ? (draggingGuidePixelPos ?? guide.pixelPosition) : guide.pixelPosition
-        let snapInfo = snapPixelPosition(rawPixelPos: activePos, orientation: guide.orientation, currentScale: currentScale)
+        let snapInfo = snapPixelPosition(rawPixelPos: activePos, orientation: guide.orientation, pixelScale: pixelScale)
 
         if guide.orientation == .horizontal {
             // 水平参考线 (固定 View Y 坐标)
@@ -1546,17 +1546,17 @@ struct ImageViewerView: View {
 
             if viewY >= -100 && viewY <= containerSize.height + 100 {
                 ZStack(alignment: .leading) {
-                    // 触控拖拽响应带 (宽度扩大至 14px，易于鼠标捕获)
+                    // 扩大命中区域便于拖拽；视觉线仍为 1pt、无投影
                     Rectangle()
                         .fill(Color.black.opacity(0.001))
-                        .frame(width: containerSize.width, height: 14)
+                        .frame(width: containerSize.width, height: guideLineHitThickness)
                         .contentShape(Rectangle())
 
-                    // 实体参考线条 (1.5px / 超界红色警告 / 吸附黄)
+                    // 实体参考线：固定 1pt，无投影
                     Rectangle()
                         .fill(isOutOfBounds ? Color.red : (snapInfo.snapLabel != nil ? Color.yellow : (isHovered || isDragging ? Color.accentColor : Color.cyan.opacity(0.85))))
-                        .frame(width: containerSize.width, height: isOutOfBounds ? 2.5 : (snapInfo.snapLabel != nil ? 2.0 : 1.5))
-                        .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
+                        .frame(width: containerSize.width, height: guideLineVisualThickness)
+                        .allowsHitTesting(false)
 
                     // 悬停/拖拽时的精准坐标与吸附/删除气泡提示
                     if isHovered || isDragging {
@@ -1578,20 +1578,24 @@ struct ImageViewerView: View {
                             .padding(.vertical, 3)
                             .background(Capsule().fill(isOutOfBounds ? Color.red : (snapInfo.snapLabel != nil ? Color.orange : Color.accentColor)))
                             .offset(x: max(30, (mousePosInContainer?.x ?? 50) + 10), y: -14)
+                            .allowsHitTesting(false)
                     }
                 }
+                .frame(width: containerSize.width, height: guideLineHitThickness)
+                .contentShape(Rectangle())
                 .position(x: containerSize.width / 2, y: viewY)
                 .onHover { over in
                     hoveredGuideId = over ? guide.id : nil
                 }
                 .highPriorityGesture(
                     isGuidesLocked ? nil :
-                    DragGesture(minimumDistance: 1)
+                    // 使用画布坐标系，location 与 originY 同一空间（不随命中带宽变化）
+                    DragGesture(minimumDistance: 1, coordinateSpace: .named(imageViewerCanvasCoordinateSpace))
                         .onChanged { value in
                             draggingGuideId = guide.id
                             let currentY = value.location.y
                             let rawPx = (currentY - originY) / pixelScale
-                            let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .horizontal, currentScale: currentScale)
+                            let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .horizontal, pixelScale: pixelScale)
                             draggingGuidePixelPos = snapRes.snappedPos
                         }
                         .onEnded { value in
@@ -1616,17 +1620,17 @@ struct ImageViewerView: View {
 
             if viewX >= -100 && viewX <= containerSize.width + 100 {
                 ZStack(alignment: .top) {
-                    // 触控拖拽响应带 (宽度扩大至 14px，易于鼠标捕获)
+                    // 扩大命中区域便于拖拽；视觉线仍为 1pt、无投影
                     Rectangle()
                         .fill(Color.black.opacity(0.001))
-                        .frame(width: 14, height: containerSize.height)
+                        .frame(width: guideLineHitThickness, height: containerSize.height)
                         .contentShape(Rectangle())
 
-                    // 实体参考线条 (1.5px / 超界红色警告 / 吸附黄)
+                    // 实体参考线：固定 1pt，无投影
                     Rectangle()
                         .fill(isOutOfBounds ? Color.red : (snapInfo.snapLabel != nil ? Color.yellow : (isHovered || isDragging ? Color.accentColor : Color.cyan.opacity(0.85))))
-                        .frame(width: isOutOfBounds ? 2.5 : (snapInfo.snapLabel != nil ? 2.0 : 1.5), height: containerSize.height)
-                        .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
+                        .frame(width: guideLineVisualThickness, height: containerSize.height)
+                        .allowsHitTesting(false)
 
                     // 悬停/拖拽时的精准坐标与吸附/删除气泡提示
                     if isHovered || isDragging {
@@ -1648,20 +1652,23 @@ struct ImageViewerView: View {
                             .padding(.vertical, 3)
                             .background(Capsule().fill(isOutOfBounds ? Color.red : (snapInfo.snapLabel != nil ? Color.orange : Color.accentColor)))
                             .offset(x: 12, y: max(30, (mousePosInContainer?.y ?? 50) + 10))
+                            .allowsHitTesting(false)
                     }
                 }
+                .frame(width: guideLineHitThickness, height: containerSize.height)
+                .contentShape(Rectangle())
                 .position(x: viewX, y: containerSize.height / 2)
                 .onHover { over in
                     hoveredGuideId = over ? guide.id : nil
                 }
                 .highPriorityGesture(
                     isGuidesLocked ? nil :
-                    DragGesture(minimumDistance: 1)
+                    DragGesture(minimumDistance: 1, coordinateSpace: .named(imageViewerCanvasCoordinateSpace))
                         .onChanged { value in
                             draggingGuideId = guide.id
                             let currentX = value.location.x
                             let rawPx = (currentX - originX) / pixelScale
-                            let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, currentScale: currentScale)
+                            let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, pixelScale: pixelScale)
                             draggingGuidePixelPos = snapRes.snappedPos
                         }
                         .onEnded { value in
@@ -1693,16 +1700,16 @@ struct ImageViewerView: View {
         currentScale: CGFloat,
         pixelScale: CGFloat
     ) -> some View {
-        let snapInfo = snapPixelPosition(rawPixelPos: pixelPos, orientation: orientation, currentScale: currentScale)
+        let snapInfo = snapPixelPosition(rawPixelPos: pixelPos, orientation: orientation, pixelScale: pixelScale)
         let activePos = snapInfo.snappedPos
 
         if orientation == .horizontal {
             let viewY = originY + activePos * pixelScale
             ZStack(alignment: .leading) {
+                // 新建中的临时线：1pt、无投影（与已保存参考线视觉一致）
                 Rectangle()
                     .fill(snapInfo.snapLabel != nil ? Color.yellow : Color.accentColor)
-                    .frame(width: containerSize.width, height: snapInfo.snapLabel != nil ? 2.0 : 1.5)
-                    .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
+                    .frame(width: containerSize.width, height: guideLineVisualThickness)
 
                 let textStr = snapInfo.snapLabel != nil ? "Y: \(Int(round(activePos))) px • \(snapInfo.snapLabel!)" : "Y: \(Int(round(activePos))) px"
                 Text(textStr)
@@ -1720,8 +1727,7 @@ struct ImageViewerView: View {
             ZStack(alignment: .top) {
                 Rectangle()
                     .fill(snapInfo.snapLabel != nil ? Color.yellow : Color.accentColor)
-                    .frame(width: snapInfo.snapLabel != nil ? 2.0 : 1.5, height: containerSize.height)
-                    .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
+                    .frame(width: guideLineVisualThickness, height: containerSize.height)
 
                 let textStr = snapInfo.snapLabel != nil ? "X: \(Int(round(activePos))) px • \(snapInfo.snapLabel!)" : "X: \(Int(round(activePos))) px"
                 Text(textStr)
@@ -1757,16 +1763,16 @@ struct ImageViewerView: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { location in
                 let rawPx = (location.x - originX) / pixelScale
-                let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, currentScale: currentScale)
+                let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, pixelScale: pixelScale)
                 guideLines.append(GuideLine(orientation: .vertical, pixelPosition: snapRes.snappedPos))
             }
             .gesture(
-                DragGesture(minimumDistance: 2)
+                DragGesture(minimumDistance: 2, coordinateSpace: .named(imageViewerCanvasCoordinateSpace))
                     .onChanged { value in
                         newGuideOrientation = .horizontal
                         let currentY = value.location.y
                         let rawPx = (currentY - originY) / pixelScale
-                        let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .horizontal, currentScale: currentScale)
+                        let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .horizontal, pixelScale: pixelScale)
                         newGuidePixelPos = snapRes.snappedPos
                     }
                     .onEnded { value in
@@ -1789,16 +1795,16 @@ struct ImageViewerView: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { location in
                 let rawPy = (location.y - originY) / pixelScale
-                let snapRes = snapPixelPosition(rawPixelPos: rawPy, orientation: .horizontal, currentScale: currentScale)
+                let snapRes = snapPixelPosition(rawPixelPos: rawPy, orientation: .horizontal, pixelScale: pixelScale)
                 guideLines.append(GuideLine(orientation: .horizontal, pixelPosition: snapRes.snappedPos))
             }
             .gesture(
-                DragGesture(minimumDistance: 2)
+                DragGesture(minimumDistance: 2, coordinateSpace: .named(imageViewerCanvasCoordinateSpace))
                     .onChanged { value in
                         newGuideOrientation = .vertical
                         let currentX = value.location.x
                         let rawPx = (currentX - originX) / pixelScale
-                        let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, currentScale: currentScale)
+                        let snapRes = snapPixelPosition(rawPixelPos: rawPx, orientation: .vertical, pixelScale: pixelScale)
                         newGuidePixelPos = snapRes.snappedPos
                     }
                     .onEnded { value in

@@ -297,6 +297,52 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         return foregroundPid > 0 && foregroundPid != idleProcessGroup
     }
 
+    // 前台进程图标缓存：命中结果按 foreground pgid 复用；未命中不长期缓存，
+    // 以便 node 包装脚本 spawn 出真实二进制后能尽快匹配。
+    private var cachedForegroundAppIconPid: pid_t = 0
+    private var cachedForegroundAppIcon: TerminalAppIconSource?
+    private var cachedForegroundAppIconMissAt: ContinuousClock.Instant?
+
+    /// 当前前台进程若在 `TerminalAppIcons/apps.json`（或用户配置）中有映射，
+    /// 返回对应图标来源；空闲或未知程序为 nil。
+    var foregroundAppIcon: TerminalAppIconSource? {
+        guard isForegroundCommandRunning,
+              let shellPid,
+              let foregroundPid = terminalView.foregroundPid,
+              foregroundPid > 0
+        else {
+            if cachedForegroundAppIconPid != 0 {
+                cachedForegroundAppIconPid = 0
+                cachedForegroundAppIcon = nil
+                cachedForegroundAppIconMissAt = nil
+            }
+            return nil
+        }
+
+        // 已命中：同 pgid 直接复用。
+        if cachedForegroundAppIconPid == foregroundPid, let cached = cachedForegroundAppIcon {
+            return cached
+        }
+        // 未命中：短暂节流后再扫进程树（避免 0.3s Timeline 每次全量 walk）。
+        if cachedForegroundAppIconPid == foregroundPid,
+           cachedForegroundAppIcon == nil,
+           let missAt = cachedForegroundAppIconMissAt,
+           ContinuousClock.now - missAt < .milliseconds(400)
+        {
+            return nil
+        }
+
+        let names = TerminalProcessIdentity.foregroundExecutableNames(
+            shellPid: shellPid,
+            foregroundPgid: foregroundPid
+        )
+        let source = TerminalAppIconCatalog.shared.source(forProcessNames: names)
+        cachedForegroundAppIconPid = foregroundPid
+        cachedForegroundAppIcon = source
+        cachedForegroundAppIconMissAt = source == nil ? ContinuousClock.now : nil
+        return source
+    }
+
     /// 终端 shell 自会话创建以来的运行时长。
     func runningDurationLabel(at date: Date = .now) -> String {
         let seconds = max(0, Int(date.timeIntervalSince(startedAt)))

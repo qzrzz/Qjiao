@@ -6,7 +6,8 @@
   "scripts": {
     "release": "bun run scripts/release.ts",
     "appcast": "bun run scripts/generate-appcast.ts",
-    "vendor:material-icons": "bun run scripts/vendor-material-icons.ts"
+    "vendor:material-icons": "bun run scripts/vendor-material-icons.ts",
+    "vendor:terminal-app-icons": "bun run scripts/vendor-terminal-app-icons.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

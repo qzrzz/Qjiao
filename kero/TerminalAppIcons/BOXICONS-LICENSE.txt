@@ -1,0 +1,5 @@
+Boxicons Brands (bxl) SVG icons in icons/bxl-*.svg are from Boxicons
+(https://github.com/atisawd/boxicons), also available via Iconify.
+
+License: MIT
+https://github.com/atisawd/boxicons/blob/master/LICENSE

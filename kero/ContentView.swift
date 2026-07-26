@@ -779,6 +779,7 @@ private struct SessionTabLabel: View {
         // Ghostty does not publish foreground-process changes as SwiftUI
         // state. A lightweight timeline refreshes just the visible tab icon.
         TimelineView(.periodic(from: .now, by: 0.3)) { _ in
+            let appIcon = session.foregroundAppIcon
             TabItemChrome(
                 systemImage: "terminal",
                 title: customTitle ?? session.title,
@@ -786,6 +787,7 @@ private struct SessionTabLabel: View {
                 paneCount: paneCount,
                 isSelected: isSelected,
                 isTerminalRunning: session.isForegroundCommandRunning,
+                terminalAppIcon: appIcon,
                 select: select,
                 close: close
             )
@@ -822,8 +824,8 @@ private struct TabStripIconView: View {
     let systemImage: String
     var materialFileName: String? = nil
     var isSelected = false
-    /// 与 ProgressView mini 框、micro SF Symbol 视觉对齐。
-    private static let materialSize: CGFloat = 12
+    /// 顶栏 Tab 条文件图标尺寸。
+    private static let materialSize: CGFloat = 13
 
     var body: some View {
         if let materialFileName {
@@ -859,6 +861,8 @@ private struct TabItemChrome: View {
     let isSelected: Bool
     var isDirty = false
     var isTerminalRunning = false
+    /// 终端前台进程匹配到的应用图标；有值时优先于转圈动画。
+    var terminalAppIcon: TerminalAppIconSource? = nil
     let select: () -> Void
     let close: () -> Void
 
@@ -870,7 +874,15 @@ private struct TabItemChrome: View {
     var body: some View {
         Button(action: select) {
             HStack(spacing: 5) {
-                if isTerminalRunning {
+                if let terminalAppIcon {
+                    // 识别到 agy / codex 等应用时显示其图标，替代通用转圈。
+                    TerminalAppIconView(
+                        source: terminalAppIcon,
+                        size: 13,
+                        isSelected: isSelected
+                    )
+                    .accessibilityLabel("Running application")
+                } else if isTerminalRunning {
                     ProgressView()
                         .controlSize(.mini)
                         .tint(isSelected ? Color(nsColor: Theme.cursor) : .secondary)
@@ -988,20 +1000,31 @@ private struct TabItemChrome: View {
     }
 }
 
-/// Terminal items switch from the idle terminal glyph to a native spinner
-/// while their foreground process is busy. Open files / diffs use Material
-/// icons (same as the Files tree); other content keeps its SF Symbol.
+/// Terminal: idle → SF Symbol；前台已知应用 → TerminalAppIcon；未知忙 → spinner。
+/// Open files / diffs use Material icons (same as the Files tree).
 private struct TabContentIcon: View {
     let content: PaneContent?
     let tint: Color
     private static let materialSize: CGFloat = 14
 
     var body: some View {
-        if case .session(let session)? = content, session.isForegroundCommandRunning {
-            ProgressView()
-                .controlSize(.small)
-                .tint(tint)
-                .accessibilityLabel("Command running")
+        if case .session(let session)? = content {
+            if let appIcon = session.foregroundAppIcon {
+                TerminalAppIconView(
+                    source: appIcon,
+                    size: Self.materialSize,
+                    isSelected: true
+                )
+            } else if session.isForegroundCommandRunning {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(tint)
+                    .accessibilityLabel("Command running")
+            } else {
+                Image(systemName: "terminal")
+                    .font(SidebarTypography.secondary(.medium))
+                    .foregroundStyle(tint)
+            }
         } else if let fileName = content?.materialFileName {
             MaterialFileIconView(
                 fileName: fileName,

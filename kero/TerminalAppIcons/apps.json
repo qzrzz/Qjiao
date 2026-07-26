@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "apps": [
+    {
+      "label": "Claude",
+      "match": ["claude"],
+      "matchPrefix": ["claude-"],
+      "material": "claude"
+    },
+    {
+      "label": "Codex",
+      "match": ["codex"],
+      "matchPrefix": ["codex-"],
+      "iconify": "bxl:openai"
+    },
+    {
+      "label": "Grok",
+      "match": ["grok"],
+      "matchPrefix": ["grok-"],
+      "iconify": "bxl:grok"
+    },
+    {
+      "label": "Agy",
+      "match": ["agy", "agent"],
+      "matchPrefix": ["agy-", "agent-"],
+      "material": "robot"
+    },
+    {
+      "label": "Gemini",
+      "match": ["gemini"],
+      "material": "gemini-ai"
+    },
+    {
+      "label": "Cursor",
+      "match": ["cursor", "cursor-agent"],
+      "material": "cursor"
+    },
+    {
+      "label": "GitHub Copilot",
+      "match": ["copilot"],
+      "material": "copilot"
+    },
+    {
+      "label": "Node.js",
+      "match": ["node", "nodejs"],
+      "material": "nodejs"
+    },
+    {
+      "label": "npm",
+      "match": ["npm", "npx"],
+      "material": "npm"
+    },
+    {
+      "label": "pnpm",
+      "match": ["pnpm"],
+      "material": "pnpm"
+    },
+    {
+      "label": "Yarn",
+      "match": ["yarn", "yarn.js"],
+      "material": "yarn"
+    },
+    {
+      "label": "Bun",
+      "match": ["bun"],
+      "material": "bun"
+    },
+    {
+      "label": "Deno",
+      "match": ["deno"],
+      "material": "deno"
+    },
+    {
+      "label": "Python",
+      "match": ["python", "python3"],
+      "matchPrefix": ["python3."],
+      "material": "python"
+    },
+    {
+      "label": "Docker",
+      "match": ["docker", "docker-compose", "com.docker.cli"],
+      "material": "docker"
+    },
+    {
+      "label": "Git",
+      "match": ["git"],
+      "material": "git"
+    },
+    {
+      "label": "GitHub CLI",
+      "match": ["gh"],
+      "iconify": "bxl:github"
+    },
+    {
+      "label": "GitLab",
+      "match": ["gitlab"],
+      "material": "gitlab"
+    },
+    {
+      "label": "Vim / Neovim",
+      "match": ["vim", "nvim", "nvim-qt", "vimdiff"],
+      "material": "vim"
+    },
+    {
+      "label": "Go",
+      "match": ["go", "gopls"],
+      "material": "go"
+    },
+    {
+      "label": "Rust",
+      "match": ["cargo", "rustc", "rustup"],
+      "material": "rust"
+    },
+    {
+      "label": "Swift",
+      "match": ["swift", "swiftc"],
+      "material": "swift"
+    },
+    {
+      "label": "Java",
+      "match": ["java", "javac"],
+      "material": "java"
+    },
+    {
+      "label": "PHP",
+      "match": ["php"],
+      "material": "php"
+    },
+    {
+      "label": "Ruby",
+      "match": ["ruby", "irb", "bundle", "bundler"],
+      "material": "ruby"
+    },
+    {
+      "label": "Vite",
+      "match": ["vite"],
+      "material": "vite"
+    },
+    {
+      "label": "Webpack",
+      "match": ["webpack"],
+      "material": "webpack"
+    },
+    {
+      "label": "Make",
+      "match": ["make", "gmake"],
+      "material": "makefile"
+    },
+    {
+      "label": "SSH",
+      "match": ["ssh", "ssh-agent", "scp", "sftp"],
+      "material": "console"
+    },
+    {
+      "label": "Process monitor",
+      "match": ["htop", "btop", "top", "glances"],
+      "material": "console"
+    },
+    {
+      "label": "tmux",
+      "match": ["tmux"],
+      "material": "console"
+    }
+  ]
+}
