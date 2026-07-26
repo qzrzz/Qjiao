@@ -137,6 +137,36 @@
       "material": "vite"
     },
     {
+      "label": "Vitest",
+      "match": ["vitest"],
+      "matchPrefix": ["vitest-"],
+      "svg": "vitest.svg"
+    },
+    {
+      "label": "Rspack",
+      "match": ["rspack"],
+      "matchPrefix": ["rspack-"],
+      "svg": "rspack.svg"
+    },
+    {
+      "label": "Rsbuild",
+      "match": ["rsbuild"],
+      "matchPrefix": ["rsbuild-"],
+      "svg": "rsbuild.svg"
+    },
+    {
+      "label": "Rslib",
+      "match": ["rslib"],
+      "matchPrefix": ["rslib-"],
+      "svg": "rslib.svg"
+    },
+    {
+      "label": "Rstest",
+      "match": ["rstest"],
+      "matchPrefix": ["rstest-"],
+      "svg": "rstest.svg"
+    },
+    {
       "label": "Webpack",
       "match": ["webpack"],
       "material": "webpack"
