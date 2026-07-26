@@ -827,8 +827,10 @@ private struct SessionTabsView: View {
         Toggle("Disable Zsh Auto Title", isOn: $settings.disableZshAutoTitle)
         Divider()
         if case .file(let file) = tab.focusedContent {
-            Button("Reveal in Finder") {
+            Button {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])
+            } label: {
+                Label("Reveal in Finder", systemImage: "finder")
             }
             Button("Copy Absolute Path") {
                 NSPasteboard.general.clearContents()

@@ -371,11 +371,15 @@ private struct SidebarProjectRow: View {
                 curatedThemeMenu(dark: true)
             }
             Divider()
-            Button("Open in Finder") {
+            Button {
                 openProjectDirectory()
+            } label: {
+                Label("Open in Finder", systemImage: "finder")
             }
-            Button("Open Config Folder") {
+            Button {
                 openConfigFolder()
+            } label: {
+                Label("Open Config Folder", systemImage: "finder")
             }
             Divider()
             Button("Change Icon…") {

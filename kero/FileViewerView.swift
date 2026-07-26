@@ -1413,7 +1413,7 @@ struct ImageViewerView: View {
         Button {
             NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
         } label: {
-            Label("Reveal in Finder", systemImage: "folder")
+            Label("Reveal in Finder", systemImage: "finder")
         }
 
         Button {

@@ -4440,44 +4440,18 @@ private struct CodeEditorOpenButton: View {
                         .fill(Color.primary.opacity(0.1))
                         .frame(width: 1, height: 14)
 
-                    // 使用 Picker 绑定 preferredBundleId：
-                    // - 自动为当前选中项渲染勾选标记
-                    // - didSet 写回 AppSettings 持久化
-                    // - preferredEditor 随之更新，主按钮图标与名称同步刷新
-                    Picker(selection: $registry.preferredBundleId, label:
-                        Image(systemName: "chevron.down")
-                            .font(SidebarTypography.micro())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 22, height: 28)
-                            .contentShape(Rectangle())
-                    ) {
-                        ForEach(registry.installedEditors) { editor in
-                            // NSMenuItem 图标：直接传 NSImage，不加任何 SwiftUI 修饰符。
-                            // Label icon 闭包内的 .resizable()/.frame() 会被菜单渲染器忽略，
-                            // 必须通过 NSImage.size 控制尺寸（menuIcon() 已设为 16pt）。
-                            if let icon = editor.menuIcon() {
-                                Label {
-                                    Text(editor.displayName)
-                                } icon: {
-                                    Image(nsImage: icon)
-                                }
-                                .tag(editor.bundleId)
-                            } else {
-                                Label(editor.displayName, systemImage: editor.symbolName)
-                                    .tag(editor.bundleId)
-                            }
-                        }
+                    // 使用原生 NSButton + NSMenu 实现下拉：
+                    // NSMenuItem.image 直接赋值，图标 100% 可靠显示，
+                    // 外观完全自定义，不受 SwiftUI Picker/Menu 渲染限制。
+                    EditorDropdownNSButton(
+                        editors: registry.installedEditors,
+                        preferredBundleId: registry.preferredBundleId
+                    ) { selected in
+                        registry.preferredBundleId = selected.bundleId
+                        registry.open(path: path, with: selected)
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(width: 22)
+                    .frame(width: 22, height: 28)
                     .help("选择代码编辑器")
-                    // 切换默认编辑器后自动用新编辑器打开当前路径。
-                    .onChange(of: registry.preferredBundleId) { newId in
-                        if let editor = registry.installedEditors.first(where: { $0.bundleId == newId }) {
-                            registry.open(path: path, with: editor)
-                        }
-                    }
                 } else {
                     // 只有一个编辑器时右侧显示跳转图标。
                     Image(systemName: "arrow.up.forward")
@@ -4497,6 +4471,89 @@ private struct CodeEditorOpenButton: View {
         }
     }
 }
+
+/// 原生 NSButton + NSMenu 包装的编辑器下拉选择按钮。
+///
+/// 直接使用 `NSMenuItem.image` 赋值应用图标，`NSMenuItem.state` 显示勾选，
+/// 绕过 SwiftUI `Menu`/`Picker` 无法可靠渲染 `NSImage` 图标的限制。
+private struct EditorDropdownNSButton: NSViewRepresentable {
+    /// 可用编辑器列表。
+    let editors: [CodeEditor]
+    /// 当前选中编辑器的 Bundle ID。
+    let preferredBundleId: String
+    /// 用户选择编辑器后的回调（已在主线程）。
+    let onSelect: (CodeEditor) -> Void
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton()
+        button.bezelStyle = .inline
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.contentTintColor = .secondaryLabelColor
+        // 使用 SF Symbol 作为 chevron 图标。
+        let chevron = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "选择代码编辑器")
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular)
+        button.image = chevron?.withSymbolConfiguration(config)
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.showMenu(_:))
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.parent = self
+        // 每次 preferredBundleId 或 editors 变化时重建菜单，同步勾选状态。
+        context.coordinator.rebuildMenu(editors: editors, preferredBundleId: preferredBundleId)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var parent: EditorDropdownNSButton
+        private var menu = NSMenu()
+
+        init(_ parent: EditorDropdownNSButton) {
+            self.parent = parent
+        }
+
+        /// 重建菜单项列表，直接通过 NSMenuItem 设置图标与勾选状态。
+        func rebuildMenu(editors: [CodeEditor], preferredBundleId: String) {
+            menu.removeAllItems()
+            for editor in editors {
+                let item = NSMenuItem(
+                    title: editor.displayName,
+                    action: #selector(selectEditor(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = editor
+                // 直接赋值 NSImage：NSMenuItem.image 原生支持，图标稳定显示。
+                item.image = editor.menuIcon()
+                // 勾选当前默认编辑器。
+                item.state = editor.bundleId == preferredBundleId ? .on : .off
+                menu.addItem(item)
+            }
+        }
+
+        /// 点击 chevron 按钮时在按钮下方弹出菜单。
+        @objc func showMenu(_ sender: NSButton) {
+            menu.popUp(
+                positioning: menu.items.first(where: { $0.state == .on }),
+                at: NSPoint(x: 0, y: sender.bounds.height + 2),
+                in: sender
+            )
+        }
+
+        /// 用户点击菜单项后触发，更新默认编辑器并打开路径。
+        @objc func selectEditor(_ item: NSMenuItem) {
+            guard let editor = item.representedObject as? CodeEditor else { return }
+            parent.onSelect(editor)
+        }
+    }
+}
+
 
 
 // MARK: - Info panel（当前终端会话）
