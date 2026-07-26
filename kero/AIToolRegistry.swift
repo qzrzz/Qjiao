@@ -261,11 +261,8 @@ final class AIToolRegistry: nonisolated ObservableObject {
             let fullCommand = "\(cdCmd) && \(cmd)"
 
             if let manager = terminalManager, let project = manager.selectedProject {
-                // 在 Project 中新建 Session，先 cd 到目标目录，然后打开 cli
+                // 在 Project 中新建 Session，先 cd 到目标目录，然后打开 cli（不强制锁定标题）
                 let session = project.newSession(directory: path)
-                let tabName = "\(targetTool.displayName)"
-                project.selectedTab?.customName = tabName
-                session.title = tabName
                 session.sendCommandWhenReady("\(fullCommand)\n")
             } else {
                 // 回退机制：使用 Process 直接通过 Terminal 启动
