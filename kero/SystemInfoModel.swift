@@ -202,6 +202,8 @@ private struct DiskIOCumulativeSample: Equatable {
 final class SystemInfoModel: nonisolated ObservableObject {
     @Published private(set) var snapshot = SystemSnapshot()
     @Published private(set) var isRefreshing = false
+    /// IP 地址（局域网 & 出口 IP）是否正在刷新中。
+    @Published private(set) var isRefreshingIP = false
     /// CPU 占用率历史（0...100），供一行高折线使用。
     @Published private(set) var cpuHistory: [Double] = []
     /// 内存使用率历史（0...1）。
@@ -436,6 +438,51 @@ final class SystemInfoModel: nonisolated ObservableObject {
         }
     }
 
+    /// 强制刷新本机局域网 IP 与出口 IP，并同步更新 isRefreshingIP 动画状态。
+    func refreshIP() async {
+        guard isActive else { return }
+        guard !isRefreshingIP else { return }
+        isRefreshingIP = true
+        defer { isRefreshingIP = false }
+
+        let runner = self.runner
+        async let routeResult = optionalRun(runner, ["route", "-n", "get", "default"], timeout: .seconds(2))
+        async let nwiResult = optionalRun(runner, ["scutil", "--nwi"], timeout: .seconds(3))
+        async let publicIPResult = optionalRun(runner, ["curl", "-sS", "--connect-timeout", "3", "--max-time", "5", "https://cloudflare.com/cdn-cgi/trace"], timeout: .seconds(6))
+
+        let routeOut = await routeResult
+        let nwiOut = await nwiResult
+        let publicIPOut = await publicIPResult
+
+        var next = snapshot
+
+        let preferredIF = routeOut.flatMap(Self.parseDefaultRouteInterface)
+        if let nwiOut, let local = Self.parseLocalIPv4(fromNWI: nwiOut, preferredInterface: preferredIF) {
+            next.localIPv4Address = local.address
+            next.localIPv4Interface = local.interface
+        } else {
+            next.localIPv4Address = nil
+            next.localIPv4Interface = nil
+        }
+        lastLocalIPAt = Date()
+
+        if let publicIPOut, let parsed = Self.parseCloudflareTrace(publicIPOut) {
+            next.publicIPv4Address = parsed.ip
+            next.publicIPLocation = parsed.loc
+            next.publicIPLocationEmoji = parsed.emoji
+        } else {
+            next.publicIPv4Address = nil
+            next.publicIPLocation = nil
+            next.publicIPLocationEmoji = nil
+        }
+        lastPublicIPAt = Date()
+
+        next.updatedAt = Date()
+        if snapshot != next {
+            snapshot = next
+        }
+    }
+
     func refresh(forceSlow: Bool = true, manual: Bool = false) async {
         guard isActive else { return }
         if isRefreshing {
@@ -443,7 +490,13 @@ final class SystemInfoModel: nonisolated ObservableObject {
             return
         }
         isRefreshing = true
+        let wantLocalIP = forceSlow || lastLocalIPAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
+        let wantPublicIP = forceSlow || lastPublicIPAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
+        let refreshingIPThisCycle = wantLocalIP || wantPublicIP
+        if refreshingIPThisCycle { isRefreshingIP = true }
+
         defer {
+            if refreshingIPThisCycle { isRefreshingIP = false }
             isRefreshing = false
             if pendingForceRefresh {
                 pendingForceRefresh = false
@@ -454,8 +507,6 @@ final class SystemInfoModel: nonisolated ObservableObject {
         let runner = self.runner
         let wantDisk = forceSlow || lastDiskCapacityAt.map { Date().timeIntervalSince($0) >= 10 } ?? true
         let wantProxy = forceSlow || lastProxyAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
-        let wantLocalIP = forceSlow || lastLocalIPAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
-        let wantPublicIP = forceSlow || lastPublicIPAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
         let wantMemTotal = cachedMemTotal == nil
             || lastMemTotalAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
         // 磁盘写入量：每 30s 一拍（手动/force 可立刻采）。

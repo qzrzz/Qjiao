@@ -379,22 +379,31 @@ struct SystemPanel: View {
         let publicEmoji = model.snapshot.publicIPLocationEmoji
 
         return HStack(spacing: 4) {
-            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                .font(SidebarTypography.micro())
-                .foregroundStyle((address != nil || publicAddr != nil) ? accent : .secondary)
-                .frame(width: 11, height: 11)
-                .padding(.trailing, 2)
-            Text("IP")
-                .font(SidebarTypography.micro(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 36, alignment: .leading)
-            // 内网 IP 数字等宽，段长变化时更稳。
+            // 点击 IP 标签与图标触发 IP 刷新，刷新时图标旋转
+            HStack(spacing: 4) {
+                ipIcon
+                Text("IP")
+                    .font(SidebarTypography.micro(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                Task { await model.refreshIP() }
+            }
+            .help(model.isRefreshingIP ? "Refreshing IP…" : "Click to refresh IP address")
+
+            // 内网 IP 数字等宽，段长变化时更稳。点击同样触发刷新。
             Text(display)
                 .font(SidebarTypography.section(.medium).monospacedDigit())
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .tooltip(localIPHelp, edge: .above)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    Task { await model.refreshIP() }
+                }
             if let address {
                 Button {
                     copyToPasteboard(address)
@@ -422,6 +431,10 @@ struct SystemPanel: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                         .tooltip(publicIPHelp, edge: .above)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            Task { await model.refreshIP() }
+                        }
                     Button {
                         copyToPasteboard(publicAddr)
                     } label: {
@@ -442,6 +455,29 @@ struct SystemPanel: View {
         .frame(height: 18)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(ipRowAccessibilityLabel)
+    }
+
+    /// IP 图标：刷新时按 30fps 平滑旋转。
+    @ViewBuilder
+    private var ipIcon: some View {
+        let hasIP = model.snapshot.localIPv4Address != nil || model.snapshot.publicIPv4Address != nil
+        if model.isRefreshingIP {
+            TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
+                let angle = context.date.timeIntervalSince1970.truncatingRemainder(dividingBy: 1.0) * 360
+                Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                    .font(SidebarTypography.micro())
+                    .foregroundStyle(accent)
+                    .frame(width: 11, height: 11)
+                    .rotationEffect(.degrees(angle))
+                    .padding(.trailing, 2)
+            }
+        } else {
+            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                .font(SidebarTypography.micro())
+                .foregroundStyle(hasIP ? accent : .secondary)
+                .frame(width: 11, height: 11)
+                .padding(.trailing, 2)
+        }
     }
 
     /// 内网 IP 的悬浮提示信息。
