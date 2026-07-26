@@ -3239,7 +3239,8 @@ private struct PackageInfoSection: View {
     private func syncVersionDraft() {
         if !isVersionFocused {
             let ver = info.version ?? ""
-            versionDraft = ver.lowercased().hasPrefix("v") ? ver : (ver.isEmpty ? "" : "v\(ver)")
+            let clean = (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
+            versionDraft = clean
         }
     }
 
@@ -3376,38 +3377,54 @@ private struct PackageInfoSection: View {
                 }
                 .frame(height: 20)
 
-                // 第二行：版本输入框 [ v1.0.0 ] [ + | - | ⌵ ]
+                // 第二行：自适应宽度的版本输入框 [ v | 1.0.0 ] [ + | - | ⌵ ]
                 if info.version != nil {
                     HStack(spacing: 6) {
-                        TextField("v0.0.0", text: $versionDraft)
-                            .font(SidebarTypography.caption(design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textFieldStyle(.plain)
-                            .focused($isVersionFocused)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1.5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(isVersionFocused ? Color.primary.opacity(0.1) : Color.primary.opacity(0.06))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .stroke(isVersionFocused ? Color.primary.opacity(0.25) : Color.clear, lineWidth: 1)
-                            )
-                            .onSubmit {
-                                commitVersionChange()
+                        HStack(spacing: 0) {
+                            Text("v")
+                                .font(SidebarTypography.caption(design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 5)
+
+                            ZStack(alignment: .leading) {
+                                Text(versionDraft.isEmpty ? "0.0.0" : versionDraft)
+                                    .font(SidebarTypography.caption(design: .monospaced))
+                                    .opacity(0)
+                                    .padding(.trailing, 5)
+                                    .padding(.leading, 1)
+
+                                TextField("0.0.0", text: $versionDraft)
+                                    .font(SidebarTypography.caption(design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .textFieldStyle(.plain)
+                                    .focused($isVersionFocused)
+                                    .padding(.trailing, 5)
+                                    .padding(.leading, 1)
+                                    .onSubmit {
+                                        commitVersionChange()
+                                    }
+                                    .onChange(of: isVersionFocused) { focused in
+                                        if !focused {
+                                            commitVersionChange()
+                                        }
+                                    }
+                                    .onAppear {
+                                        syncVersionDraft()
+                                    }
+                                    .onChange(of: info.version) { _ in
+                                        syncVersionDraft()
+                                    }
                             }
-                            .onChange(of: isVersionFocused) { focused in
-                                if !focused {
-                                    commitVersionChange()
-                                }
-                            }
-                            .onAppear {
-                                syncVersionDraft()
-                            }
-                            .onChange(of: info.version) { _ in
-                                syncVersionDraft()
-                            }
+                        }
+                        .padding(.vertical, 1.5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(isVersionFocused ? Color.primary.opacity(0.1) : Color.primary.opacity(0.06))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(isVersionFocused ? Color.primary.opacity(0.25) : Color.clear, lineWidth: 1)
+                        )
 
                         if let parsed = parsedSemVer {
                             // 连贯一体式的 Segmented Split Control (+ / - / ⌵)
