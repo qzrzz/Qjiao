@@ -3224,6 +3224,7 @@ private struct PackageInfoSection: View {
 
     @FocusState private var isVersionFocused: Bool
     @State private var versionDraft: String = ""
+    @State private var lastSyncedVersion: String = ""
 
     private var parsedSemVer: SidebarProbe.SemVerComponents {
         SidebarProbe.parseSemVer(info.version ?? "")
@@ -3241,22 +3242,32 @@ private struct PackageInfoSection: View {
         return (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
     }
 
-    private func syncVersionDraft() {
-        versionDraft = cleanVersion
+    private func syncVersionDraftIfNeeded() {
+        let currentClean = cleanVersion
+        guard !currentClean.isEmpty else { return }
+        if versionDraft.isEmpty || (currentClean != lastSyncedVersion && !isVersionFocused) {
+            lastSyncedVersion = currentClean
+            versionDraft = currentClean
+        }
+    }
+
+    private func applyNewVersion(_ newVersion: String) {
+        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: newVersion) {
+            versionDraft = newVersion
+            lastSyncedVersion = newVersion
+            onVersionUpdated()
+        }
     }
 
     private func commitVersionChange() {
         let trimmed = versionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            versionDraft = cleanVersion
+            syncVersionDraftIfNeeded()
             return
         }
         let cleanNew = (trimmed.hasPrefix("v") || trimmed.hasPrefix("V")) ? String(trimmed.dropFirst()) : trimmed
-        if cleanNew != cleanVersion {
-            if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: cleanNew) {
-                versionDraft = cleanNew
-                onVersionUpdated()
-            }
+        if cleanNew != lastSyncedVersion {
+            applyNewVersion(cleanNew)
         }
     }
 
@@ -3413,15 +3424,13 @@ private struct PackageInfoSection: View {
                                         }
                                     }
                                     .onAppear {
-                                        syncVersionDraft()
+                                        syncVersionDraftIfNeeded()
                                     }
                                     .onChange(of: info.version) { _ in
-                                        syncVersionDraft()
+                                        syncVersionDraftIfNeeded()
                                     }
                                     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                                        if !isVersionFocused {
-                                            syncVersionDraft()
-                                        }
+                                        syncVersionDraftIfNeeded()
                                     }
                             }
                         }
@@ -3446,10 +3455,7 @@ private struct PackageInfoSection: View {
                         HStack(spacing: 0) {
                             // [增加按钮 +]
                             Button {
-                                if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: nextBumpVer) {
-                                    versionDraft = nextBumpVer
-                                    onVersionUpdated()
-                                }
+                                applyNewVersion(nextBumpVer)
                             } label: {
                                 Image(systemName: "plus")
                                     .font(.system(size: 9, weight: .bold))
@@ -3471,10 +3477,7 @@ private struct PackageInfoSection: View {
 
                             // [减少按钮 -]
                             Button {
-                                if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: nextDecVer) {
-                                    versionDraft = nextDecVer
-                                    onVersionUpdated()
-                                }
+                                applyNewVersion(nextDecVer)
                             } label: {
                                 Image(systemName: "minus")
                                     .font(.system(size: 9, weight: .bold))
@@ -3501,30 +3504,21 @@ private struct PackageInfoSection: View {
 
                                     let itemMajor = NSMenuItem(title: "+ MAJOR ( \(parsed.major) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tMajor = MenuActionTarget {
-                                        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.major) {
-                                            versionDraft = parsed.major
-                                            onVersionUpdated()
-                                        }
+                                        applyNewVersion(parsed.major)
                                     }
                                     itemMajor.target = tMajor
                                     menu.addItem(itemMajor)
 
                                     let itemMinor = NSMenuItem(title: "+ MINOR ( \(parsed.minor) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tMinor = MenuActionTarget {
-                                        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.minor) {
-                                            versionDraft = parsed.minor
-                                            onVersionUpdated()
-                                        }
+                                        applyNewVersion(parsed.minor)
                                     }
                                     itemMinor.target = tMinor
                                     menu.addItem(itemMinor)
 
                                     let itemPatch = NSMenuItem(title: "+ PATCH ( \(parsed.patch) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tPatch = MenuActionTarget {
-                                        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.patch) {
-                                            versionDraft = parsed.patch
-                                            onVersionUpdated()
-                                        }
+                                        applyNewVersion(parsed.patch)
                                     }
                                     itemPatch.target = tPatch
                                     menu.addItem(itemPatch)
