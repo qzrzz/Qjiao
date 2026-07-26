@@ -92,13 +92,13 @@
   - 启动项行重构为紧凑整洁的面板对齐样式，精简高度并保留拖拽重排抓手、类型图标、按需展开编辑与独立运行控制。
 - 优化右侧边栏面板滚动条显示逻辑：精确为 `Note`、`Files`、`CWD` 与 `Git` 面板开启滚动条指示，方便长列表浏览；为 `Project` 与 `System` 面板保持隐藏滚动条，保持界面简洁精致。
 - 优化 `NPM SCRIPTS` 列表交互与 Shell 状态追踪机制：
-  - 条目整行单击设为选中高亮，仅待运行（`idle`）状态下双击触发运行脚本；正在运行状态下禁用双击，防止误操作重复触发。
+  - 条目整行 Hover Tooltip 统一展示 `package.json` 中配置的具体命令内容（`script.command`）；整行单击设为选中高亮，仅待运行（`idle`）状态下双击触发运行脚本；正在运行状态下禁用双击，防止误操作重复触发。
   - 引入「待运行 (`idle`)」、「正在运行 (`running`)」与「正在停止 (`stopping`)」状态流转机制，自动绑定与监听后台 Shell / Session 的前台进程（`isForegroundCommandRunning`）及生命周期。
   - 当脚本子进程在 Shell 中执行完毕（命令结束恢复至 prompt 提示符）时，状态立刻自动恢复为「待运行」，并精确计算与刷新上一次运行耗时。
   - 处于「正在运行」时，图标转换为红色停止按钮（`stop.fill`，单击停止），且右侧动态呈现「重新运行」按键（`arrow.clockwise`）；
   - 处于「待运行」状态时，自动在条目右侧格式化展示上一次运行耗时（如 `4.2s`、`522.4ms`、`1m12.5s`，精准保留 1 位小数，整数时无多余 `.0`，配合 `monospacedDigit` 等宽数字字体显示）。
   - 自动读取 Settings 中配置的包管理器（`bun` / `pnpm` / `yarn` / `npm`），为启动的新终端 Tab 动态命名为 `<scriptName> (<pmCommand> run)` 格式（例如 `dev (npm run)`、`build (bun run)`）。
-  - 智能探测 npm 脚本运行过程中的 TCP 监听端口（HTTP Server），当检测到监听端口（如 `3000` / `5173`）时，自动在条目右侧呈现精致纯图标 `🌐` 快捷按键（Tooltip 包含精确端口号 `http://localhost:<port>`），点击直接在 macOS 默认浏览器中打开服务。
+  - 抽象解耦出通用项目脚本执行引擎模块 `ProjectScriptEngine`：定义 `ProjectScriptCategory`、`UniversalProjectScript` 与 `ProjectScriptProvider` 探针协议，统一管理跨平台/多语言任务的构建、调度、生命周期监测与端口绑定，为后续扩展 Gradle、`tool.uv.scripts`、PDM、Rust alias 及 Makefile 等方案奠定架构基础。
 
 
 

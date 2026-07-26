@@ -3208,7 +3208,6 @@ private struct PackageScriptRow: View {
             }
             .buttonStyle(.plain)
             .onHover { isHoveringActionBtn = $0 }
-            .help("Run \(script.name)")
 
         case .running:
             Button {
@@ -3226,7 +3225,6 @@ private struct PackageScriptRow: View {
             }
             .buttonStyle(.plain)
             .onHover { isHoveringActionBtn = $0 }
-            .help("Stop \(script.name)")
 
         case .stopping:
             ProgressView()
@@ -3284,7 +3282,6 @@ private struct PackageScriptRow: View {
                 }
                 .buttonStyle(.plain)
                 .onHover { isHoveringRestartBtn = $0 }
-                .help("Restart \(script.name)")
 
             case .stopping:
                 Text("Stopping...")

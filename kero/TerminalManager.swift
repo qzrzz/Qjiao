@@ -286,37 +286,12 @@ final class TerminalManager: nonisolated ObservableObject {
         project.newSession()
     }
 
-    enum PackageScriptStatus: Equatable {
-        case idle
-        case running
-        case stopping
-    }
+    typealias PackageScriptStatus = UniversalScriptStatus
+    typealias PackageScriptExecutionRecord = UniversalScriptExecutionRecord
+    typealias PackageScriptRunMode = UniversalScriptRunMode
 
-    struct PackageScriptExecutionRecord: Identifiable {
-        let id = UUID()
-        let scriptName: String
-        let directory: String
-        let sessionID: UUID
-        let startedAt: Date
-        var status: PackageScriptStatus
-        var lastDuration: TimeInterval?
-        var boundPort: Int?
-    }
-
-    /// Info 面板运行 npm script 时的包装方式。
-    enum PackageScriptRunMode {
-        /// 直接 `pm run <script>`。
-        case normal
-        /// `/usr/bin/time`（若存在）或 shell `time` 计时。
-        case withTime
-        /// `NODE_OPTIONS="--inspect"` 启动调试。
-        case withInspect
-        /// `NODE_OPTIONS="--prof"` 启用 V8 性能分析。
-        case withProf
-    }
-
-    /// 记录各 package script 的执行句柄与耗时信息（KEY: scriptName）
-    @Published var packageScriptRecords: [String: PackageScriptExecutionRecord] = [:]
+    /// 记录各项目脚本的执行句柄与耗时信息（KEY: scriptName 或 script.id）
+    @Published var packageScriptRecords: [String: UniversalScriptExecutionRecord] = [:]
 
     private var scriptCheckTimer: Timer?
 
@@ -337,7 +312,7 @@ final class TerminalManager: nonisolated ObservableObject {
         }
     }
 
-    /// 检查并更新所有 package script 的运行/空闲状态（如果 shell 前台命令已执行完，标记为完成/停止并统计耗时）
+    /// 检查并更新所有脚本的运行/空闲状态（如果 shell 前台命令已执行完，标记为完成/停止并统计耗时）
     func checkPackageScriptStatus() {
         guard !packageScriptRecords.isEmpty else { return }
         let now = Date()
@@ -381,84 +356,81 @@ final class TerminalManager: nonisolated ObservableObject {
         }
     }
 
-    private func markScriptAsIdle(_ scriptName: String, endedAt: Date) {
-        guard let record = packageScriptRecords[scriptName], record.status == .running || record.status == .stopping else { return }
+    private func markScriptAsIdle(_ scriptKey: String, endedAt: Date) {
+        guard let record = packageScriptRecords[scriptKey], record.status == .running || record.status == .stopping else { return }
         let elapsed = max(0.1, endedAt.timeIntervalSince(record.startedAt))
-        packageScriptRecords[scriptName] = PackageScriptExecutionRecord(
-            scriptName: scriptName,
-            directory: record.directory,
-            sessionID: record.sessionID,
-            startedAt: record.startedAt,
-            status: .idle,
-            lastDuration: elapsed
-        )
+        var updated = record
+        updated.status = .idle
+        updated.lastDuration = elapsed
+        packageScriptRecords[scriptKey] = updated
     }
 
-    /// 在指定目录（或项目根）新开终端，用 Settings 中的包管理器跑 script。
-    /// - Parameter directory: nil 时用项目根；Info 面板应传入当前 cwd。
-    func runPackageScript(
-        _ scriptName: String,
-        mode: PackageScriptRunMode = .normal,
-        directory: String? = nil
+    /// 通用项目脚本运行接口（支持 NPM, Gradle, uv, PDM, Rust alias, Makefile 等）
+    func runProjectScript(
+        _ script: UniversalProjectScript,
+        mode: UniversalScriptRunMode = .normal
     ) {
-        guard let project = selectedProject, !scriptName.isEmpty else { return }
-        let resolvedDirectory: String = {
-            if let directory, !directory.isEmpty { return directory }
-            if !project.projectDirectory.isEmpty { return project.projectDirectory }
-            return selectedSession?.currentDirectoryPath ?? ""
-        }()
+        guard let project = selectedProject, !script.name.isEmpty else { return }
+        let resolvedDirectory = !script.directory.isEmpty ? script.directory : (project.projectDirectory.isEmpty ? (selectedSession?.currentDirectoryPath ?? "") : project.projectDirectory)
         guard !resolvedDirectory.isEmpty else { return }
 
-        // 如果目前已有该 script 在运行，先关闭旧的
-        if let existing = packageScriptRecords[scriptName], existing.status == .running {
-            stopPackageScript(scriptName)
+        let scriptKey = script.name
+        if let existing = packageScriptRecords[scriptKey], existing.status == .running {
+            stopPackageScript(scriptKey)
         }
 
         let session = project.newSession(directory: resolvedDirectory)
-        let pmCommand = AppSettings.shared.packageManagerCommand.rawValue
-        let scriptTabTitle = "\(scriptName) (\(pmCommand) run)"
-        project.selectedTab?.customName = scriptTabTitle
-        session.title = scriptTabTitle
+        let tabTitle = script.category.buildTabTitle(scriptName: script.name)
+        project.selectedTab?.customName = tabTitle
+        session.title = tabTitle
 
-        let oldLastDuration = packageScriptRecords[scriptName]?.lastDuration
-        let record = PackageScriptExecutionRecord(
-            scriptName: scriptName,
-            directory: resolvedDirectory,
+        let oldLastDuration = packageScriptRecords[scriptKey]?.lastDuration
+        let record = UniversalScriptExecutionRecord(
+            script: script,
             sessionID: session.id,
             startedAt: Date(),
             status: .running,
             lastDuration: oldLastDuration
         )
-        packageScriptRecords[scriptName] = record
+        packageScriptRecords[scriptKey] = record
         startScriptCheckTimerIfNeeded()
 
         // 监听该终端 Session 的退出/销毁
         let originalOnExited = session.onExited
-        session.onExited = { [weak self, weak session] s in
+        session.onExited = { [weak self] s in
             originalOnExited?(s)
             Task { @MainActor in
-                guard let self = self, let currentRecord = self.packageScriptRecords[scriptName], currentRecord.sessionID == s.id else { return }
-                self.markScriptAsIdle(scriptName, endedAt: Date())
+                self?.markScriptAsIdle(scriptKey, endedAt: Date())
             }
         }
 
-        let run = "\(AppSettings.shared.packageManagerCommand.rawValue) \(shellQuote(scriptName))"
+        let baseCmd = script.category.buildExecutionCommand(scriptName: script.name, rawCommand: script.command)
         let command: String
         switch mode {
         case .normal:
-            command = run
+            command = baseCmd
         case .withTime:
-            // 优先 GNU/BSD 的 `/usr/bin/time`；不存在时退回 shell 内建 `time`。
-            let timePrefix = FileManager.default.isExecutableFile(atPath: "/usr/bin/time")
-                ? "/usr/bin/time"
-                : "time"
-            command = "\(timePrefix) \(run)"
+            let timePrefix = FileManager.default.isExecutableFile(atPath: "/usr/bin/time") ? "/usr/bin/time" : "time"
+            command = "\(timePrefix) \(baseCmd)"
         case .withInspect:
-            command = "NODE_OPTIONS=\"--inspect\" \(run)"
+            command = "NODE_OPTIONS=\"--inspect\" \(baseCmd)"
         case .withProf:
-            command = "NODE_OPTIONS=\"--prof\" \(run)"
+            command = "NODE_OPTIONS=\"--prof\" \(baseCmd)"
+        case .custom(let prefix):
+            command = "\(prefix) \(baseCmd)"
         }
         session.sendCommandWhenReady(command + "\n")
+    }
+
+    /// 运行指定的 npm script
+    func runPackageScript(
+        _ scriptName: String,
+        mode: PackageScriptRunMode = .normal,
+        directory: String? = nil
+    ) {
+        let dir = directory ?? selectedProject?.projectDirectory ?? selectedSession?.currentDirectoryPath ?? ""
+        let script = UniversalProjectScript(name: scriptName, command: "", category: .npm, directory: dir)
+        runProjectScript(script, mode: mode)
     }
 
     /// 停止指定的 package script
