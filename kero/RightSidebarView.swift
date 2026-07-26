@@ -4490,36 +4490,52 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.contentTintColor = .secondaryLabelColor
-        // 使用 SF Symbol 作为 chevron 图标。
-        let chevron = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "选择代码编辑器")
-        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular)
-        button.image = chevron?.withSymbolConfiguration(config)
+        // SF Symbol chevron 作为下拉图标。
+        if let chevron = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil) {
+            let cfg = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular)
+            button.image = chevron.withSymbolConfiguration(cfg)
+        }
         button.target = context.coordinator
         button.action = #selector(Coordinator.showMenu(_:))
         return button
     }
 
     func updateNSView(_ button: NSButton, context: Context) {
-        context.coordinator.parent = self
-        // 每次 preferredBundleId 或 editors 变化时重建菜单，同步勾选状态。
-        context.coordinator.rebuildMenu(editors: editors, preferredBundleId: preferredBundleId)
+
+        // 每次数据变化时更新 Coordinator 状态并重建菜单。
+        context.coordinator.update(
+            editors: editors,
+            preferredBundleId: preferredBundleId,
+            onSelect: onSelect
+        )
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
-    @MainActor
+    // ⚠️ 不标 @MainActor：@objc target-action 由 AppKit 在主线程调用，
+    //    额外的 actor 注解反而会干扰 Objective-C 运行时的方法查找。
     final class Coordinator: NSObject {
-        var parent: EditorDropdownNSButton
-        private var menu = NSMenu()
+        private let menu = NSMenu()
+        private var editors: [CodeEditor] = []
+        private var preferredBundleId: String = ""
+        private var onSelect: ((CodeEditor) -> Void)?
 
-        init(_ parent: EditorDropdownNSButton) {
-            self.parent = parent
+        override init() {
+            super.init()
+            // 关闭自动启用验证，防止 AppKit 因找不到 responder 而禁用菜单项导致图标不显示。
+            menu.autoenablesItems = false
         }
 
-        /// 重建菜单项列表，直接通过 NSMenuItem 设置图标与勾选状态。
-        func rebuildMenu(editors: [CodeEditor], preferredBundleId: String) {
+        /// 接收来自 SwiftUI 的最新数据并重建菜单。
+        func update(editors: [CodeEditor], preferredBundleId: String, onSelect: @escaping (CodeEditor) -> Void) {
+            self.editors = editors
+            self.preferredBundleId = preferredBundleId
+            self.onSelect = onSelect
+            rebuildMenu()
+        }
+
+        /// 重建 NSMenuItem 列表：直接赋值 image 和 state，100% 可靠。
+        private func rebuildMenu() {
             menu.removeAllItems()
             for editor in editors {
                 let item = NSMenuItem(
@@ -4528,31 +4544,40 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
                     keyEquivalent: ""
                 )
                 item.target = self
-                item.representedObject = editor
-                // 直接赋值 NSImage：NSMenuItem.image 原生支持，图标稳定显示。
-                item.image = editor.menuIcon()
+                item.isEnabled = true
+                // 用 bundleId 字符串作为 representedObject，避免跨线程传递 struct 的潜在问题。
+                item.representedObject = editor.bundleId
+                // NSMenuItem.image 直接接受 NSImage，无需任何 SwiftUI 修饰符。
+                if let appURL = editor.appURL {
+                    let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+                    icon.size = NSSize(width: 16, height: 16)
+                    item.image = icon
+                }
                 // 勾选当前默认编辑器。
                 item.state = editor.bundleId == preferredBundleId ? .on : .off
                 menu.addItem(item)
             }
         }
 
-        /// 点击 chevron 按钮时在按钮下方弹出菜单。
+        /// 点击 chevron 时在按钮正下方弹出菜单。
         @objc func showMenu(_ sender: NSButton) {
             menu.popUp(
-                positioning: menu.items.first(where: { $0.state == .on }),
+                positioning: nil,
                 at: NSPoint(x: 0, y: sender.bounds.height + 2),
                 in: sender
             )
         }
 
-        /// 用户点击菜单项后触发，更新默认编辑器并打开路径。
-        @objc func selectEditor(_ item: NSMenuItem) {
-            guard let editor = item.representedObject as? CodeEditor else { return }
-            parent.onSelect(editor)
+        /// 菜单项被点击时调用。
+        @objc func selectEditor(_ sender: NSMenuItem) {
+            guard let bundleId = sender.representedObject as? String,
+                  let editor = editors.first(where: { $0.bundleId == bundleId })
+            else { return }
+            onSelect?(editor)
         }
     }
 }
+
 
 
 
