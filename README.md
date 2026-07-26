@@ -101,4 +101,5 @@
   - 处于「待运行」状态时，自动在条目右侧格式化展示上一次运行耗时（如 `4.2s`、`522.4ms`、`1m12.5s`，精准保留 1 位小数，整数时无多余 `.0`，配合 `monospacedDigit` 等宽数字字体显示）。
   - 自动读取 Settings 中配置的包管理器（`bun` / `pnpm` / `yarn` / `npm`），为启动的新终端 Tab 动态命名为 `<scriptName> (<pmCommand> run)` 格式（例如 `dev (npm run)`、`build (bun run)`）。
   - 抽象解耦出通用项目脚本执行引擎模块 `ProjectScriptEngine`：定义 `ProjectScriptCategory`、`UniversalProjectScript` 与 `ProjectScriptProvider` 探针协议，统一管理跨平台/多语言任务的构建、调度、生命周期监测与端口绑定，为后续扩展 Gradle、`tool.uv.scripts`、PDM、Rust alias 及 Makefile 等方案奠定架构基础。
-- 优化右侧边栏 Project 面板 Header 内容展示：响应显示项目的自定义图标（SF Symbol 或 Emoji），渲染自定义项目名称（Title）以及项目描述（Description），缺失描述时优雅回退显示会话数据。
+- 优化右侧边栏 Project 与 Info 面板 Header 与顶部布局：以 Project 面板为统一模板对齐 Info 面板 Header 样式；Info 面板顶部图标动态响应当前终端 Tab 的前台应用图标（如 Node/Python/Cargo/Antigravity）与运行状态；移除冗余的 CWD/PROJECT 分组，在 Header 标题下方集成单行无边框只读路径输入框（支持放置光标平移浏览）与 Finder / Copy 操作按钮，并在内容区顶部统一设立 VS Code 打开项目的专属区域。
+- 代码编辑器打开按钮支持多编辑器选择：Project / Info 面板顶部「在编辑器中打开」区域与路径栏编辑器按钮均通过 `CodeEditorRegistry` 动态检测系统已安装的代码编辑器（VS Code、VS Code Insiders、Cursor、Windsurf、Zed、Sublime Text、JetBrains 系列、Nova、Xcode 等）；默认以首个检测到的编辑器打开，安装多个时右侧 `[⌄]` 下拉菜单可切换默认编辑器（设置持久化到 `config.toml`：`editor.preferred-code-editor`）；无已安装编辑器时整体隐藏。

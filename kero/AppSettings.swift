@@ -162,6 +162,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 用户首选代码编辑器的 Bundle ID；空字符串表示使用检测到的第一个已安装编辑器。
+    @Published var preferredCodeEditorBundleId: String {
+        didSet { save() }
+    }
+
     /// 毛玻璃 4 核心属性定制选项：Material 材质
     @Published var visualEffectMaterial: String {
         didSet { save() }
@@ -251,6 +256,7 @@ final class AppSettings: nonisolated ObservableObject {
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
         disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
+        preferredCodeEditorBundleId = toml["editor.preferred-code-editor"]?.string ?? ""
         packageManagerCommand = toml["terminal.package-manager"]?.string
             .flatMap(PackageManagerCommand.init(rawValue:)) ?? .npm
         // 优先 config.toml；无则迁移旧 UserDefaults，最后回落默认 30s。
@@ -334,6 +340,7 @@ final class AppSettings: nonisolated ObservableObject {
         disableZshAutoTitle = false
         packageManagerCommand = .npm
         systemReachabilityInterval = .default
+        preferredCodeEditorBundleId = ""
     }
 
     private func save() {
@@ -406,6 +413,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if packageManagerCommand != .npm {
             lines.append("terminal.package-manager = \(TOML.quote(packageManagerCommand.rawValue))")
+        }
+        if !preferredCodeEditorBundleId.isEmpty {
+            lines.append("editor.preferred-code-editor = \(TOML.quote(preferredCodeEditorBundleId))")
         }
         if systemReachabilityInterval != .default {
             lines.append(

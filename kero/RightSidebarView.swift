@@ -552,12 +552,13 @@ struct RightSidebarView: View {
 private struct PanelHeader: View {
     let title: String
     let subtitle: String?
+    var titleFont: Font = SidebarTypography.title()
     var subtitleTruncationMode: Text.TruncationMode = .head
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title)
-                .font(SidebarTypography.title())
+                .font(titleFont)
                 .lineLimit(1)
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
@@ -717,7 +718,7 @@ private struct FileTreePanel: View {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.rootPath)])
                 } label: {
-                    Image(systemName: "arrow.up.forward.app")
+                    Image(systemName: "finder")
                         .font(SidebarTypography.secondary())
                         .foregroundStyle(.secondary)
                 }
@@ -1185,10 +1186,12 @@ private struct FileTreeRow: View {
                 NSWorkspace.shared.open(URL(fileURLWithPath: target.path))
             }
         }
-        Button("Reveal in Finder") {
+        Button {
             selectForContextAction()
             let urls = menuActionTargets.map { URL(fileURLWithPath: $0.path) }
             NSWorkspace.shared.activateFileViewerSelecting(urls)
+        } label: {
+            Label("Reveal in Finder", systemImage: "finder")
         }
         Button(targets.count == 1 ? "Copy Path" : "Copy Paths") {
             selectForContextAction()
@@ -1827,8 +1830,10 @@ private struct GitPanel: View {
             Button("Copy Changed Paths") { copyChangedPaths() }
                 .disabled(model.totalChangeCount == 0)
             Button("Copy Repository Path") { copyToPasteboard(model.repoRoot) }
-            Button("Reveal Repository in Finder") {
+            Button {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.repoRoot)])
+            } label: {
+                Label("Reveal Repository in Finder", systemImage: "finder")
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -2866,8 +2871,10 @@ private struct GitEntryRow: View {
                 .disabled(disabled)
         }
         Divider()
-        Button("Reveal in Finder") {
+        Button {
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: absolutePath)])
+        } label: {
+            Label("Reveal in Finder", systemImage: "finder")
         }
         Button("Copy Path") {
             NSPasteboard.general.clearContents()
@@ -2936,15 +2943,15 @@ private func sidebarEmptyRow(_ text: String) -> some View {
         .padding(.vertical, 4)
 }
 
-/// 路径区：展示绝对路径 + Finder / VS Code / Copy。
+/// 路径区：展示绝对路径 + Finder / 代码编辑器 / Copy。
 private struct PathDirectorySection: View {
     let path: String
     @Binding var isCollapsed: Bool
     /// 分组标题，如 "PROJECT" / "CWD"。
     var sectionTitle: String = "DIRECTORY"
 
-    private static let vsCodeURL = NSWorkspace.shared
-        .urlForApplication(withBundleIdentifier: "com.microsoft.VSCode")
+    /// 订阅编辑器注册表，首选编辑器变化时自动刷新按钮标签。
+    @ObservedObject private var registry = CodeEditorRegistry.shared
 
     var body: some View {
         GitSectionHeader(
@@ -2965,26 +2972,38 @@ private struct PathDirectorySection: View {
                     }
 
                 HStack(spacing: 4) {
-                    pathActionButton("Finder", systemImage: "arrow.up.forward.app") {
+                    pathActionButton("Finder", systemImage: "finder") {
                         guard !path.isEmpty else { return }
                         NSWorkspace.shared.activateFileViewerSelecting(
                             [URL(fileURLWithPath: path)]
                         )
                     }
                     .disabled(path.isEmpty)
-                    if let vsCode = Self.vsCodeURL {
-                        pathActionButton(
-                            "VS Code",
-                            systemImage: "chevron.left.forwardslash.chevron.right"
-                        ) {
-                            guard !path.isEmpty else { return }
-                            NSWorkspace.shared.open(
-                                [URL(fileURLWithPath: path)],
-                                withApplicationAt: vsCode,
-                                configuration: NSWorkspace.OpenConfiguration()
-                            )
+                    // 若检测到已安装的代码编辑器则显示打开按钮。
+                    if let preferred = registry.preferredEditor {
+                        if registry.installedEditors.count > 1 {
+                            // 多个编辑器时：按钮本身触发打开，右键菜单切换默认。
+                            pathActionButton(preferred.displayName, systemImage: preferred.symbolName) {
+                                registry.open(path: path)
+                            }
+                            .disabled(path.isEmpty)
+                            .contextMenu {
+                                ForEach(registry.installedEditors) { editor in
+                                    Button {
+                                        registry.preferredBundleId = editor.bundleId
+                                        registry.open(path: path, with: editor)
+                                    } label: {
+                                        Label(editor.displayName, systemImage: editor.symbolName)
+                                    }
+                                }
+                            }
+                        } else {
+                            // 只有一个编辑器时直接点击打开。
+                            pathActionButton(preferred.displayName, systemImage: preferred.symbolName) {
+                                registry.open(path: path)
+                            }
+                            .disabled(path.isEmpty)
                         }
-                        .disabled(path.isEmpty)
                     }
                     pathActionButton("Copy", systemImage: "doc.on.doc") {
                         copyPath()
@@ -4027,7 +4046,6 @@ private struct ProjectPanel: View {
     let runLaunchCommand: (ProjectLaunchCommand) -> Void
     let runAllLaunchCommands: () -> Void
 
-    @State private var directoryCollapsed = false
     @State private var launchersCollapsed = false
     @State private var packageScriptsCollapsed = false
     @State private var gradleTasksCollapsed = false
@@ -4059,11 +4077,7 @@ private struct ProjectPanel: View {
             header
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    PathDirectorySection(
-                        path: model.rootPath,
-                        isCollapsed: $directoryCollapsed,
-                        sectionTitle: "PROJECT"
-                    )
+                    CodeEditorOpenButton(path: model.rootPath)
                     LaunchersSection(
                         project: project,
                         isCollapsed: $launchersCollapsed,
@@ -4241,46 +4255,191 @@ private struct ProjectPanel: View {
         switch project.icon {
         case .sfSymbol(let name):
             Image(systemName: name)
-                .font(SidebarTypography.secondary(.medium))
+                .font(SidebarTypography.listIcon())
                 .foregroundStyle(Color(nsColor: Theme.cursor))
-                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24)
         case .emoji(let emoji):
             Text(emoji)
-                .font(SidebarTypography.secondary(.medium))
+                .font(SidebarTypography.listEmoji())
                 .lineLimit(1)
                 .fixedSize()
-                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24)
         case nil:
             Image(systemName: "shippingbox")
-                .font(SidebarTypography.secondary(.medium))
+                .font(SidebarTypography.listIcon())
                 .foregroundStyle(Color(nsColor: Theme.cursor))
-                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24)
+        }
+    }
+
+    private var pathRow: some View {
+        HStack(spacing: 6) {
+            TextField("", text: .constant(model.rootPath.isEmpty ? "—" : model.rootPath))
+                .textFieldStyle(.plain)
+                .font(SidebarTypography.caption(design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .help(model.rootPath)
+
+            HStack(spacing: 4) {
+                Button {
+                    guard !model.rootPath.isEmpty else { return }
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.rootPath)])
+                } label: {
+                    Image(systemName: "finder")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 13, height: 13)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.primary.opacity(0.06))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Open in Finder")
+                .disabled(model.rootPath.isEmpty)
+
+                Button {
+                    guard !model.rootPath.isEmpty else { return }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.rootPath, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 13, height: 13)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.primary.opacity(0.06))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Copy Path")
+                .disabled(model.rootPath.isEmpty)
+            }
         }
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            headerIcon
-            PanelHeader(
-                title: projectTitle,
-                subtitle: headerSubtitle,
-                subtitleTruncationMode: (project.description != nil && !(project.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)) ? .tail : .head
-            )
-            Button {
-                model.refresh()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(SidebarTypography.caption(.medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18, height: 18)
-                    .contentShape(RoundedRectangle(cornerRadius: 4))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                headerIcon
+                PanelHeader(
+                    title: projectTitle,
+                    subtitle: headerSubtitle,
+                    titleFont: SidebarTypography.body(.semibold),
+                    subtitleTruncationMode: (project.description != nil && !(project.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)) ? .tail : .head
+                )
+                Button {
+                    model.refresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(SidebarTypography.caption(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Refresh")
             }
-            .buttonStyle(.plain)
-            .help("Refresh")
+            pathRow
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)
         .padding(.bottom, 8)
+    }
+}
+
+/// 用代码编辑器打开路径的按钮区域。
+/// 左半区点击使用默认编辑器打开；右侧下拉箭头展开菜单可切换默认编辑器。
+/// 若系统未检测到任何已知编辑器则隐藏整个区域。
+private struct CodeEditorOpenButton: View {
+    let path: String
+
+    /// 订阅注册表，编辑器列表或首选变化时自动刷新 UI。
+    @ObservedObject private var registry = CodeEditorRegistry.shared
+
+    var body: some View {
+        // 无任何已安装编辑器时整体隐藏。
+        if let preferred = registry.preferredEditor {
+            HStack(spacing: 0) {
+                // ── 左半：主按钮（用默认编辑器打开）
+                Button {
+                    registry.open(path: path)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: preferred.symbolName)
+                            .font(SidebarTypography.caption(.medium))
+                        Text(preferred.displayName)
+                            .font(SidebarTypography.caption(.medium))
+                        Spacer()
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 10)
+                    .padding(.trailing, 4)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(path.isEmpty)
+                .help("在 \(preferred.displayName) 中打开")
+
+                // ── 右侧：下拉切换编辑器（仅在已安装多个时才显示）
+                if registry.installedEditors.count > 1 {
+                    // 分隔线
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.1))
+                        .frame(width: 1, height: 14)
+
+                    Menu {
+                        // 列出全部已安装编辑器供切换。
+                        ForEach(registry.installedEditors) { editor in
+                            Button {
+                                // 直接用此编辑器打开，同时设为默认。
+                                registry.preferredBundleId = editor.bundleId
+                                registry.open(path: path, with: editor)
+                            } label: {
+                                Label(editor.displayName, systemImage: editor.symbolName)
+                                if editor.bundleId == registry.preferredEditor?.bundleId {
+                                    // 已选中项显示勾选状态（SwiftUI Menu 自动处理）
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(SidebarTypography.micro())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 22, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 22)
+                    .help("选择代码编辑器")
+                } else {
+                    // 只有一个编辑器时右侧显示跳转图标。
+                    Image(systemName: "arrow.up.forward")
+                        .font(SidebarTypography.micro())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 28)
+                        .allowsHitTesting(false)
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(0.05))
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 6)
+        }
     }
 }
 
@@ -4293,7 +4452,6 @@ private struct SessionInfoPanel: View {
     let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
     let openPackageJSON: () -> Void
 
-    @State private var directoryCollapsed = false
     @State private var packageScriptsCollapsed = false
     @State private var gradleTasksCollapsed = false
     @State private var justTasksCollapsed = false
@@ -4306,13 +4464,9 @@ private struct SessionInfoPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    PathDirectorySection(
-                        path: model.cwdPath,
-                        isCollapsed: $directoryCollapsed,
-                        sectionTitle: "CWD"
-                    )
+                    CodeEditorOpenButton(path: model.cwdPath)
                     PackageScriptsSection(
                         scripts: model.packageScripts,
                         records: manager.packageScriptRecords,
@@ -4479,26 +4633,120 @@ private struct SessionInfoPanel: View {
         }
     }
 
-    private var header: some View {
+    private var infoTitle: String {
+        model.shellName.isEmpty ? "Session" : model.shellName
+    }
+
+    private var infoSubtitle: String? {
+        model.shellPid > 0 ? "pid \(String(model.shellPid))" : nil
+    }
+
+    private var pathRow: some View {
         HStack(spacing: 6) {
-            Image(systemName: "info.circle")
-                .font(SidebarTypography.secondary(.medium))
-                .foregroundStyle(Color(nsColor: Theme.cursor))
-            PanelHeader(
-                title: model.shellName.isEmpty ? "Session" : model.shellName,
-                subtitle: model.shellPid > 0 ? "pid \(String(model.shellPid))" : nil
-            )
-            Button {
-                model.refresh()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(SidebarTypography.caption(.medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18, height: 18)
-                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            TextField("", text: .constant(model.cwdPath.isEmpty ? "—" : model.cwdPath))
+                .textFieldStyle(.plain)
+                .font(SidebarTypography.caption(design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .help(model.cwdPath)
+
+            HStack(spacing: 4) {
+                Button {
+                    guard !model.cwdPath.isEmpty else { return }
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.cwdPath)])
+                } label: {
+                    Image(systemName: "finder")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 13, height: 13)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.primary.opacity(0.06))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Open in Finder")
+                .disabled(model.cwdPath.isEmpty)
+
+                Button {
+                    guard !model.cwdPath.isEmpty else { return }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.cwdPath, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 13, height: 13)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.primary.opacity(0.06))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Copy Path")
+                .disabled(model.cwdPath.isEmpty)
             }
-            .buttonStyle(.plain)
-            .help("Refresh")
+        }
+    }
+
+    @ViewBuilder
+    private var headerIcon: some View {
+        if let session = manager.selectedProject?.selectedSession {
+            TimelineView(.periodic(from: .now, by: 0.3)) { _ in
+                if let appIcon = session.foregroundAppIcon {
+                    TerminalAppIconView(source: appIcon, size: 16, isSelected: true)
+                        .frame(width: 24, height: 24)
+                } else if session.isForegroundCommandRunning {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(Color(nsColor: Theme.cursor))
+                        .frame(width: 24, height: 24)
+                } else {
+                    Image(systemName: "terminal")
+                        .font(SidebarTypography.listIcon())
+                        .foregroundStyle(Color(nsColor: Theme.cursor))
+                        .frame(width: 24, height: 24)
+                }
+            }
+        } else if case .file(let file)? = manager.selectedProject?.selectedTab?.focusedContent {
+            MaterialFileIconView(fileName: file.name, isDirectory: false, size: 16)
+                .frame(width: 24, height: 24)
+        } else {
+            Image(systemName: "terminal")
+                .font(SidebarTypography.listIcon())
+                .foregroundStyle(Color(nsColor: Theme.cursor))
+                .frame(width: 24, height: 24)
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                headerIcon
+                PanelHeader(
+                    title: infoTitle,
+                    subtitle: infoSubtitle,
+                    titleFont: SidebarTypography.body(.semibold)
+                )
+                Button {
+                    model.refresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(SidebarTypography.caption(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Refresh")
+            }
+            pathRow
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)
