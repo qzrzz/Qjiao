@@ -237,15 +237,15 @@ struct StartCommandRow: View {
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(
-                    isDropTarget
+                    (isDropTarget && !isDragged)
                     ? Color(nsColor: Theme.cursor).opacity(0.12)
-                    : (isHovering ? Color.primary.opacity(0.06) : Color.clear)
+                    : (isHovering && !isDragged ? Color.primary.opacity(0.06) : Color.clear)
                 )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .strokeBorder(
-                    isDropTarget
+                    (isDropTarget && !isDragged)
                     ? Color(nsColor: Theme.cursor).opacity(0.4)
                     : Color.clear,
                     lineWidth: 1
@@ -253,6 +253,18 @@ struct StartCommandRow: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 5))
         .onHover { isHovering = $0 }
+        .onChange(of: isDragged) { _, newValue in
+            if !newValue {
+                isHovering = false
+                isHoveringHandle = false
+                isHoveringRunBtn = false
+            }
+        }
+        .onChange(of: isDropTarget) { _, newValue in
+            if !newValue {
+                isHovering = false
+            }
+        }
         .animation(.snappy(duration: 0.2), value: isDragged)
         .animation(.snappy(duration: 0.2), value: isDropTarget)
     }
@@ -434,6 +446,13 @@ struct StartCommandDropDelegate: DropDelegate {
             dropTargetCommandID = nil
         }
         return true
+    }
+
+    func dropEnded(info: DropInfo) {
+        withAnimation(.snappy(duration: 0.2)) {
+            draggedCommandID = nil
+            dropTargetCommandID = nil
+        }
     }
 }
 
