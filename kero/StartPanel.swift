@@ -104,17 +104,18 @@ struct StartPanel: View {
                             Divider().padding(.leading, 12)
                         }
                     }
-                    // 展开时：先内边距，再背景 → 背景覆盖含内边距的整个区域
+                    // 展开时：先加内边距再叠背景 → 背景覆盖含边距的完整区域
                     .padding(.horizontal, isExpanded ? 4 : 0)
                     .padding(.vertical, isExpanded ? 3 : 0)
                     .background {
                         if isExpanded {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.primary.opacity(0.09))
+                                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.8))
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
+                                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                                 }
+                                .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 1)
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 8 : 0, style: .continuous))
