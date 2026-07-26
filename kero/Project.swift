@@ -285,13 +285,14 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// it in a tab — shared by new tabs and splits. `restoredHistory` seeds the
     /// scrollback when reopening a saved session.
     private func makeSession(
-        directory: String? = nil, restoredHistory: String? = nil
+        directory: String? = nil, restoredHistory: String? = nil, isLazy: Bool = false
     ) -> TerminalSession {
         let session = TerminalSession(
             initialDirectory: directory
                 ?? selectedSession?.currentDirectoryPath
                 ?? (projectDirectory.isEmpty ? nil : projectDirectory),
-            restoredHistory: restoredHistory
+            restoredHistory: restoredHistory,
+            isLazy: isLazy
         )
         configureProjectDirectoryDrop(for: session)
         session.onExited = { [weak self] session in
@@ -306,7 +307,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
 
     /// 让每个终端会话使用项目统一的文件夹拖放处理器。
     private func configureProjectDirectoryDrop(for session: TerminalSession) {
-        session.terminalView.onOpenProjectDirectory = { [weak self] directoryURL in
+        session.pendingOnOpenProjectDirectory = { [weak self] directoryURL in
             self?.onOpenProjectDirectory?(directoryURL) ?? false
         }
     }
@@ -653,7 +654,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     func restoreTab(
         from snap: SessionSnapshot.ProjectSnapshot.TabSnapshot,
         histories: [String: String] = [:],
-        sessionDirectory: String? = nil
+        sessionDirectory: String? = nil,
+        isLazy: Bool = false
     ) {
         var columns: [PaneColumn] = []
         for columnSnap in snap.columns {
@@ -664,7 +666,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
                     content: makeContent(
                         from: paneSnap.content,
                         restoredHistory: restoredHistory,
-                        sessionDirectory: sessionDirectory
+                        sessionDirectory: sessionDirectory,
+                        isLazy: isLazy
                     ),
                     weight: CGFloat(paneSnap.weight)
                 ))
@@ -683,14 +686,16 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     private func makeContent(
         from snap: SessionSnapshot.ProjectSnapshot.PaneContentSnapshot,
         restoredHistory: String? = nil,
-        sessionDirectory: String? = nil
+        sessionDirectory: String? = nil,
+        isLazy: Bool = false
     ) -> PaneContent {
         switch snap {
         case .session(let workingDirectory):
             return .session(
                 makeSession(
                     directory: sessionDirectory ?? workingDirectory,
-                    restoredHistory: restoredHistory
+                    restoredHistory: restoredHistory,
+                    isLazy: isLazy
                 )
             )
         case .file(let path, let editorState):

@@ -112,12 +112,13 @@ final class TerminalParkingContainerView: NSView {
     }
 
     func mount(_ sessions: [TerminalSession]) {
-        let desired = Set(sessions.map { ObjectIdentifier($0.terminalView) })
+        let activeSessions = sessions.filter(\.isInitialized)
+        let desired = Set(activeSessions.map { ObjectIdentifier($0.terminalView) })
         for subview in subviews where !desired.contains(ObjectIdentifier(subview)) {
             subview.removeFromSuperview()
         }
 
-        for session in sessions {
+        for session in activeSessions {
             let terminal = session.terminalView
             guard terminal.superview !== self else { continue }
             let parkedSize = terminal.frame.size

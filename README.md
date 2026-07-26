@@ -104,3 +104,5 @@
 - 优化右侧边栏 Project 与 Info 面板 Header 与顶部布局：以 Project 面板为统一模板对齐 Info 面板 Header 样式；Info 面板顶部图标动态响应当前终端 Tab 的前台应用图标（如 Node/Python/Cargo/Antigravity）与运行状态；移除冗余的 CWD/PROJECT 分组，在 Header 标题下方集成单行无边框只读路径输入框（支持放置光标平移浏览）与 Finder / Copy 操作按钮，并在内容区顶部统一设立 VS Code 打开项目的专属区域。
 - 新增 AI 工具打开按钮与动态选择注册表：通过 `AIToolRegistry` 动态检测系统已安装的 AI 桌面 GUI 应用（Codex、Claude Code、Claude Desktop、OpenCode、Antigravity 等）与 CLI 命令行工具（`codex`、`agy`、`claude`、`opencode`、`grok` 等）；在 Project 与 Info 面板顶部形成「编辑器 + AI 工具」双核并列组合栏。桌面应用通过 `NSWorkspace` 激活打开目录，CLI 工具自动在新终端 Session 中携带目标路径启动；图标自动匹配 Material / App 真实图标，右侧 `[⌄]` 原生菜单支持一键切换并持久化至 `config.toml` (`ai.preferred-tool`)。
 - 优化右侧栏 Project 面板 Header：Project 图标变为带 hover 浅底高亮可点击按钮，点击弹窗设置项目图标；Project 名称与 Project 描述均升级为就地编辑输入框，常规状态无背景无描边，获取焦点后高亮显示描边与背景色并即时保存。
+- 终端 Tab 惰性加载机制（Lazy Allocation）：启动时反序列化快照仅为当前活跃选中的 Tab 实例化 LibGhostty 引擎与 Shell 进程，所有后台 Tab 保持惰性装载；在首次切换到目标 Tab 时低于 10ms 瞬间无感激活，将包含数十个历史 Tab 时的 App 启动内存占用从 ~1.0GB 降低至 ~60MB。
+

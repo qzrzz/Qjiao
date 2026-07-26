@@ -19,11 +19,33 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     @Published var title: String
     @Published var workingDirectory: String?
     @Published var hasExited = false
+    /// 终端引擎与视图是否已完成真正的初始化。惰性 Session 在首次访问或进入前台时建联。
+    @Published private(set) var isInitialized = false
 
-    let terminalView: KeroTerminalView
+    /// 项目拖拽回调缓存，延迟装载时应用给新建的 terminalView。
+    var pendingOnOpenProjectDirectory: ((URL) -> Bool)? {
+        didSet {
+            _terminalView?.onOpenProjectDirectory = pendingOnOpenProjectDirectory
+        }
+    }
+
+    private var _terminalView: KeroTerminalView?
+    private var _controller: TerminalController?
+    private var _find: TerminalFind?
+
+    @MainActor
+    var terminalView: KeroTerminalView {
+        ensureInitialized()
+        return _terminalView!
+    }
+
     let overlayScrollbar = OverlayScrollbarView()
-    /// Find-in-terminal state for this session's pane (⌘F).
-    let find: TerminalFind
+
+    @MainActor
+    var find: TerminalFind {
+        ensureInitialized()
+        return _find!
+    }
     var onExited: ((TerminalSession) -> Void)?
 
     private static let persistedHistoryLineLimit = 500
@@ -32,7 +54,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private let launchWorkingDirectory: String
     /// 会话创建时刻，用于 Tab 总览显示已运行时间。
     private let startedAt = Date()
-    private let controller: TerminalController
+    var controller: TerminalController? { _controller }
     private let launchCommand: String
     private let launchDirectoryURL: URL?
     private let shellPidFileURL: URL?
@@ -41,7 +63,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private var lastHistorySnapshot: String?
     private var isTerminating = false
 
-    init(initialDirectory: String? = nil, restoredHistory: String? = nil) {
+    init(initialDirectory: String? = nil, restoredHistory: String? = nil, isLazy: Bool = false) {
         let shellPath = Self.loginShell()
         let directory = Self.validWorkingDirectory(initialDirectory)
         let artifacts = Self.makeLaunchArtifacts(restoredHistory: restoredHistory)
@@ -61,8 +83,21 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         title = directoryName.isEmpty
             ? (shellPath as NSString).lastPathComponent
             : directoryName
+        lastHistorySnapshot = restoredHistory
+        super.init()
 
-        controller = TerminalController(
+        if !isLazy {
+            ensureInitialized()
+        }
+    }
+
+    /// 惰性初始化底层 TerminalController 与 KeroTerminalView（仅在首次被需要时触发）。
+    @MainActor
+    func ensureInitialized() {
+        guard !isInitialized else { return }
+        isInitialized = true
+
+        let controller = TerminalController(
             configSource: .none,
             theme: Self.ghosttyTheme(),
             terminalConfiguration: Self.terminalConfiguration(command: launchCommand)
@@ -70,20 +105,23 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         let terminalView = KeroTerminalView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 600)
         )
-        self.terminalView = terminalView
-        find = TerminalFind(terminal: terminalView)
-        lastHistorySnapshot = restoredHistory
-        super.init()
+        self._controller = controller
+        self._terminalView = terminalView
+        self._find = TerminalFind(terminal: terminalView)
 
         terminalView.delegate = self
         terminalView.configuration = TerminalSurfaceOptions(
             backend: .exec,
-            workingDirectory: directory,
+            workingDirectory: launchWorkingDirectory,
             envVars: Self.surfaceEnvironment(shellPath: shellPath)
         )
         terminalView.controller = controller
+        if let pendingOnOpenProjectDirectory {
+            terminalView.onOpenProjectDirectory = pendingOnOpenProjectDirectory
+        }
         installOverlayScrollbar()
         applyTheme()
+        NSLog("🚀 [TerminalSession] 实例化终端 Session ID: %@, 目录: %@", id.uuidString, launchWorkingDirectory)
     }
 
     deinit {
@@ -107,6 +145,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// font settings change. Ghostty also uses these values for OSC 10/11
     /// queries, so reported defaults always match the visible theme.
     func applyTheme() {
+        guard isInitialized, let controller = _controller, let terminalView = _terminalView else { return }
         _ = controller.setTerminalConfiguration(
             Self.terminalConfiguration(command: launchCommand)
         )
@@ -130,6 +169,12 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// or been force-stopped. Releasing AppTerminalView first can make
     /// libghostty wait synchronously for a process that ignored SIGHUP.
     private func beginTeardown(processAlive: Bool, notifyExit: Bool) {
+        guard isInitialized else {
+            hasExited = true
+            removeLaunchArtifacts()
+            if notifyExit { onExited?(self) }
+            return
+        }
         if processAlive {
             _ = shellPid // Cache it before `hasExited` changes.
             signalTerminalJob(SIGHUP)
@@ -146,7 +191,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
                 // process-close callback.
                 await Task.yield()
             }
-            terminalView.controller = nil
+            _terminalView?.controller = nil
             hasExited = true
             removeLaunchArtifacts()
             if notifyExit { onExited?(self) }
@@ -156,7 +201,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private func signalTerminalJob(_ signal: Int32) {
         var pids = Set<pid_t>()
         if let shellPid { pids.insert(shellPid) }
-        if let foreground = terminalView.foregroundPid, foreground > 0 {
+        if isInitialized, let foreground = _terminalView?.foregroundPid, foreground > 0 {
             pids.insert(foreground)
         }
         for pid in pids where pid > 1 {
@@ -240,7 +285,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// replacing the last saved shell scrollback in normal shell/TUI use.
     func serializedHistory(captureLive: Bool) -> String? {
         guard AppSettings.shared.restoreTerminalHistory else { return nil }
-        guard captureLive else { return lastHistorySnapshot }
+        guard captureLive, isInitialized else { return lastHistorySnapshot }
 
         let rootShellIsForeground = shellPid != nil
             && terminalView.foregroundPid == shellPid
@@ -284,9 +329,9 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// Whether a child process currently owns this terminal's foreground
     /// process group. An idle prompt keeps the login shell in the foreground.
     var isForegroundCommandRunning: Bool {
-        guard !hasExited,
+        guard isInitialized, !hasExited,
               let shellPid,
-              let foregroundPid = terminalView.foregroundPid
+              let foregroundPid = _terminalView?.foregroundPid
         else { return false }
         // `foregroundPid` is the terminal's foreground *process group* ID
         // (`tcgetpgrp`), which is not necessarily the shell's process ID.

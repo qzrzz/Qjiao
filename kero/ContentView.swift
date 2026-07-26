@@ -141,7 +141,7 @@ struct ContentView: View {
         )
         return manager.projects
             .flatMap(\.sessions)
-            .filter { !visibleIDs.contains($0.id) }
+            .filter { $0.isInitialized && !visibleIDs.contains($0.id) }
     }
 
     /// The pane layer paints an opaque background to hide unselected diffs in

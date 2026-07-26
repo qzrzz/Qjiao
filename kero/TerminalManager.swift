@@ -92,6 +92,19 @@ final class TerminalManager: nonisolated ObservableObject {
             Self.hasLoadedStore = true
             Self.pendingRestores = SessionStore.load()
             Self.pendingHistories = TerminalHistoryStore.load()
+
+            // 统计恢复时加载的项目总数与终端 Session 总数
+            let sessionCount = Self.pendingRestores.reduce(0) { winSum, win in
+                winSum + win.projects.reduce(0) { projSum, proj in
+                    projSum + proj.tabs.reduce(0) { tabSum, tab in
+                        tabSum + tab.columns.reduce(0) { colSum, col in
+                            colSum + col.panes.filter { if case .session = $0.content { return true }; return false }.count
+                        }
+                    }
+                }
+            }
+            let projectCount = Self.pendingRestores.flatMap(\.projects).count
+            NSLog("🚀 [Qjiao Startup] 恢复窗口数: %d, 恢复项目数: %d, 恢复终端 Session 总数: %d", Self.pendingRestores.count, projectCount, sessionCount)
         }
         Self.registry.append(self)
         var restored = false
@@ -344,7 +357,8 @@ final class TerminalManager: nonisolated ObservableObject {
             else { continue }
 
             // 检查监听端口 PID 是否属于此 session shellPid
-            if let matchedPort = ports.first(where: { $0.pid == shellPid || $0.pid == session.terminalView.foregroundPid })?.port {
+            let foregroundPid = session.isInitialized ? session.terminalView.foregroundPid : nil
+            if let matchedPort = ports.first(where: { $0.pid == shellPid || $0.pid == foregroundPid })?.port {
                 if packageScriptRecords[name]?.boundPort != matchedPort {
                     packageScriptRecords[name]?.boundPort = matchedPort
                 }
@@ -922,7 +936,8 @@ final class TerminalManager: nonisolated ObservableObject {
         if let tab = snapshot.rightPanelTab {
             panelTab = tab
         }
-        for saved in snapshot.projects where !saved.tabs.isEmpty {
+        let targetProjectIndex = snapshot.selectedProjectIndex ?? 0
+        for (projectIndex, saved) in snapshot.projects.enumerated() where !saved.tabs.isEmpty {
             let project = makeProject(id: saved.id, createInitialSession: false)
             let config = ProjectConfigStore.load(for: project.id)
             project.customName = config?.customName ?? saved.customName
@@ -931,13 +946,16 @@ final class TerminalManager: nonisolated ObservableObject {
             project.theme = config?.theme ?? saved.theme ?? .global
             project.projectDirectory = config?.projectDirectory ?? saved.projectDirectory ?? ""
             project.launchCommands = config?.launchCommands ?? []
-            for tab in saved.tabs {
+            let targetTabIndex = saved.selectedTabIndex ?? 0
+            for (tabIndex, tab) in saved.tabs.enumerated() {
+                let isSelectedActiveTab = (projectIndex == targetProjectIndex && tabIndex == targetTabIndex)
                 project.restoreTab(
                     from: tab,
                     histories: Self.pendingHistories,
                     sessionDirectory: project.projectDirectory.isEmpty
                         ? nil
-                        : project.projectDirectory
+                        : project.projectDirectory,
+                    isLazy: !isSelectedActiveTab
                 )
             }
             if project.projectDirectory.isEmpty {
