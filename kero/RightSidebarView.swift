@@ -2693,24 +2693,26 @@ private struct GitSectionHeader: View {
 
             Spacer(minLength: 0)
 
-            ForEach(actions) { action in
-                Button(action: action.perform) {
-                    Image(systemName: action.systemImage)
-                        .font(SidebarTypography.micro())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16, height: 16)
-                        .contentShape(RoundedRectangle(cornerRadius: 3))
+            HStack(spacing: 5) {
+                ForEach(actions) { action in
+                    Button(action: action.perform) {
+                        Image(systemName: action.systemImage)
+                            .font(SidebarTypography.micro())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18, height: 18)
+                            .contentShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(actionsDisabled)
+                    .opacity(actionsDisabled ? 0.3 : (isHovering ? 1 : 0.55))
+                    .help(action.help)
+                    .accessibilityLabel(action.help)
                 }
-                .buttonStyle(.plain)
-                .disabled(actionsDisabled)
-                .opacity(actionsDisabled ? 0.3 : (isHovering ? 1 : 0.55))
-                .help(action.help)
-                .accessibilityLabel(action.help)
             }
         }
         // Fixed height so the taller hover buttons don't grow the header.
         .frame(height: SidebarTypography.rowMinHeight)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .padding(.top, 8)
         .padding(.bottom, 3)
         .onHover { isHovering = $0 }
