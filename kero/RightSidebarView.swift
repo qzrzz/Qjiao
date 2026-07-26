@@ -3243,20 +3243,18 @@ private struct PackageInfoSection: View {
     }
 
     private func syncVersionDraft() {
-        if !isVersionFocused {
-            versionDraft = cleanVersion
-        }
+        versionDraft = cleanVersion
     }
 
     private func commitVersionChange() {
         let trimmed = versionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            syncVersionDraft()
+        if trimmed.isEmpty {
+            versionDraft = cleanVersion
             return
         }
-        let cleanVersion = (trimmed.hasPrefix("v") || trimmed.hasPrefix("V")) ? String(trimmed.dropFirst()) : trimmed
-        if cleanVersion != info.version {
-            if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: cleanVersion) {
+        let cleanNew = (trimmed.hasPrefix("v") || trimmed.hasPrefix("V")) ? String(trimmed.dropFirst()) : trimmed
+        if cleanNew != info.version {
+            if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: cleanNew) {
                 onVersionUpdated()
             }
         }
@@ -3398,10 +3396,7 @@ private struct PackageInfoSection: View {
                                     .padding(.trailing, 5)
                                     .padding(.leading, 1)
 
-                                TextField("0.0.0", text: Binding(
-                                    get: { versionDraft.isEmpty ? cleanVersion : versionDraft },
-                                    set: { versionDraft = $0 }
-                                ))
+                                TextField("0.0.0", text: $versionDraft)
                                     .font(SidebarTypography.caption(design: .monospaced))
                                     .foregroundStyle(.secondary)
                                     .textFieldStyle(.plain)
