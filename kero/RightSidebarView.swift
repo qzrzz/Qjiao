@@ -3055,7 +3055,31 @@ private struct PathDirectorySection: View {
                         .help("Open in \(preferredAI.displayName)")
                         .contextMenu {
                             if aiRegistry.installedTools.count > 1 {
-                                ForEach(aiRegistry.installedTools) { tool in
+                                let desktopTools = aiRegistry.installedTools.filter { $0.kind == .desktop }
+                                let cliTools = aiRegistry.installedTools.filter { $0.kind == .cli }
+
+                                ForEach(desktopTools) { tool in
+                                    Button {
+                                        aiRegistry.preferredToolId = tool.id
+                                        aiRegistry.open(path: path, with: tool)
+                                    } label: {
+                                        if let icon = tool.iconImage(size: 16) {
+                                            Label {
+                                                Text(tool.displayName)
+                                            } icon: {
+                                                Image(nsImage: icon)
+                                            }
+                                        } else {
+                                            Label(tool.displayName, systemImage: tool.symbolName)
+                                        }
+                                    }
+                                }
+
+                                if !desktopTools.isEmpty && !cliTools.isEmpty {
+                                    Divider()
+                                }
+
+                                ForEach(cliTools) { tool in
                                     Button {
                                         aiRegistry.preferredToolId = tool.id
                                         aiRegistry.open(path: path, with: tool)
@@ -4647,19 +4671,45 @@ private struct AIDropdownNSButton: NSViewRepresentable {
 
         private func rebuildMenu() {
             menu.removeAllItems()
-            for tool in tools {
-                let item = NSMenuItem(
-                    title: tool.displayName,
-                    action: #selector(selectTool(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = self
-                item.isEnabled = true
-                item.representedObject = tool.id
-                item.image = tool.iconImage(size: 16)
-                item.state = (tool.id == preferredToolId) ? .on : .off
-                menu.addItem(item)
+
+            let desktopTools = tools.filter { $0.kind == .desktop }
+            let cliTools = tools.filter { $0.kind == .cli }
+
+            // 1. 添加 GUI 桌面应用
+            for tool in desktopTools {
+                addMenuItem(for: tool)
             }
+
+            // 2. 若同时存在桌面应用与 CLI 工具，插入 CLI 分组标题 Header
+            if !desktopTools.isEmpty && !cliTools.isEmpty {
+                if #available(macOS 14.0, *) {
+                    menu.addItem(NSMenuItem.sectionHeader(title: "CLI"))
+                } else {
+                    menu.addItem(NSMenuItem.separator())
+                    let headerItem = NSMenuItem(title: "CLI", action: nil, keyEquivalent: "")
+                    headerItem.isEnabled = false
+                    menu.addItem(headerItem)
+                }
+            }
+
+            // 3. 添加 CLI 命令行工具
+            for tool in cliTools {
+                addMenuItem(for: tool)
+            }
+        }
+
+        private func addMenuItem(for tool: AITool) {
+            let item = NSMenuItem(
+                title: tool.displayName,
+                action: #selector(selectTool(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.isEnabled = true
+            item.representedObject = tool.id
+            item.image = tool.iconImage(size: 16)
+            item.state = (tool.id == preferredToolId) ? .on : .off
+            menu.addItem(item)
         }
 
         @objc func showMenu(_ sender: NSButton) {
