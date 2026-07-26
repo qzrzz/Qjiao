@@ -75,10 +75,12 @@ struct StartPanel: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(Array(project.launchCommands.enumerated()), id: \.element.id) { index, command in
+                    let isExpanded = expandedCommandID == command.id
+                    let showDivider = !isExpanded && index < project.launchCommands.count - 1
                     VStack(spacing: 0) {
                         StartCommandRow(
                             command: command,
-                            isExpanded: expandedCommandID == command.id,
+                            isExpanded: isExpanded,
                             isDragged: draggedCommandID == command.id,
                             run: { runCommand(command) },
                             toggleExpanded: { toggleExpanded(command.id) },
@@ -91,17 +93,33 @@ struct StartPanel: View {
                         )
                         .background(LauncherFrameReader(commandID: command.id))
 
-                        if expandedCommandID == command.id {
+                        if isExpanded {
                             StartCommandInlineEditor(
                                 command: binding(for: command.id),
                                 delete: { delete(command.id) }
                             )
                         }
 
-                        if index < project.launchCommands.count - 1 {
+                        if showDivider {
                             Divider().padding(.leading, 12)
                         }
                     }
+                    // 展开时：整个条目+编辑区用选中背景+圆角包裹
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(isExpanded ? Color.primary.opacity(0.07) : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(
+                                isExpanded ? Color.primary.opacity(0.1) : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .padding(.horizontal, isExpanded ? 2 : 0)
+                    .padding(.vertical, isExpanded ? 2 : 0)
+                    .animation(.snappy(duration: 0.2), value: isExpanded)
                 }
             }
             .background(
@@ -287,7 +305,6 @@ struct StartCommandInlineEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Divider()
             Picker("Type", selection: $command.type) {
                 ForEach(ProjectLaunchCommandType.allCases) { type in
                     Label(type.title, systemImage: type.systemImage).tag(type)
@@ -309,9 +326,8 @@ struct StartCommandInlineEditor: View {
         }
         .font(SidebarTypography.secondary())
         .padding(.horizontal, 12)
-        .padding(.top, 2)
-        .padding(.bottom, 10)
-        .background(Color.primary.opacity(0.025))
+        .padding(.top, 4)
+        .padding(.bottom, 12)
     }
 
     @ViewBuilder
