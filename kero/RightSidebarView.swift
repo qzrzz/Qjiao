@@ -424,6 +424,8 @@ struct RightSidebarView: View {
             }
         }
         .frame(height: 41)
+        // 右侧 Tabs 顶栏空白区域允许拖拽移动窗口
+        .background { WindowDragArea() }
     }
 
     private func tabButton(
@@ -728,6 +730,8 @@ private struct FileTreePanel: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
             .padding(.bottom, 8)
+            // Files 面板 Header 空白区域允许拖拽移动窗口
+            .background { WindowDragArea() }
 
             if isFilterActive {
                 filterBarView
@@ -1751,6 +1755,8 @@ private struct GitPanel: View {
         .padding(.horizontal, 12)
         .padding(.top, 8)
         .padding(.bottom, 8)
+        // Git 面板 Header 空白区域允许拖拽移动窗口
+        .background { WindowDragArea() }
     }
 
     private var branchMenu: some View {
@@ -4370,6 +4376,8 @@ private struct ProjectPanel: View {
             if model.processes.isEmpty { processesCollapsed = true }
             if model.ports.isEmpty { portsCollapsed = true }
         }
+        // Project 面板空白区域允许拖拽移动窗口
+        .background { WindowDragArea() }
     }
 
     @ViewBuilder
@@ -4558,6 +4566,8 @@ private struct ProjectPanel: View {
                 descDraft = project.description ?? ""
             }
         }
+        // Project 面板 Header 空白区域允许拖拽移动窗口
+        .background { WindowDragArea() }
     }
 }
 
@@ -5271,6 +5281,8 @@ private struct SessionInfoPanel: View {
         .padding(.horizontal, 12)
         .padding(.top, 8)
         .padding(.bottom, 8)
+        // Session Info 面板 Header 空白区域允许拖拽移动窗口
+        .background { WindowDragArea() }
     }
 }
 
