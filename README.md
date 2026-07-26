@@ -10,6 +10,7 @@
 
 > 相对于 Kero 原版的改动
 
+- 左边栏开关（`sidebar.left`，⌘B）：展开时显示在左侧边栏顶栏右侧；收起后移到 Tabs 顶栏左侧（左边距与右侧栏按钮右边距一致，均为 10pt）。
 - 增加窗口拖拽区域。
   - 顶部、右侧边栏添加可拖拽区域。
 - 右面板文本颜色提升可读性。
@@ -17,7 +18,7 @@
   - 默认使用内置 `Source Han Sans CN VF Mono1200` 作为中文等宽回退字体，并可在设置中关闭。
 - 拖拽文件夹自动以该文件夹创建项目并在其中启动终端。
 - 项目支持自定义图标（Emoji 和 SF Symbols ）。
-- 增加 Tabs 选择菜单。
+- 增加 Tabs 选择菜单；顶栏新建标签紧挨标签条，标签总览下拉固定在右侧侧栏按钮旁；左侧栏开关 / 新建 / 下拉 / 右侧栏 / Zoom 共用 `HeaderIconButton`（26pt 热区、caption 图标不变；仅 hover 浅底，按下/激活无底色，激活仅 tint）。右侧工具用 ZStack 固定叠层 + 左侧 padding 硬预留宽度，标签再多也不会挤占下拉/侧栏。
 - 终端可选启用直接点击移动光标。
 - 项目支持添加描述，并显示在项目列表中。
 - 项目右键菜单支持在 Finder 中打开项目目录和配置文件夹。
@@ -47,7 +48,7 @@
 - 左侧面板底部增加主题菜单，可快速切换 System、Light、Dark 外观。
 - Default Dark 主题的左侧项目面板改用更深的 `underWindowBackground` 材质，避免系统侧栏材质提亮背景。
 - 修复开启终端不透明度时切换 Tab 后未选中的 Git Diff 对比器透出显示的问题，并将终端背景不透明度设置应用于 Git Diff 对比器。
-- 终端 Tab 最小宽度调整为 136；标题变长时立即扩张，变短后延迟收缩并带有过渡动画，减少标签宽度抖动；未挤满时最大宽度 220，标签条已满（需要横向滚动）时最大宽度压至 140，空间足够再恢复，避免宽窄来回抖。
+- 终端 Tab 宽度展示：未挤满时最小 150、最大 220；标签条已满（需要横向滚动）时最小 130、最大 140，空间足够再恢复；标题变长立即扩张，变短延迟收缩并带过渡动画，减少抖动。
 - 增加全局“禁用 Zsh 自动标题名”开关；仅为 Qjiao 新建的 zsh 终端设置 `DISABLE_AUTO_TITLE=true`，并可在 Tab 右键菜单中切换。
 - 设置面板改为顶部图标分类导航，按 General、Terminal、Editor、Files、About 分组展示配置项；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
 - 设置 Editor 分组支持分别选择 Light / Dark 编辑器配色；两种外观都可独立跟随全局与当前项目主题或设置专用主题，不改变终端和窗口主题；编辑器专用主题内置 VS Code 风格的 Dark+、Light+、GitHub Dark、GitHub Light、One Dark、One Light、Monokai Pro、Xcode、Ayu、Solarized，并直接使用其语法 token 配色即时重绘。
@@ -99,6 +100,4 @@
   - 处于「待运行」状态时，自动在条目右侧格式化展示上一次运行耗时（如 `4.2s`、`522.4ms`、`1m12.5s`，精准保留 1 位小数，整数时无多余 `.0`，配合 `monospacedDigit` 等宽数字字体显示）。
   - 自动读取 Settings 中配置的包管理器（`bun` / `pnpm` / `yarn` / `npm`），为启动的新终端 Tab 动态命名为 `<scriptName> (<pmCommand> run)` 格式（例如 `dev (npm run)`、`build (bun run)`）。
   - 抽象解耦出通用项目脚本执行引擎模块 `ProjectScriptEngine`：定义 `ProjectScriptCategory`、`UniversalProjectScript` 与 `ProjectScriptProvider` 探针协议，统一管理跨平台/多语言任务的构建、调度、生命周期监测与端口绑定，为后续扩展 Gradle、`tool.uv.scripts`、PDM、Rust alias 及 Makefile 等方案奠定架构基础。
-
-
-
+- 优化右侧边栏 Project 面板 Header 内容展示：响应显示项目的自定义图标（SF Symbol 或 Emoji），渲染自定义项目名称（Title）以及项目描述（Description），缺失描述时优雅回退显示会话数据。

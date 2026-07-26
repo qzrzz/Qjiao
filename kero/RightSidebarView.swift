@@ -552,6 +552,7 @@ struct RightSidebarView: View {
 private struct PanelHeader: View {
     let title: String
     let subtitle: String?
+    var subtitleTruncationMode: Text.TruncationMode = .head
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -564,7 +565,7 @@ private struct PanelHeader: View {
                     // PID 作为辅助信息显示，但在浅色模式下保持足够对比度。
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.head)
+                    .truncationMode(subtitleTruncationMode)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -4038,11 +4039,16 @@ private struct ProjectPanel: View {
     @State private var portsCollapsed = false
 
     private var projectTitle: String {
+        let name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
         guard !model.rootPath.isEmpty else { return "Project" }
         return (model.rootPath as NSString).lastPathComponent
     }
 
     private var headerSubtitle: String? {
+        if let desc = project.description?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
+            return desc
+        }
         let n = model.sessionShellCount
         guard n > 0 else { return nil }
         return n == 1 ? "1 session" : "\(n) sessions"
@@ -4230,12 +4236,36 @@ private struct ProjectPanel: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 6) {
+    @ViewBuilder
+    private var headerIcon: some View {
+        switch project.icon {
+        case .sfSymbol(let name):
+            Image(systemName: name)
+                .font(SidebarTypography.secondary(.medium))
+                .foregroundStyle(Color(nsColor: Theme.cursor))
+                .frame(width: 18, height: 18)
+        case .emoji(let emoji):
+            Text(emoji)
+                .font(SidebarTypography.secondary(.medium))
+                .lineLimit(1)
+                .fixedSize()
+                .frame(width: 18, height: 18)
+        case nil:
             Image(systemName: "shippingbox")
                 .font(SidebarTypography.secondary(.medium))
                 .foregroundStyle(Color(nsColor: Theme.cursor))
-            PanelHeader(title: projectTitle, subtitle: headerSubtitle)
+                .frame(width: 18, height: 18)
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            headerIcon
+            PanelHeader(
+                title: projectTitle,
+                subtitle: headerSubtitle,
+                subtitleTruncationMode: (project.description != nil && !(project.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)) ? .tail : .head
+            )
             Button {
                 model.refresh()
             } label: {

@@ -21,9 +21,21 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header-height strip housing the traffic-light buttons.
-            WindowDragArea()
-                .frame(height: 38)
+            // Header-height strip: traffic lights on the left, collapse control
+            // on the right (outer margin matches the main header's right-sidebar
+            // button so both edges read as the same inset).
+            ZStack(alignment: .trailing) {
+                WindowDragArea()
+                HeaderIconButton(
+                    systemImage: "sidebar.left",
+                    isActive: true,
+                    help: "Toggle Left Sidebar (⌘B)",
+                    helpAlignment: .trailing,
+                    action: { manager.toggleLeftSidebar() }
+                )
+                .padding(.trailing, HeaderTabActionMetrics.edgePadding)
+            }
+            .frame(height: 38)
 
             GeometryReader { viewport in
                 ScrollView {

@@ -185,73 +185,126 @@ struct ContentView: View {
     }
 }
 /// Slim bar above the terminal: the selected project's sessions as
-/// horizontal tabs on the left, sidebar toggle on the right. Doubles as
-/// window-drag space.
+/// horizontal tabs on the left, right-sidebar toggle on the right. Doubles as
+/// window-drag space. Left-sidebar toggle lives in `SidebarView` while open,
+/// and only appears here when the left sidebar is closed.
 private struct MainHeaderView: View {
     @ObservedObject var manager: TerminalManager
 
+    /// 左侧栏收起时，为红绿灯预留的宽度（不含 edgePadding）。
+    private static let trafficLightInset: CGFloat = 68
+    /// 「+」与右侧工具、以及工具彼此之间的间距（满栏时与按钮间距一致）。
+    private static var actionSpacing: CGFloat { HeaderTabActionMetrics.spacing }
+    /// 标签条与「+」间距。
+    private static let tabNewSpacing: CGFloat = 4
+    /// 左侧栏开关与标签条之间的间距。
+    private static var leftToggleSpacing: CGFloat { HeaderTabActionMetrics.spacing }
+
+    /// 左侧栏开关占用宽度（按钮 + 与后续内容间距）；仅在 Tabs 栏展示时计入。
+    private static var leftToggleWidth: CGFloat {
+        HeaderTabActionMetrics.size + leftToggleSpacing
+    }
+
     /// With the left sidebar hidden the header slides under the window's
-    /// traffic-light buttons, so inset its content to clear them.
+    /// traffic-light buttons, so inset its content to clear them. Outer
+    /// padding matches the right-sidebar button's trailing margin.
     private var leadingInset: CGFloat {
-        manager.isLeftSidebarVisible ? 8 : 78
+        if manager.isLeftSidebarVisible {
+            return HeaderTabActionMetrics.edgePadding
+        }
+        return Self.trafficLightInset + HeaderTabActionMetrics.edgePadding
+    }
+
+    /// 右侧固定工具簇固有宽度（zoom 可选 + 下拉 + 侧栏）。
+    private static func trailingClusterWidth(isPaneZoomed: Bool, hasProject: Bool) -> CGFloat {
+        guard hasProject else { return 0 }
+        var width =
+            HeaderTabActionMetrics.size
+            + HeaderTabActionMetrics.spacing
+            + HeaderTabActionMetrics.size
+        if isPaneZoomed {
+            width += HeaderTabActionMetrics.size + HeaderTabActionMetrics.spacing
+        }
+        return width
     }
 
     var body: some View {
         GeometryReader { geo in
-            ZStack {
+            let hasProject = manager.selectedProject != nil
+            let showLeftToggle = !manager.isLeftSidebarVisible
+            let trailingCluster = Self.trailingClusterWidth(
+                isPaneZoomed: manager.isPaneZoomed,
+                hasProject: hasProject
+            )
+            // 标签/新建不得进入的右侧预留：工具簇 + 与「+」同宽的间距 + 外边距。
+            let trailingReserve =
+                trailingCluster
+                + (trailingCluster > 0 ? Self.actionSpacing : 0)
+                + HeaderTabActionMetrics.edgePadding
+            let leftToggleOccupied = showLeftToggle ? Self.leftToggleWidth : 0
+            let leftBudget = max(
+                0,
+                geo.size.width - leadingInset - leftToggleOccupied - trailingReserve
+            )
+            let stripMaxWidth = max(
+                0,
+                leftBudget - Self.tabNewSpacing - HeaderTabActionMetrics.size
+            )
+
+            ZStack(alignment: .trailing) {
                 // 顶栏未被标签和按钮占用的区域始终可拖动窗口。
                 WindowDragArea()
 
-                HStack(spacing: 8) {
-                    if let project = manager.selectedProject {
-                        // Everything in the header that isn't the scrollable tab
-                        // strip: leading inset + trailing padding (8), HStack
-                        // spacings (24), tab-list + sidebar toggles (56), "+" and spacing (26),
-                        // and the exit-zoom button (24 + 8 spacing) while shown.
-                        SessionTabsView(
-                            project: project,
-                            maxStripWidth: max(0, geo.size.width - leadingInset - 106 - (manager.isPaneZoomed ? 32 : 0))
+                // 左侧：收起时的左边栏开关 + 标签 + 新建。trailing 用 padding 硬预留。
+                HStack(spacing: Self.leftToggleSpacing) {
+                    if showLeftToggle {
+                        HeaderIconButton(
+                            systemImage: "sidebar.left",
+                            isActive: false,
+                            help: "Toggle Left Sidebar (⌘B)",
+                            action: { manager.toggleLeftSidebar() }
                         )
                     }
-                    Spacer(minLength: 0)
-                    // Zoom indicator: only visible while the selected tab has a
-                    // zoomed pane. Styled like the sidebar toggle next to it, with
-                    // the accent tint marking the active state. Click restores the
-                    // layout.
-                    if manager.isPaneZoomed {
-                        Button {
-                            manager.togglePaneZoom()
-                        } label: {
-                            Image(systemName: "arrow.down.forward.and.arrow.up.backward")
-                                .font(SidebarTypography.secondary(.medium))
-                                .foregroundStyle(Color(nsColor: Theme.cursor))
-                                .frame(width: 24, height: 24)
-                                .contentShape(RoundedRectangle(cornerRadius: 6))
+                    HStack(spacing: Self.tabNewSpacing) {
+                        if let project = manager.selectedProject {
+                            SessionTabsView(
+                                project: project,
+                                maxStripWidth: stripMaxWidth
+                            )
+                            NewTabButton(project: project)
                         }
-                        .buttonStyle(.plain)
-                        .tooltip("Exit Pane Zoom (⇧⌘↩)", edge: .below, alignment: .trailing)
-                    }
-                    // No project means the sidebar has nothing to show, so drop
-                    // its toggle too — matching the panel collapsing itself.
-                    if let project = manager.selectedProject {
-                        TabListButton(project: project)
-                        Button {
-                            manager.toggleSidebar()
-                        } label: {
-                            Image(systemName: "sidebar.right")
-                                .font(SidebarTypography.secondary(.medium))
-                                .foregroundStyle(manager.isPanelVisible ? Color(nsColor: Theme.cursor) : .secondary)
-                                .frame(width: 24, height: 24)
-                                .contentShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                        .tooltip("Toggle Right Sidebar (⇧⌘B)", edge: .below, alignment: .trailing)
+                        Spacer(minLength: 0)
                     }
                 }
                 .padding(.leading, leadingInset)
-                .padding(.trailing, 8)
+                .padding(.trailing, trailingReserve)
+
+                // 右侧：固定叠在预留区；按钮间距与「+」到下拉的间距一致。
+                if let project = manager.selectedProject {
+                    HStack(spacing: Self.actionSpacing) {
+                        if manager.isPaneZoomed {
+                            HeaderIconButton(
+                                systemImage: "arrow.down.forward.and.arrow.up.backward",
+                                isActive: true,
+                                help: "Exit Pane Zoom (⇧⌘↩)",
+                                helpAlignment: .trailing,
+                                action: { manager.togglePaneZoom() }
+                            )
+                        }
+                        TabListButton(project: project)
+                        HeaderIconButton(
+                            systemImage: "sidebar.right",
+                            isActive: manager.isPanelVisible,
+                            help: "Toggle Right Sidebar (⇧⌘B)",
+                            helpAlignment: .trailing,
+                            action: { manager.toggleSidebar() }
+                        )
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.trailing, HeaderTabActionMetrics.edgePadding)
+                }
             }
-            .frame(height: geo.size.height)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .trailing)
         }
         .frame(height: 42)
         .overlay(alignment: .bottom) {
@@ -262,23 +315,92 @@ private struct MainHeaderView: View {
     }
 }
 
-/// 顶栏右侧的 Tab 总览入口。用于在标题很长或标签很多时快速切换。
+/// 顶栏图标按钮尺寸与 hover 样式（左侧栏 / 新建 / 下拉 / 右侧栏 / Zoom 共用）。
+enum HeaderTabActionMetrics {
+    /// 点击热区边长；图标仍用 caption，不随热区放大。
+    static let size: CGFloat = 26
+    static let spacing: CGFloat = 2
+    static let cornerRadius: CGFloat = 6
+    /// 顶栏左右工具按钮外侧边距：左边栏开关左边距 = 右边栏开关右边距。
+    static let edgePadding: CGFloat = 10
+    /// 仅 hover 浅底；按下 / 激活无底色。
+    static let hoverFill = Color.primary.opacity(0.06)
+}
+
+/// 顶栏统一图标按钮：较大 hit 区、固定 caption 图标；hover 浅底，按下无底色。
+struct HeaderIconButton: View {
+    let systemImage: String
+    var isActive = false
+    let help: String
+    var helpAlignment: HorizontalAlignment = .leading
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    private var iconColor: Color {
+        if isActive { return Color(nsColor: Theme.cursor) }
+        return isHovering ? .primary : .secondary
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(SidebarTypography.caption(.medium))
+                .foregroundStyle(iconColor)
+                .frame(width: HeaderTabActionMetrics.size, height: HeaderTabActionMetrics.size)
+                .contentShape(
+                    RoundedRectangle(cornerRadius: HeaderTabActionMetrics.cornerRadius, style: .continuous)
+                )
+        }
+        .buttonStyle(HeaderIconButtonStyle(isHovering: isHovering))
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+        .animation(.easeInOut(duration: 0.12), value: isActive)
+        .tooltip(help, edge: .below, alignment: helpAlignment)
+    }
+}
+
+/// 仅 hover 时铺浅底；`isPressed` 时去掉底色，且不做系统默认压暗。
+struct HeaderIconButtonStyle: ButtonStyle {
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let showHoverFill = isHovering && !configuration.isPressed
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: HeaderTabActionMetrics.cornerRadius, style: .continuous)
+                    .fill(showHoverFill ? HeaderTabActionMetrics.hoverFill : .clear)
+            )
+            .animation(.easeInOut(duration: 0.12), value: showHoverFill)
+    }
+}
+
+/// 标签条右侧：新建标签。
+private struct NewTabButton: View {
+    @ObservedObject var project: Project
+
+    var body: some View {
+        HeaderIconButton(
+            systemImage: "plus",
+            help: "New Session (⌘T)",
+            action: { project.newSession() }
+        )
+    }
+}
+
+/// 顶栏标签总览入口，固定在右侧侧栏按钮旁。
 private struct TabListButton: View {
     @ObservedObject var project: Project
     @State private var isPresented = false
 
     var body: some View {
-        Button {
-            isPresented.toggle()
-        } label: {
-            Image(systemName: "chevron.down")
-                .font(SidebarTypography.secondary(.medium))
-                .foregroundStyle(isPresented ? Color(nsColor: Theme.cursor) : .secondary)
-                .frame(width: 24, height: 24)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-        }
-        .buttonStyle(.plain)
-        .tooltip("Show Tab List", edge: .below, alignment: .trailing)
+        HeaderIconButton(
+            systemImage: "chevron.down",
+            isActive: isPresented,
+            help: "Show Tab List",
+            helpAlignment: .trailing,
+            action: { isPresented.toggle() }
+        )
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
             TabListPopover(project: project, isPresented: $isPresented)
         }
@@ -487,14 +609,16 @@ private final class TerminalTabDetailsLoader: ObservableObject {
     }
 }
 
-/// Horizontal tabs for one project — terminal sessions and open files —
-/// plus a "+" button.
+/// Horizontal tabs for one project — terminal sessions and open files.
+/// 新建在条带右侧（`NewTabButton`）；总览下拉固定在侧栏旁（`TabListButton`）。
 private struct SessionTabsView: View {
     @ObservedObject var project: Project
     @ObservedObject private var settings = AppSettings.shared
     let maxStripWidth: CGFloat
     @State private var overflow = StripOverflow()
-    /// 标签条已挤满时把单 Tab 最大宽度从 220 压到 140，腾出可见数量。
+    /// 标签内容固有宽度（未裁切），用于条带收窄到内容。
+    @State private var contentWidth: CGFloat = 0
+    /// 标签条已挤满时压低单 Tab 最小/最大宽度，腾出可见数量。
     @State private var stripIsFull = false
     @State private var draggedTabID: UUID?
     @State private var tabFrames: [UUID: CGRect] = [:]
@@ -506,31 +630,46 @@ private struct SessionTabsView: View {
         var right = false
     }
 
-    /// Scroll 几何快照：边缘淡入 + 是否挤满（用于压缩 Tab 最大宽度）。
+    /// Scroll 几何快照：边缘淡入 + 是否挤满（用于压缩 Tab 宽限）。
     private struct StripGeometry: Equatable {
         var overflow = StripOverflow()
         var contentWidth: CGFloat = 0
         var containerWidth: CGFloat = 0
     }
 
+    /// 标签条未满时的单 Tab 最小宽度。
+    private static let relaxedTabMinWidth: CGFloat = 150
+    /// 标签条已满（需要滚动）时的单 Tab 最小宽度。
+    private static let compressedTabMinWidth: CGFloat = 130
     /// 标签条未满时的单 Tab 最大宽度。
     private static let relaxedTabMaxWidth: CGFloat = 220
     /// 标签条已满（需要滚动）时的单 Tab 最大宽度。
     private static let compressedTabMaxWidth: CGFloat = 140
 
+    private var tabMinWidth: CGFloat {
+        stripIsFull ? Self.compressedTabMinWidth : Self.relaxedTabMinWidth
+    }
+
     private var tabMaxWidth: CGFloat {
         stripIsFull ? Self.compressedTabMaxWidth : Self.relaxedTabMaxWidth
     }
 
+    /// 条带显示宽度：内容与上限取小；硬宽度，避免 ScrollView 把右侧工具顶走。
+    private var stripWidth: CGFloat {
+        guard maxStripWidth > 0 else { return 0 }
+        guard contentWidth > 0 else { return maxStripWidth }
+        return min(contentWidth, maxStripWidth)
+    }
+
     var body: some View {
-        HStack(spacing: 4) {
-            ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 3) {
                     ForEach(project.tabs) { tab in
                         PaneTabItem(
                             tab: tab,
                             isSelected: tab.id == project.selectedTabID,
+                            minWidth: tabMinWidth,
                             maxWidth: tabMaxWidth,
                             select: { project.selectedTabID = tab.id },
                             close: { project.close(tab) },
@@ -538,10 +677,10 @@ private struct SessionTabsView: View {
                         )
                         .contextMenu { tabContextMenu(for: tab) }
                         .background {
-                            GeometryReader { proxy in
+                            GeometryReader { geo in
                                 Color.clear.preference(
                                     key: TabFramePreferenceKey.self,
-                                    value: [tab.id: proxy.frame(in: .global)]
+                                    value: [tab.id: geo.frame(in: .global)]
                                 )
                             }
                         }
@@ -556,7 +695,16 @@ private struct SessionTabsView: View {
                         )
                     }
                 }
+                .background {
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: TabStripContentWidthKey.self,
+                            value: geo.size.width
+                        )
+                    }
+                }
             }
+            .onPreferenceChange(TabStripContentWidthKey.self) { contentWidth = $0 }
             .onScrollGeometryChange(for: StripGeometry.self) { geo in
                 StripGeometry(
                     overflow: StripOverflow(
@@ -568,6 +716,10 @@ private struct SessionTabsView: View {
                 )
             } action: { _, new in
                 overflow = new.overflow
+                // contentSize 亦同步内容宽，避免仅依赖 preference 时的首帧空档。
+                if new.contentWidth > 0 {
+                    contentWidth = new.contentWidth
+                }
                 updateStripFullness(
                     contentWidth: new.contentWidth,
                     containerWidth: new.containerWidth
@@ -606,22 +758,11 @@ private struct SessionTabsView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.15), value: overflow)
-            .frame(maxWidth: maxStripWidth, alignment: .leading)
-            .fixedSize(horizontal: true, vertical: false)
-            }
-
-            Button {
-                project.newSession()
-            } label: {
-                Image(systemName: "plus")
-                    .font(SidebarTypography.compact())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .tooltip("New Session (⌘T)", edge: .below)
+            // 硬宽度 = min(内容, 上限)，不参与 HStack 弹性争夺。
+            .frame(width: stripWidth, alignment: .leading)
+            .clipped()
         }
+        .frame(width: stripWidth, alignment: .leading)
         .onPreferenceChange(TabFramePreferenceKey.self) { tabFrames = $0 }
     }
 
@@ -711,6 +852,15 @@ private struct TabFramePreferenceKey: PreferenceKey {
     }
 }
 
+/// 标签条内容固有宽度（全部 Tab 排开后的总宽）。
+private struct TabStripContentWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// A tab in the strip. Shows the focused pane's title/icon, with a small
 /// counter when the tab holds more than one pane. Observes the tab so focus
 /// and layout changes refresh it; the focused content is observed by the
@@ -718,6 +868,8 @@ private struct TabFramePreferenceKey: PreferenceKey {
 private struct PaneTabItem: View {
     @ObservedObject var tab: PaneTab
     let isSelected: Bool
+    /// 由标签条是否挤满决定：宽松 150 / 压缩 130。
+    var minWidth: CGFloat = 150
     /// 由标签条是否挤满决定：宽松 220 / 压缩 140。
     var maxWidth: CGFloat = 220
     let select: () -> Void
@@ -745,6 +897,7 @@ private struct PaneTabItem: View {
                     customTitle: tab.customName,
                     paneCount: paneCount,
                     isSelected: isSelected,
+                    minWidth: minWidth,
                     maxWidth: maxWidth,
                     select: select,
                     close: close
@@ -755,6 +908,7 @@ private struct PaneTabItem: View {
                     customTitle: tab.customName,
                     paneCount: paneCount,
                     isSelected: isSelected,
+                    minWidth: minWidth,
                     maxWidth: maxWidth,
                     select: select,
                     close: close
@@ -767,6 +921,7 @@ private struct PaneTabItem: View {
                     manualTitle: tab.customName,
                     paneCount: paneCount,
                     isSelected: isSelected,
+                    minWidth: minWidth,
                     maxWidth: maxWidth,
                     select: select,
                     close: close
@@ -837,6 +992,7 @@ private struct SessionTabLabel: View {
     var customTitle: String?
     let paneCount: Int
     let isSelected: Bool
+    var minWidth: CGFloat = 150
     var maxWidth: CGFloat = 220
     let select: () -> Void
     let close: () -> Void
@@ -854,6 +1010,7 @@ private struct SessionTabLabel: View {
                 isSelected: isSelected,
                 isTerminalRunning: session.isForegroundCommandRunning,
                 terminalAppIcon: appIcon,
+                minWidth: minWidth,
                 maxWidth: maxWidth,
                 select: select,
                 close: close
@@ -867,6 +1024,7 @@ private struct FileTabLabel: View {
     var customTitle: String?
     let paneCount: Int
     let isSelected: Bool
+    var minWidth: CGFloat = 150
     var maxWidth: CGFloat = 220
     let select: () -> Void
     let close: () -> Void
@@ -880,6 +1038,7 @@ private struct FileTabLabel: View {
             paneCount: paneCount,
             isSelected: isSelected,
             isDirty: file.isDirty,
+            minWidth: minWidth,
             maxWidth: maxWidth,
             select: select,
             close: close
@@ -913,8 +1072,8 @@ private struct TabStripIconView: View {
 }
 
 private struct TabItemChrome: View {
-    /// 常规 Tab 的最小宽度，避免短标题让标签过于紧凑。
-    private static let minimumWidth: CGFloat = 136
+    /// 默认最小宽度（标签条未满）；实际下限由 `minWidth` 传入。
+    private static let defaultMinWidth: CGFloat = 150
     /// 标题缩短后保留当前宽度的时长，避免命令状态频繁变化造成标签抖动。
     private static let shrinkDelay: Duration = .seconds(2)
 
@@ -930,6 +1089,8 @@ private struct TabItemChrome: View {
     var isTerminalRunning = false
     /// 终端前台进程匹配到的应用图标；有值时优先于转圈动画。
     var terminalAppIcon: TerminalAppIconSource? = nil
+    /// 由标签条挤满状态决定：默认 150，挤满时 130。
+    var minWidth: CGFloat = 150
     /// 由标签条挤满状态决定：默认 220，挤满时 140。
     var maxWidth: CGFloat = 220
     let select: () -> Void
@@ -937,7 +1098,7 @@ private struct TabItemChrome: View {
 
     @State private var isHovering = false
     /// 当前显示宽度会立即扩张，但会延迟收缩，给标题的短暂变化留出缓冲。
-    @State private var retainedWidth = minimumWidth
+    @State private var retainedWidth = defaultMinWidth
     @State private var shrinkTask: Task<Void, Never>?
 
     var body: some View {
@@ -1015,12 +1176,13 @@ private struct TabItemChrome: View {
         .onChange(of: title) { updateRetainedWidth() }
         .onChange(of: manualTitle) { applyManualTitleWidth() }
         .onChange(of: paneCount) { updateRetainedWidth() }
+        .onChange(of: minWidth) { updateRetainedWidth(immediate: true) }
         .onChange(of: maxWidth) { updateRetainedWidth(immediate: true) }
         .onDisappear { shrinkTask?.cancel() }
     }
 
     /// 根据 AppKit 测得的标题自然宽度更新显示宽度：扩张即时生效，收缩等待一段时间后再执行。
-    /// `immediate` 用于最大宽度上限被标签条挤满/放宽时立刻应用，避免仍卡在旧的 retainedWidth。
+    /// `immediate` 用于最小/最大宽度随标签条挤满/放宽变化时立刻应用，避免仍卡在旧的 retainedWidth。
     private func updateRetainedWidth(immediate: Bool = false) {
         // 图标、关闭/修改状态、左右内边距和元素间距占用的固定宽度。
         let accessoryWidth: CGFloat = paneCount > 1 ? 73 : 44
@@ -1028,8 +1190,8 @@ private struct TabItemChrome: View {
         let titleWidth = (title as NSString).size(
             withAttributes: [.font: SidebarTypography.bodyNSFont]
         ).width
-        // 挤满时 maxWidth 可能小于 minimumWidth（140 vs 136 仍 ≥）；始终保证不超过上限。
-        let floorWidth = min(Self.minimumWidth, maxWidth)
+        // 下限不超过上限（挤满时 min 130 / max 140）；始终夹在 [floor, max] 内。
+        let floorWidth = min(minWidth, maxWidth)
         let desiredWidth = min(
             max(titleWidth + accessoryWidth, floorWidth),
             maxWidth
