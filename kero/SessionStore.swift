@@ -27,6 +27,11 @@ enum ProjectConfigStore {
             .appendingPathComponent("projects", isDirectory: true)
     }
 
+    /// 用户项目图标托管目录：`…/projects/icons/{projectId}.{ext}`。
+    static var iconsDirectoryURL: URL {
+        directoryURL.appendingPathComponent("icons", isDirectory: true)
+    }
+
     static func load(for id: UUID) -> ProjectConfig? {
         let url = fileURL(for: id)
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -47,6 +52,73 @@ enum ProjectConfigStore {
 
     private static func fileURL(for id: UUID) -> URL {
         directoryURL.appendingPathComponent("\(id.uuidString).json")
+    }
+}
+
+/// 将用户选择的图片复制到配置目录，保证重启后仍可加载（不依赖原路径）。
+@MainActor
+enum ProjectIconFileStore {
+    private static let allowedExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "webp", "tif", "tiff",
+        "icns", "ico", "bmp", "heic", "heif", "svg",
+    ]
+
+    /// 导入图片为项目托管图标，返回绝对路径；失败返回 nil。
+    static func importImage(from sourceURL: URL, projectID: UUID) -> URL? {
+        let fm = FileManager.default
+        let ext = sourceURL.pathExtension.lowercased()
+        // 允许常见扩展名；无扩展名时按 png 托管。
+        let resolvedExt: String
+        if ext.isEmpty {
+            resolvedExt = "png"
+        } else if allowedExtensions.contains(ext) {
+            resolvedExt = ext
+        } else {
+            return nil
+        }
+        do {
+            try fm.createDirectory(
+                at: ProjectConfigStore.iconsDirectoryURL,
+                withIntermediateDirectories: true
+            )
+            // 先清掉该项目旧托管文件（可能扩展名不同）。
+            removeManagedIcons(for: projectID)
+            let dest = ProjectConfigStore.iconsDirectoryURL
+                .appendingPathComponent("\(projectID.uuidString).\(resolvedExt)")
+            if fm.fileExists(atPath: dest.path) {
+                try fm.removeItem(at: dest)
+            }
+            try fm.copyItem(at: sourceURL, to: dest)
+            return dest
+        } catch {
+            NSLog("qjiao: failed to import project icon: \(error)")
+            return nil
+        }
+    }
+
+    /// 删除该项目配置目录下托管的自定义图标文件。
+    static func removeManagedIcons(for projectID: UUID) {
+        let fm = FileManager.default
+        let dir = ProjectConfigStore.iconsDirectoryURL
+        guard let files = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
+        let prefix = projectID.uuidString.lowercased()
+        for name in files where name.lowercased().hasPrefix(prefix) {
+            try? fm.removeItem(at: dir.appendingPathComponent(name))
+        }
+    }
+
+    /// 路径是否位于托管图标目录内。
+    static func isManagedPath(_ path: String) -> Bool {
+        let icons = ProjectConfigStore.iconsDirectoryURL.standardizedFileURL.path
+        return path.standardizedFilePath.hasPrefix(icons)
+    }
+}
+
+private extension String {
+    /// 展开 ~ 并标准化，便于路径前缀比较。
+    var standardizedFilePath: String {
+        let expanded = (self as NSString).expandingTildeInPath
+        return (expanded as NSString).standardizingPath
     }
 }
 

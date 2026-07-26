@@ -21,6 +21,8 @@ enum ProjectIcon: Codable, Equatable {
     case emoji(String)
     /// 本应用内置预置图标。
     case preset(ProjectPresetIcon)
+    /// 用户选择的图片文件绝对路径（通常为配置目录下的托管副本）。
+    case file(String)
 }
 
 /// A reusable project launch target shown in the Start panel.

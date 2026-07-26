@@ -69,10 +69,17 @@ final class TerminalAppIconCatalog {
         reload()
     }
 
+    /// `TerminalAppIcons/icons` 文件名 → `apps.json` 中的 label（若有），供预置选择器 tooltip。
+    private(set) var bundledFileLabels: [String: String] = [:]
+    /// 内置图标文件名缓存，避免选择器反复扫盘。
+    private var cachedBundledIconFileNames: [String]?
+
     /// 重新加载内置与用户配置（修改配置文件后可调用）。
     func reload() {
         exactMap.removeAll(keepingCapacity: true)
         prefixRules.removeAll(keepingCapacity: true)
+        bundledFileLabels.removeAll(keepingCapacity: true)
+        cachedBundledIconFileNames = nil
         // 不丢 imageCache：文件路径不变时复用光栅结果。
 
         if let bundled = Self.locateBundledManifest(in: Bundle.main) {
@@ -85,6 +92,41 @@ final class TerminalAppIconCatalog {
         }
 
         prefixRules.sort { $0.prefix.count > $1.prefix.count }
+    }
+
+    /// 内置 `TerminalAppIcons/icons` 中的图标文件名（排序），供项目图标预置选择。
+    func bundledIconFileNames() -> [String] {
+        if let cachedBundledIconFileNames {
+            return cachedBundledIconFileNames
+        }
+        guard let dir = bundledIconsDirectory else {
+            cachedBundledIconFileNames = []
+            return []
+        }
+        let allowed: Set<String> = ["svg", "png", "icns", "jpg", "jpeg", "webp"]
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        let names = files
+            .filter { allowed.contains(($0 as NSString).pathExtension.lowercased()) }
+            .sorted()
+        cachedBundledIconFileNames = names
+        return names
+    }
+
+    /// 内置图标文件绝对路径；选择器异步加载用。
+    func fileURLForBundledFile(named fileName: String) -> URL? {
+        locateIconFile(fileName: fileName, preferUser: false)
+    }
+
+    /// 按内置文件名加载图标（用于项目预置图标）。
+    func imageForBundledFile(named fileName: String, pointSize: CGFloat) -> NSImage? {
+        guard let url = locateIconFile(fileName: fileName, preferUser: false) else { return nil }
+        return image(for: .imageFile(path: url.path), pointSize: pointSize)
+    }
+
+    /// 内置文件名是否应按 template 着色（单色 currentColor SVG）。
+    func isBundledFileTemplate(_ fileName: String) -> Bool {
+        guard let url = locateIconFile(fileName: fileName, preferUser: false) else { return false }
+        return isTemplate(.imageFile(path: url.path))
     }
 
     /// 按进程可执行文件 basename 查找图标来源；未配置时返回 nil。
@@ -214,6 +256,19 @@ final class TerminalAppIconCatalog {
         }
 
         for entry in manifest.apps {
+            // 记录 icon 文件名 → label，供预置选择器展示（不依赖 match 是否解析成功）。
+            if let label = entry.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+                let fileName = [entry.icon, entry.svg]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty }
+                if let fileName {
+                    let bare = (fileName as NSString).lastPathComponent
+                    if isUser || bundledFileLabels[bare] == nil {
+                        bundledFileLabels[bare] = label
+                    }
+                }
+            }
+
             guard let source = resolveSource(entry, isUser: isUser) else {
                 #if DEBUG
                 print("TerminalAppIcon: skip entry \(entry.label ?? entry.match?.first ?? "?") — no resolvable icon")

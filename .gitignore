@@ -1,7 +1,7 @@
 # Release artifacts produced by scripts/release.ts
 /build/
 .venv/
-
+build_tmp
 # Bun / node deps
 /node_modules/
 

@@ -387,6 +387,9 @@ private struct SidebarProjectRow: View {
             }
             if project.icon != nil {
                 Button("Clear Icon") {
+                    if case .file = project.icon {
+                        ProjectIconFileStore.removeManagedIcons(for: project.id)
+                    }
                     project.icon = nil
                 }
             }

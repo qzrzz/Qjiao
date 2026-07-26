@@ -149,6 +149,18 @@ final class MaterialFileIconCatalog {
         return manifest.file
     }
 
+    /// Material Icon Theme 全部逻辑名（排序），供项目图标预置选择器浏览。
+    /// 结果缓存，避免选择器每次 body 重算排序。
+    private(set) lazy var allIconNames: [String] = {
+        guard let manifest else { return [] }
+        return manifest.iconFiles.keys.sorted()
+    }()
+
+    /// 逻辑名对应的 SVG 文件 URL；选择器异步加载时用。
+    func fileURL(forIconName iconName: String) -> URL? {
+        svgURL(for: iconName)
+    }
+
     /// 加载指定逻辑名的图标；`pointSize` 为 SwiftUI 显示逻辑点（默认 16）。
     func image(named iconName: String, pointSize: CGFloat = 16) -> NSImage? {
         // 点尺寸取整后做 key，同一列表行共用同一缓存项。
@@ -159,12 +171,16 @@ final class MaterialFileIconCatalog {
         }
 
         guard let url = svgURL(for: iconName) else { return nil }
-        guard let base = NSImage(contentsOf: url) else { return nil }
+        guard let sized = Self.loadSizedImage(at: url, pointSize: pointSize) else { return nil }
+        imageCache[cacheKey] = sized
+        return sized
+    }
 
-        // 固定逻辑尺寸，SVG rep 在绘制时按 size 光栅化，列表对齐更稳。
+    /// 在后台线程从磁盘光栅化图标（不碰 MainActor 缓存）。
+    nonisolated static func loadSizedImage(at url: URL, pointSize: CGFloat) -> NSImage? {
+        guard let base = NSImage(contentsOf: url) else { return nil }
         let sized = base.copy() as? NSImage ?? base
         sized.size = NSSize(width: pointSize, height: pointSize)
-        imageCache[cacheKey] = sized
         return sized
     }
 
