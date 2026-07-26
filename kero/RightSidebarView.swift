@@ -4472,100 +4472,12 @@ private struct CodeEditorOpenButton: View {
     }
 }
 
-/// 下拉菜单项的 SwiftUI 自定义视图：包含勾选标记、应用图标与名称，支持 hover 高亮。
-private struct CodeEditorMenuItemView: View {
-    let editor: CodeEditor
-    let isSelected: Bool
-    let isHighlighted: Bool
-    let onSelect: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            // 左侧勾选标记对齐区（固定 14pt 宽）
-            ZStack {
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(isHighlighted ? .white : .primary)
-                }
-            }
-            .frame(width: 14, height: 14)
-
-            // 编辑器 App 真实图标（16pt）
-            CodeEditorIcon(editor: editor, size: 16)
-
-            // 编辑器显示名称
-            Text(editor.displayName)
-                .font(SidebarTypography.caption(.medium))
-                .foregroundStyle(isHighlighted ? .white : .primary)
-
-            Spacer(minLength: 12)
-        }
-        .padding(.horizontal, 4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(isHighlighted ? Color.accentColor : Color.clear)
-                .padding(.horizontal, 2)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onSelect()
-        }
-        .focusable(false) // 拒绝参与 SwiftUI 键盘 Tab 聚焦环
-    }
-}
-
-/// 带有 AppKit 显式 NSTrackingArea 的 NSHostingView，确保在 NSMenu 弹出窗口中 100% 精确捕获 mouseEntered / mouseExited。
-private final class MenuItemHostingView: NSHostingView<CodeEditorMenuItemView> {
-    override var acceptsFirstResponder: Bool { false }
-    override var canBecomeKeyView: Bool { false }
-
-    var onSelect: (() -> Void)?
-    private var trackingArea: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let old = trackingArea {
-            removeTrackingArea(old)
-        }
-        // 关键：.activeAlways 保证在 NSMenuWindow 菜单窗口中精准触发 mouseEntered/Exited
-        let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
-        let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
-        addTrackingArea(area)
-        self.trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        super.mouseEntered(with: event)
-        updateHighlight(true)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event)
-        updateHighlight(false)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        super.mouseUp(with: event)
-        onSelect?()
-    }
-
-    private func updateHighlight(_ highlighted: Bool) {
-        let currentRoot = rootView
-        rootView = CodeEditorMenuItemView(
-            editor: currentRoot.editor,
-            isSelected: currentRoot.isSelected,
-            isHighlighted: highlighted,
-            onSelect: currentRoot.onSelect
-        )
-    }
-}
-
 /// 原生 NSButton + NSMenu 包装的编辑器下拉选择按钮。
 ///
-/// 使用 NSHostingView 渲染每个 NSMenuItem 的视图，
-/// 彻底突破 AppKit 原生 NSMenuItem.image 在 Selection 勾选模式下自动隐藏图标的硬限制。
+/// 使用 100% AppKit 原生 NSMenuItem：
+/// - 系统原生处理鼠标 hover 高亮与离开，彻底消除自定义 View 的 hover 背景残留 Bug
+/// - 原生菜单项不参与 Focus 焦点，消除 Tab 键聚焦框
+/// - 配合像素化 NSImage，完美渲染 App 图标与勾选标记
 private struct EditorDropdownNSButton: NSViewRepresentable {
     /// 可用编辑器列表。
     let editors: [CodeEditor]
@@ -4621,32 +4533,20 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
             rebuildMenu()
         }
 
-        /// 使用 MenuItemHostingView 重建 NSMenuItem 列表：100% 渲染图标、勾选与高亮。
+        /// 使用 100% AppKit 原生 NSMenuItem 重建菜单项。
         private func rebuildMenu() {
             menu.removeAllItems()
             for editor in editors {
-                let item = NSMenuItem()
-                item.isEnabled = true
-
-                let isSelected = (editor.bundleId == preferredBundleId)
-                let menuItemView = CodeEditorMenuItemView(
-                    editor: editor,
-                    isSelected: isSelected,
-                    isHighlighted: false,
-                    onSelect: { [weak self] in
-                        self?.menu.cancelTracking()
-                        self?.onSelect?(editor)
-                    }
+                let item = NSMenuItem(
+                    title: editor.displayName,
+                    action: #selector(selectEditor(_:)),
+                    keyEquivalent: ""
                 )
-
-                let hostingView = MenuItemHostingView(rootView: menuItemView)
-                hostingView.onSelect = { [weak self] in
-                    self?.menu.cancelTracking()
-                    self?.onSelect?(editor)
-                }
-                // 确保菜单项尺寸与行高精致规范（24pt 标准菜单行高）
-                hostingView.frame = NSRect(x: 0, y: 0, width: 165, height: 24)
-                item.view = hostingView
+                item.target = self
+                item.isEnabled = true
+                item.representedObject = editor.bundleId
+                item.image = editor.iconImage(size: 16)
+                item.state = (editor.bundleId == preferredBundleId) ? .on : .off
                 menu.addItem(item)
             }
         }
@@ -4658,6 +4558,14 @@ private struct EditorDropdownNSButton: NSViewRepresentable {
                 at: NSPoint(x: 0, y: sender.bounds.height + 2),
                 in: sender
             )
+        }
+
+        /// 菜单项被点击时调用。
+        @objc func selectEditor(_ sender: NSMenuItem) {
+            guard let bundleId = sender.representedObject as? String,
+                  let editor = editors.first(where: { $0.bundleId == bundleId })
+            else { return }
+            onSelect?(editor)
         }
     }
 }
