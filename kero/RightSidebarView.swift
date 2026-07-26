@@ -3252,8 +3252,9 @@ private struct PackageInfoSection: View {
             return
         }
         let cleanNew = (trimmed.hasPrefix("v") || trimmed.hasPrefix("V")) ? String(trimmed.dropFirst()) : trimmed
-        if cleanNew != info.version {
+        if cleanNew != cleanVersion {
             if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: cleanNew) {
+                versionDraft = cleanNew
                 onVersionUpdated()
             }
         }
@@ -3431,7 +3432,7 @@ private struct PackageInfoSection: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .onHover { isHoveringVersionBox = $0 }
 
-                        let targetVer = info.version ?? ""
+                        let targetVer = cleanVersion
                         let nextBumpVer = SidebarProbe.bumpVersion(targetVer)
                         let nextDecVer = SidebarProbe.decrementVersion(targetVer)
                         let parsed = parsedSemVer
@@ -3441,6 +3442,7 @@ private struct PackageInfoSection: View {
                             // [增加按钮 +]
                             Button {
                                 if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: nextBumpVer) {
+                                    versionDraft = nextBumpVer
                                     onVersionUpdated()
                                 }
                             } label: {
@@ -3465,6 +3467,7 @@ private struct PackageInfoSection: View {
                             // [减少按钮 -]
                             Button {
                                 if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: nextDecVer) {
+                                    versionDraft = nextDecVer
                                     onVersionUpdated()
                                 }
                             } label: {
@@ -3494,6 +3497,7 @@ private struct PackageInfoSection: View {
                                     let itemMajor = NSMenuItem(title: "+ MAJOR ( \(parsed.major) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tMajor = MenuActionTarget {
                                         if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.major) {
+                                            versionDraft = parsed.major
                                             onVersionUpdated()
                                         }
                                     }
@@ -3503,6 +3507,7 @@ private struct PackageInfoSection: View {
                                     let itemMinor = NSMenuItem(title: "+ MINOR ( \(parsed.minor) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tMinor = MenuActionTarget {
                                         if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.minor) {
+                                            versionDraft = parsed.minor
                                             onVersionUpdated()
                                         }
                                     }
@@ -3512,6 +3517,7 @@ private struct PackageInfoSection: View {
                                     let itemPatch = NSMenuItem(title: "+ PATCH ( \(parsed.patch) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tPatch = MenuActionTarget {
                                         if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: parsed.patch) {
+                                            versionDraft = parsed.patch
                                             onVersionUpdated()
                                         }
                                     }
