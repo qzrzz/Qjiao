@@ -36,7 +36,7 @@ struct SystemPanel: View {
     }
 
     var body: some View {
-        ScrollView {
+        ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 8) {
                 resourceCard
                 // Net + Proxy 同一组，行距与资源区一致。
@@ -152,7 +152,8 @@ struct SystemPanel: View {
                 tint: tint,
                 capacity: historyCapacity
             )
-            .frame(width: Self.sparklineWidth, height: Self.sparklineHeight)
+            .frame(height: Self.sparklineHeight)
+            .frame(minWidth: 36, maxWidth: Self.sparklineWidth)
         }
         .frame(height: 18)
         .accessibilityElement(children: .combine)
@@ -187,7 +188,8 @@ struct SystemPanel: View {
                     .font(SidebarTypography.micro().monospacedDigit())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.7)
+                    .layoutPriority(-1)
             }
         }
         .contentShape(Rectangle())
@@ -374,27 +376,82 @@ struct SystemPanel: View {
 
     /// [图标] IP  192.168.x.x [复制]    🇯🇵 133.18.140.32 [复制]
     private var localIPRow: some View {
+        ViewThatFits(in: .horizontal) {
+            singleLineIPContent
+            stackedIPContent
+        }
+    }
+
+    private var singleLineIPContent: some View {
         let address = model.snapshot.localIPv4Address
         let display = address ?? "—"
         let publicAddr = model.snapshot.publicIPv4Address
         let publicEmoji = model.snapshot.publicIPLocationEmoji
 
         return HStack(spacing: 4) {
-            // 点击仅限于 IP 标题与图标触发刷新，刷新时图标旋转
-            HStack(spacing: 4) {
-                ipIcon
-                Text("IP")
-                    .font(SidebarTypography.micro(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 36, alignment: .leading)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                Task { await model.refreshIP() }
-            }
-            .help(model.isRefreshingIP ? "Refreshing IP…" : "Click to refresh IP address")
+            ipHeaderButton
+            localIPToken(display: display, address: address)
 
-            // 内网 IP 数字等宽，支持文本选中
+            if let publicAddr {
+                publicIPToken(publicAddr: publicAddr, publicEmoji: publicEmoji)
+                    .padding(.leading, 6)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(height: 18)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(ipRowAccessibilityLabel)
+    }
+
+    private var stackedIPContent: some View {
+        let address = model.snapshot.localIPv4Address
+        let display = address ?? "—"
+        let publicAddr = model.snapshot.publicIPv4Address
+        let publicEmoji = model.snapshot.publicIPLocationEmoji
+
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                ipHeaderButton
+                localIPToken(display: display, address: address)
+                Spacer(minLength: 0)
+            }
+            .frame(height: 18)
+
+            if let publicAddr {
+                HStack(spacing: 4) {
+                    Text("Pub")
+                        .font(SidebarTypography.micro(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, alignment: .leading)
+                        .padding(.leading, 15)
+                    publicIPToken(publicAddr: publicAddr, publicEmoji: publicEmoji)
+                    Spacer(minLength: 0)
+                }
+                .frame(height: 18)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(ipRowAccessibilityLabel)
+    }
+
+    private var ipHeaderButton: some View {
+        HStack(spacing: 4) {
+            ipIcon
+            Text("IP")
+                .font(SidebarTypography.micro(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            Task { await model.refreshIP() }
+        }
+        .help(model.isRefreshingIP ? "Refreshing IP…" : "Click to refresh IP address")
+    }
+
+    private func localIPToken(display: String, address: String?) -> some View {
+        HStack(spacing: 3) {
             Text(display)
                 .font(SidebarTypography.section(.medium).monospacedDigit())
                 .foregroundStyle(.primary)
@@ -415,41 +472,34 @@ struct SystemPanel: View {
                 .buttonStyle(.plain)
                 .help("Copy local IP address")
             }
-
-            // 出口 IP 添加到现有内网 IP 后面，添加 gap 间隔与复制按钮，支持文本选中
-            if let publicAddr {
-                HStack(spacing: 3) {
-                    if let publicEmoji, !publicEmoji.isEmpty {
-                        Text(publicEmoji)
-                            .font(SidebarTypography.section(.medium))
-                    }
-                    Text(publicAddr)
-                        .font(SidebarTypography.section(.medium).monospacedDigit())
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .textSelection(.enabled)
-                        .tooltip(publicIPHelp, edge: .above)
-                    Button {
-                        copyToPasteboard(publicAddr)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(SidebarTypography.micro())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16, height: 16)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Copy public IP address")
-                }
-                .padding(.leading, 8)
-            }
-
-            Spacer(minLength: 0)
         }
-        .frame(height: 18)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(ipRowAccessibilityLabel)
+    }
+
+    private func publicIPToken(publicAddr: String, publicEmoji: String?) -> some View {
+        HStack(spacing: 3) {
+            if let publicEmoji, !publicEmoji.isEmpty {
+                Text(publicEmoji)
+                    .font(SidebarTypography.section(.medium))
+            }
+            Text(publicAddr)
+                .font(SidebarTypography.section(.medium).monospacedDigit())
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .textSelection(.enabled)
+                .tooltip(publicIPHelp, edge: .above)
+            Button {
+                copyToPasteboard(publicAddr)
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(SidebarTypography.micro())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Copy public IP address")
+        }
     }
 
     /// IP 图标：刷新时按 30fps 平滑旋转。
@@ -888,17 +938,18 @@ private struct ReachabilitySiteRow: View {
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-                .frame(width: 72, alignment: .leading)
+                .frame(minWidth: 36, maxWidth: 72, alignment: .leading)
             Text(latencyText)
                 .font(SidebarTypography.micro().monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 // 足够放下 `999ms` / `9.9s` / `...`，避免被截成 `523...`
                 .frame(width: 40, alignment: .trailing)
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
             // 柱状图整体贴行尾，与上方折线右对齐。
             ReachabilityBarChart(history: item.history)
-                .frame(width: barWidth, height: barHeight)
+                .frame(height: barHeight)
+                .frame(minWidth: 36, maxWidth: barWidth)
         }
         .padding(.horizontal, 4)
         .frame(height: 18)

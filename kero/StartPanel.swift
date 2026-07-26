@@ -170,7 +170,7 @@ struct StartPanel: View {
     }
 }
 
-private struct StartCommandRow: View {
+struct StartCommandRow: View {
     let command: ProjectLaunchCommand
     let isExpanded: Bool
     let isDropTarget: Bool
@@ -178,28 +178,34 @@ private struct StartCommandRow: View {
     let toggleExpanded: () -> Void
     let startDrag: () -> NSItemProvider
 
+    @State private var isHovering = false
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 5) {
             Image(systemName: "line.3.horizontal")
                 .font(SidebarTypography.micro())
                 .foregroundStyle(.tertiary)
-                .frame(width: 22, height: 24)
-                .contentShape(RoundedRectangle(cornerRadius: 5))
+                .frame(width: 14, height: 14)
+                .contentShape(Rectangle())
                 .onDrag(startDrag) {
                     StartCommandDragPreview(command: command)
                 }
 
             StartCommandIcon(command: command)
-                .frame(width: 18, height: 18)
+                .frame(width: 14, height: 14)
 
-            VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
                 Text(command.displayTitle)
-                    .font(SidebarTypography.body(.medium))
+                    .font(SidebarTypography.secondary(.medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
+                Text("•")
+                    .font(SidebarTypography.micro())
+                    .foregroundStyle(.tertiary)
                 Text(command.type.title)
-                    .font(SidebarTypography.caption())
+                    .font(SidebarTypography.micro())
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(commandTooltip)
@@ -208,8 +214,8 @@ private struct StartCommandRow: View {
                 Image(systemName: "play.fill")
                     .font(SidebarTypography.micro(.semibold))
                     .foregroundStyle(Color(nsColor: Theme.cursor))
-                    .frame(width: 22, height: 22)
-                    .contentShape(RoundedRectangle(cornerRadius: 5))
+                    .frame(width: 18, height: 18)
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
             }
             .buttonStyle(.plain)
             .help("Run \(command.displayTitle)")
@@ -218,20 +224,26 @@ private struct StartCommandRow: View {
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                     .font(SidebarTypography.caption(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(RoundedRectangle(cornerRadius: 5))
+                    .frame(width: 18, height: 18)
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
             }
             .buttonStyle(.plain)
             .help(isExpanded ? "Hide Options" : "Show Options")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(isHovering ? Color.primary.opacity(0.06) : .clear)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 5))
+        .onHover { isHovering = $0 }
         .overlay(alignment: .top) {
             if isDropTarget {
                 Capsule()
                     .fill(Color(nsColor: Theme.cursor))
                     .frame(height: 2)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 4)
             }
         }
     }
@@ -247,7 +259,7 @@ private struct StartCommandRow: View {
     }
 }
 
-private struct StartCommandInlineEditor: View {
+struct StartCommandInlineEditor: View {
     @Binding var command: ProjectLaunchCommand
     let delete: () -> Void
 
@@ -352,7 +364,7 @@ private struct StartCommandInlineEditor: View {
 
 /// An opaque, compact drag image avoids the translucent snapshot AppKit makes
 /// from an entire sidebar row (which looks especially muddy over materials).
-private struct StartCommandDragPreview: View {
+struct StartCommandDragPreview: View {
     let command: ProjectLaunchCommand
 
     var body: some View {
@@ -376,7 +388,7 @@ private struct StartCommandDragPreview: View {
     }
 }
 
-private struct StartCommandDropDelegate: DropDelegate {
+struct StartCommandDropDelegate: DropDelegate {
     let targetID: UUID
     let project: Project
     @Binding var draggedCommandID: UUID?
@@ -407,7 +419,7 @@ private struct StartCommandDropDelegate: DropDelegate {
     }
 }
 
-private struct StartCommandIcon: View {
+struct StartCommandIcon: View {
     let command: ProjectLaunchCommand
 
     var body: some View {

@@ -82,5 +82,23 @@
   - 支持背景模式跨标签与应用重启 `@AppStorage` 持久化记忆，并全新推出 Dark Checkerboard（深色棋盘格）背景模式。
   - 适配 Retina 高清屏 (High DPI Display)：自动响应 `screenBackingScale`，实现 1:1 绝对物理像素点对点精准对齐渲染。
 - 优化 System 面板 IP 显示：请求 Cloudflare trace (`https://cloudflare.com/cdn-cgi/trace`) 获取出口 IP 与位置代码，并将 loc 转换为 Emoji 国旗图标（如 🇯🇵）；出口 IP 显示在内网 IP 后面（带有 gap 间隔与独立复制按钮）；支持仅点击 `[图标] IP` 标题区域触发刷新（刷新时 IP 图标平滑旋转转圈）；IP 值与 Net 网络速率值均支持鼠标文本选择。
+- 优化右侧边栏窄宽度布局与防错位溢出：
+  - 顶栏与底栏 Tabs 引入三阶响应式展缩机制（宽屏全文字、中屏仅选中项显示文字非选中项显示图标、极窄屏自动全图标排列），移除阻断鼠标手势的 ScrollView，完全恢复顶部 `WindowDragArea` 的窗口拖拽与双击动作体验。
+  - System 面板 IP 行引入 `ViewThatFits` 自适应机制，宽屏单行展示，窄屏自动切为双行分层，彻底解决内网/公网 IP 宽度溢出导致界面错位的问题。
+  - System 面板指标折线图、站点延迟柱状图及 Detail 文字改用弹性 Width 与布局优先级，并在侧栏外层施加 `.clipped()` 剪裁保护，保障任何窄宽度下的精致排版与稳定性。
+  - 路径区操作按钮（Finder / VS Code / Copy）限制单行显示（`.lineLimit(1)`）与自适应字号缩放（`.minimumScaleFactor(0.7)`），防止在极窄边栏下按钮文字折行撑高。
+- 移除右侧边栏顶栏 Start tab，并将项目启动项（Project launchers）整合为 Project 面板中的 `LAUNCHERS` 分组：
+  - Header 右侧右对齐集成一键运行全部启动项（`play.fill`）与快捷新增（`+`）操作按钮。
+  - 启动项行重构为紧凑整洁的面板对齐样式，精简高度并保留拖拽重排抓手、类型图标、按需展开编辑与独立运行控制。
+- 优化右侧边栏面板滚动条显示逻辑：精确为 `Note`、`Files`、`CWD` 与 `Git` 面板开启滚动条指示，方便长列表浏览；为 `Project` 与 `System` 面板保持隐藏滚动条，保持界面简洁精致。
+- 优化 `NPM SCRIPTS` 列表交互与 Shell 状态追踪机制：
+  - 条目整行单击设为选中高亮，仅待运行（`idle`）状态下双击触发运行脚本；正在运行状态下禁用双击，防止误操作重复触发。
+  - 引入「待运行 (`idle`)」、「正在运行 (`running`)」与「正在停止 (`stopping`)」状态流转机制，自动绑定与监听后台 Shell / Session 的前台进程（`isForegroundCommandRunning`）及生命周期。
+  - 当脚本子进程在 Shell 中执行完毕（命令结束恢复至 prompt 提示符）时，状态立刻自动恢复为「待运行」，并精确计算与刷新上一次运行耗时。
+  - 处于「正在运行」时，图标转换为红色停止按钮（`stop.fill`，单击停止），且右侧动态呈现「重新运行」按键（`arrow.clockwise`）；
+  - 处于「待运行」状态时，自动在条目右侧格式化展示上一次运行耗时（如 `4.2s`、`522.4ms`、`1m12.5s`，精准保留 1 位小数，整数时无多余 `.0`，配合 `monospacedDigit` 等宽数字字体显示）。
+  - 自动读取 Settings 中配置的包管理器（`bun` / `pnpm` / `yarn` / `npm`），为启动的新终端 Tab 动态命名为 `<scriptName> (<pmCommand> run)` 格式（例如 `dev (npm run)`、`build (bun run)`）。
+  - 智能探测 npm 脚本运行过程中的 TCP 监听端口（HTTP Server），当检测到监听端口（如 `3000` / `5173`）时，自动在条目右侧呈现精致纯图标 `🌐` 快捷按键（Tooltip 包含精确端口号 `http://localhost:<port>`），点击直接在 macOS 默认浏览器中打开服务。
+
 
 

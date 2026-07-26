@@ -5,6 +5,8 @@
 
 import AppKit
 import Combine
+import QuickLook
+import QuickLookUI
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -93,6 +95,7 @@ struct RightSidebarView: View {
 
                 splitBody
                     .frame(width: width)
+                    .clipped()
                     .background {
                         // Keep the sidebar visually consistent with the main
                         // window: reduced window opacity uses native blur beneath
@@ -229,33 +232,32 @@ struct RightSidebarView: View {
     @ViewBuilder
     private var topPanelContent: some View {
         switch manager.panelTab {
-        case .start:
+        case .start, .project:
             if let project = manager.selectedProject {
-                StartPanel(
+                ProjectPanel(
+                    model: projectInfo,
                     project: project,
-                    runCommand: { manager.runLaunchCommand($0) },
-                    runAllCommands: { manager.runAllLaunchCommands() }
+                    manager: manager,
+                    runPackageScript: { name, mode in
+                        manager.runPackageScript(
+                            name, mode: mode, directory: projectInfo.rootPath
+                        )
+                    },
+                    openPackageJSON: {
+                        let root = projectInfo.rootPath
+                        guard !root.isEmpty else { return }
+                        manager.openFile(
+                            (root as NSString).appendingPathComponent("package.json")
+                        )
+                    },
+                    runLaunchCommand: { manager.runLaunchCommand($0) },
+                    runAllLaunchCommands: { manager.runAllLaunchCommands() }
                 )
             }
-        case .project:
-            ProjectPanel(
-                model: projectInfo,
-                runPackageScript: { name, mode in
-                    manager.runPackageScript(
-                        name, mode: mode, directory: projectInfo.rootPath
-                    )
-                },
-                openPackageJSON: {
-                    let root = projectInfo.rootPath
-                    guard !root.isEmpty else { return }
-                    manager.openFile(
-                        (root as NSString).appendingPathComponent("package.json")
-                    )
-                }
-            )
         case .info:
             SessionInfoPanel(
                 model: sessionInfo,
+                manager: manager,
                 runPackageScript: { name, mode in
                     manager.runPackageScript(
                         name, mode: mode, directory: sessionInfo.cwdPath
@@ -375,7 +377,8 @@ struct RightSidebarView: View {
             sidebarTabLabel(
                 systemImage: tab.systemImage,
                 title: tab.title,
-                isActive: isActive
+                isActive: isActive,
+                availableWidth: width
             )
         }
         .buttonStyle(.plain)
@@ -399,34 +402,47 @@ struct RightSidebarView: View {
     }
 
     private var tabBar: some View {
-        ZStack(alignment: .leading) {
-            // 右侧顶栏未被面板切换按钮占用的区域可拖动窗口。
-            WindowDragArea()
+        GeometryReader { geo in
+            let availableW = geo.size.width
+            ZStack(alignment: .leading) {
+                // 右侧顶栏未被面板切换按钮占用的区域可拖动窗口。
+                WindowDragArea()
 
-            HStack(spacing: 4) {
-                tabButton(.start, systemImage: "play.circle", title: "Start", help: "Start")
-                tabButton(.project, systemImage: "shippingbox", title: "Project", help: "Project")
-                tabButton(.info, systemImage: "info.circle", title: "Info", help: "Info (⇧⌘I)")
-                tabButton(.files, systemImage: "folder", title: "Files", help: "Files (⇧⌘E)")
-                if showsCWD {
-                    tabButton(.cwd, systemImage: "terminal", title: "CWD", help: "CWD")
+                HStack(spacing: availableW < 250 ? 2 : 4) {
+                    tabButton(.project, systemImage: "shippingbox", title: "Project", help: "Project", availableWidth: availableW)
+                    tabButton(.info, systemImage: "info.circle", title: "Info", help: "Info (⇧⌘I)", availableWidth: availableW)
+                    tabButton(.files, systemImage: "folder", title: "Files", help: "Files (⇧⌘E)", availableWidth: availableW)
+                    if showsCWD {
+                        tabButton(.cwd, systemImage: "terminal", title: "CWD", help: "CWD", availableWidth: availableW)
+                    }
+                    tabButton(.git, systemImage: "arrow.triangle.branch", title: "Git", help: "Git (⇧⌘G)", availableWidth: availableW)
+                    Spacer(minLength: 0)
                 }
-                tabButton(.git, systemImage: "arrow.triangle.branch", title: "Git", help: "Git (⇧⌘G)")
-                Spacer(minLength: 0)
+                .padding(.horizontal, 8)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
             }
-            .padding(.horizontal, 8)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
         }
         .frame(height: 41)
     }
 
-    private func tabButton(_ panel: RightPanel, systemImage: String, title: String, help: String) -> some View {
+    private func tabButton(
+        _ panel: RightPanel,
+        systemImage: String,
+        title: String,
+        help: String,
+        availableWidth: CGFloat
+    ) -> some View {
         let isActive = manager.panelTab == panel
         return Button {
             manager.panelTab = panel
         } label: {
-            sidebarTabLabel(systemImage: systemImage, title: title, isActive: isActive)
+            sidebarTabLabel(
+                systemImage: systemImage,
+                title: title,
+                isActive: isActive,
+                availableWidth: availableWidth
+            )
         }
         .buttonStyle(.plain)
         .help(help)
@@ -434,21 +450,40 @@ struct RightSidebarView: View {
         .accessibilityValue(isActive ? "Selected" : "Not selected")
     }
 
-    /// 上/下半区共用的 tab 样式：内容宽度（最小 75）、左对齐；字重始终 medium，
+    /// 上/下半区共用的 tab 样式：根据可用宽度响应式展缩文本；字重始终 medium，
     /// 选中只改颜色和背景，避免 regular↔medium 宽度变化导致抖动。
-    private func sidebarTabLabel(systemImage: String, title: String, isActive: Bool) -> some View {
-        HStack(alignment: .center, spacing: 5) {
+    private func sidebarTabLabel(
+        systemImage: String,
+        title: String,
+        isActive: Bool,
+        availableWidth: CGFloat = 340
+    ) -> some View {
+        // 宽屏 (>=340): 全部显示 Icon + Title;
+        // 中屏 (250~340): 仅选中项显示 Icon + Title，未选中项仅显示 Icon;
+        // 窄屏 (<250): 全部仅显示 Icon (选中项带高亮框)。
+        let showTitle: Bool = {
+            if availableWidth >= 340 {
+                return true
+            } else if availableWidth >= 250 {
+                return isActive
+            } else {
+                return false
+            }
+        }()
+
+        return HStack(alignment: .center, spacing: 4) {
             Image(systemName: systemImage)
                 .font(SidebarTypography.caption(.medium))
-            Text(title)
-                .font(SidebarTypography.secondary(.medium))
-                .lineLimit(1)
+                .frame(width: 14, height: 14)
+            if showTitle {
+                Text(title)
+                    .font(SidebarTypography.secondary(.medium))
+                    .lineLimit(1)
+            }
         }
-        // 未选中使用次级文字色，避免在浅色模式下过于发白。
         .foregroundStyle(isActive ? .primary : .secondary)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, showTitle ? 7 : 6)
         .frame(height: 24)
-        .frame(minWidth: 75)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isActive ? Color.primary.opacity(0.09) : .clear)
@@ -457,6 +492,7 @@ struct RightSidebarView: View {
     }
 
     private func syncModels() {
+        manager.checkPackageScriptStatus()
         guard let project = manager.selectedProject, manager.isPanelVisible else { return }
         guard manager.panelTab != .start else { return }
         guard let session = manager.selectedSession else { return }
@@ -478,6 +514,7 @@ struct RightSidebarView: View {
             let root = projectRoot(for: project, fallback: session)
             let shellPids = project.sessions.compactMap(\.shellPid)
             projectInfo.sync(root: root, shellPids: shellPids)
+            manager.updatePackageScriptPorts(with: projectInfo.ports)
         case .info:
             // 当前终端 cwd 的 scripts + 本 session 进程/端口。
             sessionInfo.sync(
@@ -531,6 +568,74 @@ private struct PanelHeader: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Quick Look Manager
+
+/// 系统原生 Quick Look (快速预览) 管理类，支持 QLPreviewPanel 弹窗与数据源绑定。
+@MainActor
+final class QuickLookManager: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+    static let shared = QuickLookManager()
+    private var currentURLs: [URL] = []
+
+    /// 打开或更新当前 Quick Look 预览文件集合。
+    func preview(urls: [URL]) {
+        guard !urls.isEmpty else {
+            close()
+            return
+        }
+        self.currentURLs = urls
+        if QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared() {
+            panel.dataSource = self
+            panel.delegate = self
+            panel.reloadData()
+            if !panel.isVisible {
+                panel.makeKeyAndOrderFront(nil)
+            }
+        } else if let panel = QLPreviewPanel.shared() {
+            panel.dataSource = self
+            panel.delegate = self
+            panel.reloadData()
+            panel.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    /// 切换预览窗口开/关：已打开时关闭，未打开时开窗预览。
+    func togglePreview(urls: [URL]) {
+        if isVisible {
+            close()
+        } else {
+            preview(urls: urls)
+        }
+    }
+
+    /// 关闭 Quick Look 预览窗口。
+    func close() {
+        if QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared(), panel.isVisible {
+            panel.orderOut(nil)
+        }
+        currentURLs = []
+    }
+
+    /// 当前 Quick Look 窗口是否可见。
+    var isVisible: Bool {
+        QLPreviewPanel.sharedPreviewPanelExists() && (QLPreviewPanel.shared()?.isVisible ?? false)
+    }
+
+    // MARK: - QLPreviewPanelDataSource
+
+    @objc nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        MainActor.assumeIsolated {
+            currentURLs.count
+        }
+    }
+
+    @objc nonisolated func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+        MainActor.assumeIsolated {
+            guard index >= 0 && index < currentURLs.count else { return nil }
+            return currentURLs[index] as NSURL
+        }
     }
 }
 
@@ -717,6 +822,17 @@ private struct FileTreePanel: View {
                 isPanelClicked = true
             }
         )
+        .onChange(of: model.selectedPaths) { _ in
+            // 如果 Quick Look 预览窗口已打开，选中项改变时实时更新 Quick Look 预览
+            if QuickLookManager.shared.isVisible {
+                let fileURLs = model.selectedItems
+                    .filter { !$0.isDirectory && !$0.isDraft }
+                    .map { URL(fileURLWithPath: $0.path) }
+                if !fileURLs.isEmpty {
+                    QuickLookManager.shared.preview(urls: fileURLs)
+                }
+            }
+        }
         .onChange(of: manager.selectedProject?.selectedTab?.focusedPaneID) { _ in
             // 当主编辑区/终端被点击或切换焦点时，标记侧边栏无独立点击响应
             isPanelClicked = false
@@ -725,6 +841,7 @@ private struct FileTreePanel: View {
             if manager.panelTab != .files && manager.panelTab != .cwd {
                 dismissFilter()
                 isPanelClicked = false
+                QuickLookManager.shared.close()
             }
         }
     }
@@ -769,7 +886,7 @@ private struct FileTreePanel: View {
         }
     }
 
-    /// 注册 NSEvent 本地按键监听，处理 ⌘F 及字母数字文件定位。
+    /// 注册 NSEvent 本地按键监听，处理 ⌘F、字母数字文件定位及空格键 Quick Look 预览。
     private func setupKeyboardMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -801,6 +918,24 @@ private struct FileTreePanel: View {
                         jumpToNextItem(startingWith: char)
                     }
                     return nil // 消费该按键，屏蔽系统提示音
+                }
+            }
+
+            // 3. 空格键：触发/切换系统 Quick Look 文件快速预览
+            if flags.isEmpty, event.keyCode == 49 || event.charactersIgnoringModifiers == " ",
+               !isFilterActive,
+               !isFilterFieldFocused,
+               model.renamingPath == nil,
+               model.draft == nil,
+               isFilesTreeActiveOrFocused() {
+                let fileURLs = model.selectedItems
+                    .filter { !$0.isDirectory && !$0.isDraft }
+                    .map { URL(fileURLWithPath: $0.path) }
+                if !fileURLs.isEmpty {
+                    Task { @MainActor in
+                        QuickLookManager.shared.togglePreview(urls: fileURLs)
+                    }
+                    return nil // 消费空格键
                 }
             }
 
@@ -1825,7 +1960,7 @@ private struct GitPanel: View {
                     }
                 }
                 if operationExpanded, !operation.output.isEmpty {
-                    ScrollView([.horizontal, .vertical]) {
+                    ScrollView([.horizontal, .vertical], showsIndicators: false) {
                         Text(operation.output)
                             .font(SidebarTypography.micro(.regular, design: .monospaced))
                             .textSelection(.enabled)
@@ -2524,6 +2659,8 @@ private struct GitSectionHeader: View {
             .accessibilityLabel(title)
             .accessibilityValue(isCollapsed ? "Collapsed" : "Expanded")
 
+            Spacer(minLength: 0)
+
             ForEach(actions) { action in
                 Button(action: action.perform) {
                     Image(systemName: action.systemImage)
@@ -2538,8 +2675,6 @@ private struct GitSectionHeader: View {
                 .help(action.help)
                 .accessibilityLabel(action.help)
             }
-
-            Spacer(minLength: 0)
         }
         // Fixed height so the taller hover buttons don't grow the header.
         .frame(height: SidebarTypography.rowMinHeight)
@@ -2873,15 +3008,18 @@ private struct PathDirectorySection: View {
         _ title: String, systemImage: String, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 4) {
+            HStack(spacing: 3) {
                 Image(systemName: systemImage)
                     .font(SidebarTypography.micro())
                 Text(title)
                     .font(SidebarTypography.caption(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 5)
+            .padding(.horizontal, 2)
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.primary.opacity(0.05))
@@ -2895,12 +3033,34 @@ private struct PathDirectorySection: View {
 
 // MARK: - Package scripts / processes 共用区块
 
+private func formatScriptDuration(_ duration: TimeInterval) -> String {
+    if duration < 1.0 {
+        let ms = duration * 1000.0
+        let formatted = String(format: "%.1fms", ms)
+        return formatted.replacingOccurrences(of: ".0ms", with: "ms")
+    } else if duration < 60.0 {
+        let formatted = String(format: "%.1fs", duration)
+        return formatted.replacingOccurrences(of: ".0s", with: "s")
+    } else {
+        let min = Int(duration) / 60
+        let sec = duration.truncatingRemainder(dividingBy: 60)
+        let formattedSec = String(format: "%.1fs", sec)
+        let cleanSec = formattedSec.replacingOccurrences(of: ".0s", with: "s")
+        return "\(min)m\(cleanSec)"
+    }
+}
+
 /// npm scripts 列表；scriptsRoot 仅用于空状态文案区分。
 private struct PackageScriptsSection: View {
     let scripts: [SidebarProbe.PackageScript]
+    let records: [String: TerminalManager.PackageScriptExecutionRecord]
     @Binding var isCollapsed: Bool
     let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
+    let stopPackageScript: (String) -> Void
+    let restartPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
     let openPackageJSON: () -> Void
+
+    @State private var selectedScriptName: String? = nil
 
     var body: some View {
         GitSectionHeader(
@@ -2917,7 +3077,26 @@ private struct PackageScriptsSection: View {
                     ForEach(scripts) { script in
                         PackageScriptRow(
                             script: script,
-                            run: { mode in runPackageScript(script.name, mode) },
+                            record: records[script.name],
+                            isSelected: selectedScriptName == script.name,
+                            onSelect: {
+                                selectedScriptName = script.name
+                            },
+                            onDoubleClick: {
+                                selectedScriptName = script.name
+                                runPackageScript(script.name, .normal)
+                            },
+                            run: { mode in
+                                selectedScriptName = script.name
+                                runPackageScript(script.name, mode)
+                            },
+                            stop: {
+                                stopPackageScript(script.name)
+                            },
+                            restart: { mode in
+                                selectedScriptName = script.name
+                                restartPackageScript(script.name, mode)
+                            },
                             editPackageJSON: openPackageJSON
                         )
                     }
@@ -2928,47 +3107,190 @@ private struct PackageScriptsSection: View {
     }
 }
 
-/// npm script 行：单击运行、hover、右键 time / inspect / prof。
+/// npm script 行：支持运行/停止/重新运行状态追踪，展示上一次运行耗时与明显 Hover 控制。
 private struct PackageScriptRow: View {
     let script: SidebarProbe.PackageScript
+    let record: TerminalManager.PackageScriptExecutionRecord?
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onDoubleClick: () -> Void
     let run: (TerminalManager.PackageScriptRunMode) -> Void
+    let stop: () -> Void
+    let restart: (TerminalManager.PackageScriptRunMode) -> Void
     let editPackageJSON: () -> Void
 
-    @State private var isHovering = false
+    @State private var isHoveringRow = false
+    @State private var isHoveringActionBtn = false
+    @State private var isHoveringRestartBtn = false
+    @State private var isHoveringBrowserBtn = false
+
+    private var status: TerminalManager.PackageScriptStatus {
+        record?.status ?? .idle
+    }
+
+    private var boundPort: Int? {
+        record?.boundPort
+    }
 
     var body: some View {
-        Button {
-            run(.normal)
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "play.fill")
-                    .font(SidebarTypography.micro())
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 12)
-                Text(script.name)
-                    .font(SidebarTypography.body(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .frame(height: SidebarTypography.rowMinHeight)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .contentShape(RoundedRectangle(cornerRadius: 4))
+        HStack(spacing: 6) {
+            actionButton
+
+            Text(script.name)
+                .font(SidebarTypography.secondary(.medium))
+                .foregroundStyle(isSelected ? .primary : (isHoveringRow ? .primary : .secondary))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            rightContent
         }
-        .buttonStyle(.plain)
-        .help(script.command)
+        .frame(height: SidebarTypography.rowMinHeight)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
         .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(isHovering ? Color.primary.opacity(0.05) : .clear)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(
+                    isSelected
+                    ? Color.primary.opacity(0.09)
+                    : (isHoveringRow ? Color.primary.opacity(0.05) : Color.clear)
+                )
         )
-        .onHover { isHovering = $0 }
+        .contentShape(RoundedRectangle(cornerRadius: 5))
+        .onHover { isHoveringRow = $0 }
+        .onTapGesture(count: 2) {
+            guard status == .idle else { return }
+            onDoubleClick()
+        }
+        .onTapGesture(count: 1) {
+            onSelect()
+        }
+        .help(script.command)
         .contextMenu {
+            if let port = boundPort {
+                Button("Open http://localhost:\(port) in Browser") {
+                    if let url = URL(string: "http://localhost:\(port)") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                Divider()
+            }
+            if status == .running {
+                Button("Stop") { stop() }
+                Button("Restart") { restart(.normal) }
+            } else {
+                Button("Run") { run(.normal) }
+            }
             Button("Edit package.json") { editPackageJSON() }
             Divider()
             Button("Run with time") { run(.withTime) }
             Button("Run with --inspect") { run(.withInspect) }
             Button("Run with --prof") { run(.withProf) }
+        }
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        switch status {
+        case .idle:
+            Button {
+                run(.normal)
+            } label: {
+                Image(systemName: "play.fill")
+                    .font(SidebarTypography.micro(.semibold))
+                    .foregroundStyle(isHoveringActionBtn ? Color.white : Color(nsColor: Theme.cursor))
+                    .frame(width: 18, height: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isHoveringActionBtn ? Color(nsColor: Theme.cursor) : (isHoveringRow ? Color.primary.opacity(0.08) : Color.clear))
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringActionBtn = $0 }
+            .help("Run \(script.name)")
+
+        case .running:
+            Button {
+                stop()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(SidebarTypography.micro(.semibold))
+                    .foregroundStyle(isHoveringActionBtn ? Color.white : Color.red)
+                    .frame(width: 18, height: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isHoveringActionBtn ? Color.red : Color.red.opacity(0.12))
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringActionBtn = $0 }
+            .help("Stop \(script.name)")
+
+        case .stopping:
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 18, height: 18)
+        }
+    }
+
+    @ViewBuilder
+    private var rightContent: some View {
+        HStack(spacing: 4) {
+            if let port = boundPort {
+                Button {
+                    if let url = URL(string: "http://localhost:\(port)") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Image(systemName: "globe")
+                        .font(SidebarTypography.micro(.semibold))
+                        .foregroundStyle(isHoveringBrowserBtn ? Color.white : Color(nsColor: Theme.cursor))
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(isHoveringBrowserBtn ? Color(nsColor: Theme.cursor) : Color(nsColor: Theme.cursor).opacity(0.12))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringBrowserBtn = $0 }
+                .help("Open http://localhost:\(port) in browser")
+            }
+
+            switch status {
+            case .idle:
+                if let duration = record?.lastDuration {
+                    Text(formatScriptDuration(duration))
+                        .font(SidebarTypography.micro(.medium).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .padding(.trailing, 2)
+                }
+
+            case .running:
+                Button {
+                    restart(.normal)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(SidebarTypography.micro(.semibold))
+                        .foregroundStyle(isHoveringRestartBtn ? Color.white : Color.secondary)
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(isHoveringRestartBtn ? Color.primary.opacity(0.8) : (isHoveringRow ? Color.primary.opacity(0.08) : Color.clear))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringRestartBtn = $0 }
+                .help("Restart \(script.name)")
+
+            case .stopping:
+                Text("Stopping...")
+                    .font(SidebarTypography.micro())
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 }
@@ -3033,13 +3355,149 @@ private struct PortsSection: View {
 
 // MARK: - Project panel
 
+/// Project launchers 区块：在 ProjectPanel 中作为 LAUNCHERS 分组展示
+private struct LaunchersSection: View {
+    @ObservedObject var project: Project
+    @Binding var isCollapsed: Bool
+    let runCommand: (ProjectLaunchCommand) -> Void
+    let runAllCommands: () -> Void
+
+    @State private var expandedCommandID: UUID?
+    @State private var draggedCommandID: UUID?
+    @State private var dropTargetCommandID: UUID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            GitSectionHeader(
+                title: "LAUNCHERS",
+                count: project.launchCommands.count,
+                isCollapsed: $isCollapsed,
+                actions: [
+                    GitSectionHeader.Action(
+                        systemImage: "play.fill",
+                        help: "Run all launchers in order",
+                        perform: runAllCommands
+                    ),
+                    GitSectionHeader.Action(
+                        systemImage: "plus",
+                        help: "Add Launcher",
+                        perform: addCommand
+                    )
+                ],
+                actionsDisabled: project.launchCommands.isEmpty
+            )
+
+            if !isCollapsed {
+                if project.launchCommands.isEmpty {
+                    emptyView
+                } else {
+                    commandList
+                }
+            }
+        }
+        .onChange(of: project.launchCommands.count) { oldCount, newCount in
+            sidebarAutoCollapse(
+                oldCount: oldCount, newCount: newCount, isCollapsed: $isCollapsed
+            )
+        }
+    }
+
+    private var emptyView: some View {
+        HStack(spacing: 6) {
+            Text("No launchers")
+                .font(SidebarTypography.caption())
+                .foregroundStyle(.tertiary)
+            Spacer()
+            Button("Add Launcher") {
+                addCommand()
+            }
+            .buttonStyle(.plain)
+            .font(SidebarTypography.caption(.medium))
+            .foregroundStyle(Color(nsColor: Theme.cursor))
+        }
+        .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        .padding(.trailing, 8)
+        .padding(.vertical, 4)
+    }
+
+    private var commandList: some View {
+        VStack(spacing: 1) {
+            ForEach(Array(project.launchCommands.enumerated()), id: \.element.id) { index, command in
+                VStack(spacing: 0) {
+                    StartCommandRow(
+                        command: command,
+                        isExpanded: expandedCommandID == command.id,
+                        isDropTarget: dropTargetCommandID == command.id,
+                        run: { runCommand(command) },
+                        toggleExpanded: { toggleExpanded(command.id) },
+                        startDrag: {
+                            draggedCommandID = command.id
+                            return NSItemProvider(object: command.id.uuidString as NSString)
+                        }
+                    )
+                    .onDrop(
+                        of: [.plainText],
+                        delegate: StartCommandDropDelegate(
+                            targetID: command.id,
+                            project: project,
+                            draggedCommandID: $draggedCommandID,
+                            dropTargetCommandID: $dropTargetCommandID
+                        )
+                    )
+
+                    if expandedCommandID == command.id {
+                        StartCommandInlineEditor(
+                            command: binding(for: command.id),
+                            delete: { delete(command.id) }
+                        )
+                        .padding(.top, 2)
+                        .padding(.bottom, 4)
+                    }
+                }
+            }
+        }
+        .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+        .padding(.trailing, 4)
+    }
+
+    private func addCommand() {
+        if isCollapsed { isCollapsed = false }
+        let command = ProjectLaunchCommand()
+        project.addLaunchCommand(command)
+        expandedCommandID = command.id
+    }
+
+    private func toggleExpanded(_ id: UUID) {
+        expandedCommandID = expandedCommandID == id ? nil : id
+    }
+
+    private func delete(_ id: UUID) {
+        guard let index = project.launchCommands.firstIndex(where: { $0.id == id }) else { return }
+        if expandedCommandID == id { expandedCommandID = nil }
+        project.removeLaunchCommands(at: IndexSet(integer: index))
+    }
+
+    private func binding(for id: UUID) -> Binding<ProjectLaunchCommand> {
+        Binding {
+            project.launchCommands.first(where: { $0.id == id }) ?? ProjectLaunchCommand(id: id)
+        } set: { updated in
+            project.updateLaunchCommand(updated)
+        }
+    }
+}
+
 /// 项目根路径 + 根 package.json scripts + 全 session 进程/端口并集。
 private struct ProjectPanel: View {
     @ObservedObject var model: ProjectPanelModel
+    @ObservedObject var project: Project
+    @ObservedObject var manager: TerminalManager
     let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
     let openPackageJSON: () -> Void
+    let runLaunchCommand: (ProjectLaunchCommand) -> Void
+    let runAllLaunchCommands: () -> Void
 
     @State private var directoryCollapsed = false
+    @State private var launchersCollapsed = false
     @State private var packageScriptsCollapsed = false
     @State private var processesCollapsed = false
     @State private var portsCollapsed = false
@@ -3058,17 +3516,26 @@ private struct ProjectPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     PathDirectorySection(
                         path: model.rootPath,
                         isCollapsed: $directoryCollapsed,
                         sectionTitle: "PROJECT"
                     )
+                    LaunchersSection(
+                        project: project,
+                        isCollapsed: $launchersCollapsed,
+                        runCommand: runLaunchCommand,
+                        runAllCommands: runAllLaunchCommands
+                    )
                     PackageScriptsSection(
                         scripts: model.packageScripts,
+                        records: manager.packageScriptRecords,
                         isCollapsed: $packageScriptsCollapsed,
                         runPackageScript: runPackageScript,
+                        stopPackageScript: { manager.stopPackageScript($0) },
+                        restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
                         openPackageJSON: openPackageJSON
                     )
                     ProcessesSection(
@@ -3137,6 +3604,7 @@ private struct ProjectPanel: View {
 /// 当前终端 cwd + cwd 下 scripts + 本 session 进程/端口。
 private struct SessionInfoPanel: View {
     @ObservedObject var model: SessionInfoModel
+    @ObservedObject var manager: TerminalManager
     let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
     let openPackageJSON: () -> Void
 
@@ -3157,8 +3625,11 @@ private struct SessionInfoPanel: View {
                     )
                     PackageScriptsSection(
                         scripts: model.packageScripts,
+                        records: manager.packageScriptRecords,
                         isCollapsed: $packageScriptsCollapsed,
                         runPackageScript: runPackageScript,
+                        stopPackageScript: { manager.stopPackageScript($0) },
+                        restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
                         openPackageJSON: openPackageJSON
                     )
                     ProcessesSection(
