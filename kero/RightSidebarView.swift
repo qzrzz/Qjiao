@@ -3464,6 +3464,7 @@ private struct PackageInfoSection: View {
 
                                 // [下拉菜单 ⌵] Button 点击弹出 NSMenu
                                 Button {
+                                    let tagVersion = parsed.raw.lowercased().hasPrefix("v") ? parsed.raw : "v\(parsed.raw)"
                                     let menu = NSMenu()
 
                                     let itemMajor = NSMenuItem(title: "+ MAJOR ( \(parsed.major) )", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
@@ -3495,9 +3496,9 @@ private struct PackageInfoSection: View {
 
                                     menu.addItem(NSMenuItem.separator())
 
-                                    let itemTag = NSMenuItem(title: "Git tag \(displayVersion)", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                                    let itemTag = NSMenuItem(title: "Git tag \(tagVersion)", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                                     let tTag = MenuActionTarget {
-                                        SidebarProbe.createGitTag(directory: rootPath, tagName: displayVersion)
+                                        SidebarProbe.createGitTag(directory: rootPath, tagName: tagVersion)
                                     }
                                     itemTag.target = tTag
                                     menu.addItem(itemTag)
