@@ -79,24 +79,17 @@ struct StartPanel: View {
                         StartCommandRow(
                             command: command,
                             isExpanded: expandedCommandID == command.id,
-                            isDropTarget: dropTargetCommandID == command.id,
                             isDragged: draggedCommandID == command.id,
                             run: { runCommand(command) },
                             toggleExpanded: { toggleExpanded(command.id) },
-                            startDrag: {
-                                draggedCommandID = command.id
-                                return NSItemProvider(object: command.id.uuidString as NSString)
+                            onDrag: { location in
+                                updateCommandDrag(source: command.id, location: location)
+                            },
+                            onDragEnded: {
+                                endCommandDrag()
                             }
                         )
-                        .onDrop(
-                            of: [.plainText],
-                            delegate: StartCommandDropDelegate(
-                                targetID: command.id,
-                                project: project,
-                                draggedCommandID: $draggedCommandID,
-                                dropTargetCommandID: $dropTargetCommandID
-                            )
-                        )
+                        .background(LauncherFrameReader(commandID: command.id))
 
                         if expandedCommandID == command.id {
                             StartCommandInlineEditor(
@@ -121,6 +114,9 @@ struct StartPanel: View {
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
+        }
+        .onPreferenceChange(LauncherFramePreferenceKey.self) { frames in
+            commandFrames = frames
         }
         .animation(.easeInOut(duration: 0.15), value: expandedCommandID)
     }
@@ -174,11 +170,11 @@ struct StartPanel: View {
 struct StartCommandRow: View {
     let command: ProjectLaunchCommand
     let isExpanded: Bool
-    let isDropTarget: Bool
     var isDragged: Bool = false
     let run: () -> Void
     let toggleExpanded: () -> Void
-    let startDrag: () -> NSItemProvider
+    let onDrag: (CGPoint) -> Void
+    let onDragEnded: () -> Void
 
     @State private var isHovering = false
     @State private var isHoveringHandle = false
@@ -192,9 +188,15 @@ struct StartCommandRow: View {
                 .frame(width: 14, height: 14)
                 .contentShape(Rectangle())
                 .onHover { isHoveringHandle = $0 }
-                .onDrag(startDrag) {
-                    Image(nsImage: NSImage())
-                }
+                .gesture(
+                    DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                        .onChanged { gesture in
+                            onDrag(gesture.location)
+                        }
+                        .onEnded { _ in
+                            onDragEnded()
+                        }
+                )
 
             StartCommandIcon(command: command)
                 .frame(width: 14, height: 14)
@@ -233,23 +235,10 @@ struct StartCommandRow: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .opacity(isDragged ? 0.35 : 1.0)
+        .opacity(isDragged ? 0.4 : 1.0)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(
-                    (isDropTarget && !isDragged)
-                    ? Color(nsColor: Theme.cursor).opacity(0.12)
-                    : (isHovering && !isDragged ? Color.primary.opacity(0.06) : Color.clear)
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .strokeBorder(
-                    (isDropTarget && !isDragged)
-                    ? Color(nsColor: Theme.cursor).opacity(0.4)
-                    : Color.clear,
-                    lineWidth: 1
-                )
+                .fill(isHovering && !isDragged ? Color.primary.opacity(0.06) : Color.clear)
         )
         .contentShape(RoundedRectangle(cornerRadius: 5))
         .onHover { isHovering = $0 }
@@ -260,13 +249,7 @@ struct StartCommandRow: View {
                 isHoveringRunBtn = false
             }
         }
-        .onChange(of: isDropTarget) { _, newValue in
-            if !newValue {
-                isHovering = false
-            }
-        }
         .animation(.snappy(duration: 0.2), value: isDragged)
-        .animation(.snappy(duration: 0.2), value: isDropTarget)
     }
 
     private var commandTooltip: String {
@@ -385,73 +368,22 @@ struct StartCommandInlineEditor: View {
 
 /// An opaque, compact drag image avoids the translucent snapshot AppKit makes
 /// from an entire sidebar row (which looks especially muddy over materials).
-struct StartCommandDragPreview: View {
-    let command: ProjectLaunchCommand
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "line.3.horizontal")
-                .font(SidebarTypography.micro())
-                .foregroundStyle(.secondary)
-            StartCommandIcon(command: command)
-                .frame(width: 14, height: 14)
-            Text(command.displayTitle)
-                .font(SidebarTypography.secondary())
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color(nsColor: Theme.sidebar))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(Color(nsColor: Theme.cursor).opacity(0.4), lineWidth: 1)
-        }
-        .shadow(color: Color.black.opacity(0.15), radius: 5, x: 0, y: 2)
+struct LauncherFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { $1 }
     }
 }
 
-struct StartCommandDropDelegate: DropDelegate {
-    let targetID: UUID
-    let project: Project
-    @Binding var draggedCommandID: UUID?
-    @Binding var dropTargetCommandID: UUID?
+struct LauncherFrameReader: View {
+    let commandID: UUID
 
-    func validateDrop(info: DropInfo) -> Bool {
-        draggedCommandID != nil && draggedCommandID != targetID
-    }
-
-    func dropEntered(info: DropInfo) {
-        guard let draggedCommandID, draggedCommandID != targetID else { return }
-        dropTargetCommandID = targetID
-        withAnimation(.snappy(duration: 0.22, extraBounce: 0.05)) {
-            project.moveLaunchCommand(id: draggedCommandID, before: targetID)
-        }
-    }
-
-    func dropExited(info: DropInfo) {
-        if dropTargetCommandID == targetID { dropTargetCommandID = nil }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        withAnimation(.snappy(duration: 0.2)) {
-            draggedCommandID = nil
-            dropTargetCommandID = nil
-        }
-        return true
-    }
-
-    func dropEnded(info: DropInfo) {
-        withAnimation(.snappy(duration: 0.2)) {
-            draggedCommandID = nil
-            dropTargetCommandID = nil
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: LauncherFramePreferenceKey.self,
+                value: [commandID: proxy.frame(in: .global)]
+            )
         }
     }
 }

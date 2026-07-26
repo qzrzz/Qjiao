@@ -4035,7 +4035,7 @@ private struct LaunchersSection: View {
 
     @State private var expandedCommandID: UUID?
     @State private var draggedCommandID: UUID?
-    @State private var dropTargetCommandID: UUID?
+    @State private var commandFrames: [UUID: CGRect] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -4098,24 +4098,17 @@ private struct LaunchersSection: View {
                     StartCommandRow(
                         command: command,
                         isExpanded: expandedCommandID == command.id,
-                        isDropTarget: dropTargetCommandID == command.id,
                         isDragged: draggedCommandID == command.id,
                         run: { runCommand(command) },
                         toggleExpanded: { toggleExpanded(command.id) },
-                        startDrag: {
-                            draggedCommandID = command.id
-                            return NSItemProvider(object: command.id.uuidString as NSString)
+                        onDrag: { location in
+                            updateCommandDrag(source: command.id, location: location)
+                        },
+                        onDragEnded: {
+                            endCommandDrag()
                         }
                     )
-                    .onDrop(
-                        of: [.plainText],
-                        delegate: StartCommandDropDelegate(
-                            targetID: command.id,
-                            project: project,
-                            draggedCommandID: $draggedCommandID,
-                            dropTargetCommandID: $dropTargetCommandID
-                        )
-                    )
+                    .background(LauncherFrameReader(commandID: command.id))
 
                     if expandedCommandID == command.id {
                         StartCommandInlineEditor(
@@ -4130,6 +4123,27 @@ private struct LaunchersSection: View {
         }
         .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
         .padding(.trailing, 4)
+        .onPreferenceChange(LauncherFramePreferenceKey.self) { frames in
+            commandFrames = frames
+        }
+    }
+
+    private func updateCommandDrag(source: UUID, location: CGPoint) {
+        draggedCommandID = source
+        NSCursor.closedHand.set()
+        guard let targetID = commandFrames.first(where: {
+            $0.key != source && $0.value.contains(location)
+        })?.key else { return }
+        withAnimation(.snappy(duration: 0.2, extraBounce: 0.05)) {
+            project.moveLaunchCommand(id: source, before: targetID)
+        }
+    }
+
+    private func endCommandDrag() {
+        withAnimation(.snappy(duration: 0.2)) {
+            draggedCommandID = nil
+        }
+        NSCursor.arrow.set()
     }
 
     private func addCommand() {
@@ -4429,6 +4443,9 @@ private struct ProjectPanel: View {
                 .frame(width: 24, height: 24)
         case .preset(let preset):
             ProjectPresetIconImage(preset: preset, size: 22, isSelected: true)
+                .frame(width: 24, height: 24)
+        case .file(let path):
+            ProjectFileIconImage(path: path, size: 22)
                 .frame(width: 24, height: 24)
         case nil:
             Image(systemName: "shippingbox")
