@@ -4394,6 +4394,9 @@ private struct ProjectPanel: View {
                 .lineLimit(1)
                 .fixedSize()
                 .frame(width: 24, height: 24)
+        case .preset(let preset):
+            ProjectPresetIconImage(preset: preset, size: 22, isSelected: true)
+                .frame(width: 24, height: 24)
         case nil:
             Image(systemName: "shippingbox")
                 .font(SidebarTypography.listIcon())

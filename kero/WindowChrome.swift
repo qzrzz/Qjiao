@@ -74,10 +74,9 @@ struct WindowChromeAccessor: NSViewRepresentable {
             }
             guard self.window !== window else { return }
             self.window = window
-            // Interactive controls occupy the title-bar region. Disable the
-            // server-side title-bar drag entirely; WindowDragArea is the only
-            // surface that opts into moving the window.
-            window.isMovable = false
+            // 允许自定义标题栏和 Header 空白区域通过 WindowDragArea 拖拽移动窗口。
+            window.isMovable = true
+            window.isMovableByWindowBackground = false
             reposition()
             // The initial system layout can land after us; catch up.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.reposition() }
@@ -105,7 +104,8 @@ struct WindowChromeAccessor: NSViewRepresentable {
 
         private func reposition() {
             guard let window else { return }
-            window.isMovable = false
+            window.isMovable = true
+            window.isMovableByWindowBackground = false
             guard !window.styleMask.contains(.fullScreen) else { return }
             let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
             for (index, type) in types.enumerated() {
@@ -135,23 +135,34 @@ struct WindowChromeAccessor: NSViewRepresentable {
     }
 }
 
-/// A deliberate window-moving surface. Interactive header controls are kept
-/// outside this view so their own drag gestures receive the full mouse stream.
-///
-/// Double-clicking runs the standard title-bar action (zoom / minimize per
-/// System Settings) — behavior our non-movable, hidden title bar would
-/// otherwise lose. The tap is simultaneous with the drag: a stationary
-/// double-click never registers a move, so the two don't conflict.
-struct WindowDragArea: View {
-    var body: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .gesture(WindowDragGesture())
-            .simultaneousGesture(TapGesture(count: 2).onEnded {
-                NSApp.keyWindow?.performTitlebarDoubleClickAction()
-            })
-            .allowsWindowActivationEvents()
+/// 原生 AppKit 窗口拖拽响应视图。
+/// 当鼠标在空白区域按下并拖动时，直接触发系统原生 `performWindowDrag(with:)`；
+/// 当双击时，触发标准 macOS 标题栏双击动作（缩放/最小化）。
+private class WindowDragNSView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            window?.performTitlebarDoubleClickAction()
+        } else if let window = self.window, window.isMovable {
+            let selector = Selector(("performWindowDragWithEvent:"))
+            if window.responds(to: selector) {
+                _ = window.perform(selector, with: event)
+            } else {
+                super.mouseDown(with: event)
+            }
+        } else {
+            super.mouseDown(with: event)
+        }
     }
+}
+
+/// 明确指定的窗口移动拖拽区域。
+/// 前景交互控件（按钮/输入框）在其上方正常响应点击，未被占用的空白背景区域将自动接收鼠标事件并平滑拖动窗口。
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        WindowDragNSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 extension NSWindow {

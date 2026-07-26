@@ -24,6 +24,8 @@ struct NotePanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Note 面板空白区域允许拖拽移动窗口
+        .background { WindowDragArea() }
         // 面板不可见时先刷盘，避免仅依赖防抖而丢最后一次编辑。
         .onDisappear { model.flush() }
     }

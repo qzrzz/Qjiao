@@ -48,6 +48,8 @@ struct SystemPanel: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(.easeInOut(duration: 0.25), value: model.snapshot)
+        // System 面板空白区域允许拖拽移动窗口
+        .background { WindowDragArea() }
     }
 
     // MARK: - Resource (CPU / Memory / Disk) — 一行一项 + 右对齐等宽折线

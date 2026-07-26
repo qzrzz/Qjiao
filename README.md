@@ -18,7 +18,10 @@
 - 等宽中文字体来显示终端和代码，可以对齐含有中文的表格、注释了。
   - 默认使用内置 `Source Han Sans CN VF Mono1200` 作为中文等宽回退字体，并可在设置中关闭。
 - 拖拽文件夹自动以该文件夹创建项目并在其中启动终端。
-- 项目支持自定义图标（Emoji 和 SF Symbols ）；图标选择器独立为 `ProjectIconPicker.swift`，含常用推荐、搜索防抖、多词过滤与当前图标预览。
+- 项目支持自定义图标（预置 / Emoji / SF Symbols）；图标选择器独立为 `ProjectIconPicker.swift`：
+  - **预置**：列出本应用内置 Brands（`TerminalAppIcons`）与 Material Icon Theme 图标，可搜索选择。
+  - **SF Symbols**：左侧分类浏览（Suggested / Coding / Arrows…）、分类内搜索防抖、多词过滤。
+  - 数量徽章、当前图标预览与 Clear。
 - 增加 Tabs 选择菜单；顶栏新建标签紧挨标签条，标签总览下拉固定在右侧侧栏按钮旁；左侧栏开关 / 新建 / 下拉 / 右侧栏 / Zoom 共用 `HeaderIconButton`（26pt 热区、caption 图标不变；仅 hover 浅底，按下/激活无底色，激活仅 tint）。右侧工具用 ZStack 固定叠层 + 左侧 padding 硬预留宽度，标签再多也不会挤占下拉/侧栏。
 - 终端可选启用直接点击移动光标。
 - 项目支持添加描述，并显示在项目列表中。
