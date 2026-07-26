@@ -838,129 +838,11 @@ enum SFSymbolCatalog {
     }
 }
 
-// MARK: - Liquid Glass tab switcher
-
-/// 液态玻璃分段切换器（按推荐结构）：
-/// - **外层**：整条轨道 `glassEffect()`
-/// - **选中项**：单独一层 Capsule 玻璃背景，跟着手指/点击移动
-/// - **动画**：`matchedGeometryEffect` 在各 tab 间滑动选中胶囊
-private struct LiquidGlassTabSwitcher<Tab: Hashable & Identifiable & CaseIterable>: View
-where Tab.AllCases: RandomAccessCollection, Tab.AllCases.Element == Tab {
-    @Binding var selection: Tab
-    var namespace: Namespace.ID
-    let title: (Tab) -> String
-
-    /// 选中胶囊在 matchedGeometry 命名空间中的固定 id。
-    private let selectionGeometryID = "liquid-glass-selection-capsule"
-
-    var body: some View {
-        Group {
-            if #available(macOS 26.0, *) {
-                liquidGlassBody
-            } else {
-                fallbackBody
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Icon type")
-    }
-
-    // MARK: macOS 26+ Liquid Glass
-
-    @available(macOS 26.0, *)
-    private var liquidGlassBody: some View {
-        HStack(spacing: 2) {
-            ForEach(Array(Tab.allCases), id: \.id) { tab in
-                let isSelected = selection == tab
-                Button {
-                    withAnimation(.smooth(duration: 0.34)) {
-                        selection = tab
-                    }
-                } label: {
-                    Text(title(tab))
-                        .font(SidebarTypography.caption(.semibold))
-                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 4)
-                        .contentShape(Capsule())
-                        // 选中项：移动的 Capsule 玻璃背景（matchedGeometry 做滑动）。
-                        .background {
-                            if isSelected {
-                                Capsule(style: .continuous)
-                                    .fill(Color.clear)
-                                    .glassEffect(Glass.regular.interactive(true), in: Capsule())
-                                    .matchedGeometryEffect(id: selectionGeometryID, in: namespace)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-            }
-        }
-        .padding(4)
-        // 外层：整条轨道液态玻璃。
-        .glassEffect(Glass.clear.interactive(false), in: Capsule())
-        // 轨道轻微衬底，sheet 白底上仍能看出边界。
-        .background {
-            Capsule(style: .continuous)
-                .fill(Color.primary.opacity(0.05))
-        }
-        .overlay {
-            Capsule(style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-        }
-    }
-
-    // MARK: Fallback（macOS 26 以下：同样用 matchedGeometry 滑动胶囊）
-
-    private var fallbackBody: some View {
-        HStack(spacing: 2) {
-            ForEach(Array(Tab.allCases), id: \.id) { tab in
-                let isSelected = selection == tab
-                Button {
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
-                        selection = tab
-                    }
-                } label: {
-                    Text(title(tab))
-                        .font(SidebarTypography.caption(.semibold))
-                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 4)
-                        .contentShape(Capsule())
-                        .background {
-                            if isSelected {
-                                Capsule(style: .continuous)
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
-                                    .matchedGeometryEffect(id: selectionGeometryID, in: namespace)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-            }
-        }
-        .padding(4)
-        .background {
-            ZStack {
-                Capsule(style: .continuous)
-                    .fill(.ultraThinMaterial)
-                Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(0.04))
-                Capsule(style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
-            }
-        }
-    }
-}
-
 // MARK: - Picker sheet
 
 /// 为项目选择预置 / SF Symbol / Emoji 的面板。
 struct ProjectIconPicker: View {
+    /// 图标来源分段（与原生 segmented Picker 的四个选项对应）。
     private enum Source: String, CaseIterable, Identifiable {
         case preset = "预置"
         case sfSymbols = "SF Symbols"
@@ -1004,8 +886,6 @@ struct ProjectIconPicker: View {
     @State private var fileImportError: String?
     @FocusState private var emojiFieldFocused: Bool
     @FocusState private var symbolSearchFocused: Bool
-    /// 液态玻璃切换器内选中胶囊的 morph 命名空间。
-    @Namespace private var sourceGlassNamespace
 
     private let columns = Array(
         repeating: GridItem(.flexible(minimum: 36), spacing: Metrics.gridSpacing),
@@ -1055,12 +935,18 @@ struct ProjectIconPicker: View {
         VStack(alignment: .leading, spacing: 14) {
             header
 
-            // 类型切换：macOS 26+ 系统 Liquid Glass；更早系统回退磨砂胶囊。
-            LiquidGlassTabSwitcher(
-                selection: $source,
-                namespace: sourceGlassNamespace,
-                title: { $0.rawValue }
-            )
+            // 使用传统原生分段控件，采用系统中号尺寸与标准交互。
+            Picker("Icon type", selection: $source) {
+                ForEach(Source.allCases) { item in
+                    Text(item.rawValue)
+                        .tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.regular)
+            .frame(width: 372)
+            .frame(maxWidth: .infinity)
 
             // 固定高度内容区：切换类型时窗口尺寸不变。
             Group {

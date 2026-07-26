@@ -22,7 +22,7 @@
   - **预置**：列出本应用内置 Brands（`TerminalAppIcons`）与 Material Icon Theme 图标，可搜索选择。
   - **SF Symbols**：左侧分类浏览（Suggested / Coding / Arrows…）、分类内搜索防抖、多词过滤。
   - **Select File**：从磁盘选择图片（支持拖放）；复制到 `~/.config/qjiao/projects/icons/` 托管，重启后仍可用。
-  - 类型切换使用液态玻璃分段器（macOS 26+ `GlassEffectContainer` / `glassEffect`；更早系统回退磨砂胶囊）。
+  - 类型切换使用 SwiftUI 原生传统 segmented Picker（中号、居中显示）。
   - 选择器内容区固定高度，切换类型不抖动；预置图标异步惰性加载 + 缩略图缓存，网格仅渲染可见项。
   - 数量徽章、当前图标预览与 Clear。
 - 增加 Tabs 选择菜单；顶栏新建标签紧挨标签条，标签总览下拉固定在右侧侧栏按钮旁；左侧栏开关 / 新建 / 下拉 / 右侧栏 / Zoom 共用 `HeaderIconButton`（26pt 热区、caption 图标不变；仅 hover 浅底，按下/激活无底色，激活仅 tint）。右侧工具用 ZStack 固定叠层 + 左侧 padding 硬预留宽度，标签再多也不会挤占下拉/侧栏。
@@ -114,5 +114,3 @@
 - 优化右侧栏 Project 面板 Header：Project 图标变为带 hover 浅底高亮可点击按钮，点击弹窗设置项目图标；Project 名称与 Project 描述均升级为就地编辑输入框，常规状态无背景无描边，获取焦点后高亮显示描边与背景色并即时保存。
 - 终端 Tab 惰性加载机制（Lazy Allocation）：启动时反序列化快照仅为当前活跃选中的 Tab 实例化 LibGhostty 引擎与 Shell 进程，所有后台 Tab 保持惰性装载；在首次切换到目标 Tab 时低于 10ms 瞬间无感激活，将包含数十个历史 Tab 时的 App 启动内存占用从 ~1.0GB 降低至 ~60MB。
 - 优化右侧栏 Tabs 与 Project 等面板空白区域拖拽逻辑：为右侧 Tabs 顶栏、Project / Info / Files / Git 面板 Header 及 Project 面板空白背景配置 `WindowDragArea`，允许用户拖拽空白区域直接移动窗口。
-
-
