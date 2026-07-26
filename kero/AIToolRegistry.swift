@@ -233,7 +233,31 @@ final class AIToolRegistry: nonisolated ObservableObject {
 
     /// 重新探测并刷新已安装的 AI 工具列表。
     func refresh() {
-        installedTools = Self.knownTools.filter(\.isInstalled)
+        var list = Self.knownTools.filter(\.isInstalled)
+
+        // 解析用户在设置面板中填写的自定义 CLI 工具名称
+        for cmd in AppSettings.shared.customCLITools {
+            let trimmed = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            // 避免与已知预设工具重复
+            if !list.contains(where: { $0.cliCommand == trimmed }) {
+                if let execPath = Self.findExecutable(name: trimmed) {
+                    let customTool = AITool(
+                        id: "cli:\(trimmed)",
+                        displayName: trimmed,
+                        kind: .cli,
+                        bundleId: nil,
+                        cliCommand: trimmed,
+                        symbolName: "terminal",
+                        appURL: nil,
+                        executablePath: execPath
+                    )
+                    list.append(customTool)
+                }
+            }
+        }
+
+        installedTools = list
         if !preferredToolId.isEmpty,
            !installedTools.contains(where: { $0.id == preferredToolId }) {
             preferredToolId = installedTools.first?.id ?? ""

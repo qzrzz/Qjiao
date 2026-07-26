@@ -139,9 +139,33 @@ final class CodeEditorRegistry: nonisolated ObservableObject {
         refresh()
     }
 
-    /// 刷新已安装编辑器列表（在 launch 或每次显示时调用一次即可）。
+    /// 刷新已安装编辑器列表（在 launch 或设置变更时调用）。
     func refresh() {
-        installedEditors = Self.knownEditors.filter(\.isInstalled)
+        var list = Self.knownEditors.filter(\.isInstalled)
+
+        // 解析用户在设置面板中选择添加的自定义 .app 路径
+        for path in AppSettings.shared.customCodeEditorPaths {
+            guard FileManager.default.fileExists(atPath: path) else { continue }
+            let url = URL(fileURLWithPath: path)
+            let bundle = Bundle(url: url)
+            let bundleId = bundle?.bundleIdentifier ?? path
+            let displayName = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+                ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
+                ?? url.deletingPathExtension().lastPathComponent
+
+            // 避免重复添加已在预设中的条目
+            if !list.contains(where: { $0.bundleId == bundleId || $0.appURL?.path == path }) {
+                let customEditor = CodeEditor(
+                    bundleId: bundleId,
+                    displayName: displayName,
+                    symbolName: "square.and.arrow.up",
+                    appURL: url
+                )
+                list.append(customEditor)
+            }
+        }
+
+        installedEditors = list
         // 校验当前首选是否仍安装；若未安装则自动切换到第一个已安装的。
         if !preferredBundleId.isEmpty,
            !installedEditors.contains(where: { $0.bundleId == preferredBundleId }) {

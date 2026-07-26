@@ -172,6 +172,16 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 用户自定义挑选的 `.app` 代码编辑器路径列表。
+    @Published var customCodeEditorPaths: [String] {
+        didSet { save() }
+    }
+
+    /// 用户自定义填写的 CLI 命令行 AI 工具名称列表。
+    @Published var customCLITools: [String] {
+        didSet { save() }
+    }
+
     /// 毛玻璃 4 核心属性定制选项：Material 材质
     @Published var visualEffectMaterial: String {
         didSet { save() }
@@ -263,6 +273,8 @@ final class AppSettings: nonisolated ObservableObject {
         disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
         preferredCodeEditorBundleId = toml["editor.preferred-code-editor"]?.string ?? ""
         preferredAIToolId = toml["ai.preferred-tool"]?.string ?? ""
+        customCodeEditorPaths = toml["editor.custom-editors"]?.array?.compactMap(\.string) ?? []
+        customCLITools = toml["ai.custom-cli-tools"]?.array?.compactMap(\.string) ?? []
         packageManagerCommand = toml["terminal.package-manager"]?.string
             .flatMap(PackageManagerCommand.init(rawValue:)) ?? .npm
         // 优先 config.toml；无则迁移旧 UserDefaults，最后回落默认 30s。
@@ -348,6 +360,8 @@ final class AppSettings: nonisolated ObservableObject {
         systemReachabilityInterval = .default
         preferredCodeEditorBundleId = ""
         preferredAIToolId = ""
+        customCodeEditorPaths = []
+        customCLITools = []
     }
 
     private func save() {
@@ -426,6 +440,14 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if !preferredAIToolId.isEmpty {
             lines.append("ai.preferred-tool = \(TOML.quote(preferredAIToolId))")
+        }
+        if !customCodeEditorPaths.isEmpty {
+            let quoted = customCodeEditorPaths.map { TOML.quote($0) }.joined(separator: ", ")
+            lines.append("editor.custom-editors = [\(quoted)]")
+        }
+        if !customCLITools.isEmpty {
+            let quoted = customCLITools.map { TOML.quote($0) }.joined(separator: ", ")
+            lines.append("ai.custom-cli-tools = [\(quoted)]")
         }
         if systemReachabilityInterval != .default {
             lines.append(

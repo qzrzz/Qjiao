@@ -41,8 +41,8 @@ struct SettingsView: View {
                             .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundStyle(selectedSection == section ? Color.accentColor : .secondary)
-                    // 五个分类时略收窄卡片，避免顶栏横向溢出固定窗口宽度。
-                    .frame(width: 74, height: 60)
+                    // 六个分类时略收窄卡片，避免顶栏横向溢出固定窗口宽度。
+                    .frame(width: 66, height: 58)
                     .background(
                         RoundedRectangle(cornerRadius: 7)
                             .fill(selectedSection == section ? Color.accentColor.opacity(0.10) : .clear)
@@ -376,6 +376,8 @@ struct SettingsView: View {
                 }
                 .settingsRowPadding()
             }
+            if selectedSection == .project {
+                ProjectSettingsSectionView(settings: settings)
             }
 
             if selectedSection == .about {
@@ -557,6 +559,7 @@ private enum SettingsSection: CaseIterable, Identifiable {
     case terminal
     case editor
     case files
+    case project
     case about
 
     var id: Self { self }
@@ -567,6 +570,7 @@ private enum SettingsSection: CaseIterable, Identifiable {
         case .terminal: "Terminal"
         case .editor: "Editor"
         case .files: "Files"
+        case .project: "Project"
         case .about: "About"
         }
     }
@@ -577,6 +581,7 @@ private enum SettingsSection: CaseIterable, Identifiable {
         case .terminal: "terminal"
         case .editor: "text.cursor"
         case .files: "folder"
+        case .project: "folder.badge.gear"
         case .about: "info.circle"
         }
     }
@@ -868,6 +873,131 @@ private struct MiniWindow: View {
         RoundedRectangle(cornerRadius: 1)
             .fill(fill)
             .frame(width: width, height: 2.5)
+    }
+}
+
+/// Project 设置分类面板：配置自定义 Code 编辑工具与 CLI AI 工具。
+private struct ProjectSettingsSectionView: View {
+    @ObservedObject var settings: AppSettings
+
+    @State private var cliToolsInputText: String = ""
+
+    var body: some View {
+        Group {
+            // ── Section 1: Code 编辑工具 (文件选择)
+            Section("Code 编辑工具") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("自定义代码编辑器 (.app)。选择已安装的应用程序包，将自动识别并加入编辑器打开列表。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if !settings.customCodeEditorPaths.isEmpty {
+                        VStack(spacing: 4) {
+                            ForEach(settings.customCodeEditorPaths, id: \.self) { path in
+                                HStack(spacing: 8) {
+                                    let url = URL(fileURLWithPath: path)
+                                    let icon = NSWorkspace.shared.icon(forFile: path)
+                                    Image(nsImage: icon)
+                                        .resizable()
+                                        .frame(width: 18, height: 18)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(url.deletingPathExtension().lastPathComponent)
+                                            .font(.system(size: 12, weight: .medium))
+                                        Text(path)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                    Spacer()
+                                    Button {
+                                        removeCustomEditor(path: path)
+                                    } label: {
+                                        Image(systemName: "minus.circle.fill")
+                                            .foregroundStyle(.red.opacity(0.8))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("移除此编辑器")
+                                }
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.primary.opacity(0.04))
+                                )
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("选择文件…") {
+                            selectCustomEditorApp()
+                        }
+                    }
+                }
+                .settingsRowPadding()
+            }
+
+            // ── Section 2: CLI 工具 (文本列表 一行一个)
+            Section("CLI 工具") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("自定义 CLI 命令行工具。填写可执行命令名称，一行一个：")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TextEditor(text: $cliToolsInputText)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(height: 100)
+                        .padding(4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.primary.opacity(0.15), lineWidth: 1)
+                        )
+                        .onChange(of: cliToolsInputText) { newValue in
+                            updateCustomCLITools(from: newValue)
+                        }
+                }
+                .settingsRowPadding()
+            }
+        }
+        .onAppear {
+            cliToolsInputText = settings.customCLITools.joined(separator: "\n")
+        }
+    }
+
+    private func selectCustomEditorApp() {
+        let panel = NSOpenPanel()
+        panel.title = "选择代码编辑器应用"
+        panel.prompt = "选择"
+        panel.allowedContentTypes = [.application, .applicationBundle]
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+
+        if panel.runModal() == .OK {
+            for url in panel.urls {
+                let path = url.path
+                if !settings.customCodeEditorPaths.contains(path) {
+                    settings.customCodeEditorPaths.append(path)
+                }
+            }
+            CodeEditorRegistry.shared.refresh()
+        }
+    }
+
+    private func removeCustomEditor(path: String) {
+        settings.customCodeEditorPaths.removeAll { $0 == path }
+        CodeEditorRegistry.shared.refresh()
+    }
+
+    private func updateCustomCLITools(from text: String) {
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        settings.customCLITools = lines
+        AIToolRegistry.shared.refresh()
     }
 }
 
