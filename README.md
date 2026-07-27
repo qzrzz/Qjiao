@@ -129,6 +129,7 @@
 - Project / Info 的 Processes 列表过滤已经退出且等待回收的僵尸进程。
 - 优化右侧栏 Tabs 与 Project 等面板空白区域拖拽逻辑：为右侧 Tabs 顶栏、Project / Info / Files / Git 面板 Header 及 Project 面板空白背景配置 `WindowDragArea`，允许用户拖拽空白区域直接移动窗口。
 - 右侧栏 Project 面板增加 PACKAGE 分组：双行紧凑布局（首行包名与右侧独占仓库跳转图标按钮，次行版本号与 SemVer `[+]` 递增按钮及 `MAJOR` / `MINOR` / `PATCH` / `Git tag` 下拉菜单）；点击快速递增并改写 `package.json` 中的 `version` 字段或生成 Git 标签；若未检测到 `package.json` 或无有效字段则自动隐藏该分组。
+- 重构右侧栏代码结构：`RightSidebarView` 只保留侧栏框架与面板调度，Files、Git、Project、Info 及公共视图按职责拆分；Gradle / Just / Cargo / CMake / Makefile 任务分组统一复用同一组件与交互逻辑。
 
 ## 上游移植记录
 
