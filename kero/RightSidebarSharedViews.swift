@@ -50,6 +50,7 @@ struct SidebarIconButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(SidebarTypography.caption(.medium))
+                .imageScale(systemImage.contains("doc") ? .small : .medium)
                 .foregroundStyle(
                     active
                         ? Color(nsColor: Theme.cursor)

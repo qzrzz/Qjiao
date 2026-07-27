@@ -105,6 +105,10 @@ struct FileTreePanel: View {
     @State private var filterQuery = ""
     @State private var isPanelHovered = false
     @State private var isPanelClicked = false
+    /// Search 模式主输入框是否拥有焦点；Replace / Include / Exclude 不算。
+    @State private var isFilesSearchFieldFocused = false
+    /// Search 模式任一输入框是否拥有焦点，用于阻止快捷键漏到终端菜单。
+    @State private var isFilesSearchInputFocused = false
     @State private var isCloseFilterHovering = false
     @State private var eventMonitor: Any? = nil
 
@@ -162,8 +166,8 @@ struct FileTreePanel: View {
                 PanelHeader(title: model.rootName, subtitle: model.rootPath)
 
                 SidebarIconButton(
-                    systemImage: manager.filePanelMode == .search ? "doc.text.magnifyingglass" : "list.bullet.indent",
-                    help: manager.filePanelMode == .search ? "Switch to File Tree" : "Switch to Text Search (⇧⌘F)",
+                    systemImage: "magnifyingglass",
+                    help: manager.filePanelMode == .search ? "Switch to File Tree (⇧⌘F)" : "Search in Files (⇧⌘F)",
                     active: manager.filePanelMode == .search
                 ) {
                     withAnimation(.easeInOut(duration: 0.15)) {
@@ -223,16 +227,6 @@ struct FileTreePanel: View {
             .padding(.bottom, 8)
             // Files 面板 Header 空白区域允许拖拽移动窗口
             mainContentView
-            // ⌘F 快捷键：仅在焦点位于 Files Tree 时激活 Filter，与终端/编辑器 ⌘F 隔离
-            .onKeyPress(keys: [.init("f")], phases: .down) { press in
-                guard press.modifiers.contains(.command),
-                      !press.modifiers.contains(.shift),
-                      !press.modifiers.contains(.option)
-                else { return .ignored }
-                isFilterActive = true
-                isFilterFieldFocused = true
-                return .handled
-            }
             // 文件树快捷键：⌘A 全选、⌘C 复制、⌘V 粘贴（需面板焦点）。
             .onKeyPress(keys: [.init("a")], phases: .down) { press in
                 guard press.modifiers.contains(.command) else { return .ignored }
@@ -347,22 +341,44 @@ struct FileTreePanel: View {
     private func setupKeyboardMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // Sheet / 模态对话框（如 Image Build）打开时绝不拦截，避免抢走文本输入
-            if Self.isSheetOrModalKeyInput(event) {
+            // Sheet / 模态对话框（如 Image Build）打开时绝不拦截。
+            if Self.isSheetOrModalPresented(event) {
                 return event
             }
 
             // 只过滤用户显式按下的 Command, Shift, Option, Control 键，排除 macOS 为方向键自动附加的 .numericPad 与 .function
             let relevantFlags = event.modifierFlags.intersection([.command, .shift, .option, .control])
 
-            // 1. ⌘F 快捷键：激活 Filter 输入栏
-            if relevantFlags == .command, event.keyCode == 3 || event.charactersIgnoringModifiers?.lowercased() == "f" {
-                if isFilesTreeActiveOrFocused() {
-                    Task { @MainActor in
-                        isFilterActive = true
-                        isFilterFieldFocused = true
+            // 1. Files 内部 ⌘F 三态：
+            // 文件树 → Filter；Filter 输入框 → Search；Search 主输入框 → 文件树。
+            if relevantFlags == .command,
+               (event.keyCode == 3 || event.charactersIgnoringModifiers?.lowercased() == "f") {
+                if manager.isPanelVisible, manager.panelTab == .files {
+                    if manager.filePanelMode == .tree, isFilterFieldFocused {
+                        Task { @MainActor in
+                            dismissFilter()
+                            manager.filePanelMode = .search
+                        }
+                        return nil
                     }
-                    return nil // 拦截 ⌘F，不触发主菜单 Find 命令
+                    if manager.filePanelMode == .search, isFilesSearchFieldFocused {
+                        Task { @MainActor in
+                            isFilesSearchFieldFocused = false
+                            isFilesSearchInputFocused = false
+                            manager.filePanelMode = .tree
+                        }
+                        return nil
+                    }
+                    if manager.filePanelMode == .search, isFilesSearchInputFocused {
+                        return nil
+                    }
+                    if isFilesTreeActiveOrFocused() {
+                        Task { @MainActor in
+                            isFilterActive = true
+                            isFilterFieldFocused = true
+                        }
+                        return nil // 拦截 ⌘F，不触发主菜单 Find 命令
+                    }
                 }
             }
 
@@ -449,6 +465,10 @@ struct FileTreePanel: View {
                 rootPath: model.rootPath,
                 onOpenMatch: { path, line, col in
                     manager.openFile(path, line: line, column: col)
+                },
+                onInputFocusChanged: { searchFocused, anyInputFocused in
+                    isFilesSearchFieldFocused = searchFocused
+                    isFilesSearchInputFocused = anyInputFocused
                 }
             )
         } else {
@@ -529,8 +549,8 @@ struct FileTreePanel: View {
         }
     }
 
-    /// 当前按键是否应交给 Sheet / 模态 / 文本字段，而不是 Files 树。
-    private static func isSheetOrModalKeyInput(_ event: NSEvent) -> Bool {
+    /// 当前按键是否应完整交给 Sheet / 模态窗口。
+    private static func isSheetOrModalPresented(_ event: NSEvent) -> Bool {
         // 事件落在 sheet 窗口上
         if event.window?.isSheet == true { return true }
         // 任意可见 sheet（SwiftUI sheet 有时 keyWindow 仍是宿主）
@@ -538,18 +558,6 @@ struct FileTreePanel: View {
             return true
         }
         if NSApp.modalWindow != nil { return true }
-        // 首响应者是文本编辑控件（输入框 / 文本视图）
-        if let win = NSApp.keyWindow ?? event.window,
-           let responder = win.firstResponder {
-            if responder is NSTextView || responder is NSTextField {
-                return true
-            }
-            let name = String(describing: type(of: responder))
-            if name.contains("TextField") || name.contains("TextView")
-                || name.contains("FieldEditor") || name.contains("TextInput") {
-                return true
-            }
-        }
         return false
     }
 
@@ -579,32 +587,30 @@ struct FileTreePanel: View {
             return false
         }
 
-        // 如果面板被点击过、或处于聚焦状态、或 Filter 搜索框激活中
-        if isFilterActive || isFilterFieldFocused || isTreeFocused || isPanelClicked {
-            return true
-        }
-
-        // 文本输入控件（如 Filter 搜索框、文本输入框）焦点拦截
+        // firstResponder 是当前事件最可靠的焦点来源，必须优先于
+        // isPanelClicked 等 SwiftUI 状态判断。否则 Files 曾被点击后，
+        // 再点击本来就已选中的终端 pane 不会改变 focusedPaneID，
+        // 残留的 isPanelClicked 会继续截走终端的 ⌘F / 方向键等按键。
         if let window = NSApp.keyWindow, let responder = window.firstResponder as? NSView {
             let className = String(describing: type(of: responder))
             if responder is NSTextView || responder is NSTextField
-                || className.contains("TextField") || className.contains("FieldEditor") {
-                return false
-            }
-        }
-
-        // 如果鼠标悬停在侧边栏面板上方，直接允许响应方向键
-        if isPanelHovered {
-            return true
-        }
-
-        // 如果第一响应者是终端或代码编辑器，且面板未被悬停/点击/聚焦，交给终端/编辑器
-        if let window = NSApp.keyWindow, let responder = window.firstResponder as? NSView {
-            let className = String(describing: type(of: responder))
-            if className.contains("Ghostty") || className.contains("STTextView")
+                || responder is KeroTerminalView || responder is FocusReportingTextView
+                || className.contains("TextField") || className.contains("FieldEditor")
+                || className.contains("Ghostty") || className.contains("STTextView")
                 || className.contains("SourceTextEditor") {
                 return false
             }
+        }
+
+        // Files 树的 SwiftUI focus 是首选；isPanelClicked 仅用于树的
+        // 空白区/行点击后 AppKit 没有可作为 firstResponder 的原生视图。
+        if isFilterFieldFocused || isTreeFocused || isPanelClicked {
+            return true
+        }
+
+        // SwiftUI 的 focus bridge 可能把 firstResponder 放在私有宿主视图，
+        // 此时只沿视图层级确认它是否真的属于 Files / RightSidebar。
+        if let window = NSApp.keyWindow, let responder = window.firstResponder as? NSView {
             var current: NSView? = responder
             while let v = current {
                 let name = String(describing: type(of: v))
@@ -615,6 +621,8 @@ struct FileTreePanel: View {
             }
         }
 
+        // hover 只决定预览展示，不代表键盘焦点；指针停在 Files 上时，
+        // 仍应让当前 firstResponder（例如终端）独占快捷键。
         return false
     }
 

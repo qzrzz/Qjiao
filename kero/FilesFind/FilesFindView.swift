@@ -12,18 +12,28 @@ public struct FilesFindView: View {
     @ObservedObject public var model: FilesFindModel
     public let rootPath: String
     public let onOpenMatch: (String, Int, Int) -> Void
+    /// 将 Search 输入区的真实焦点同步给 Files 容器，用于限定 ⌘F 行为。
+    public let onInputFocusChanged: (_ searchFocused: Bool, _ anyInputFocused: Bool) -> Void
 
-    @FocusState private var isSearchFocused: Bool
-    @FocusState private var isReplaceFocused: Bool
+    @FocusState private var focusedInput: InputField?
+
+    private enum InputField: Hashable {
+        case search
+        case replace
+        case include
+        case exclude
+    }
 
     public init(
         model: FilesFindModel,
         rootPath: String,
-        onOpenMatch: @escaping (String, Int, Int) -> Void
+        onOpenMatch: @escaping (String, Int, Int) -> Void,
+        onInputFocusChanged: @escaping (Bool, Bool) -> Void = { _, _ in }
     ) {
         self.model = model
         self.rootPath = rootPath
         self.onOpenMatch = onOpenMatch
+        self.onInputFocusChanged = onInputFocusChanged
     }
 
     public var body: some View {
@@ -50,7 +60,7 @@ public struct FilesFindView: View {
         .onAppear {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 50_000_000)
-                isSearchFocused = true
+                focusedInput = .search
             }
             if !rootPath.isEmpty && !model.options.query.isEmpty && model.results.isEmpty {
                 model.performSearch(rootPath: rootPath)
@@ -60,6 +70,12 @@ public struct FilesFindView: View {
             if !newPath.isEmpty && !model.options.query.isEmpty {
                 model.performSearch(rootPath: newPath)
             }
+        }
+        .onChange(of: focusedInput) { _, input in
+            onInputFocusChanged(input == .search, input != nil)
+        }
+        .onDisappear {
+            onInputFocusChanged(false, false)
         }
     }
 
@@ -87,7 +103,7 @@ public struct FilesFindView: View {
                     TextField("Search", text: $model.options.query)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
-                        .focused($isSearchFocused)
+                        .focused($focusedInput, equals: .search)
                         .onSubmit {
                             model.performSearch(rootPath: rootPath)
                         }
@@ -134,11 +150,11 @@ public struct FilesFindView: View {
                 .cornerRadius(4)
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
-                        .stroke(isSearchFocused ? Color(nsColor: Theme.accent) : Color.gray.opacity(0.3), lineWidth: 1)
+                        .stroke(focusedInput == .search ? Color(nsColor: Theme.accent) : Color.gray.opacity(0.3), lineWidth: 1)
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    isSearchFocused = true
+                    focusedInput = .search
                 }
             }
 
@@ -151,7 +167,7 @@ public struct FilesFindView: View {
                         TextField("Replace", text: $model.options.replaceText)
                             .textFieldStyle(.plain)
                             .font(.system(size: 12))
-                            .focused($isReplaceFocused)
+                            .focused($focusedInput, equals: .replace)
                             .onSubmit {
                                 model.replaceAllInProject()
                             }
@@ -173,11 +189,11 @@ public struct FilesFindView: View {
                     .cornerRadius(4)
                     .overlay(
                         RoundedRectangle(cornerRadius: 4)
-                            .stroke(isReplaceFocused ? Color(nsColor: Theme.accent) : Color.gray.opacity(0.3), lineWidth: 1)
+                            .stroke(focusedInput == .replace ? Color(nsColor: Theme.accent) : Color.gray.opacity(0.3), lineWidth: 1)
                     )
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        isReplaceFocused = true
+                        focusedInput = .replace
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -213,6 +229,7 @@ public struct FilesFindView: View {
                         TextField("files to include (e.g. *.ts, src/**)", text: $model.options.includePattern)
                             .textFieldStyle(.plain)
                             .font(.system(size: 11))
+                            .focused($focusedInput, equals: .include)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
                             .background(Color(nsColor: Theme.background))
@@ -227,6 +244,7 @@ public struct FilesFindView: View {
                         TextField("files to exclude (e.g. node_modules, *.log)", text: $model.options.excludePattern)
                             .textFieldStyle(.plain)
                             .font(.system(size: 11))
+                            .focused($focusedInput, equals: .exclude)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
                             .background(Color(nsColor: Theme.background))

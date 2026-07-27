@@ -176,6 +176,9 @@ struct ProjectPanel: View {
     @FocusState private var isDescFocused: Bool
     @State private var descDraft = ""
 
+    @State private var isNameHovered = false
+    @State private var isDescHovered = false
+
     private func syncDrafts() {
         if !isNameFocused {
             nameDraft = project.name
@@ -510,48 +513,45 @@ struct ProjectPanel: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .help(model.rootPath)
+                .mask {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0.85),
+                            .init(color: .clear, location: 1.0)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                }
 
             HStack(spacing: 4) {
-                Button {
+                SidebarIconButton(
+                    systemImage: "terminal",
+                    help: "Open Terminal",
+                    disabled: model.rootPath.isEmpty
+                ) {
+                    guard !model.rootPath.isEmpty else { return }
+                    project.newSession(directory: model.rootPath)
+                }
+
+                SidebarIconButton(
+                    systemImage: "finder",
+                    help: "Open in Finder",
+                    disabled: model.rootPath.isEmpty
+                ) {
                     guard !model.rootPath.isEmpty else { return }
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.rootPath)])
-                } label: {
-                    Image(systemName: "finder")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 13, height: 13)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 22)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.primary.opacity(0.06))
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 4))
                 }
-                .buttonStyle(.plain)
-                .help("Open in Finder")
-                .disabled(model.rootPath.isEmpty)
 
-                Button {
+                SidebarIconButton(
+                    systemImage: "doc.on.doc",
+                    help: "Copy Path",
+                    disabled: model.rootPath.isEmpty
+                ) {
                     guard !model.rootPath.isEmpty else { return }
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(model.rootPath, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 13, height: 13)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 22)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.primary.opacity(0.06))
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 4))
                 }
-                .buttonStyle(.plain)
-                .help("Copy Path")
-                .disabled(model.rootPath.isEmpty)
             }
         }
     }
@@ -562,55 +562,83 @@ struct ProjectPanel: View {
                 iconButton
 
                 VStack(alignment: .leading, spacing: 1) {
-                    TextField("Project Name", text: $nameDraft)
-                        .textFieldStyle(.plain)
-                        .font(SidebarTypography.body(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .focused($isNameFocused)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(isNameFocused ? Color.primary.opacity(0.06) : Color.clear)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(isNameFocused ? Color(nsColor: Theme.cursor).opacity(0.6) : Color.clear, lineWidth: 1)
-                        )
-                        .onSubmit {
-                            commitName()
-                        }
-                        .onChange(of: isNameFocused) {
-                            if !isNameFocused {
+                    ZStack(alignment: .leading) {
+                        // 隐藏的 Text 元素，根据当前展示文本/占位符计算自适应宽度
+                        Text(nameDraft.isEmpty ? "Project Name" : nameDraft)
+                            .font(SidebarTypography.body(.semibold))
+                            .lineLimit(1)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .opacity(0)
+                            .accessibilityHidden(true)
+
+                        TextField("Project Name", text: $nameDraft)
+                            .textFieldStyle(.plain)
+                            .font(SidebarTypography.body(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .focused($isNameFocused)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .onSubmit {
                                 commitName()
                             }
-                        }
+                            .onChange(of: isNameFocused) {
+                                if !isNameFocused {
+                                    commitName()
+                                }
+                            }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(isNameFocused ? Color.primary.opacity(0.06) : (isNameHovered ? Color.primary.opacity(0.04) : Color.clear))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(isNameFocused ? Color(nsColor: Theme.cursor).opacity(0.6) : Color.clear, lineWidth: 1)
+                    )
+                    .onHover { hovering in
+                        isNameHovered = hovering
+                    }
 
-                    TextField(descriptionPlaceholder, text: $descDraft)
-                        .textFieldStyle(.plain)
-                        .font(SidebarTypography.caption())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .focused($isDescFocused)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(isDescFocused ? Color.primary.opacity(0.06) : Color.clear)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(isDescFocused ? Color(nsColor: Theme.cursor).opacity(0.6) : Color.clear, lineWidth: 1)
-                        )
-                        .onSubmit {
-                            commitDescription()
-                        }
-                        .onChange(of: isDescFocused) {
-                            if !isDescFocused {
+                    ZStack(alignment: .leading) {
+                        // 隐藏的 Text 元素，根据当前展示文本/占位符计算自适应宽度
+                        Text(descDraft.isEmpty ? descriptionPlaceholder : descDraft)
+                            .font(SidebarTypography.caption())
+                            .lineLimit(1)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .opacity(0)
+                            .accessibilityHidden(true)
+
+                        TextField(descriptionPlaceholder, text: $descDraft)
+                            .textFieldStyle(.plain)
+                            .font(SidebarTypography.caption())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .focused($isDescFocused)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .onSubmit {
                                 commitDescription()
                             }
-                        }
+                            .onChange(of: isDescFocused) {
+                                if !isDescFocused {
+                                    commitDescription()
+                                }
+                            }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(isDescFocused ? Color.primary.opacity(0.06) : (isDescHovered ? Color.primary.opacity(0.04) : Color.clear))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(isDescFocused ? Color(nsColor: Theme.cursor).opacity(0.6) : Color.clear, lineWidth: 1)
+                    )
+                    .onHover { hovering in
+                        isDescHovered = hovering
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 

@@ -261,48 +261,36 @@ struct SessionInfoPanel: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .help(model.cwdPath)
+                .mask {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0.85),
+                            .init(color: .clear, location: 1.0)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                }
 
             HStack(spacing: 4) {
-                Button {
+                SidebarIconButton(
+                    systemImage: "finder",
+                    help: "Open in Finder",
+                    disabled: model.cwdPath.isEmpty
+                ) {
                     guard !model.cwdPath.isEmpty else { return }
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.cwdPath)])
-                } label: {
-                    Image(systemName: "finder")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 13, height: 13)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 22)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.primary.opacity(0.06))
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 4))
                 }
-                .buttonStyle(.plain)
-                .help("Open in Finder")
-                .disabled(model.cwdPath.isEmpty)
 
-                Button {
+                SidebarIconButton(
+                    systemImage: "doc.on.doc",
+                    help: "Copy Path",
+                    disabled: model.cwdPath.isEmpty
+                ) {
                     guard !model.cwdPath.isEmpty else { return }
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(model.cwdPath, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 13, height: 13)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 22)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.primary.opacity(0.06))
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 4))
                 }
-                .buttonStyle(.plain)
-                .help("Copy Path")
-                .disabled(model.cwdPath.isEmpty)
             }
         }
     }

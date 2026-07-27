@@ -175,24 +175,46 @@ public final class FilesFindEngine: @unchecked Sendable {
                            let lineTextWithNewline = linesDict["text"] as? String,
                            let submatches = matchData["submatches"] as? [[String: Any]] {
 
-                            let cleanLine = lineTextWithNewline.trimmingCharacters(in: .newlines)
                             let relPath = filePath.hasPrefix(rootPath) ? String(filePath.dropFirst(rootPath.count).trimmingCharacters(in: CharacterSet(charactersIn: "/"))) : filePath
                             let fileName = URL(fileURLWithPath: filePath).lastPathComponent
 
+                            let rawUtf8 = Array(lineTextWithNewline.utf8)
+                            let lineUtf8Count = rawUtf8.count
+
                             for sub in submatches {
-                                let start = sub["start"] as? Int ?? 0
-                                let end = sub["end"] as? Int ?? 0
-                                let matchRange = NSRange(location: start, length: max(0, end - start))
-                                let matchedStr = (cleanLine as NSString).substring(with: matchRange)
+                                let startByte = sub["start"] as? Int ?? 0
+                                let endByte = sub["end"] as? Int ?? 0
+
+                                let safeStartByte = min(max(0, startByte), lineUtf8Count)
+                                let safeEndByte = min(max(safeStartByte, endByte), lineUtf8Count)
+
+                                let prefixData = Data(rawUtf8[0..<safeStartByte])
+                                let matchDataBytes = Data(rawUtf8[safeStartByte..<safeEndByte])
+                                let suffixData = Data(rawUtf8[safeEndByte..<lineUtf8Count])
+
+                                let rawPrefix = String(data: prefixData, encoding: .utf8) ?? ""
+                                let matchedStr = String(data: matchDataBytes, encoding: .utf8) ?? ""
+                                let rawSuffix = String(data: suffixData, encoding: .utf8) ?? ""
+
+                                let cleanSuffix = rawSuffix.trimmingCharacters(in: .newlines)
+                                let cleanLine = rawPrefix + matchedStr + cleanSuffix
+
+                                let charStart = rawPrefix.utf16.count
+                                let charLength = matchedStr.utf16.count
+
+                                let nsCleanLine = cleanLine as NSString
+                                let safeLocation = min(max(0, charStart), nsCleanLine.length)
+                                let safeLength = min(max(0, charLength), nsCleanLine.length - safeLocation)
+                                let matchRange = NSRange(location: safeLocation, length: safeLength)
 
                                 let item = MatchItem(
                                     lineNumber: lineNumber,
-                                    column: start,
+                                    column: safeLocation,
                                     lineContent: cleanLine,
                                     matchRange: matchRange,
-                                    previewPrefix: String(cleanLine.prefix(start)),
+                                    previewPrefix: rawPrefix,
                                     matchedText: matchedStr,
-                                    previewSuffix: String(cleanLine.dropFirst(end))
+                                    previewSuffix: cleanSuffix
                                 )
 
                                 lock.lock()
@@ -336,8 +358,8 @@ public final class FilesFindEngine: @unchecked Sendable {
                 for match in nsMatches {
                     let range = match.range
                     let matchedStr = nsLine.substring(with: range)
-                    let prefix = String(line.prefix(range.location))
-                    let suffix = String(line.dropFirst(range.location + range.length))
+                    let prefix = nsLine.substring(to: range.location)
+                    let suffix = nsLine.substring(from: range.location + range.length)
 
                     matches.append(MatchItem(
                         lineNumber: lineNumber,

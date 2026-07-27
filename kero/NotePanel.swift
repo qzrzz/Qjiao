@@ -31,27 +31,18 @@ struct NotePanel: View {
     }
 
     private var editor: some View {
-        ZStack(alignment: .topLeading) {
-            PlainTextEditor(
-                text: model.text,
-                font: .systemFont(ofSize: SidebarTypography.bodySize),
-                textColor: Theme.terminal(dark: colorScheme == .dark).foreground,
-                // 侧栏背景已由 RightSidebar 绘制；编辑器透明，避免叠色。
-                backgroundColor: .clear,
-                insertionPointColor: Theme.cursor,
-                isEditable: true,
-                onTextChange: { model.updateText($0) }
-            )
-
-            if model.text.isEmpty {
-                Text("Write a note…")
-                    .font(SidebarTypography.body())
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .allowsHitTesting(false)
-            }
-        }
+        PlainTextEditor(
+            text: model.text,
+            placeholder: "Write a note…",
+            font: .systemFont(ofSize: SidebarTypography.bodySize),
+            textColor: Theme.terminal(dark: colorScheme == .dark).foreground,
+            placeholderColor: .tertiaryLabelColor,
+            // 侧栏背景已由 RightSidebar 绘制；编辑器透明，避免叠色。
+            backgroundColor: .clear,
+            insertionPointColor: Theme.cursor,
+            isEditable: true,
+            onTextChange: { model.updateText($0) }
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Project note")
     }
@@ -85,8 +76,10 @@ struct NotePanel: View {
 /// 避免菜单项抢走按键；保留文本编辑键（由 NSTextView 处理）与少量系统级菜单。
 struct PlainTextEditor: NSViewRepresentable {
     var text: String
+    var placeholder: String = ""
     var font: NSFont
     var textColor: NSColor
+    var placeholderColor: NSColor = .tertiaryLabelColor
     var backgroundColor: NSColor
     var insertionPointColor: NSColor
     var isEditable: Bool
@@ -180,6 +173,10 @@ struct PlainTextEditor: NSViewRepresentable {
     }
 
     private func apply(to textView: NSTextView) {
+        if let noteTextView = textView as? NoteTextView {
+            noteTextView.placeholder = placeholder
+            noteTextView.placeholderColor = placeholderColor
+        }
         if textView.font != font {
             textView.font = font
         }
@@ -300,27 +297,110 @@ private enum NoteKeyEquivalentPolicy {
 /// 查找栏获焦时 firstResponder 是栏内字段；在 scroll view 上拦截，避免快捷键漏到菜单。
 private final class NoteScrollView: NSScrollView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if super.performKeyEquivalent(with: event) { return true }
+        // AppKit 会向窗口内所有可见视图询问 key equivalent，并不只调用
+        // firstResponder。必须在 super 之前判断，否则未获焦的 Note 子视图
+        // 也可能由 NSTextView 提前消费终端的 ⌘F。
         guard ownsKeyboardFocus else { return false }
+        if super.performKeyEquivalent(with: event) { return true }
         let textView = documentView as? NSTextView
         return NoteKeyEquivalentPolicy.handleUnclaimed(event, textView: textView)
     }
 
     /// 键盘焦点是否在本笔记编辑器（正文或查找栏）内。
-    private var ownsKeyboardFocus: Bool {
+    fileprivate var ownsKeyboardFocus: Bool {
         guard let responder = window?.firstResponder as? NSView else { return false }
         return responder === documentView || responder.isDescendant(of: self)
     }
 }
 
-/// Note 正文：不参与 ideal-size 测量；获焦时隔离工作区快捷键。
+/// Note 正文：不参与 ideal-size 测量；获焦时隔离工作区快捷键；自带缺省字绘制（输入法拼音/查找栏开启时隐藏）。
 private final class NoteTextView: NSTextView {
+    /// 缺省字文本
+    var placeholder: String = "" {
+        didSet {
+            if placeholder != oldValue {
+                needsDisplay = true
+            }
+        }
+    }
+
+    /// 缺省字颜色
+    var placeholderColor: NSColor = .tertiaryLabelColor {
+        didSet {
+            if placeholderColor != oldValue {
+                needsDisplay = true
+            }
+        }
+    }
+
+    /// 是否应当显示缺省字：无文本、无拼音/输入法组合、且查找栏未显示时显示。
+    private var shouldShowPlaceholder: Bool {
+        guard !placeholder.isEmpty else { return false }
+        guard string.isEmpty else { return false }
+        guard !hasMarkedText() else { return false }
+        if let scrollView = enclosingScrollView, scrollView.isFindBarVisible {
+            return false
+        }
+        return true
+    }
+
     override var intrinsicContentSize: NSSize {
         // 不参与 SwiftUI ideal-size 测量；由 sizeThatFits 固定为提议尺寸。
         NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
     }
 
+    override func draw(_ rect: NSRect) {
+        super.draw(rect)
+
+        if shouldShowPlaceholder {
+            let usedFont = self.font ?? NSFont.systemFont(ofSize: SidebarTypography.bodySize)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: usedFont,
+                .foregroundColor: placeholderColor
+            ]
+
+            let padding = textContainer?.lineFragmentPadding ?? 0
+            let x = textContainerOrigin.x + padding
+            let y = textContainerOrigin.y
+            let width = bounds.width - x - textContainerInset.width
+            let height = bounds.height - y
+
+            let placeholderRect = NSRect(x: x, y: y, width: max(0, width), height: max(0, height))
+            (placeholder as NSString).draw(in: placeholderRect, withAttributes: attrs)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        needsDisplay = true
+    }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        needsDisplay = true
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        needsDisplay = true
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        super.insertText(string, replacementRange: replacementRange)
+        needsDisplay = true
+    }
+
+    override func performFindPanelAction(_ sender: Any?) {
+        super.performFindPanelAction(sender)
+        needsDisplay = true
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // performKeyEquivalent 会遍历非焦点视图；只有 Note 正文或其查找栏
+        // 真正持有键盘焦点时，才允许 NSTextView 处理本地快捷键。
+        guard let scrollView = enclosingScrollView as? NoteScrollView,
+              scrollView.ownsKeyboardFocus
+        else { return false }
         // 先让 NSTextView 处理拷贝/粘贴/全选/撤销等标准编辑键。
         if super.performKeyEquivalent(with: event) { return true }
         return NoteKeyEquivalentPolicy.handleUnclaimed(event, textView: self)

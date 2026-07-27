@@ -76,6 +76,7 @@
 - 设置 Files 分组可配置文件树字体族与字号（默认内置 Inter Variable / 13pt，资源 `kero/Fonts/InterVariable.ttf`），写入 `files.font-family` / `files.font-size`，行高与图标随字号缩放。
 - Files / CWD 目录树支持选中态：单击选择、双击打开文件（目录为展开/折叠）；⌘ 点击切换多选、⇧ 点击按可见范围多选；⌘A 全选；右键菜单与废纸篓支持批量操作；箭头单独切换展开。
 - Files / CWD 支持复制/粘贴文件与文件夹（右键 Copy / Paste，快捷键 ⌘C / ⌘V；剪贴板为 fileURL，可与 Finder 互通）；粘贴目标为选中文件夹内或文件父目录；同名冲突整批只询问一次，可选 New Name（`… copy`）或 Overwrite，应用于本批全部冲突项；Cancel 取消整批粘贴。
+- Files / CWD 与 Note 的本地快捷键按真实键盘焦点隔离：未获焦的可见侧栏不参与窗口的 key-equivalent 处理；终端、编辑器或文本输入控件获焦时不再被侧栏残留点击状态、鼠标悬停或可见的 Note 抢占，方向键及文件操作键仅作用于当前焦点区域。Files 的 `⌘F` 按焦点形成三态操作：文件树打开 Filter、Filter 输入框切换至 Search、Search 主输入框关闭 Search 并返回文件树；该循环不作用于 CWD 或其他区域。
 - 统一 chrome 字号体系（`SidebarTypography`）：左侧项目栏、右侧边栏 Start / Files / CWD / Git / Info 与顶栏 Tabs 共用 title / body / secondary / caption 等角色；列表与标签主文字统一为 13，正文字号不低于 11 以提高可读性。
 - Start 面板「Add Launcher」按钮加大（顶栏 + 与空状态主按钮）。
 - 右侧面板上下分区框架：上半保留 Start/Files/Git 等；中间可拖分割（默认 70/30，双击恢复）；下半区顶部为 System / Note tabs（最小宽 75、宽度随内容），可收起到仅显示 tabs（双击底栏切换收起/展开）。
@@ -153,7 +154,7 @@
     - **JXL** → `VendorBin/cjxl` / `djxl` / `jxlinfo`（从 [libjxl](https://github.com/libjxl/libjxl) `v0.12.0` 静态编译，仅链系统库；`scripts/vendor-jxl.sh` 可复现构建；macOS ImageIO 不能写 JXL）
   - 工具定位：`VendorBin` Bundle → 源码 `kero/VendorBin` → Homebrew → `which`。
   - 图片查看器顶栏 / 右键 **Image Build…**（资源图标 `ImageBuild`）打开处理面板；Files 树多选图片右键亦可进入。
-  - Image Build：**统一批量**（1 张或 N 张输入 × 导出变体表）；默认导出 `1x` + `_build`，用户修改后会记住；尺寸可输入或下拉（0.5x…4x、16w…512w、`1024x1024`，并支持 `100x200` 宽×高）+ 后缀；压缩 **简单** / **高级**；对话框内滚轮不穿透。
+- 优化 Project 面板 Header 与路径栏：Project Name 与 Project Description 输入框根据当前内容文本/占位符长度自适应调节宽度，聚焦/hover 背景与边框高亮框不再充满整行；路径右侧操作按钮统一使用 `SidebarIconButton`，支持 hover 态高亮与 Tooltip 提示，并在 Finder / Copy Path 左侧新增「在终端中打开」按钮（`terminal`），点击即可在当前项目/路径下建立并切换至新终端 Session。
 
 ## 上游移植记录
 
