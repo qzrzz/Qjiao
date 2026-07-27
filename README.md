@@ -28,6 +28,11 @@
   - 数量徽章、当前图标预览与 Clear。
 - 增加 Tabs 选择菜单；顶栏新建标签紧挨标签条，标签总览下拉固定在右侧侧栏按钮旁；左侧栏开关 / 新建 / 下拉 / 右侧栏 / Zoom 共用 `HeaderIconButton`（26pt 热区、caption 图标不变；仅 hover 浅底，按下/激活无底色，激活仅 tint）。右侧工具用 ZStack 固定叠层 + 左侧 padding 硬预留宽度，标签再多也不会挤占下拉/侧栏。
 - 终端可选启用直接点击移动光标。
+- 在 `kero/FilesFind` 中实现以 VS Code 为目标的全局文件与文本搜索模块：
+  - **Files 面板深度集成**：在 Files 面板顶栏支持模式切换（文件树 / 文本搜索），按 `⇧⌘F` 或菜单项一键无缝唤起全局文本搜索模式。
+  - **高效搜索引擎驱动**：内置开箱即用的原生 macOS `ripgrep` 可执行二进制（`kero/VendorBin/rg`），优先通过内置 `rg --json` 进行毫秒级流式文本检索；无 `rg` 环境下亦可自动无缝降级至 Swift 多线程并发扫描引擎（`TaskGroup`），智能剔除忽略项（`node_modules`、`.git`、`dist` 等）。
+  - **完整的 VS Code 搜索控制**：支持搜索与替换框、区分大小写 (`Aa`)、全字匹配 (`\b`)、正则表达式 (`.*`)，以及精准的包含文件与排除文件过滤规则 (`files to include/exclude`)。
+  - **精细的结果展示与交互**：按文件树/平铺归类展示匹配结果，高亮显示文本上下文与匹配关键字，支持单条替换与项目一键全替换；点击任意结果匹配行直接在编辑器中定位并切至目标代码行与光标。
 - 项目支持添加描述，并显示在项目列表中。
 - 项目右键菜单支持在 Finder 中打开项目目录和配置文件夹。
 - 项目名称、图标和描述改为保存在配置文件夹的独立项目配置文件中。
@@ -62,7 +67,7 @@
 - Default Dark 主题的左侧项目面板改用更深的 `underWindowBackground` 材质，避免系统侧栏材质提亮背景。
 - 修复开启终端不透明度时切换 Tab 后未选中的 Git Diff 对比器透出显示的问题，并将终端背景不透明度设置应用于 Git Diff 对比器。
 - 终端 Tab 宽度展示：未挤满时最小 150、最大 220；标签条已满（需要横向滚动）时最小 130、最大 140，空间足够再恢复；标题变长立即扩张，变短延迟收缩并带过渡动画，减少抖动。
-- 增加全局“禁用 Zsh 自动标题名”开关；仅为 Qjiao 新建的 zsh 终端设置 `DISABLE_AUTO_TITLE=true`，并可在 Tab 右键菜单中切换。
+- 优化文件查看器（FileViewer）工具栏：提取可复用原生 macOS 风格 Tooltip 系统 ([MacTooltip.swift](file:///Users/yarna/Project/Qzrzz/Code/Qjiao/kero/MacTooltip.swift))，支持极速悬停弹出、快捷键 Badge 格式与自适应多方位 (.top / .bottom 等) 定位；移除工具栏按钮悬停放大动画，恢复沉稳平整的原生 macOS 操作手感，并增强图像旋转、镜像翻转与双图对比视图。
 - 设置面板改为顶部图标分类导航，按 General、Terminal、Editor、Files、About 分组展示配置项；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
 - 设置 Editor 分组支持分别选择 Light / Dark 编辑器配色；两种外观都可独立跟随全局与当前项目主题或设置专用主题，不改变终端和窗口主题；编辑器专用主题内置 VS Code 风格的 Dark+、Light+、GitHub Dark、GitHub Light、One Dark、One Light、Monokai Pro、Xcode、Ayu、Solarized，并直接使用其语法 token 配色即时重绘。
 - 源码文本编辑器增加可开关的英文底部状态栏：显示保存状态、当前文件大小、选区行数/字符数、文件格式，以及项目本地 `oxfmt`（优先）或 `prettier` 的格式化入口；格式化会先保存并以 `--write` 改写当前文件后重新载入。

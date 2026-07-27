@@ -9,6 +9,12 @@ import Foundation
 import GhosttyTerminal
 import SwiftUI
 
+/// Files 面板的模式（文件树 / 全局搜寻）
+enum FilePanelMode: String, Codable {
+    case tree
+    case search
+}
+
 /// 右侧栏上半区面板。rawValue 会写入会话快照，新增 case 勿改已有值。
 enum RightPanel: String, Codable {
     case start
@@ -51,6 +57,7 @@ final class TerminalManager: nonisolated ObservableObject {
     }
     @Published var isPanelVisible = false
     @Published var panelTab: RightPanel = .files
+    @Published var filePanelMode: FilePanelMode = .tree
     /// Visibility of the left project sidebar (⌘B). `isPanelVisible` above is
     /// the separate right panel.
     @Published var isLeftSidebarVisible = true
@@ -782,6 +789,20 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Opens `path` as a file tab in the current project.
     func openFile(_ path: String) {
         selectedProject?.openFile(path)
+    }
+
+    /// Opens `path` as a file tab and moves cursor to specified line and column.
+    func openFile(_ path: String, line: Int, column: Int = 0) {
+        selectedProject?.openFile(path, line: line, column: column)
+    }
+
+    /// Open right sidebar, select Files tab, and switch to Search mode.
+    func openSearchInFiles() {
+        if !isPanelVisible {
+            isPanelVisible = true
+        }
+        panelTab = .files
+        filePanelMode = .search
     }
 
     /// Opens `path` as a pane beside the focused one in the current tab.

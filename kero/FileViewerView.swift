@@ -205,6 +205,7 @@ struct FileViewerView: View {
                 )
                 if settings.showEditorStatusBar {
                     EditorStatusBar(file: file)
+                        .zIndex(100)
                 }
             }
         case .image(let image):
@@ -250,9 +251,16 @@ private struct EditorStatusBar: View {
         HStack(spacing: 9) {
             Label(file.isDirty ? "Unsaved" : "Saved", systemImage: file.isDirty ? "circle" : "checkmark.circle")
                 .foregroundStyle(.secondary)
+                .macTooltip(file.isDirty ? "Unsaved Changes" : "Saved to Disk", shortcut: "⌘S", position: .top)
             Text(file.editorFileSize)
+                .monospacedDigit()
+                .macTooltip("File Size", position: .top)
             Spacer()
-            if let selection = file.selectionSummary { Text(selection) }
+            if let selection = file.selectionSummary {
+                Text(selection)
+                    .monospacedDigit()
+                    .macTooltip("Selection Summary", position: .top)
+            }
             Button {
                 settings.wrapLines.toggle()
             } label: {
@@ -260,9 +268,12 @@ private struct EditorStatusBar: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(settings.wrapLines ? Color.accentColor : .secondary)
-            .help(settings.wrapLines ? "Disable line wrapping" : "Enable line wrapping")
+            .macTooltip(settings.wrapLines ? "Disable Line Wrapping" : "Enable Line Wrapping", shortcut: "⌥Z", position: .top)
             .accessibilityLabel("Toggle line wrapping")
+
             Text(file.languageLabel)
+                .macTooltip("Language Mode", position: .top)
+
             ForEach(formatters) { formatter in
                 if formatter.id == formatters.first?.id {
                     formatterButton(formatter)
@@ -274,7 +285,7 @@ private struct EditorStatusBar: View {
             if let formatterError {
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
-                    .help(formatterError)
+                    .macTooltip("Formatting Error: \(formatterError)", position: .top)
                     .accessibilityLabel("Formatting failed: \(formatterError)")
             }
         }
@@ -329,7 +340,7 @@ private struct EditorStatusBar: View {
         .buttonStyle(.plain)
         .foregroundStyle(Color.accentColor)
         .disabled(formattingID != nil)
-        .help(formatter.id == formatters.first?.id ? "Format document (⌥⌘P)" : "Format document")
+        .macTooltip(formatter.id == formatters.first?.id ? "Format Document (\(formatter.title))" : "Format Document", shortcut: formatter.id == formatters.first?.id ? "⌥⌘P" : nil, position: .top)
     }
 }
 
@@ -1009,6 +1020,7 @@ struct ImageViewerView: View {
                 // 顶部控制条与元数据面板
                 imageControlToolbar(currentScale: currentScale)
                     .frame(height: toolbarHeight)
+                    .zIndex(100)
 
                 Divider()
 
@@ -1940,6 +1952,7 @@ struct ImageViewerView: View {
             .interpolation(isPixelMode ? .none : .high)
             .antialiased(!isPixelMode)
             .frame(width: unrotatedWidth, height: unrotatedHeight)
+            .scaleEffect(x: isFlippedHorizontal ? -1 : 1, y: isFlippedVertical ? -1 : 1)
             .rotationEffect(.degrees(rotationDegrees))
             .offset(totalOffset)
             .shadow(color: .black.opacity(backgroundMode == .defaultTheme ? 0.1 : 0.0), radius: 6, x: 0, y: 2)
@@ -1982,6 +1995,7 @@ struct ImageViewerView: View {
                     .interpolation(isPixelMode ? .none : .high)
                     .antialiased(!isPixelMode)
                     .frame(width: unrotatedWidth, height: unrotatedHeight)
+                    .scaleEffect(x: isFlippedHorizontal ? -1 : 1, y: isFlippedVertical ? -1 : 1)
                     .rotationEffect(.degrees(rotationDegrees))
                     .offset(totalOffset)
                     .shadow(color: .black.opacity(backgroundMode == .defaultTheme ? 0.1 : 0.0), radius: 6, x: 0, y: 2)
@@ -2314,11 +2328,11 @@ struct ImageViewerView: View {
         }
     }
 
-    /// 顶部图像控制与信息面板 (现代化高质感样式，支持悬停光泽高亮与 Accent 描边)
+    /// 顶部图像控制与信息面板 (现代化高质感样式，支持极速出现的 Tooltip、悬停光泽高亮与 Accent 描边)
     private func imageControlToolbar(currentScale: CGFloat) -> some View {
-        HStack(spacing: 6) {
-            // 1. 缩放倍数下拉菜单 (固定 128px 宽度，避免跳变)
-            ModernToolbarMenu(fixedWidth: 128, helpText: "Zoom Scale Option") {
+        HStack(spacing: 5) {
+            // 1. 缩放倍数下拉菜单 (固定 128px 宽度)
+            ModernToolbarMenu(fixedWidth: 128, helpText: "Zoom Scale Options", shortcutText: "Menu") {
                 Picker("Zoom", selection: Binding(
                     get: { zoomOption },
                     set: { newValue in
@@ -2350,7 +2364,7 @@ struct ImageViewerView: View {
             }
 
             // 2. 一键快速重置至 Fit 状态
-            ModernToolbarButton(isActive: zoomOption == .fit && customZoomScale == nil, helpText: "Reset to Fit View (⌘0)") {
+            ModernToolbarButton(isActive: zoomOption == .fit && customZoomScale == nil, helpText: "Fit to Window", shortcutText: "⌘0") {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     zoomOption = .fit
                     customZoomScale = nil
@@ -2362,7 +2376,7 @@ struct ImageViewerView: View {
             }
 
             // 3. 一键快速缩放至 100% 真实像素尺寸
-            ModernToolbarButton(isActive: zoomOption == .p100 && customZoomScale == nil, helpText: "Zoom to 100% Actual Size (⌘1)") {
+            ModernToolbarButton(isActive: zoomOption == .p100 && customZoomScale == nil, helpText: "Actual Size (100%)", shortcutText: "⌘1") {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     zoomOption = .p100
                     customZoomScale = nil
@@ -2375,8 +2389,18 @@ struct ImageViewerView: View {
 
             ModernToolbarDivider()
 
-            // 4. 顺时针旋转按钮 (+90°)
-            ModernToolbarButton(helpText: "Rotate 90° Clockwise") {
+            // 4. 逆时针旋转按钮 (-90°)
+            ModernToolbarButton(helpText: "Rotate 90° Counterclockwise", shortcutText: "⌥⌘R") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    rotationDegrees -= 90
+                }
+            } content: {
+                Image(systemName: "rotate.left")
+                    .font(.system(size: 11))
+            }
+
+            // 5. 顺时针旋转按钮 (+90°)
+            ModernToolbarButton(helpText: "Rotate 90° Clockwise", shortcutText: "⌘R") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     rotationDegrees += 90
                 }
@@ -2385,10 +2409,30 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
+            // 6. 水平镜像翻转
+            ModernToolbarButton(isActive: isFlippedHorizontal, helpText: "Flip Horizontal", shortcutText: "⌥H") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isFlippedHorizontal.toggle()
+                }
+            } content: {
+                Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                    .font(.system(size: 11))
+            }
+
+            // 7. 垂直镜像翻转
+            ModernToolbarButton(isActive: isFlippedVertical, helpText: "Flip Vertical", shortcutText: "⌥V") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isFlippedVertical.toggle()
+                }
+            } content: {
+                Image(systemName: "arrow.up.and.down.righttriangle.up.righttriangle.down")
+                    .font(.system(size: 11))
+            }
+
             ModernToolbarDivider()
 
-            // 5. 图片对比模式开关按钮
-            ModernToolbarButton(isActive: isCompareMode, helpText: "Image Comparison Mode") {
+            // 8. 图片对比模式开关按钮
+            ModernToolbarButton(isActive: isCompareMode, helpText: "Compare Mode", shortcutText: "⌘D") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isCompareMode.toggle()
                 }
@@ -2397,10 +2441,11 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
-            // 6. ImageBuild：尺寸 / 格式转换 / 压缩
+            // 9. ImageBuild：尺寸 / 格式转换 / 压缩
             ModernToolbarButton(
                 isActive: showImageBuild,
-                helpText: "Image Build — 尺寸 / 格式 / 压缩"
+                helpText: "Image Build & Export",
+                shortcutText: "⌥B"
             ) {
                 showImageBuild = true
             } content: {
@@ -2412,8 +2457,8 @@ struct ImageViewerView: View {
             }
             .disabled(file.path.isEmpty)
 
-            // 7. 标尺与参考线控制下拉菜单
-            ModernToolbarMenu(isActive: isRulerEnabled, helpText: "Rulers & Reference Guides") {
+            // 10. 标尺与参考线控制下拉菜单
+            ModernToolbarMenu(isActive: isRulerEnabled, helpText: "Rulers & Guides") {
                 Toggle("Show Rulers", isOn: $isRulerEnabled)
                 Toggle("Show Guides", isOn: $isGuidesVisible)
                 Toggle("Lock Guides", isOn: $isGuidesLocked)
@@ -2431,7 +2476,7 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
-            // 8. 背景模式下拉菜单
+            // 11. 背景模式下拉菜单
             ModernToolbarMenu(helpText: "Background Mode") {
                 Picker("Background Mode", selection: $backgroundMode) {
                     ForEach(ImageBackgroundMode.allCases) { mode in
@@ -2444,9 +2489,19 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
+            ModernToolbarDivider()
+
+            // 12. 在 Finder 中定位文件
+            ModernToolbarButton(helpText: "Reveal in Finder", shortcutText: "⌥⌘R") {
+                NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
+            } content: {
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.system(size: 11))
+            }
+
             Spacer(minLength: 4)
 
-            // 9. 响应式元数据数值信息栏 (在窄窗口下平滑自适应降级，绝对避免折行与文本重叠)
+            // 13. 响应式元数据数值信息栏
             AdaptiveImageMetadataView(metadata: metadata)
         }
         .padding(.horizontal, 10)
@@ -2552,10 +2607,11 @@ private struct AdaptiveImageMetadataView: View {
 
 // MARK: - 现代化极简工具栏微组件
 
-/// 现代化极简精致工具栏按钮 (包含悬停 Hover 光泽高亮、Accent 激活高亮边框与极微轻量触感微动)
+/// 现代化极简精致工具栏按钮 (平整原生 macOS 质感，接入 macTooltip 系统)
 private struct ModernToolbarButton<Content: View>: View {
     var isActive: Bool = false
     var helpText: String? = nil
+    var shortcutText: String? = nil
     let action: () -> Void
     @ViewBuilder let content: () -> Content
 
@@ -2574,8 +2630,7 @@ private struct ModernToolbarButton<Content: View>: View {
                         .stroke(borderColor, lineWidth: 1)
                 )
                 .foregroundStyle(foregroundColor)
-                .shadow(color: isHovered ? Color.black.opacity(0.06) : Color.clear, radius: 2, x: 0, y: 1)
-                .scaleEffect(isHovered ? 1.03 : 1.0)
+                .shadow(color: isHovered ? Color.black.opacity(0.05) : Color.clear, radius: 2, x: 0, y: 1)
         }
         .buttonStyle(.plain)
         .onHover { hover in
@@ -2583,7 +2638,7 @@ private struct ModernToolbarButton<Content: View>: View {
                 isHovered = hover
             }
         }
-        .help(helpText ?? "")
+        .macTooltip(helpText, shortcut: shortcutText)
     }
 
     private var backgroundColor: Color {
@@ -2611,11 +2666,12 @@ private struct ModernToolbarButton<Content: View>: View {
     }
 }
 
-/// 现代化极简精致工具栏下拉菜单
+/// 现代化极简精致工具栏下拉菜单 (平整原生 macOS 质感，接入 macTooltip 系统)
 private struct ModernToolbarMenu<Content: View, LabelContent: View>: View {
     var isActive: Bool = false
     var fixedWidth: CGFloat? = nil
     var helpText: String? = nil
+    var shortcutText: String? = nil
     @ViewBuilder let menuContent: () -> Content
     @ViewBuilder let labelContent: () -> LabelContent
 
@@ -2636,8 +2692,7 @@ private struct ModernToolbarMenu<Content: View, LabelContent: View>: View {
                         .stroke(borderColor, lineWidth: 1)
                 )
                 .foregroundStyle(foregroundColor)
-                .shadow(color: isHovered ? Color.black.opacity(0.06) : Color.clear, radius: 2, x: 0, y: 1)
-                .scaleEffect(isHovered ? 1.03 : 1.0)
+                .shadow(color: isHovered ? Color.black.opacity(0.05) : Color.clear, radius: 2, x: 0, y: 1)
         }
         .menuStyle(.borderlessButton)
         .frame(width: fixedWidth)
@@ -2646,7 +2701,7 @@ private struct ModernToolbarMenu<Content: View, LabelContent: View>: View {
                 isHovered = hover
             }
         }
-        .help(helpText ?? "")
+        .macTooltip(helpText, shortcut: shortcutText)
     }
 
     private var backgroundColor: Color {

@@ -92,6 +92,7 @@ private final class QuickLookManager: NSObject, QLPreviewPanelDataSource, QLPrev
 struct FileTreePanel: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject var model: FileTreeModel
+    @ObservedObject var findModel: FilesFindModel
     let session: TerminalSession?
     let currentFilePath: String?
     let openFile: (String) -> Void
@@ -161,6 +162,16 @@ struct FileTreePanel: View {
                 PanelHeader(title: model.rootName, subtitle: model.rootPath)
 
                 SidebarIconButton(
+                    systemImage: manager.filePanelMode == .search ? "doc.text.magnifyingglass" : "list.bullet.indent",
+                    help: manager.filePanelMode == .search ? "Switch to File Tree" : "Switch to Text Search (⇧⌘F)",
+                    active: manager.filePanelMode == .search
+                ) {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        manager.filePanelMode = manager.filePanelMode == .search ? .tree : .search
+                    }
+                }
+
+                SidebarIconButton(
                     systemImage: "line.3.horizontal.decrease",
                     help: "Filter files (⌘F)",
                     active: isFilterActive
@@ -211,83 +222,7 @@ struct FileTreePanel: View {
             .padding(.top, 8)
             .padding(.bottom, 8)
             // Files 面板 Header 空白区域允许拖拽移动窗口
-            .background { WindowDragArea() }
-
-            if isFilterActive {
-                filterBarView
-            }
-
-            GeometryReader { geo in
-                let containerHeight = geo.size.height
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            let itemsToDisplay = filteredItems
-                            if itemsToDisplay.isEmpty && isFilterActive && !filterQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                VStack(spacing: 6) {
-                                    Image(systemName: "line.3.horizontal.decrease.circle")
-                                        .font(.system(size: 18))
-                                        .foregroundStyle(.tertiary)
-                                    Text("No matching files")
-                                        .font(SidebarTypography.caption())
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 24)
-                            } else {
-                                LazyVStack(spacing: 1) {
-                                    ForEach(itemsToDisplay) { item in
-                                        FileTreeRow(
-                                            model: model, item: item, session: session,
-                                            currentFilePath: currentFilePath,
-                                            openFile: openFile, openToSide: openToSide, onRename: onRename,
-                                            onImageBuild: onImageBuild,
-                                            onRowClick: {
-                                                isPanelClicked = true
-                                                isTreeFocused = true
-                                                NSApp.keyWindow?.makeFirstResponder(nil)
-                                            },
-                                            onRowAnchor: { path, view in
-                                                activeAnchorPath = path
-                                                activeAnchorView = view
-                                                updateQuickPreviewState(anchorView: view)
-                                            }
-                                        )
-                                        .id(item.id)
-                                    }
-                                }
-                                .padding(.horizontal, 6)
-                                .padding(.bottom, 8)
-                                // 点击列表空白处清空选择；行上的手势优先命中。
-                                .frame(maxWidth: .infinity, alignment: .top)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    isPanelClicked = true
-                                    isTreeFocused = true
-                                    NSApp.keyWindow?.makeFirstResponder(nil)
-                                    model.clearSelection()
-                                }
-                            }
-
-                            // 填满 Files 面板底部剩余空白区域，允许拖拽移动窗口
-                            WindowDragArea()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .frame(minHeight: 20)
-                        }
-                        .frame(minHeight: geo.size.height, alignment: .top)
-                    }
-                    .coordinateSpace(name: "FileTreePanelContainer")
-                    .onPreferenceChange(SelectedRowYKey.self) { y in
-                        selectedRowY = y
-                    }
-                    .focused($isTreeFocused)
-                    .focusable(true)
-                    .focusEffectDisabled()
-                    .onAppear {
-                        scrollProxy = proxy
-                    }
-                }
-            }
+            mainContentView
             // ⌘F 快捷键：仅在焦点位于 Files Tree 时激活 Filter，与终端/编辑器 ⌘F 隔离
             .onKeyPress(keys: [.init("f")], phases: .down) { press in
                 guard press.modifiers.contains(.command),
@@ -506,6 +441,94 @@ struct FileTreePanel: View {
         }
     }
 
+    @ViewBuilder
+    private var mainContentView: some View {
+        if manager.filePanelMode == .search {
+            FilesFindView(
+                model: findModel,
+                rootPath: model.rootPath,
+                onOpenMatch: { path, line, col in
+                    manager.openFile(path, line: line, column: col)
+                }
+            )
+        } else {
+            VStack(spacing: 0) {
+                if isFilterActive {
+                    filterBarView
+                }
+
+                GeometryReader { geo in
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                let itemsToDisplay = filteredItems
+                                if itemsToDisplay.isEmpty && isFilterActive && !filterQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    VStack(spacing: 6) {
+                                        Image(systemName: "line.3.horizontal.decrease.circle")
+                                            .font(.system(size: 18))
+                                            .foregroundStyle(.tertiary)
+                                        Text("No matching files")
+                                            .font(SidebarTypography.caption())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.top, 24)
+                                } else {
+                                    LazyVStack(spacing: 1) {
+                                        ForEach(itemsToDisplay) { item in
+                                            FileTreeRow(
+                                                model: model, item: item, session: session,
+                                                currentFilePath: currentFilePath,
+                                                openFile: openFile, openToSide: openToSide, onRename: onRename,
+                                                onImageBuild: onImageBuild,
+                                                onRowClick: {
+                                                    isPanelClicked = true
+                                                    isTreeFocused = true
+                                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                                },
+                                                onRowAnchor: { path, view in
+                                                    activeAnchorPath = path
+                                                    activeAnchorView = view
+                                                    updateQuickPreviewState(anchorView: view)
+                                                }
+                                            )
+                                            .id(item.id)
+                                        }
+                                    }
+                                    .padding(.horizontal, 6)
+                                    .padding(.bottom, 8)
+                                    .frame(maxWidth: .infinity, alignment: .top)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        isPanelClicked = true
+                                        isTreeFocused = true
+                                        NSApp.keyWindow?.makeFirstResponder(nil)
+                                        model.clearSelection()
+                                    }
+                                }
+
+                                WindowDragArea()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .frame(minHeight: 20)
+                            }
+                            .frame(minHeight: geo.size.height, alignment: .top)
+                        }
+                        .coordinateSpace(name: "FileTreePanelContainer")
+                        .onPreferenceChange(SelectedRowYKey.self) { y in
+                            selectedRowY = y
+                        }
+                        .focused($isTreeFocused)
+                        .focusable(true)
+                        .focusEffectDisabled()
+                        .onAppear {
+                            scrollProxy = proxy
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// 当前按键是否应交给 Sheet / 模态 / 文本字段，而不是 Files 树。
     private static func isSheetOrModalKeyInput(_ event: NSEvent) -> Bool {
         // 事件落在 sheet 窗口上
@@ -540,7 +563,8 @@ struct FileTreePanel: View {
     /// 判断当前按键事件是否应该作用于 Files Tree。
     private func isFilesTreeActiveOrFocused() -> Bool {
         guard manager.isPanelVisible,
-              (manager.panelTab == .files || manager.panelTab == .cwd)
+              (manager.panelTab == .files || manager.panelTab == .cwd),
+              manager.filePanelMode == .tree
         else { return false }
 
         // Sheet / 模态对话框打开时，Files 树不抢按键

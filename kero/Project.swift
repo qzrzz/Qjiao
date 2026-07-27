@@ -405,6 +405,11 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         if let (tab, paneID) = findFilePane(path: path) {
             selectedTabID = tab.id
             tab.focusedPaneID = paneID
+            if let pane = tab.allPanes.first(where: { $0.id == paneID }),
+               case .file(let file) = pane.content,
+               let editorState {
+                file.editorState = editorState
+            }
             return
         }
         // Capture the current directory context *before* selection moves to the
@@ -418,6 +423,25 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         tab.contextSession = context
         insertNextToSelected(tab)
         selectedTabID = tab.id
+    }
+
+    /// 打开文件并精确定位到指定行号与列号
+    func openFile(_ path: String, line: Int, column: Int = 0) {
+        var editorState: EditorState? = nil
+        if let content = try? String(contentsOfFile: path) {
+            let lines = content.components(separatedBy: .newlines)
+            let targetLineIdx = max(0, min(line - 1, lines.count - 1))
+            var offset = 0
+            if !lines.isEmpty {
+                for i in 0..<targetLineIdx {
+                    offset += lines[i].count + 1
+                }
+                offset += max(0, min(column, lines[targetLineIdx].count))
+            }
+            editorState = EditorState(selectionLocation: offset, selectionLength: 0)
+        }
+
+        openFile(path, editorState: editorState)
     }
 
     /// Opens `path` as a new pane beside the focused one in the current tab

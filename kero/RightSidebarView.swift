@@ -36,6 +36,7 @@ struct RightSidebarView: View {
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject private var settings = AppSettings.shared
     @StateObject private var fileTree = FileTreeModel()
+    @StateObject private var filesFind = FilesFindModel()
     @StateObject private var git = GitStatusModel()
     /// 项目根路径 + npm scripts（Project tab）。
     @StateObject private var projectInfo = ProjectPanelModel()
@@ -305,6 +306,7 @@ struct RightSidebarView: View {
             FileTreePanel(
                 manager: manager,
                 model: fileTree,
+                findModel: filesFind,
                 session: manager.selectedSession,
                 currentFilePath: openFilePath,
                 openFile: { manager.openFile($0) },
@@ -318,6 +320,7 @@ struct RightSidebarView: View {
             FileTreePanel(
                 manager: manager,
                 model: fileTree,
+                findModel: filesFind,
                 session: manager.selectedSession,
                 currentFilePath: openFilePath,
                 openFile: { manager.openFile($0) },

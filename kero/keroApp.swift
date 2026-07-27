@@ -114,6 +114,14 @@ private struct KeroCommands: Commands {
             // text field has keyboard focus. ⇧⌘G is already Toggle Git Panel,
             // so Find Previous is reachable by ⇧↩ in the bar instead.
             Menu("Find") {
+                Button("Search in Files…") {
+                    manager?.openSearchInFiles()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .disabled(manager?.selectedProject == nil)
+
+                Divider()
+
                 Button("Find…") {
                     manager?.performFindAction(.show)
                 }
