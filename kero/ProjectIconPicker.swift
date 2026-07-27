@@ -17,21 +17,30 @@ struct ProjectIconView: View {
     let icon: ProjectIcon?
     let isSelected: Bool
 
-    private let size: CGFloat = 24
+    var size: CGFloat = 24
+
+    /// 根据 size 按比例计算 SF Symbol 字号（基准为 size=24 时 listIconSize=16pt）。
+    private var iconFont: Font {
+        let fontSize = max(8.0, SidebarTypography.listIconSize * (size / 24.0))
+        return .system(size: fontSize)
+    }
+
+    /// 根据 size 按比例计算 Emoji 字号（基准为 size=24 时 listEmojiSize=18pt）。
+    private var emojiFont: Font {
+        let fontSize = max(9.0, SidebarTypography.listEmojiSize * (size / 24.0))
+        return .system(size: fontSize)
+    }
 
     var body: some View {
         switch icon {
         case .sfSymbol(let name):
             Image(systemName: name)
-                // 与 Emoji 使用相同字号和图标区域，避免项目列表中两类图标大小不一致。
-                .font(SidebarTypography.listIcon())
+                .font(iconFont)
                 .foregroundStyle(iconColor)
                 .frame(width: size, height: size)
         case .emoji(let emoji):
             Text(emoji)
-                // 彩色 Emoji 的实际字形通常比标称字号更宽、更高；保留
-                // 额外边距并禁止压缩，避免肤色、组合 Emoji 等被裁掉。
-                .font(SidebarTypography.listEmoji())
+                .font(emojiFont)
                 .lineLimit(1)
                 .fixedSize()
                 .frame(width: size, height: size)
@@ -43,8 +52,7 @@ struct ProjectIconView: View {
                 .frame(width: size, height: size)
         case nil:
             Image(systemName: "folder")
-                // 默认文件夹图标也保持与自定义 Emoji 相同的尺寸。
-                .font(SidebarTypography.listIcon())
+                .font(iconFont)
                 .foregroundStyle(iconColor)
                 .frame(width: size, height: size)
         }

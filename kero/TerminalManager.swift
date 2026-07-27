@@ -234,7 +234,13 @@ final class TerminalManager: nonisolated ObservableObject {
 
     func close(_ project: Project) {
         project.terminateAll()
+        let projectID = project.id
         remove(project)
+        // 延后删除配置目录：先让 Note 面板在切换选中项时 flush，
+        // 避免防抖写回在删目录之后又重建空文件夹。
+        DispatchQueue.main.async {
+            ProjectConfigStore.removeAllData(for: projectID)
+        }
     }
 
     private func remove(_ project: Project) {

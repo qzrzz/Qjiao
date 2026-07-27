@@ -22,43 +22,229 @@ struct ProjectConfig: Codable {
     var isArchived: Bool?
 }
 
-/// 项目配置文件存储。每个项目使用稳定 UUID 对应一个 JSON 文件。
+/// 项目配置目录存储。
+///
+/// 布局（每个项目一个文件夹，关闭项目时可整目录删除）：
+/// ```
+/// ~/.config/qjiao/projects/{projectId}/
+///   config.json   # 名称 / 图标 / 描述 / 主题 / Launchers / 归档…
+///   icon.{ext}    # 用户自定义图标托管副本
+///   note.txt      # 项目笔记
+/// ```
+/// Debug 构建根目录为 `qjiao-dev`。
+///
+/// 兼容旧布局并在首次读写时迁移：
+/// - `projects/{id}.json`
+/// - `projects/icons/{id}.{ext}`
+/// - `notes/{id}.txt`
 @MainActor
 enum ProjectConfigStore {
-    private static var directoryURL: URL {
+    /// 所有项目配置根目录：`…/projects/`。
+    static var projectsRootURL: URL {
         AppSettings.configURL.deletingLastPathComponent()
             .appendingPathComponent("projects", isDirectory: true)
     }
 
-    /// 用户项目图标托管目录：`…/projects/icons/{projectId}.{ext}`。
-    static var iconsDirectoryURL: URL {
-        directoryURL.appendingPathComponent("icons", isDirectory: true)
+    /// 旧版扁平图标目录（仅迁移 / 清理用）。
+    static var legacyIconsDirectoryURL: URL {
+        projectsRootURL.appendingPathComponent("icons", isDirectory: true)
     }
 
+    /// 旧版笔记根目录（仅迁移 / 清理用）。
+    static var legacyNotesDirectoryURL: URL {
+        AppSettings.configURL.deletingLastPathComponent()
+            .appendingPathComponent("notes", isDirectory: true)
+    }
+
+    /// 单个项目的数据目录：`projects/{id}/`。
+    static func projectDirectoryURL(for id: UUID) -> URL {
+        projectsRootURL.appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
+    /// 项目主配置文件：`projects/{id}/config.json`。
+    static func configFileURL(for id: UUID) -> URL {
+        projectDirectoryURL(for: id).appendingPathComponent("config.json")
+    }
+
+    /// 项目笔记文件：`projects/{id}/note.txt`。
+    static func noteFileURL(for id: UUID) -> URL {
+        projectDirectoryURL(for: id).appendingPathComponent("note.txt")
+    }
+
+    /// 读取项目配置；必要时从旧路径迁移后再读。
     static func load(for id: UUID) -> ProjectConfig? {
-        let url = fileURL(for: id)
+        migrateIfNeeded(for: id)
+        let url = configFileURL(for: id)
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(ProjectConfig.self, from: data)
     }
 
+    /// 将项目配置原子写入 `projects/{id}/config.json`。
     static func save(_ config: ProjectConfig, for id: UUID) {
         do {
+            let dir = projectDirectoryURL(for: id)
             try FileManager.default.createDirectory(
-                at: directoryURL, withIntermediateDirectories: true
+                at: dir, withIntermediateDirectories: true
             )
+            // 若仍有旧布局数据，先迁入本目录再写，避免丢旁路文件。
+            migrateIfNeeded(for: id)
             let data = try JSONEncoder().encode(config)
-            try data.write(to: fileURL(for: id), options: .atomic)
+            try data.write(to: configFileURL(for: id), options: .atomic)
+            // 旧扁平 JSON 已迁出后删除，避免双份。
+            removeLegacyFlatConfig(for: id)
         } catch {
             NSLog("qjiao: failed to save project config \(id): \(error)")
         }
     }
 
-    private static func fileURL(for id: UUID) -> URL {
-        directoryURL.appendingPathComponent("\(id.uuidString).json")
+    /// 删除整个项目数据目录（配置 / 图标 / 笔记），并清理旧路径残留。
+    static func removeAllData(for id: UUID) {
+        let fm = FileManager.default
+        let dir = projectDirectoryURL(for: id)
+        if fm.fileExists(atPath: dir.path) {
+            do {
+                try fm.removeItem(at: dir)
+            } catch {
+                NSLog("qjiao: failed to remove project directory \(dir.path): \(error)")
+            }
+        }
+        removeLegacyFlatConfig(for: id)
+        ProjectIconFileStore.removeLegacyIcons(for: id)
+        removeLegacyNote(for: id)
+    }
+
+    // MARK: - Migration
+
+    /// 将旧布局的配置 / 图标 / 笔记迁入 `projects/{id}/`。
+    private static func migrateIfNeeded(for id: UUID) {
+        let fm = FileManager.default
+        let dir = projectDirectoryURL(for: id)
+        let newConfig = configFileURL(for: id)
+        let legacyConfig = projectsRootURL.appendingPathComponent("\(id.uuidString).json")
+
+        var config: ProjectConfig?
+        var didMigrateConfig = false
+
+        if fm.fileExists(atPath: newConfig.path) {
+            if let data = try? Data(contentsOf: newConfig) {
+                config = try? JSONDecoder().decode(ProjectConfig.self, from: data)
+            }
+        } else if fm.fileExists(atPath: legacyConfig.path),
+                  let data = try? Data(contentsOf: legacyConfig),
+                  let decoded = try? JSONDecoder().decode(ProjectConfig.self, from: data) {
+            config = decoded
+            didMigrateConfig = true
+        }
+
+        // 迁移自定义图标：旧 `projects/icons/{id}.*` → `projects/{id}/icon.*`
+        let migratedIconURL = migrateLegacyIcon(for: id)
+        if let migratedIconURL {
+            // 即使原先没有 config.json（仅有图标），也要落一份配置指向新路径。
+            if config == nil {
+                config = ProjectConfig(
+                    customName: nil,
+                    description: nil,
+                    icon: .file(migratedIconURL.path),
+                    theme: nil,
+                    projectDirectory: nil,
+                    launchCommands: nil,
+                    isArchived: nil
+                )
+            } else {
+                config?.icon = .file(migratedIconURL.path)
+            }
+            didMigrateConfig = true
+        } else if case .file(let path)? = config?.icon,
+                  ProjectIconFileStore.isLegacyManagedPath(path),
+                  let found = ProjectIconFileStore.existingIconURL(for: id) {
+            // 配置仍指向旧 icons 路径，但文件可能已在新目录。
+            config?.icon = .file(found.path)
+            didMigrateConfig = true
+        }
+
+        // 迁移笔记：旧 `notes/{id}.txt` → `projects/{id}/note.txt`
+        migrateLegacyNote(for: id)
+
+        guard didMigrateConfig, let config else { return }
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(config)
+            try data.write(to: newConfig, options: .atomic)
+            removeLegacyFlatConfig(for: id)
+        } catch {
+            NSLog("qjiao: failed to migrate project config \(id): \(error)")
+        }
+    }
+
+    /// 旧版 `projects/{id}.json` → 删除（内容已写入新路径）。
+    private static func removeLegacyFlatConfig(for id: UUID) {
+        let legacy = projectsRootURL.appendingPathComponent("\(id.uuidString).json")
+        try? FileManager.default.removeItem(at: legacy)
+    }
+
+    /// 旧版 `projects/icons/{id}.*` 迁到 `projects/{id}/icon.*`，返回新路径。
+    private static func migrateLegacyIcon(for id: UUID) -> URL? {
+        // 新路径已有图标则不再从旧目录搬。
+        if ProjectIconFileStore.existingIconURL(for: id) != nil {
+            ProjectIconFileStore.removeLegacyIcons(for: id)
+            return nil
+        }
+        let fm = FileManager.default
+        let legacyDir = legacyIconsDirectoryURL
+        guard let files = try? fm.contentsOfDirectory(atPath: legacyDir.path) else { return nil }
+        let prefix = id.uuidString.lowercased()
+        guard let name = files.first(where: { $0.lowercased().hasPrefix(prefix) }) else {
+            return nil
+        }
+        let source = legacyDir.appendingPathComponent(name)
+        let ext = (name as NSString).pathExtension
+        let destName = ext.isEmpty ? "icon" : "icon.\(ext)"
+        let destDir = projectDirectoryURL(for: id)
+        let dest = destDir.appendingPathComponent(destName)
+        do {
+            try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+            if fm.fileExists(atPath: dest.path) {
+                try fm.removeItem(at: dest)
+            }
+            try fm.moveItem(at: source, to: dest)
+            // 清掉同 id 其它扩展名残留。
+            ProjectIconFileStore.removeLegacyIcons(for: id)
+            return dest
+        } catch {
+            NSLog("qjiao: failed to migrate project icon \(id): \(error)")
+            return nil
+        }
+    }
+
+    /// 旧版 `notes/{id}.txt` → `projects/{id}/note.txt`。
+    private static func migrateLegacyNote(for id: UUID) {
+        let fm = FileManager.default
+        let dest = noteFileURL(for: id)
+        if fm.fileExists(atPath: dest.path) {
+            removeLegacyNote(for: id)
+            return
+        }
+        let legacy = legacyNotesDirectoryURL
+            .appendingPathComponent("\(id.uuidString).txt")
+        guard fm.fileExists(atPath: legacy.path) else { return }
+        do {
+            try fm.createDirectory(
+                at: projectDirectoryURL(for: id), withIntermediateDirectories: true
+            )
+            try fm.moveItem(at: legacy, to: dest)
+        } catch {
+            NSLog("qjiao: failed to migrate project note \(id): \(error)")
+        }
+    }
+
+    private static func removeLegacyNote(for id: UUID) {
+        let legacy = legacyNotesDirectoryURL
+            .appendingPathComponent("\(id.uuidString).txt")
+        try? FileManager.default.removeItem(at: legacy)
     }
 }
 
-/// 将用户选择的图片复制到配置目录，保证重启后仍可加载（不依赖原路径）。
+/// 将用户选择的图片复制到项目配置目录，保证重启后仍可加载（不依赖原路径）。
 @MainActor
 enum ProjectIconFileStore {
     private static let allowedExtensions: Set<String> = [
@@ -66,7 +252,7 @@ enum ProjectIconFileStore {
         "icns", "ico", "bmp", "heic", "heif", "svg",
     ]
 
-    /// 导入图片为项目托管图标，返回绝对路径；失败返回 nil。
+    /// 导入图片为项目托管图标（`projects/{id}/icon.{ext}`），返回绝对路径；失败返回 nil。
     static func importImage(from sourceURL: URL, projectID: UUID) -> URL? {
         let fm = FileManager.default
         let ext = sourceURL.pathExtension.lowercased()
@@ -82,14 +268,11 @@ enum ProjectIconFileStore {
             return nil
         }
         do {
-            try fm.createDirectory(
-                at: ProjectConfigStore.iconsDirectoryURL,
-                withIntermediateDirectories: true
-            )
-            // 先清掉该项目旧托管文件（可能扩展名不同）。
+            let dir = ProjectConfigStore.projectDirectoryURL(for: projectID)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            // 先清掉该项目旧托管文件（可能扩展名不同，含旧 icons 布局）。
             removeManagedIcons(for: projectID)
-            let dest = ProjectConfigStore.iconsDirectoryURL
-                .appendingPathComponent("\(projectID.uuidString).\(resolvedExt)")
+            let dest = dir.appendingPathComponent("icon.\(resolvedExt)")
             if fm.fileExists(atPath: dest.path) {
                 try fm.removeItem(at: dest)
             }
@@ -101,10 +284,33 @@ enum ProjectIconFileStore {
         }
     }
 
-    /// 删除该项目配置目录下托管的自定义图标文件。
+    /// 删除该项目配置目录下托管的自定义图标文件（不删 config / note）。
     static func removeManagedIcons(for projectID: UUID) {
         let fm = FileManager.default
-        let dir = ProjectConfigStore.iconsDirectoryURL
+        let dir = ProjectConfigStore.projectDirectoryURL(for: projectID)
+        if let files = try? fm.contentsOfDirectory(atPath: dir.path) {
+            for name in files where name.lowercased().hasPrefix("icon.") {
+                try? fm.removeItem(at: dir.appendingPathComponent(name))
+            }
+        }
+        removeLegacyIcons(for: projectID)
+    }
+
+    /// 查找已存在的托管图标路径（新布局 `icon.*`）。
+    static func existingIconURL(for projectID: UUID) -> URL? {
+        let dir = ProjectConfigStore.projectDirectoryURL(for: projectID)
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
+        else { return nil }
+        guard let name = files.first(where: { $0.lowercased().hasPrefix("icon.") }) else {
+            return nil
+        }
+        return dir.appendingPathComponent(name)
+    }
+
+    /// 删除旧布局 `projects/icons/{id}.*`。
+    static func removeLegacyIcons(for projectID: UUID) {
+        let fm = FileManager.default
+        let dir = ProjectConfigStore.legacyIconsDirectoryURL
         guard let files = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
         let prefix = projectID.uuidString.lowercased()
         for name in files where name.lowercased().hasPrefix(prefix) {
@@ -112,9 +318,20 @@ enum ProjectIconFileStore {
         }
     }
 
-    /// 路径是否位于托管图标目录内。
+    /// 路径是否为当前托管布局下的项目图标（`…/projects/{id}/icon.*`）。
     static func isManagedPath(_ path: String) -> Bool {
-        let icons = ProjectConfigStore.iconsDirectoryURL.standardizedFileURL.path
+        let root = ProjectConfigStore.projectsRootURL.standardizedFileURL.path
+        let standardized = path.standardizedFilePath
+        guard standardized.hasPrefix(root + "/") else {
+            return isLegacyManagedPath(path)
+        }
+        let fileName = (standardized as NSString).lastPathComponent.lowercased()
+        return fileName.hasPrefix("icon.")
+    }
+
+    /// 路径是否位于旧版 `projects/icons/` 下。
+    static func isLegacyManagedPath(_ path: String) -> Bool {
+        let icons = ProjectConfigStore.legacyIconsDirectoryURL.standardizedFileURL.path
         return path.standardizedFilePath.hasPrefix(icons)
     }
 }

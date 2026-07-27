@@ -200,10 +200,28 @@ final class KeroTerminalView: AppTerminalView {
         canReadFileURLs(sender) ? .copy : []
     }
 
-    /// Inserts dropped absolute paths, shell-escaped and space-separated, at
-    /// the active prompt exactly as a paste would.
+    /// 将拖入的文件/文件夹绝对路径进行 Shell 转义并插入到当前终端命令行提示符后。
+    /// 外部拖入的文件夹会触发打开项目，内部文件树拖拽则始终作为路径插入。
+    /// - Parameter sender: 拖拽 Session 信息
+    /// - Returns: 是否成功执行拖放操作
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard let urls = fileURLs(sender), !urls.isEmpty else { return false }
+        let isInternalFileTreeDrag = FileTreeModel.isDraggingFromTree ||
+            (sender.draggingPasteboard.types?.contains(
+                NSPasteboard.PasteboardType("com.qjiao.filetree-item")
+            ) ?? false) ||
+            (FileTreeModel.activeTreeDragPasteboardChangeCount == sender.draggingPasteboard.changeCount)
+
+        FileTreeModel.isDraggingFromTree = false
+
+        if isInternalFileTreeDrag {
+            // 内部文件树拖拽到终端：不管是否为文件夹，一律作为路径插入命令行，不触发打开项目
+            focusForInteraction()
+            let text = urls.map { Self.shellToken(for: $0.path) }.joined(separator: " ")
+            sendText(text + " ")
+            return true
+        }
+
         let directoryURLs = urls.filter(Self.isDirectory)
         let openedDirectories = directoryURLs.filter { url in
             onOpenProjectDirectory?(url) ?? false

@@ -117,13 +117,37 @@ struct ContentView: View {
             // The window appearance may be applied by WindowChromeAccessor
             // during the first mount; refresh once after that override exists.
             manager.reloadActiveProjectTheme()
+            NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { event in
+                FileTreeModel.isDraggingFromTree = false
+                return event
+            }
         }
     }
 
     /// 接收从 Finder 拖入窗口的文件夹；每个有效文件夹都会创建一个项目。
+    /// - Parameter providers: 拖拽传入的 NSItemProvider 数组
+    /// - Returns: 是否接收该 Drop 操作
     private func addDroppedProjects(_ providers: [NSItemProvider]) -> Bool {
         guard !providers.isEmpty else { return false }
-        for provider in providers {
+
+        let dragPb = NSPasteboard(name: .drag)
+        let isInternalFileTreeDrag = FileTreeModel.isDraggingFromTree ||
+            (dragPb.types?.contains(NSPasteboard.PasteboardType("com.qjiao.filetree-item")) ?? false) ||
+            (FileTreeModel.activeTreeDragPasteboardChangeCount == dragPb.changeCount)
+
+        if isInternalFileTreeDrag {
+            FileTreeModel.isDraggingFromTree = false
+            return false
+        }
+
+        // 过滤掉软件内部文件树拖拽的项
+        let externalProviders = providers.filter { provider in
+            !provider.registeredTypeIdentifiers.contains("com.qjiao.filetree-item") &&
+            !provider.hasItemConformingToTypeIdentifier("com.qjiao.filetree-item")
+        }
+        guard !externalProviders.isEmpty else { return false }
+
+        for provider in externalProviders {
             provider.loadItem(
                 forTypeIdentifier: UTType.fileURL.identifier,
                 options: nil

@@ -5,9 +5,19 @@
 
 import AppKit
 import QuickLook
+import QuickLookThumbnailing
 import QuickLookUI
 import SwiftUI
 import UniformTypeIdentifiers
+
+// MARK: - Selected Row Position Preference Key
+
+private struct SelectedRowYKey: PreferenceKey {
+    static var defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = value ?? nextValue()
+    }
+}
 
 // MARK: - Quick Look Manager
 
@@ -96,6 +106,16 @@ struct FileTreePanel: View {
     @State private var isPanelClicked = false
     @State private var isCloseFilterHovering = false
     @State private var eventMonitor: Any? = nil
+
+    @State private var selectedRowY: CGFloat? = nil
+    @State private var quickPreviewPath: String? = nil
+    @State private var quickPreviewImage: NSImage? = nil
+    @State private var quickPreviewIsVideo = false
+    @State private var quickPreviewLoading = false
+    @State private var quickPreviewDimensions: String? = nil
+
+    @State private var activeAnchorView: NSView? = nil
+    @State private var activeAnchorPath: String? = nil
 
     @FocusState private var isFilterFieldFocused: Bool
     @FocusState private var isTreeFocused: Bool
@@ -198,6 +218,7 @@ struct FileTreePanel: View {
             }
 
             GeometryReader { geo in
+                let containerHeight = geo.size.height
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
@@ -220,7 +241,17 @@ struct FileTreePanel: View {
                                             model: model, item: item, session: session,
                                             currentFilePath: currentFilePath,
                                             openFile: openFile, openToSide: openToSide, onRename: onRename,
-                                            onImageBuild: onImageBuild
+                                            onImageBuild: onImageBuild,
+                                            onRowClick: {
+                                                isPanelClicked = true
+                                                isTreeFocused = true
+                                                NSApp.keyWindow?.makeFirstResponder(nil)
+                                            },
+                                            onRowAnchor: { path, view in
+                                                activeAnchorPath = path
+                                                activeAnchorView = view
+                                                updateQuickPreviewState(anchorView: view)
+                                            }
                                         )
                                         .id(item.id)
                                     }
@@ -231,6 +262,9 @@ struct FileTreePanel: View {
                                 .frame(maxWidth: .infinity, alignment: .top)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
+                                    isPanelClicked = true
+                                    isTreeFocused = true
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
                                     model.clearSelection()
                                 }
                             }
@@ -241,6 +275,10 @@ struct FileTreePanel: View {
                                 .frame(minHeight: 20)
                         }
                         .frame(minHeight: geo.size.height, alignment: .top)
+                    }
+                    .coordinateSpace(name: "FileTreePanelContainer")
+                    .onPreferenceChange(SelectedRowYKey.self) { y in
+                        selectedRowY = y
                     }
                     .focused($isTreeFocused)
                     .focusable(true)
@@ -263,7 +301,7 @@ struct FileTreePanel: View {
             // 文件树快捷键：⌘A 全选、⌘C 复制、⌘V 粘贴（需面板焦点）。
             .onKeyPress(keys: [.init("a")], phases: .down) { press in
                 guard press.modifiers.contains(.command) else { return .ignored }
-                model.selectAllVisible()
+                model.selectAllVisible(visibleItems: filteredItems)
                 return .handled
             }
             .onKeyPress(keys: [.init("c")], phases: .down) { press in
@@ -293,13 +331,19 @@ struct FileTreePanel: View {
         }
         .onHover { isHovered in
             isPanelHovered = isHovered
+            if !isHovered {
+                FilePreviewPopoverManager.shared.close()
+            }
         }
         .simultaneousGesture(
             TapGesture().onEnded {
                 isPanelClicked = true
+                isTreeFocused = true
+                NSApp.keyWindow?.makeFirstResponder(nil)
             }
         )
         .onChange(of: model.selectedPaths) { _ in
+            updateQuickPreviewState()
             // 如果 Quick Look 预览窗口已打开，选中项改变时实时更新 Quick Look 预览
             if QuickLookManager.shared.isVisible {
                 let fileURLs = model.selectedItems
@@ -319,6 +363,7 @@ struct FileTreePanel: View {
                 dismissFilter()
                 isPanelClicked = false
                 QuickLookManager.shared.close()
+                FilePreviewPopoverManager.shared.close()
             }
         }
     }
@@ -355,7 +400,7 @@ struct FileTreePanel: View {
         }
 
         // 选中目标并平滑滚动到可见区域中央
-        model.selectClick(targetItem, modifiers: [])
+        model.selectClick(targetItem, modifiers: [], visibleItems: filteredItems)
         if let proxy = scrollProxy {
             withAnimation(.easeInOut(duration: 0.15)) {
                 proxy.scrollTo(targetItem.id, anchor: .center)
@@ -363,7 +408,7 @@ struct FileTreePanel: View {
         }
     }
 
-    /// 注册 NSEvent 本地按键监听，处理 ⌘F、字母数字文件定位及空格键 Quick Look 预览。
+    /// 注册 NSEvent 本地按键监听，处理 ⌘F、方向键移动选择/Shift 多选、字母数字文件定位及空格键 Quick Look 预览。
     private func setupKeyboardMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -372,10 +417,11 @@ struct FileTreePanel: View {
                 return event
             }
 
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            // 只过滤用户显式按下的 Command, Shift, Option, Control 键，排除 macOS 为方向键自动附加的 .numericPad 与 .function
+            let relevantFlags = event.modifierFlags.intersection([.command, .shift, .option, .control])
 
             // 1. ⌘F 快捷键：激活 Filter 输入栏
-            if flags == .command, event.keyCode == 3 || event.charactersIgnoringModifiers?.lowercased() == "f" {
+            if relevantFlags == .command, event.keyCode == 3 || event.charactersIgnoringModifiers?.lowercased() == "f" {
                 if isFilesTreeActiveOrFocused() {
                     Task { @MainActor in
                         isFilterActive = true
@@ -385,8 +431,43 @@ struct FileTreePanel: View {
                 }
             }
 
-            // 2. 字母数字按键文件定位 (a-z, 0-9)：在非 Filter 激活且非内联重命名/新建草稿状态下触发
-            if (flags.isEmpty || flags == .shift),
+            // 2. 方向键移动选择与 Shift 多选 (keyCode: 123 左, 124 右, 125 下, 126 上)
+            if (relevantFlags.isEmpty || relevantFlags == .shift),
+               model.renamingPath == nil,
+               model.draft == nil,
+               (123...126).contains(event.keyCode) {
+                let isFilterFocusMove = isFilterFieldFocused && event.keyCode == 125
+                if isFilesTreeActiveOrFocused() || isFilterFocusMove {
+                    let direction: FileTreeModel.ArrowDirection
+                    switch event.keyCode {
+                    case 123: direction = .left
+                    case 124: direction = .right
+                    case 125: direction = .down
+                    case 126: direction = .up
+                    default: return event
+                    }
+                    let isShift = relevantFlags.contains(.shift)
+                    Task { @MainActor in
+                        if isFilterFieldFocused {
+                            isFilterFieldFocused = false
+                        }
+                        isPanelClicked = true
+                        isTreeFocused = true
+                        NSApp.keyWindow?.makeFirstResponder(nil)
+                        let visible = filteredItems
+                        if let targetItem = model.moveSelection(direction: direction, shift: isShift, visibleItems: visible),
+                           let proxy = scrollProxy {
+                            withAnimation(.easeInOut(duration: 0.12)) {
+                                proxy.scrollTo(targetItem.id, anchor: nil)
+                            }
+                        }
+                    }
+                    return nil // 消费该按键，屏蔽系统提示音
+                }
+            }
+
+            // 3. 字母数字按键文件定位 (a-z, 0-9)：在非 Filter 激活且非内联重命名/新建草稿状态下触发
+            if (relevantFlags.isEmpty || relevantFlags == .shift),
                !isFilterActive,
                !isFilterFieldFocused,
                model.renamingPath == nil,
@@ -403,8 +484,8 @@ struct FileTreePanel: View {
                 }
             }
 
-            // 3. 空格键：触发/切换系统 Quick Look 文件快速预览
-            if flags.isEmpty, event.keyCode == 49 || event.charactersIgnoringModifiers == " ",
+            // 4. 空格键：触发/切换系统 Quick Look 文件快速预览
+            if relevantFlags.isEmpty, event.keyCode == 49 || event.charactersIgnoringModifiers == " ",
                !isFilterActive,
                !isFilterFieldFocused,
                model.renamingPath == nil,
@@ -456,34 +537,48 @@ struct FileTreePanel: View {
         }
     }
 
-    /// 判断当前 ⌘F 是否应该作用于 Files Tree。
+    /// 判断当前按键事件是否应该作用于 Files Tree。
     private func isFilesTreeActiveOrFocused() -> Bool {
         guard manager.isPanelVisible,
               (manager.panelTab == .files || manager.panelTab == .cwd)
         else { return false }
 
-        // Sheet / 模态打开时 Files 树不抢焦点快捷键
+        // Sheet / 模态对话框打开时，Files 树不抢按键
         if NSApp.windows.contains(where: { $0.isSheet && $0.isVisible }) {
             return false
         }
         if NSApp.modalWindow != nil { return false }
         if let win = NSApp.keyWindow, win.isSheet { return false }
 
+        // 内联重命名或新建草稿输入框激活时，不抢按键
+        if model.renamingPath != nil || model.draft != nil {
+            return false
+        }
+
+        // 如果面板被点击过、或处于聚焦状态、或 Filter 搜索框激活中
         if isFilterActive || isFilterFieldFocused || isTreeFocused || isPanelClicked {
             return true
         }
 
+        // 文本输入控件（如 Filter 搜索框、文本输入框）焦点拦截
+        if let window = NSApp.keyWindow, let responder = window.firstResponder as? NSView {
+            let className = String(describing: type(of: responder))
+            if responder is NSTextView || responder is NSTextField
+                || className.contains("TextField") || className.contains("FieldEditor") {
+                return false
+            }
+        }
+
+        // 如果鼠标悬停在侧边栏面板上方，直接允许响应方向键
+        if isPanelHovered {
+            return true
+        }
+
+        // 如果第一响应者是终端或代码编辑器，且面板未被悬停/点击/聚焦，交给终端/编辑器
         if let window = NSApp.keyWindow, let responder = window.firstResponder as? NSView {
             let className = String(describing: type(of: responder))
             if className.contains("Ghostty") || className.contains("STTextView")
                 || className.contains("SourceTextEditor") {
-                return false
-            }
-            // 文本输入控件：不视为 Files 树焦点
-            if responder is NSTextView || responder is NSTextField {
-                return false
-            }
-            if className.contains("TextField") || className.contains("FieldEditor") {
                 return false
             }
             var current: NSView? = responder
@@ -496,7 +591,6 @@ struct FileTreePanel: View {
             }
         }
 
-        // 仅悬停不再抢键：避免 sheet 打开时 hover 仍为 true 导致输入被吃掉
         return false
     }
 
@@ -563,6 +657,122 @@ struct FileTreePanel: View {
         isFilterFieldFocused = false
         isTreeFocused = true
     }
+
+    // MARK: - Floating Quick Preview Helper
+
+    private func isPreviewableFile(_ path: String) -> Bool {
+        isImageFile(path) || isVideoFile(path)
+    }
+
+    private func isImageFile(_ path: String) -> Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        let imageExts: Set<String> = [
+            "png", "jpg", "jpeg", "gif", "webp", "heic", "heif",
+            "tiff", "bmp", "svg", "ico", "icns", "avif", "psd"
+        ]
+        return imageExts.contains(ext)
+    }
+
+    private func isVideoFile(_ path: String) -> Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        let videoExts: Set<String> = [
+            "mp4", "mov", "m4v", "mkv", "avi", "webm", "flv", "wmv"
+        ]
+        return videoExts.contains(ext)
+    }
+
+    private var currentSelectedFileSizeLabel: String? {
+        guard let selectedItem = model.selectedItems.first,
+              selectedItem.path == quickPreviewPath,
+              let size = selectedItem.fileSize
+        else { return nil }
+        return FileTreeRow.formatByteCount(size)
+    }
+
+    private func updateQuickPreviewState(anchorView: NSView? = nil) {
+        guard isPanelHovered else {
+            FilePreviewPopoverManager.shared.close()
+            return
+        }
+
+        let selected = model.selectedItems
+        guard selected.count == 1,
+              let item = selected.first,
+              !item.isDirectory,
+              !item.isDraft,
+              isPreviewableFile(item.path)
+        else {
+            quickPreviewPath = nil
+            quickPreviewImage = nil
+            quickPreviewLoading = false
+            quickPreviewDimensions = nil
+            FilePreviewPopoverManager.shared.close()
+            return
+        }
+
+        let targetPath = item.path
+        let isVideo = isVideoFile(targetPath)
+        quickPreviewPath = targetPath
+        quickPreviewIsVideo = isVideo
+
+        if let view = anchorView ?? activeAnchorView, activeAnchorPath == targetPath {
+            if quickPreviewImage == nil {
+                quickPreviewLoading = true
+                FilePreviewPopoverManager.shared.show(
+                    for: targetPath,
+                    targetView: view,
+                    image: nil,
+                    isVideo: isVideo,
+                    isLoading: true
+                )
+            }
+        }
+
+        let url = URL(fileURLWithPath: targetPath)
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let targetPixelDim: CGFloat = 260 * scale
+        let size = CGSize(width: targetPixelDim, height: targetPixelDim)
+        let request = QLThumbnailGenerator.Request(
+            fileAt: url, size: size, scale: scale, representationTypes: .thumbnail
+        )
+
+        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { rep, _ in
+            DispatchQueue.main.async {
+                guard self.quickPreviewPath == targetPath else { return }
+                self.quickPreviewLoading = false
+                var dimensionsStr: String? = nil
+                var loadedImg: NSImage? = nil
+
+                if let image = rep?.nsImage {
+                    loadedImg = image
+                    dimensionsStr = "\(Int(image.size.width)) × \(Int(image.size.height))"
+                } else if self.isImageFile(targetPath), let fallback = NSImage(contentsOfFile: targetPath) {
+                    loadedImg = fallback
+                    dimensionsStr = "\(Int(fallback.size.width)) × \(Int(fallback.size.height))"
+                }
+
+                self.quickPreviewImage = loadedImg
+                self.quickPreviewDimensions = dimensionsStr
+
+                if let view = anchorView ?? self.activeAnchorView, self.activeAnchorPath == targetPath {
+                    FilePreviewPopoverManager.shared.show(
+                        for: targetPath,
+                        targetView: view,
+                        image: loadedImg,
+                        isVideo: isVideo,
+                        isLoading: false
+                    )
+                } else {
+                    FilePreviewPopoverManager.shared.updateContent(
+                        for: targetPath,
+                        image: loadedImg,
+                        isVideo: isVideo,
+                        isLoading: false
+                    )
+                }
+            }
+        }
+    }
 }
 
 private struct FileTreeRow: View {
@@ -575,6 +785,8 @@ private struct FileTreeRow: View {
     let openToSide: (String) -> Void
     let onRename: (_ oldPath: String, _ newPath: String) -> Void
     var onImageBuild: (([String]) -> Void)? = nil
+    var onRowClick: (() -> Void)? = nil
+    var onRowAnchor: ((_ path: String, _ view: NSView) -> Void)? = nil
 
     @State private var isHovering = false
     @State private var editingName = ""
@@ -615,7 +827,7 @@ private struct FileTreeRow: View {
     }()
 
     /// 格式化文件与目录体积，将 bytes/byte/字节 统一替换显示为 b。
-    private static func formatByteCount(_ size: UInt64) -> String {
+    fileprivate static func formatByteCount(_ size: UInt64) -> String {
         if size < 1000 {
             return "\(size) b"
         }
@@ -877,8 +1089,18 @@ private struct FileTreeRow: View {
         .padding(.trailing, 6)
         .padding(.vertical, 2)
         .contentShape(RoundedRectangle(cornerRadius: 4))
+        .background(
+            FileRowAnchorRepresentable(
+                item: item,
+                isSelected: isSelected && model.selectedPaths.count == 1,
+                isPreviewable: item.name.contains(".") && !item.isDirectory
+            ) { view in
+                onRowAnchor?(item.path, view)
+            }
+        )
         // simultaneous：单击立即选择（无双击延迟）；双击再打开/展开。
         .onTapGesture {
+            onRowClick?()
             model.selectClick(item, modifiers: NSEvent.modifierFlags)
         }
         .simultaneousGesture(
@@ -1010,6 +1232,7 @@ private struct FileTreeRow: View {
     private var expandControl: some View {
         if item.isDirectory {
             Button {
+                onRowClick?()
                 model.toggle(item)
             } label: {
                 Image(systemName: "chevron.right")
@@ -1035,7 +1258,15 @@ private struct FileTreeRow: View {
         }
     }
 
+    /// 生成拖拽 ItemProvider，包含文件 URL 与内部文件树标记。
+    /// - Returns: NSItemProvider，若包含多选则写多文件列表，并附带 com.qjiao.filetree-item 标识
     private func dragProvider() -> NSItemProvider {
+        FileTreeModel.isDraggingFromTree = true
+        let pb = NSPasteboard(name: .drag)
+        pb.addTypes([NSPasteboard.PasteboardType("com.qjiao.filetree-item")], owner: nil)
+        pb.setString("true", forType: NSPasteboard.PasteboardType("com.qjiao.filetree-item"))
+        FileTreeModel.activeTreeDragPasteboardChangeCount = pb.changeCount
+
         let paths: [String]
         if isSelected, model.selectedPaths.count > 1 {
             paths = model.selectedItems.map(\.path)
@@ -1047,28 +1278,38 @@ private struct FileTreeRow: View {
             paths = [item.path]
         }
         // NSItemProvider 以主文件 URL 为代表；多文件时写入 pasteboard 文件列表。
+        let provider: NSItemProvider
         if paths.count == 1 {
-            return NSItemProvider(object: URL(fileURLWithPath: paths[0]) as NSURL)
-        }
-        let provider = NSItemProvider()
-        let urls = paths.map { URL(fileURLWithPath: $0) }
-        provider.registerDataRepresentation(
-            forTypeIdentifier: UTType.fileURL.identifier,
-            visibility: .all
-        ) { completion in
-            // 注册第一个 URL 的 data；多文件拖拽由系统在部分场景下降级为单文件。
-            if let data = urls.first?.dataRepresentation {
-                completion(data, nil)
-            } else {
-                completion(nil, nil)
+            provider = NSItemProvider(object: URL(fileURLWithPath: paths[0]) as NSURL)
+        } else {
+            provider = NSItemProvider()
+            let urls = paths.map { URL(fileURLWithPath: $0) }
+            provider.registerDataRepresentation(
+                forTypeIdentifier: UTType.fileURL.identifier,
+                visibility: .all
+            ) { completion in
+                // 注册第一个 URL 的 data；多文件拖拽由系统在部分场景下降级为单文件。
+                if let data = urls.first?.dataRepresentation {
+                    completion(data, nil)
+                } else {
+                    completion(nil, nil)
+                }
+                return nil
             }
+            // 额外把全部路径写成 public.file-url 列表，供支持多文件的目标读取。
+            provider.registerObject(
+                urls.map(\.absoluteString).joined(separator: "\n") as NSString,
+                visibility: .all
+            )
+        }
+        // 标识属于软件内部文件目录树，避免触发全局「拖入文件夹打开项目」功能
+        provider.registerDataRepresentation(
+            forTypeIdentifier: "com.qjiao.filetree-item",
+            visibility: .ownProcess
+        ) { completion in
+            completion("filetree".data(using: .utf8), nil)
             return nil
         }
-        // 额外把全部路径写成 public.file-url 列表，供支持多文件的目标读取。
-        provider.registerObject(
-            urls.map(\.absoluteString).joined(separator: "\n") as NSString,
-            visibility: .all
-        )
         return provider
     }
 
@@ -1162,6 +1403,312 @@ private struct FileTreeRow: View {
                 size: iconSize
             )
             .frame(width: iconSize, alignment: .center)
+        }
+    }
+}
+
+// MARK: - File Preview Panel Manager (Borderless Floating NSPanel)
+
+@MainActor
+final class FilePreviewPopoverManager: NSObject {
+    static let shared = FilePreviewPopoverManager()
+
+    private var panel: NSPanel?
+    private(set) var currentPath: String?
+    private weak var currentView: NSView?
+    private weak var currentClipView: NSClipView?
+    private var scrollObserver: Any? = nil
+
+    private func getOrCreatePanel() -> NSPanel {
+        if let panel = self.panel {
+            return panel
+        }
+        let p = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 160, height: 110),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        p.level = .normal // 不使用 .floating，与主窗口平级
+        p.hidesOnDeactivate = true // 切换至其他 App 时自动隐藏
+        p.ignoresMouseEvents = true
+        p.isMovableByWindowBackground = false
+        self.panel = p
+        return p
+    }
+
+    func show(
+        for path: String,
+        targetView: NSView,
+        image: NSImage?,
+        isVideo: Bool,
+        isLoading: Bool
+    ) {
+        guard let window = targetView.window else {
+            close()
+            return
+        }
+
+        // 检查 targetView 是否在 ScrollView 可见区域内并设置 60/120fps 实时滚动监听
+        if let clipView = targetView.enclosingScrollView?.contentView {
+            let viewRectInClip = targetView.convert(targetView.bounds, to: clipView)
+            if !clipView.bounds.intersects(viewRectInClip) {
+                close()
+                return
+            }
+            observeScrollView(clipView)
+        }
+
+        let panel = getOrCreatePanel()
+
+        let contentView = FileQuickPreviewPopoverContentView(
+            image: image,
+            isVideo: isVideo,
+            isLoading: isLoading
+        )
+
+        let displaySize = contentView.displaySize
+
+        let hostingView = NSHostingView(rootView: contentView)
+        hostingView.frame = NSRect(origin: .zero, size: displaySize)
+        panel.contentView = hostingView
+
+        currentPath = path
+        currentView = targetView
+
+        // 附加为主窗口子窗口：在 App 内位于最上层，但被其他应用遮盖时自动跟随主窗口下沉
+        if panel.parent != window {
+            if let oldParent = panel.parent {
+                oldParent.removeChildWindow(panel)
+            }
+            window.addChildWindow(panel, ordered: .above)
+        }
+
+        updatePosition(targetView: targetView, panelSize: displaySize)
+
+        if !panel.isVisible {
+            panel.orderFront(nil)
+        }
+    }
+
+    func updateContent(
+        for path: String,
+        image: NSImage?,
+        isVideo: Bool,
+        isLoading: Bool
+    ) {
+        guard currentPath == path, let targetView = currentView else { return }
+        show(for: path, targetView: targetView, image: image, isVideo: isVideo, isLoading: isLoading)
+    }
+
+    private func observeScrollView(_ clipView: NSClipView) {
+        clipView.postsBoundsChangedNotifications = true
+        if currentClipView !== clipView {
+            removeScrollObserver()
+            currentClipView = clipView
+            scrollObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: clipView,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.repositionCurrentPanel()
+                }
+            }
+        }
+    }
+
+    private func removeScrollObserver() {
+        if let observer = scrollObserver {
+            NotificationCenter.default.removeObserver(observer)
+            scrollObserver = nil
+        }
+        currentClipView = nil
+    }
+
+    private func repositionCurrentPanel() {
+        guard let targetView = currentView, let panel = panel, panel.isVisible else { return }
+
+        if let clipView = targetView.enclosingScrollView?.contentView {
+            let viewRectInClip = targetView.convert(targetView.bounds, to: clipView)
+            if !clipView.bounds.intersects(viewRectInClip) {
+                close()
+                return
+            }
+        }
+
+        if let hostingView = panel.contentView as? NSHostingView<FileQuickPreviewPopoverContentView> {
+            let displaySize = hostingView.rootView.displaySize
+            updatePosition(targetView: targetView, panelSize: displaySize)
+        }
+    }
+
+    private func updatePosition(targetView: NSView, panelSize: CGSize) {
+        guard let window = targetView.window, let panel = panel else { return }
+
+        let rectInWindow = targetView.convert(targetView.bounds, to: nil)
+        let rectOnScreen = window.convertToScreen(rectInWindow)
+
+        // 紧贴文件目录树左边缘（右边缘与 sidebar 左界留 6pt 间隙），垂直中心对齐选中行
+        let panelX = rectOnScreen.minX - panelSize.width - 6
+        let panelY = rectOnScreen.midY - (panelSize.height / 2)
+
+        panel.setFrame(NSRect(x: panelX, y: panelY, width: panelSize.width, height: panelSize.height), display: true, animate: false)
+    }
+
+    func close() {
+        removeScrollObserver()
+        if let parent = panel?.parent {
+            parent.removeChildWindow(panel!)
+        }
+        panel?.orderOut(nil)
+        currentPath = nil
+        currentView = nil
+    }
+}
+
+// MARK: - File Quick Preview Popover Content View
+
+private extension NSImage {
+    /// 获取 NSImage 的真实物理像素尺寸 (Physical Pixel Size)
+    var pixelSize: CGSize {
+        if let rep = representations.first, rep.pixelsWide > 0, rep.pixelsHigh > 0 {
+            return CGSize(width: rep.pixelsWide, height: rep.pixelsHigh)
+        }
+        if let cgImage = cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            return CGSize(width: cgImage.width, height: cgImage.height)
+        }
+        return size
+    }
+}
+
+private struct FileQuickPreviewPopoverContentView: View {
+    let image: NSImage?
+    let isVideo: Bool
+    let isLoading: Bool
+
+    /// 根据图片真实物理像素与高清屏缩放比（Retina @2x/@3x）计算 1:1 像素清晰对齐的紧凑浮窗尺寸
+    var displaySize: CGSize {
+        guard let image = image else {
+            return CGSize(width: 160, height: 110)
+        }
+        let screenScale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let pix = image.pixelSize
+        guard pix.width > 0, pix.height > 0 else {
+            return CGSize(width: 160, height: 110)
+        }
+
+        // 高清屏点阵尺寸（Physical Pixels / backingScaleFactor）
+        let ptW = pix.width / screenScale
+        let ptH = pix.height / screenScale
+
+        let maxW: CGFloat = 260
+        let maxH: CGFloat = 260
+        let scale = min(1.0, min(maxW / ptW, maxH / ptH))
+        let finalW = max(32, ptW * scale)
+        let finalH = max(32, ptH * scale)
+        return CGSize(width: finalW, height: finalH)
+    }
+
+    var body: some View {
+        ZStack {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 160, height: 110)
+            } else if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: displaySize.width, height: displaySize.height)
+
+                if isVideo {
+                    // 视频播放缩略图轻量标记
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(5)
+                                .background(Circle().fill(Color.black.opacity(0.65)))
+                                .padding(6)
+                        }
+                    }
+                }
+            } else {
+                VStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                    Text("No Preview Available")
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 160, height: 100)
+            }
+        }
+        .frame(width: displaySize.width, height: displaySize.height)
+        .background(
+            ZStack {
+                VisualEffectView()
+                Color(nsColor: Theme.sidebar).opacity(0.4)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Anchor NSView Representable
+
+private struct FileRowAnchorRepresentable: NSViewRepresentable {
+    let item: FileTreeModel.Item
+    let isSelected: Bool
+    let isPreviewable: Bool
+    let onAnchor: (NSView) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = AnchorNSView()
+        view.onLayout = { nsView in
+            if isSelected && isPreviewable {
+                onAnchor(nsView)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if isSelected && isPreviewable {
+            DispatchQueue.main.async {
+                onAnchor(nsView)
+            }
+        }
+    }
+}
+
+private final class AnchorNSView: NSView {
+    override var isFlipped: Bool { true }
+    var onLayout: ((NSView) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            onLayout?(self)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        if window != nil {
+            onLayout?(self)
         }
     }
 }

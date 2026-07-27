@@ -440,7 +440,11 @@ private struct SidebarProjectRow: View {
 
     private var rowContent: some View {
         HStack(spacing: 6) {
-            ProjectIconView(icon: project.icon, isSelected: isSelected)
+            ProjectIconView(
+                icon: project.icon,
+                isSelected: isSelected,
+                size: project.isArchived ? 16 : 24
+            )
 
             if isRenaming {
                 TextField("", text: $renameDraft)
@@ -473,9 +477,10 @@ private struct SidebarProjectRow: View {
 
             Spacer(minLength: 0)
 
-            if isHovering, !isRenaming, !isEditingDescription {
-                HStack(spacing: 4) {
-                    if project.isArchived {
+            ZStack(alignment: .trailing) {
+                if project.isArchived {
+                    // 已归档项目：操作按钮区域常驻布局，Hover 时控制 opacity，避免尺寸抖动
+                    HStack(spacing: 4) {
                         Button {
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 manager.unarchiveProject(project)
@@ -489,20 +494,33 @@ private struct SidebarProjectRow: View {
                         }
                         .buttonStyle(.plain)
                         .help("Unarchive Project")
+
+                        Button(action: requestClose) {
+                            Image(systemName: "xmark")
+                                .font(SidebarTypography.micro(.bold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16, height: 16)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    Button(action: requestClose) {
-                        Image(systemName: "xmark")
-                            .font(SidebarTypography.micro(.bold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16, height: 16)
-                            .contentShape(Rectangle())
+                    .opacity(isHovering && !isRenaming && !isEditingDescription ? 1 : 0)
+                } else {
+                    if isHovering, !isRenaming, !isEditingDescription {
+                        Button(action: requestClose) {
+                            Image(systemName: "xmark")
+                                .font(SidebarTypography.micro(.bold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16, height: 16)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else if index < 9, !isRenaming, !isEditingDescription {
+                        Text("⌘\(index + 1)")
+                            .font(SidebarTypography.section().monospacedDigit())
+                            .foregroundStyle(.tertiary)
                     }
-                    .buttonStyle(.plain)
                 }
-            } else if !project.isArchived, index < 9, !isRenaming, !isEditingDescription {
-                Text("⌘\(index + 1)")
-                    .font(SidebarTypography.section().monospacedDigit())
-                    .foregroundStyle(.tertiary)
             }
         }
         .padding(.horizontal, 8)
@@ -623,10 +641,9 @@ private struct SidebarProjectRow: View {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 
-    /// 创建并打开当前项目配置所在的 Qjiao 配置目录。
+    /// 创建并打开当前项目的独立配置目录：`…/projects/{projectId}/`。
     private func openConfigFolder() {
-        let directory = AppSettings.configURL.deletingLastPathComponent()
-            .appendingPathComponent("projects", isDirectory: true)
+        let directory = ProjectConfigStore.projectDirectoryURL(for: project.id)
         do {
             try FileManager.default.createDirectory(
                 at: directory, withIntermediateDirectories: true
@@ -773,6 +790,7 @@ private struct SidebarArchiveSection: View {
                             )
                         }
                     }
+                    .padding(.leading, 18)
                     .transition(.opacity)
                 }
             }

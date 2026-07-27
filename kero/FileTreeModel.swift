@@ -16,6 +16,10 @@ import Foundation
 /// 目录体积不在树刷新时计算（昂贵）；由用户 hover 点 Size 后按需异步统计。
 @MainActor
 final class FileTreeModel: nonisolated ObservableObject {
+    /// 静态状态记录：标记当前是否正在从右侧边栏文件目录树中拖拽文件/文件夹
+    static var isDraggingFromTree: Bool = false
+    static var activeTreeDragPasteboardChangeCount: Int? = nil
+
     /// 文件排序依据
     enum FileSortCriteria: String, CaseIterable, Identifiable {
         case name
@@ -83,6 +87,8 @@ final class FileTreeModel: nonisolated ObservableObject {
     private var expanded: Set<String> = []
     /// ⇧ 范围选择的锚点：最近一次普通单击或 ⌘ 点击的目标。
     private var selectionAnchorPath: String?
+    /// ⇧ 范围选择的游标端点：指示当前移动/扩展方向的目标。
+    private var selectionHeadPath: String?
     /// path → 进行中的统计任务，便于取消与去重。
     private var folderSizeTasks: [String: Task<Void, Never>] = [:]
     /// 每次 request 递增；完成后校验，避免已取消任务写回过期结果。
@@ -160,15 +166,16 @@ final class FileTreeModel: nonisolated ObservableObject {
     // MARK: - Selection
 
     /// 处理单击：支持普通 / ⌘ / ⇧ 多选。草稿行忽略。
-    func selectClick(_ item: Item, modifiers: NSEvent.ModifierFlags) {
+    func selectClick(_ item: Item, modifiers: NSEvent.ModifierFlags, visibleItems: [Item]? = nil) {
         guard !item.isDraft else { return }
         if modifiers.contains(.shift) {
-            shiftSelect(to: item)
+            shiftSelect(to: item, visibleItems: visibleItems)
         } else if modifiers.contains(.command) {
             commandToggle(item)
         } else {
             selectedPaths = [item.path]
             selectionAnchorPath = item.path
+            selectionHeadPath = item.path
         }
     }
 
@@ -178,19 +185,23 @@ final class FileTreeModel: nonisolated ObservableObject {
         if !selectedPaths.contains(item.path) {
             selectedPaths = [item.path]
             selectionAnchorPath = item.path
+            selectionHeadPath = item.path
         }
     }
 
     func clearSelection() {
         selectedPaths = []
         selectionAnchorPath = nil
+        selectionHeadPath = nil
     }
 
     /// 全选当前可见的非草稿行。
-    func selectAllVisible() {
-        let paths = items.filter { !$0.isDraft }.map(\.path)
+    func selectAllVisible(visibleItems: [Item]? = nil) {
+        let visible = visibleItems ?? items.filter { !$0.isDraft }
+        let paths = visible.map(\.path)
         selectedPaths = Set(paths)
         selectionAnchorPath = paths.first
+        selectionHeadPath = paths.last
     }
 
     private func commandToggle(_ item: Item) {
@@ -199,16 +210,18 @@ final class FileTreeModel: nonisolated ObservableObject {
         } else {
             selectedPaths.insert(item.path)
         }
-        // ⌘ 点击更新锚点，便于接着 ⇧ 扩展。
+        // ⌘ 点击更新锚点与游标，便于接着 ⇧ 扩展。
         selectionAnchorPath = item.path
+        selectionHeadPath = item.path
     }
 
     /// 从锚点到目标之间、当前可见列表上的连续范围（含两端）。
-    private func shiftSelect(to item: Item) {
-        let visible = items.filter { !$0.isDraft }
+    func shiftSelect(to item: Item, visibleItems: [Item]? = nil) {
+        let visible = visibleItems ?? items.filter { !$0.isDraft }
         guard let endIndex = visible.firstIndex(where: { $0.path == item.path }) else {
             selectedPaths = [item.path]
             selectionAnchorPath = item.path
+            selectionHeadPath = item.path
             return
         }
         let anchor = selectionAnchorPath
@@ -217,10 +230,164 @@ final class FileTreeModel: nonisolated ObservableObject {
         let lo = min(anchor, endIndex)
         let hi = max(anchor, endIndex)
         selectedPaths = Set(visible[lo...hi].map(\.path))
-        // ⇧ 不移动锚点（与 Finder / VS Code 一致）。
+        // ⇧ 不移动锚点，移动游标（与 Finder / VS Code 一致）。
         if selectionAnchorPath == nil {
             selectionAnchorPath = item.path
         }
+        selectionHeadPath = item.path
+    }
+
+    /// 方向键方向
+    enum ArrowDirection {
+        case up
+        case down
+        case left
+        case right
+    }
+
+    /// 方向键移动选择及展开/折叠。
+    /// - Parameters:
+    ///   - direction: 方向（上、下、左、右）
+    ///   - shift: 是否按住 Shift 键进行多选扩展
+    ///   - visibleItems: 当前可见节点列表（由 Panel 传入，包含 Filter 过滤后的节点）
+    /// - Returns: 新选中的目标 Item（供界面平滑滚动），若无变化返回 nil。
+    @discardableResult
+    func moveSelection(direction: ArrowDirection, shift: Bool, visibleItems: [Item]) -> Item? {
+        let visible = visibleItems.filter { !$0.isDraft }
+        guard !visible.isEmpty else { return nil }
+
+        switch direction {
+        case .down:
+            let currentIndex: Int
+            if shift {
+                if let head = selectionHeadPath, let idx = visible.firstIndex(where: { $0.path == head }) {
+                    currentIndex = idx
+                } else if let anchor = selectionAnchorPath, let idx = visible.firstIndex(where: { $0.path == anchor }) {
+                    currentIndex = idx
+                } else if let maxIdx = selectedItemsIn(visible).map({ $0.0 }).max() {
+                    currentIndex = maxIdx
+                } else {
+                    currentIndex = -1
+                }
+            } else {
+                if let head = selectionHeadPath, let idx = visible.firstIndex(where: { $0.path == head }) {
+                    currentIndex = idx
+                } else if let maxIdx = selectedItemsIn(visible).map({ $0.0 }).max() {
+                    currentIndex = maxIdx
+                } else {
+                    currentIndex = -1
+                }
+            }
+
+            let targetIndex = min(max(currentIndex + 1, 0), visible.count - 1)
+            let targetItem = visible[targetIndex]
+
+            if shift {
+                shiftSelect(to: targetItem, visibleItems: visible)
+            } else {
+                selectedPaths = [targetItem.path]
+                selectionAnchorPath = targetItem.path
+                selectionHeadPath = targetItem.path
+            }
+            return targetItem
+
+        case .up:
+            let currentIndex: Int
+            if shift {
+                if let head = selectionHeadPath, let idx = visible.firstIndex(where: { $0.path == head }) {
+                    currentIndex = idx
+                } else if let anchor = selectionAnchorPath, let idx = visible.firstIndex(where: { $0.path == anchor }) {
+                    currentIndex = idx
+                } else if let minIdx = selectedItemsIn(visible).map({ $0.0 }).min() {
+                    currentIndex = minIdx
+                } else {
+                    currentIndex = visible.count
+                }
+            } else {
+                if let head = selectionHeadPath, let idx = visible.firstIndex(where: { $0.path == head }) {
+                    currentIndex = idx
+                } else if let minIdx = selectedItemsIn(visible).map({ $0.0 }).min() {
+                    currentIndex = minIdx
+                } else {
+                    currentIndex = visible.count
+                }
+            }
+
+            let targetIndex = max(min(currentIndex - 1, visible.count - 1), 0)
+            let targetItem = visible[targetIndex]
+
+            if shift {
+                shiftSelect(to: targetItem, visibleItems: visible)
+            } else {
+                selectedPaths = [targetItem.path]
+                selectionAnchorPath = targetItem.path
+                selectionHeadPath = targetItem.path
+            }
+            return targetItem
+
+        case .right:
+            let currentItem = focusItem(in: visible)
+            guard let item = currentItem else { return nil }
+
+            if item.isDirectory {
+                if !isExpanded(item) {
+                    toggle(item)
+                    return item
+                } else {
+                    // 已展开：导航到第一个子节点
+                    if let idx = visible.firstIndex(where: { $0.path == item.path }),
+                       idx + 1 < visible.count {
+                        let nextItem = visible[idx + 1]
+                        if nextItem.path.hasPrefix(item.path + "/") {
+                            selectedPaths = [nextItem.path]
+                            selectionAnchorPath = nextItem.path
+                            selectionHeadPath = nextItem.path
+                            return nextItem
+                        }
+                    }
+                }
+            }
+            return item
+
+        case .left:
+            let currentItem = focusItem(in: visible)
+            guard let item = currentItem else { return nil }
+
+            if item.isDirectory && isExpanded(item) {
+                toggle(item)
+                return item
+            } else {
+                // 文件或已折叠文件夹：导航到其父目录节点
+                let parentPath = (item.path as NSString).deletingLastPathComponent
+                if let parentItem = visible.first(where: { $0.path == parentPath }) {
+                    selectedPaths = [parentItem.path]
+                    selectionAnchorPath = parentItem.path
+                    selectionHeadPath = parentItem.path
+                    return parentItem
+                }
+            }
+            return item
+        }
+    }
+
+    private func focusItem(in visible: [Item]) -> Item? {
+        if let head = selectionHeadPath, let item = visible.first(where: { $0.path == head }) {
+            return item
+        }
+        if let anchor = selectionAnchorPath, let item = visible.first(where: { $0.path == anchor }) {
+            return item
+        }
+        return selectedItemsIn(visible).first?.1 ?? visible.first
+    }
+
+    private func selectedItemsIn(_ visible: [Item]) -> [(Int, Item)] {
+        var res: [(Int, Item)] = []
+        for (index, item) in visible.enumerated() {
+            if selectedPaths.contains(item.path) {
+                res.append((index, item))
+            }
+        }
+        return res
     }
 
     /// 重建后剔除已消失路径，避免选中幽灵项。
@@ -232,6 +399,9 @@ final class FileTreeModel: nonisolated ObservableObject {
         }
         if let anchor = selectionAnchorPath, !valid.contains(anchor) {
             selectionAnchorPath = next.sorted().first
+        }
+        if let head = selectionHeadPath, !valid.contains(head) {
+            selectionHeadPath = selectionAnchorPath
         }
     }
 

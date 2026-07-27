@@ -18,11 +18,11 @@
 - 右面板文本颜色提升可读性。
 - 等宽中文字体来显示终端和代码，可以对齐含有中文的表格、注释了。
   - 默认使用内置 `Source Han Sans CN VF Mono1200` 作为中文等宽回退字体，并可在设置中关闭。
-- 拖拽文件夹自动以该文件夹创建项目并在其中启动终端。
+- 拖拽文件夹自动以该文件夹创建项目并在其中启动终端（排除软件内部 Files / CWD 文件目录树拖拽，避免误触发）。
 - 项目支持自定义图标（预置 / Emoji / SF Symbols / Select File）；图标选择器独立为 `ProjectIconPicker.swift`：
   - **预置**：列出本应用内置 Brands（`TerminalAppIcons`）与 Material Icon Theme 图标，可搜索选择。
   - **SF Symbols**：左侧分类浏览（Suggested / Coding / Arrows…）、分类内搜索防抖、多词过滤。
-  - **Select File**：从磁盘选择图片（支持拖放）；复制到 `~/.config/qjiao/projects/icons/` 托管，重启后仍可用。
+  - **Select File**：从磁盘选择图片（支持拖放）；复制到 `~/.config/qjiao/projects/{id}/icon.*` 托管，重启后仍可用。
   - 类型切换使用 SwiftUI 原生传统 segmented Picker（中号、居中显示）。
   - 选择器内容区固定高度，切换类型不抖动；预置图标异步惰性加载 + 缩略图缓存，网格仅渲染可见项。
   - 数量徽章、当前图标预览与 Clear。
@@ -31,6 +31,7 @@
 - 项目支持添加描述，并显示在项目列表中。
 - 项目右键菜单支持在 Finder 中打开项目目录和配置文件夹。
 - 项目名称、图标和描述改为保存在配置文件夹的独立项目配置文件中。
+- 项目配置数据集中到 `~/.config/qjiao/projects/{projectId}/`（Debug 为 `qjiao-dev`）：`config.json`（名称 / 图标 / 描述 / 主题 / 目录 / Launchers / 归档）、`icon.*`（自定义图标）、`note.txt`（笔记）；关闭项目时删除整个目录；首次读写自动从旧路径（`projects/{id}.json`、`projects/icons/`、`notes/`）迁移。
 - 项目关闭按钮支持普通点击确认和 ⌘ 点击直接关闭。
 - 右侧面板区分项目目录 Files 和终端当前目录 CWD，相同时自动隐藏 CWD。
 - 分栏终端的右键菜单支持直接关闭当前面板。
@@ -75,7 +76,7 @@
 - 右侧面板上下分区框架：上半保留 Start/Files/Git 等；中间可拖分割（默认 70/30，双击恢复）；下半区顶部为 System / Note tabs（最小宽 75、宽度随内容），可收起到仅显示 tabs（双击底栏切换收起/展开）。
 - System 面板通过命令行采集主机信息（CPU%、内存、磁盘可用/总量、磁盘传输量、网络上下行、本机局域网 IP、系统代理、Google/Baidu/Cloudflare/GitHub 可达性）；不显示温度；并行 CLI 轮询、超时杀进程、手动刷新；预留 CLI runner 以便日后 SSH 远程。
 - System 内存指标与活动监视器对齐：用 `vm_stat` 计算 Used = App + Wired + Compressed（不含文件缓存）；tooltip 展示 App / Wired / Compressed / Cached / Free；`top` PhysMem 仅作回退。
-- Note 面板：按项目的纯文本草稿编辑器（自动换行、⌘F 查找）；内容防抖保存到 `~/.config/qjiao/notes/{projectId}.txt`（Debug 为 `qjiao-dev`），切换项目 / 收起面板 / 隐藏侧栏时立即落盘。
+- Note 面板：按项目的纯文本草稿编辑器（自动换行、⌘F 查找）；内容防抖保存到 `~/.config/qjiao/projects/{projectId}/note.txt`（Debug 为 `qjiao-dev`），切换项目 / 收起面板 / 隐藏侧栏时立即落盘。
 - System 面板可视化：CPU/内存/磁盘紧凑单行 + 一行高历史折线；磁盘写入每 30s 用 `iostat -Id` 采样，记录最近 1 分钟量（折线）、会话累计量（行内 W）与累计时长；Net / IP / Proxy 紧凑行（IP 为默认路由网卡 IPv4 可复制；Proxy 复制 `export https_proxy=…`）；Reachability 可配置站点/间隔/GET·HEAD，柱状延迟历史，右键编辑与立即检测，探测走系统代理。
 - System Reachability 探测间隔默认 30s，下拉菜单显示勾选态与 `30s (Default)` 标注；间隔写入 `~/.config/qjiao/config.toml`（`system.reachability-interval`），重启后保留。
 - System Reachability 保留每个站点最近一次探测错误；hover 提示展示 Last error，右键菜单提供 Copy error（无错误时 disabled）。
@@ -137,6 +138,7 @@
   - 顶栏图标按钮（Filter / Sort / Reveal in Finder）采用统一的 `SidebarIconButton` 与 `SidebarMenuIconButton` 视图（标准 22x22 尺寸、5pt 圆角、平滑 hover 悬浮高亮与 active 激活态），保持整个右侧边栏 Header 按钮语言高度统一。
   - 新增文件排序功能：顶栏增加排序按钮（`arrow.up.arrow.down`），支持按文件名 (`File Name`)、修改时间 (`Modification Date`) 及文件大小 (`Size`) 排序，并支持切换升序 (`Ascending`) / 降序 (`Descending`)，目录始终保持顶部排列，排序设置持久化保存。
   - 文件夹 Hover 增强：悬停文件夹行时，右侧除了 `Size` 按钮外，新增新建文件夹（`+`）按钮，点击后自动展开该目录并进入内联新建文件夹草稿行。
+  - 文件快速预览器：采用无边框透明 `NSPanel`（`.borderless` / `.nonactivatingPanel`）替代 `NSPopover`，完全去除默认箭头与外边距瑕疵，右边缘紧贴文件目录树左界（留 6pt 缝隙）且垂直中心精确对齐选中行；显示内容极简紧凑（无文件名/尺寸栏与黑边），根据图片真实宽高比自适应充满卡片；动画设置为 `animates = false` 实现零延迟秒开秒切。多选、切换标签或选中非媒体文件时自动隐藏。
 - 新增独立图片处理功能模块 `kero/ImageBuild/`（Image Build）：
   - **尺寸调整**：保持原尺寸 / 百分比 / 指定宽高（可锁定比例）/ 最长边限制；Core Graphics 高质量缩放。
   - **格式转换**（目标四格式）：

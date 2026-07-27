@@ -6,25 +6,22 @@
 import Combine
 import Foundation
 
-/// 按项目持久化的纯文本笔记，文件落在配置目录 `notes/{projectId}.txt`。
-/// 与 `ProjectConfig` JSON 分离，避免大段笔记反复编解码配置。
+/// 按项目持久化的纯文本笔记，落在项目配置目录 `projects/{projectId}/note.txt`。
+/// 与 `ProjectConfig` JSON 分离，避免大段笔记反复编解码配置；关闭项目时随目录一并删除。
 @MainActor
 enum NoteStore {
-    private static var directoryURL: URL {
-        AppSettings.configURL.deletingLastPathComponent()
-            .appendingPathComponent("notes", isDirectory: true)
-    }
-
-    /// 读取项目笔记；无文件时返回空字符串。
+    /// 读取项目笔记；无文件时返回空字符串。会触发旧路径迁移。
     static func load(for id: UUID) -> String {
-        let url = fileURL(for: id)
+        // 借 ProjectConfigStore 的迁移逻辑把 `notes/{id}.txt` 搬进项目目录。
+        _ = ProjectConfigStore.load(for: id)
+        let url = ProjectConfigStore.noteFileURL(for: id)
         guard let data = try? Data(contentsOf: url) else { return "" }
         return String(data: data, encoding: .utf8) ?? ""
     }
 
     /// 原子写入项目笔记。空内容时删除文件，避免残留空笔记。
     static func save(_ text: String, for id: UUID) {
-        let url = fileURL(for: id)
+        let url = ProjectConfigStore.noteFileURL(for: id)
         do {
             if text.isEmpty {
                 if FileManager.default.fileExists(atPath: url.path) {
@@ -33,17 +30,14 @@ enum NoteStore {
                 return
             }
             try FileManager.default.createDirectory(
-                at: directoryURL, withIntermediateDirectories: true
+                at: ProjectConfigStore.projectDirectoryURL(for: id),
+                withIntermediateDirectories: true
             )
             guard let data = text.data(using: .utf8) else { return }
             try data.write(to: url, options: .atomic)
         } catch {
             NSLog("qjiao: failed to save note \(id): \(error)")
         }
-    }
-
-    private static func fileURL(for id: UUID) -> URL {
-        directoryURL.appendingPathComponent("\(id.uuidString).txt")
     }
 }
 
