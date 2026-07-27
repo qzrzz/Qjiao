@@ -12,6 +12,7 @@ import SwiftUI
 struct SessionInfoPanel: View {
     @ObservedObject var model: SessionInfoModel
     @ObservedObject var manager: TerminalManager
+    let projectID: UUID
     let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
     let openPackageJSON: () -> Void
 
@@ -33,25 +34,38 @@ struct SessionInfoPanel: View {
                         LazyVStack(alignment: .leading, spacing: 1) {
                             TopToolsOpenSection(path: model.cwdPath, manager: manager)
                             PackageScriptsSection(
+                                projectID: projectID,
+                                directory: model.cwdPath,
                                 scripts: model.packageScripts,
                                 records: manager.packageScriptRecords,
                                 isCollapsed: $packageScriptsCollapsed,
                                 runPackageScript: runPackageScript,
                                 stopPackageScript: { manager.stopPackageScript($0) },
-                                restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
+                                restartPackageScript: {
+                                    manager.restartPackageScript(
+                                        $0,
+                                        mode: $1,
+                                        directory: model.cwdPath
+                                    )
+                                },
                                 openPackageJSON: openPackageJSON
                             )
                             if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.cwdPath) {
                                 UniversalTasksSection(
                                     configuration: .gradle,
+                                    projectID: projectID,
+                                    defaultDirectory: model.cwdPath,
                                     scripts: model.gradleScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $gradleTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.cwdPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
@@ -61,14 +75,19 @@ struct SessionInfoPanel: View {
                             if !model.justScripts.isEmpty || JustScriptProvider.isJustProject(at: model.cwdPath) {
                                 UniversalTasksSection(
                                     configuration: .just,
+                                    projectID: projectID,
+                                    defaultDirectory: model.cwdPath,
                                     scripts: model.justScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $justTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.cwdPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
@@ -78,14 +97,19 @@ struct SessionInfoPanel: View {
                             if !model.cargoScripts.isEmpty || CargoScriptProvider.isCargoProject(at: model.cwdPath) {
                                 UniversalTasksSection(
                                     configuration: .cargo,
+                                    projectID: projectID,
+                                    defaultDirectory: model.cwdPath,
                                     scripts: model.cargoScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $cargoTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.cwdPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
@@ -95,14 +119,19 @@ struct SessionInfoPanel: View {
                             if !model.cmakeScripts.isEmpty || CMakeScriptProvider.isCMakeProject(at: model.cwdPath) {
                                 UniversalTasksSection(
                                     configuration: .cmake,
+                                    projectID: projectID,
+                                    defaultDirectory: model.cwdPath,
                                     scripts: model.cmakeScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $cmakeTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.cwdPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
@@ -112,14 +141,19 @@ struct SessionInfoPanel: View {
                             if !model.makefileScripts.isEmpty || MakefileScriptProvider.isMakefileProject(at: model.cwdPath) {
                                 UniversalTasksSection(
                                     configuration: .makefile,
+                                    projectID: projectID,
+                                    defaultDirectory: model.cwdPath,
                                     scripts: model.makefileScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $makefileTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.cwdPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)

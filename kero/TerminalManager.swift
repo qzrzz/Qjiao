@@ -368,43 +368,47 @@ final class TerminalManager: nonisolated ObservableObject {
     func checkPackageScriptStatus() {
         guard !packageScriptRecords.isEmpty else { return }
         let now = Date()
-        for (name, record) in packageScriptRecords where record.status == .running {
-            guard let project = selectedProject,
+        for (executionKey, record) in packageScriptRecords where record.status == .running {
+            guard let project = project(containingSessionID: record.sessionID),
                   let session = project.sessions.first(where: { $0.id == record.sessionID })
             else {
-                markScriptAsIdle(name, endedAt: now)
+                markScriptAsIdle(executionKey, endedAt: now)
                 continue
             }
 
             if session.hasExited {
-                markScriptAsIdle(name, endedAt: now)
+                markScriptAsIdle(executionKey, endedAt: now)
             } else if now.timeIntervalSince(record.startedAt) > 0.5 && !session.isForegroundCommandRunning {
                 // 运行超过 0.5 秒且前台命令已被 shell 释放（命令运行结束），判定为完成/停止
-                markScriptAsIdle(name, endedAt: now)
+                markScriptAsIdle(executionKey, endedAt: now)
             }
         }
         stopScriptCheckTimerIfEmpty()
     }
 
-    /// 用已采集到的监听端口更新 script 的 boundPort 绑定
-    func updatePackageScriptPorts(with ports: [SidebarProbe.PortItem]) {
+    /// 用指定 Shell 集合的最新监听端口更新脚本绑定；端口消失时同步清空旧值。
+    func updatePackageScriptPorts(
+        with ports: [SidebarProbe.PortItem],
+        shellPids: [pid_t]
+    ) {
         guard !packageScriptRecords.isEmpty else { return }
-        for (name, record) in packageScriptRecords where record.status == .running {
-            guard let project = selectedProject,
+        let refreshedShellPids = Set(shellPids.filter { $0 > 0 })
+        for (executionKey, record) in packageScriptRecords where record.status == .running {
+            guard let project = project(containingSessionID: record.sessionID),
                   let session = project.sessions.first(where: { $0.id == record.sessionID }),
-                  let shellPid = session.shellPid
+                  let shellPid = session.shellPid,
+                  refreshedShellPids.contains(shellPid)
             else { continue }
 
             // 检查监听端口 PID 是否属于此 session shellPid
             let foregroundPid = session.isInitialized ? session.terminalView.foregroundPid : nil
-            if let matchedPort = ports.first(where: { $0.pid == shellPid || $0.pid == foregroundPid })?.port {
-                if packageScriptRecords[name]?.boundPort != matchedPort {
-                    packageScriptRecords[name]?.boundPort = matchedPort
-                }
-            } else if ports.count == 1, let firstPort = ports.first?.port {
-                if packageScriptRecords[name]?.boundPort != firstPort {
-                    packageScriptRecords[name]?.boundPort = firstPort
-                }
+            let matchedPort = ports.first(where: {
+                $0.rootShellPid == shellPid
+                    || $0.pid == shellPid
+                    || $0.pid == foregroundPid
+            })?.port
+            if packageScriptRecords[executionKey]?.boundPort != matchedPort {
+                packageScriptRecords[executionKey]?.boundPort = matchedPort
             }
         }
     }
@@ -415,6 +419,7 @@ final class TerminalManager: nonisolated ObservableObject {
         var updated = record
         updated.status = .idle
         updated.lastDuration = elapsed
+        updated.boundPort = nil
         packageScriptRecords[scriptKey] = updated
     }
 
@@ -427,7 +432,15 @@ final class TerminalManager: nonisolated ObservableObject {
         let resolvedDirectory = !script.directory.isEmpty ? script.directory : (project.projectDirectory.isEmpty ? (selectedSession?.currentDirectoryPath ?? "") : project.projectDirectory)
         guard !resolvedDirectory.isEmpty else { return }
 
-        let scriptKey = script.name
+        let trackedScript = UniversalProjectScript(
+            name: script.name,
+            command: script.command,
+            category: script.category,
+            directory: resolvedDirectory,
+            depends: script.depends,
+            scriptDescription: script.scriptDescription
+        )
+        let scriptKey = trackedScript.executionKey(projectID: project.id)
         if let existing = packageScriptRecords[scriptKey], existing.status == .running {
             stopPackageScript(scriptKey)
         }
@@ -439,7 +452,7 @@ final class TerminalManager: nonisolated ObservableObject {
 
         let oldLastDuration = packageScriptRecords[scriptKey]?.lastDuration
         let record = UniversalScriptExecutionRecord(
-            script: script,
+            script: trackedScript,
             sessionID: session.id,
             startedAt: Date(),
             status: .running,
@@ -502,17 +515,33 @@ final class TerminalManager: nonisolated ObservableObject {
         session.sendCommandWhenReady(command + "\n")
     }
 
-    /// 停止指定的 package script
-    func stopPackageScript(_ scriptName: String) {
-        guard let record = packageScriptRecords[scriptName], record.status == .running else { return }
-        packageScriptRecords[scriptName]?.status = .stopping
+    /// 按唯一执行键停止脚本，避免同名任务跨项目互相影响。
+    func stopPackageScript(_ executionKey: String) {
+        guard let record = packageScriptRecords[executionKey], record.status == .running else {
+            return
+        }
+        packageScriptRecords[executionKey]?.status = .stopping
 
-        guard let project = selectedProject else { return }
+        guard let project = project(containingSessionID: record.sessionID) else { return }
         if let session = project.sessions.first(where: { $0.id == record.sessionID }) {
             project.closeContent(.session(session), terminate: true)
         }
 
-        markScriptAsIdle(scriptName, endedAt: Date())
+        markScriptAsIdle(executionKey, endedAt: Date())
+    }
+
+    /// 停止当前项目中的通用任务。
+    func stopProjectScript(
+        _ script: UniversalProjectScript,
+        fallbackDirectory: String = ""
+    ) {
+        guard let project = selectedProject else { return }
+        stopPackageScript(
+            script.executionKey(
+                projectID: project.id,
+                fallbackDirectory: fallbackDirectory
+            )
+        )
     }
 
     /// 重新运行指定的 package script（先停止，再启动）
@@ -521,9 +550,31 @@ final class TerminalManager: nonisolated ObservableObject {
         mode: PackageScriptRunMode = .normal,
         directory: String? = nil
     ) {
-        stopPackageScript(scriptName)
+        guard let project = selectedProject else { return }
+        let resolvedDirectory = directory
+            ?? (!project.projectDirectory.isEmpty
+                ? project.projectDirectory
+                : (selectedSession?.currentDirectoryPath ?? ""))
+        let executionKey = UniversalProjectScript.executionKey(
+            projectID: project.id,
+            category: .npm,
+            name: scriptName,
+            directory: resolvedDirectory
+        )
+        stopPackageScript(executionKey)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.runPackageScript(scriptName, mode: mode, directory: directory)
+            self?.runPackageScript(
+                scriptName,
+                mode: mode,
+                directory: resolvedDirectory
+            )
+        }
+    }
+
+    /// 查找脚本 Session 所属项目；脚本运行状态不能依赖当前选中的项目。
+    private func project(containingSessionID sessionID: UUID) -> Project? {
+        projects.first { project in
+            project.sessions.contains { $0.id == sessionID }
         }
     }
 

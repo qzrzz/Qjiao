@@ -239,25 +239,38 @@ struct ProjectPanel: View {
                                 runAllCommands: runAllLaunchCommands
                             )
                             PackageScriptsSection(
+                                projectID: project.id,
+                                directory: model.rootPath,
                                 scripts: model.packageScripts,
                                 records: manager.packageScriptRecords,
                                 isCollapsed: $packageScriptsCollapsed,
                                 runPackageScript: runPackageScript,
                                 stopPackageScript: { manager.stopPackageScript($0) },
-                                restartPackageScript: { manager.restartPackageScript($0, mode: $1) },
+                                restartPackageScript: {
+                                    manager.restartPackageScript(
+                                        $0,
+                                        mode: $1,
+                                        directory: model.rootPath
+                                    )
+                                },
                                 openPackageJSON: openPackageJSON
                             )
                             if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.rootPath) {
                                 UniversalTasksSection(
                                     configuration: .gradle,
+                                    projectID: project.id,
+                                    defaultDirectory: model.rootPath,
                                     scripts: model.gradleScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $gradleTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.rootPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
@@ -267,14 +280,19 @@ struct ProjectPanel: View {
                             if !model.justScripts.isEmpty || JustScriptProvider.isJustProject(at: model.rootPath) {
                                 UniversalTasksSection(
                                     configuration: .just,
+                                    projectID: project.id,
+                                    defaultDirectory: model.rootPath,
                                     scripts: model.justScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $justTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.rootPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
@@ -284,14 +302,19 @@ struct ProjectPanel: View {
                             if !model.cargoScripts.isEmpty || CargoScriptProvider.isCargoProject(at: model.rootPath) {
                                 UniversalTasksSection(
                                     configuration: .cargo,
+                                    projectID: project.id,
+                                    defaultDirectory: model.rootPath,
                                     scripts: model.cargoScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $cargoTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.rootPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
@@ -301,14 +324,19 @@ struct ProjectPanel: View {
                             if !model.cmakeScripts.isEmpty || CMakeScriptProvider.isCMakeProject(at: model.rootPath) {
                                 UniversalTasksSection(
                                     configuration: .cmake,
+                                    projectID: project.id,
+                                    defaultDirectory: model.rootPath,
                                     scripts: model.cmakeScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $cmakeTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.rootPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
@@ -318,14 +346,19 @@ struct ProjectPanel: View {
                             if !model.makefileScripts.isEmpty || MakefileScriptProvider.isMakefileProject(at: model.rootPath) {
                                 UniversalTasksSection(
                                     configuration: .makefile,
+                                    projectID: project.id,
+                                    defaultDirectory: model.rootPath,
                                     scripts: model.makefileScripts,
                                     records: manager.packageScriptRecords,
                                     isCollapsed: $makefileTasksCollapsed,
                                     runScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
                                     },
-                                    stopScript: { scriptName in
-                                        manager.stopPackageScript(scriptName)
+                                    stopScript: { script in
+                                        manager.stopProjectScript(
+                                            script,
+                                            fallbackDirectory: model.rootPath
+                                        )
                                     },
                                     restartScript: { script, mode in
                                         manager.runProjectScript(script, mode: mode)
@@ -1014,6 +1047,5 @@ struct EditorDropdownNSButton: NSViewRepresentable {
         }
     }
 }
-
 
 

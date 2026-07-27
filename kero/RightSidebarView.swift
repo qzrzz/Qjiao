@@ -137,7 +137,23 @@ struct RightSidebarView: View {
         // session.workingDirectory); resync at once instead of waiting for the
         // next refreshTimer tick, which is what made the panel lag the change.
         .onChange(of: manager.selectedSession?.workingDirectory) { syncModels() }
-        .onChange(of: manager.selectedProject?.id) { syncNoteBinding() }
+        .onChange(of: manager.selectedProject?.id) {
+            syncModels()
+            syncNoteBinding()
+        }
+        // 后台 ps/lsof 完成后立即把端口绑定到脚本行，不再等待下一轮 2s Timer。
+        .onChange(of: projectInfo.ports) {
+            manager.updatePackageScriptPorts(
+                with: projectInfo.ports,
+                shellPids: manager.selectedProject?.sessions.compactMap(\.shellPid) ?? []
+            )
+        }
+        .onChange(of: sessionInfo.ports) {
+            manager.updatePackageScriptPorts(
+                with: sessionInfo.ports,
+                shellPids: [manager.selectedSession?.shellPid].compactMap { $0 }
+            )
+        }
         .onChange(of: bottomTabRaw) {
             syncSystemPolling()
             // 离开 Note tab 时立即写盘。
@@ -251,22 +267,25 @@ struct RightSidebarView: View {
                 )
             }
         case .info:
-            SessionInfoPanel(
-                model: sessionInfo,
-                manager: manager,
-                runPackageScript: { name, mode in
-                    manager.runPackageScript(
-                        name, mode: mode, directory: sessionInfo.cwdPath
-                    )
-                },
-                openPackageJSON: {
-                    let root = sessionInfo.cwdPath
-                    guard !root.isEmpty else { return }
-                    manager.openFile(
-                        (root as NSString).appendingPathComponent("package.json")
-                    )
-                }
-            )
+            if let project = manager.selectedProject {
+                SessionInfoPanel(
+                    model: sessionInfo,
+                    manager: manager,
+                    projectID: project.id,
+                    runPackageScript: { name, mode in
+                        manager.runPackageScript(
+                            name, mode: mode, directory: sessionInfo.cwdPath
+                        )
+                    },
+                    openPackageJSON: {
+                        let root = sessionInfo.cwdPath
+                        guard !root.isEmpty else { return }
+                        manager.openFile(
+                            (root as NSString).appendingPathComponent("package.json")
+                        )
+                    }
+                )
+            }
         case .files:
             FileTreePanel(
                 manager: manager,
@@ -490,10 +509,9 @@ struct RightSidebarView: View {
     }
 
     private func syncModels() {
-        manager.checkPackageScriptStatus()
         guard let project = manager.selectedProject, manager.isPanelVisible else { return }
         guard manager.panelTab != .start else { return }
-        guard let session = manager.selectedSession else { return }
+        let session = manager.selectedSession
         let cwdVisible = showsCWD
         if manager.panelTab == .files, cwdVisible, !wasCWDVisible {
             manager.panelTab = .cwd
@@ -512,23 +530,33 @@ struct RightSidebarView: View {
             let root = projectRoot(for: project, fallback: session)
             let shellPids = project.sessions.compactMap(\.shellPid)
             projectInfo.sync(root: root, shellPids: shellPids)
-            manager.updatePackageScriptPorts(with: projectInfo.ports)
         case .info:
             // 当前终端 cwd 的 scripts + 本 session 进程/端口。
+            guard let session else { return }
             sessionInfo.sync(
                 cwd: session.currentDirectoryPath,
                 shellName: session.shellName,
                 shellPid: session.shellPid
             )
-        case .files: fileTree.sync(root: projectRoot(for: project, fallback: session))
-        case .cwd: fileTree.sync(root: session.currentDirectoryPath)
-        case .git: git.sync(root: session.currentDirectoryPath)
+        case .files:
+            fileTree.sync(root: projectRoot(for: project, fallback: session))
+        case .cwd:
+            guard let session else { return }
+            fileTree.sync(root: session.currentDirectoryPath)
+        case .git:
+            guard let session else { return }
+            git.sync(root: session.currentDirectoryPath)
         }
     }
 
     /// 项目配置尚未写入目录时，使用当前终端目录作为一次性回退值。
-    private func projectRoot(for project: Project, fallback session: TerminalSession) -> String {
-        project.projectDirectory.isEmpty ? session.currentDirectoryPath : project.projectDirectory
+    private func projectRoot(
+        for project: Project,
+        fallback session: TerminalSession?
+    ) -> String {
+        project.projectDirectory.isEmpty
+            ? (session?.currentDirectoryPath ?? "")
+            : project.projectDirectory
     }
 
     /// 只有项目目录与当前终端目录不同时才显示 CWD 面板。

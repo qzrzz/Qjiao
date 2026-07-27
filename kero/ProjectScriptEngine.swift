@@ -102,6 +102,28 @@ public struct UniversalProjectScript: Identifiable, Equatable, Hashable {
         self.depends = depends
         self.scriptDescription = scriptDescription
     }
+
+    /// 为跨项目、跨目录和跨工具的执行状态生成稳定唯一键。
+    public func executionKey(projectID: UUID, fallbackDirectory: String = "") -> String {
+        let effectiveDirectory = directory.isEmpty ? fallbackDirectory : directory
+        return Self.executionKey(
+            projectID: projectID,
+            category: category,
+            name: name,
+            directory: effectiveDirectory
+        )
+    }
+
+    /// npm 等尚未构造通用脚本对象的调用点共用的执行状态键。
+    public static func executionKey(
+        projectID: UUID,
+        category: ProjectScriptCategory,
+        name: String,
+        directory: String
+    ) -> String {
+        let normalizedDirectory = URL(fileURLWithPath: directory).standardizedFileURL.path
+        return "\(projectID.uuidString)|\(category.rawValue)|\(name)@\(normalizedDirectory)"
+    }
 }
 
 // MARK: - 运行模式与状态
@@ -925,6 +947,7 @@ public enum CargoConfigParser {
 
 public struct CargoFileState: Equatable {
     public let isCargoProject: Bool
+    public let manifestModDate: Date?
     public let configModDate: Date?
 }
 
@@ -946,11 +969,20 @@ public struct CargoScriptProvider: ProjectScriptProvider {
     /// - Parameter directory: 工程路径
     /// - Returns: CargoFileState
     public static func cargoFileState(directory: String) -> CargoFileState {
-        guard !directory.isEmpty else { return CargoFileState(isCargoProject: false, configModDate: nil) }
+        guard !directory.isEmpty else {
+            return CargoFileState(
+                isCargoProject: false,
+                manifestModDate: nil,
+                configModDate: nil
+            )
+        }
         let fm = FileManager.default
         let rootURL = URL(fileURLWithPath: directory)
 
-        let hasCargoToml = fm.fileExists(atPath: rootURL.appendingPathComponent("Cargo.toml").path)
+        let manifestPath = rootURL.appendingPathComponent("Cargo.toml").path
+        let manifestModDate = (
+            try? fm.attributesOfItem(atPath: manifestPath)
+        )?[.modificationDate] as? Date
         var modDate: Date? = nil
 
         for name in [".cargo/config.toml", ".cargo/config"] {
@@ -962,8 +994,12 @@ public struct CargoScriptProvider: ProjectScriptProvider {
             }
         }
 
-        let isCargo = hasCargoToml || modDate != nil
-        return CargoFileState(isCargoProject: isCargo, configModDate: modDate)
+        let isCargo = manifestModDate != nil || modDate != nil
+        return CargoFileState(
+            isCargoProject: isCargo,
+            manifestModDate: manifestModDate,
+            configModDate: modDate
+        )
     }
 
     /// 判断指定目录是否为 Cargo/Rust 项目

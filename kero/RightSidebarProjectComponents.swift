@@ -638,6 +638,8 @@ struct PackageInfoSection: View {
 
 /// npm scripts 列表；scriptsRoot 仅用于空状态文案区分。
 struct PackageScriptsSection: View {
+    let projectID: UUID
+    let directory: String
     let scripts: [SidebarProbe.PackageScript]
     let records: [String: TerminalManager.PackageScriptExecutionRecord]
     @Binding var isCollapsed: Bool
@@ -661,9 +663,15 @@ struct PackageScriptsSection: View {
                     sidebarEmptyRow("No package scripts in package.json")
                 } else {
                     ForEach(scripts) { script in
+                        let executionKey = UniversalProjectScript.executionKey(
+                            projectID: projectID,
+                            category: .npm,
+                            name: script.name,
+                            directory: directory
+                        )
                         PackageScriptRow(
                             script: script,
-                            record: records[script.name],
+                            record: records[executionKey],
                             isSelected: selectedScriptName == script.name,
                             onSelect: {
                                 selectedScriptName = script.name
@@ -677,7 +685,7 @@ struct PackageScriptsSection: View {
                                 runPackageScript(script.name, mode)
                             },
                             stop: {
-                                stopPackageScript(script.name)
+                                stopPackageScript(executionKey)
                             },
                             restart: { mode in
                                 selectedScriptName = script.name
@@ -939,11 +947,13 @@ struct UniversalTasksSectionConfiguration {
 /** Gradle、Just、Cargo、CMake 与 Makefile 共用的任务分组。 */
 struct UniversalTasksSection: View {
     let configuration: UniversalTasksSectionConfiguration
+    let projectID: UUID
+    let defaultDirectory: String
     let scripts: [UniversalProjectScript]
     let records: [String: TerminalManager.PackageScriptExecutionRecord]
     @Binding var isCollapsed: Bool
     let runScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
-    let stopScript: (String) -> Void
+    let stopScript: (UniversalProjectScript) -> Void
     let restartScript: (UniversalProjectScript, UniversalScriptRunMode) -> Void
 
     @State private var selectedScriptName: String? = nil
@@ -976,9 +986,13 @@ struct UniversalTasksSection: View {
 
     /** 统一构建任务行的选择、运行、停止和重启回调。 */
     private func scriptRow(_ script: UniversalProjectScript) -> some View {
-        UniversalScriptRow(
+        let executionKey = script.executionKey(
+            projectID: projectID,
+            fallbackDirectory: defaultDirectory
+        )
+        return UniversalScriptRow(
             script: script,
-            record: records[script.name],
+            record: records[executionKey],
             isSelected: selectedScriptName == script.name,
             onSelect: {
                 selectedScriptName = script.name
@@ -992,7 +1006,7 @@ struct UniversalTasksSection: View {
                 runScript(script, mode)
             },
             stop: {
-                stopScript(script.name)
+                stopScript(script)
             },
             restart: { mode in
                 selectedScriptName = script.name

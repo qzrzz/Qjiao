@@ -30,19 +30,16 @@ final class ProjectPanelModel: nonisolated ObservableObject {
     @Published private(set) var sessionShellCount = 0
 
     private var packageRoot = ""
-    private var packageFileState: SidebarProbe.PackageFileState?
-    private var gradleFileState: GradleFileState?
-    private var justFileState: JustFileState?
-    private var cargoFileState: CargoFileState?
-    private var cmakeFileState: CMakeFileState?
-    private var makefileFileState: MakefileFileState?
+    private var scriptFileState: SidebarScriptFileState?
     private var packageLoadID = UUID()
+    private var packageLoadTask: Task<Void, Never>?
 
     /// 当前用于进程聚合的 shell pid 集合（有序，便于比较）。
     private var shellPids: [pid_t] = []
     private var isRefreshingProcesses = false
     /// 每次启动采集递增，丢弃过期结果。
     private var processGeneration = 0
+    private var processTask: Task<Void, Never>?
 
     /// - Parameters:
     ///   - root: 项目根路径
@@ -54,6 +51,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         if pidsChanged {
             self.shellPids = unique
             sessionShellCount = unique.count
+            clearProcessData()
         }
         syncPackageScripts(root: root)
         // pid 集合变化或定时轮询都会走到这里；始终刷新进程视图。
@@ -78,84 +76,48 @@ final class ProjectPanelModel: nonisolated ObservableObject {
     private func syncPackageScripts(root: String, force: Bool = false) {
         guard !root.isEmpty else {
             packageRoot = ""
-            packageFileState = nil
-            gradleFileState = nil
-            justFileState = nil
-            cargoFileState = nil
-            cmakeFileState = nil
-            makefileFileState = nil
-            if packageInfo != nil { packageInfo = nil }
-            if !packageScripts.isEmpty { packageScripts = [] }
-            if !gradleScripts.isEmpty { gradleScripts = [] }
-            if !justScripts.isEmpty { justScripts = [] }
-            if !cargoScripts.isEmpty { cargoScripts = [] }
-            if !cmakeScripts.isEmpty { cmakeScripts = [] }
-            if !makefileScripts.isEmpty { makefileScripts = [] }
+            scriptFileState = nil
+            packageLoadID = UUID()
+            packageLoadTask?.cancel()
+            clearScriptData()
             return
         }
 
-        let state = SidebarProbe.packageFileState(directory: root)
-        let gState = GradleScriptProvider.gradleFileState(directory: root)
-        let jState = JustScriptProvider.justFileState(directory: root)
-        let cState = CargoScriptProvider.cargoFileState(directory: root)
-        let cmState = CMakeScriptProvider.cmakeFileState(directory: root)
-        let mkState = MakefileScriptProvider.makefileFileState(directory: root)
+        let state = SidebarPanelDataLoader.fileState(directory: root)
+        let rootChanged = packageRoot != root
 
         let needsSync = force
-            || packageRoot != root
-            || packageFileState != state
-            || gradleFileState != gState
-            || justFileState != jState
-            || cargoFileState != cState
-            || cmakeFileState != cmState
-            || makefileFileState != mkState
-            || (gState.isGradleProject && gradleScripts.isEmpty)
-            || (jState.hasJustfile && justScripts.isEmpty)
-            || (cState.isCargoProject && cargoScripts.isEmpty)
-            || (cmState.isCMakeProject && cmakeScripts.isEmpty)
-            || (mkState.hasMakefile && makefileScripts.isEmpty)
+            || rootChanged
+            || scriptFileState != state
+            || (state.gradle.isGradleProject && gradleScripts.isEmpty)
+            || (state.just.hasJustfile && justScripts.isEmpty)
+            || (state.cargo.isCargoProject && cargoScripts.isEmpty)
+            || (state.cmake.isCMakeProject && cmakeScripts.isEmpty)
+            || (state.makefile.hasMakefile && makefileScripts.isEmpty)
 
         guard needsSync else { return }
 
         packageRoot = root
-        packageFileState = state
-        gradleFileState = gState
-        justFileState = jState
-        cargoFileState = cState
-        cmakeFileState = cmState
-        makefileFileState = mkState
+        scriptFileState = state
+        if rootChanged {
+            clearScriptData()
+        }
         let loadID = UUID()
         packageLoadID = loadID
+        packageLoadTask?.cancel()
 
-        guard state.exists || gState.isGradleProject || jState.hasJustfile || cState.isCargoProject || cmState.isCMakeProject || mkState.hasMakefile else {
-            if packageInfo != nil { packageInfo = nil }
-            if !packageScripts.isEmpty { packageScripts = [] }
-            if !gradleScripts.isEmpty { gradleScripts = [] }
-            if !justScripts.isEmpty { justScripts = [] }
-            if !cargoScripts.isEmpty { cargoScripts = [] }
-            if !cmakeScripts.isEmpty { cmakeScripts = [] }
-            if !makefileScripts.isEmpty { makefileScripts = [] }
+        guard state.hasAnyProjectFile else {
+            clearScriptData()
             return
         }
 
-        Task.detached(priority: .utility) { [weak self] in
-            let info = SidebarProbe.loadPackageInfo(directory: root)
-            let scripts = SidebarProbe.loadPackageScripts(directory: root)
-            let gradle = await GradleScriptProvider().detectScripts(in: root)
-            let just = await JustScriptProvider().detectScripts(in: root)
-            let cargo = await CargoScriptProvider().detectScripts(in: root)
-            let cmake = await CMakeScriptProvider().detectScripts(in: root)
-            let makefile = await MakefileScriptProvider().detectScripts(in: root)
-            await MainActor.run {
-                guard let self, self.packageLoadID == loadID else { return }
-                if self.packageInfo != info { self.packageInfo = info }
-                if self.packageScripts != scripts { self.packageScripts = scripts }
-                if self.gradleScripts != gradle { self.gradleScripts = gradle }
-                if self.justScripts != just { self.justScripts = just }
-                if self.cargoScripts != cargo { self.cargoScripts = cargo }
-                if self.cmakeScripts != cmake { self.cmakeScripts = cmake }
-                if self.makefileScripts != makefile { self.makefileScripts = makefile }
-            }
+        packageLoadTask = Task.detached(priority: .utility) { [self] in
+            let catalog = await SidebarPanelDataLoader.load(
+                directory: root,
+                includePackageInfo: true
+            )
+            guard !Task.isCancelled else { return }
+            await apply(catalog, loadID: loadID)
         }
     }
 
@@ -182,19 +144,60 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         let generation = processGeneration
         let expectedPids = pids
 
-        Task.detached(priority: .utility) { [weak self] in
+        processTask?.cancel()
+        processTask = Task.detached(priority: .utility) { [self] in
             let (processes, ports) = SidebarProbe.collect(shellPids: expectedPids)
-            await MainActor.run {
-                guard let self else { return }
-                // 仅最新一轮写回；中间被 force 打断的旧结果丢弃。
-                if self.processGeneration == generation {
-                    self.isRefreshingProcesses = false
-                }
-                guard self.processGeneration == generation,
-                      self.shellPids == expectedPids else { return }
-                if self.processes != processes { self.processes = processes }
-                if self.ports != ports { self.ports = ports }
-            }
+            guard !Task.isCancelled else { return }
+            await apply(
+                processes: processes,
+                ports: ports,
+                generation: generation,
+                expectedPids: expectedPids
+            )
         }
+    }
+
+    /// 切换目录时立即清空旧目录内容，避免标题与列表来自不同项目。
+    private func clearScriptData() {
+        if packageInfo != nil { packageInfo = nil }
+        if !packageScripts.isEmpty { packageScripts = [] }
+        if !gradleScripts.isEmpty { gradleScripts = [] }
+        if !justScripts.isEmpty { justScripts = [] }
+        if !cargoScripts.isEmpty { cargoScripts = [] }
+        if !cmakeScripts.isEmpty { cmakeScripts = [] }
+        if !makefileScripts.isEmpty { makefileScripts = [] }
+    }
+
+    /// 只发布真正发生变化的目录解析结果。
+    private func apply(_ catalog: SidebarScriptCatalog, loadID: UUID) {
+        guard packageLoadID == loadID else { return }
+        if packageInfo != catalog.packageInfo { packageInfo = catalog.packageInfo }
+        if packageScripts != catalog.packageScripts { packageScripts = catalog.packageScripts }
+        if gradleScripts != catalog.gradleScripts { gradleScripts = catalog.gradleScripts }
+        if justScripts != catalog.justScripts { justScripts = catalog.justScripts }
+        if cargoScripts != catalog.cargoScripts { cargoScripts = catalog.cargoScripts }
+        if cmakeScripts != catalog.cmakeScripts { cmakeScripts = catalog.cmakeScripts }
+        if makefileScripts != catalog.makefileScripts { makefileScripts = catalog.makefileScripts }
+    }
+
+    /// PID 根变化时不再短暂展示上一项目的进程与端口。
+    private func clearProcessData() {
+        if !processes.isEmpty { processes = [] }
+        if !ports.isEmpty { ports = [] }
+    }
+
+    /// 只接纳最新 PID 集合对应的后台结果。
+    private func apply(
+        processes newProcesses: [ProcessItem],
+        ports newPorts: [PortItem],
+        generation: Int,
+        expectedPids: [pid_t]
+    ) {
+        if processGeneration == generation {
+            isRefreshingProcesses = false
+        }
+        guard processGeneration == generation, shellPids == expectedPids else { return }
+        if processes != newProcesses { processes = newProcesses }
+        if ports != newPorts { ports = newPorts }
     }
 }

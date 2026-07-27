@@ -25,7 +25,7 @@ enum SidebarProbe {
         let repositoryUrl: String?
 
         /// 是否包含至少一项有效数据。
-        var hasContent: Bool {
+        nonisolated var hasContent: Bool {
             !(name?.isEmpty ?? true) || !(version?.isEmpty ?? true) || !(repositoryUrl?.isEmpty ?? true)
         }
     }
@@ -49,9 +49,11 @@ enum SidebarProbe {
     }
 
     struct PortItem: Identifiable, Equatable {
-        var id: String { "\(pid):\(port)" }
+        nonisolated var id: String { "\(pid):\(port)" }
         let port: Int
         let pid: pid_t
+        /// 该监听进程所属的终端 shell，用于精确绑定脚本状态。
+        let rootShellPid: pid_t
         let processName: String
 
         var url: URL? { URL(string: "http://localhost:\(port)/") }
@@ -96,11 +98,17 @@ enum SidebarProbe {
         // 按 shell 顺序 BFS，已见 pid 跳过（跨 session 共用子树时去重）。
         var processes: [ProcessItem] = []
         var seen = Set<pid_t>()
+        var rootByPid: [pid_t: pid_t] = Dictionary(
+            uniqueKeysWithValues: roots.map { ($0, $0) }
+        )
         for shellPid in roots {
             var queue = childPids[shellPid] ?? []
-            while !queue.isEmpty {
-                let pid = queue.removeFirst()
+            var queueIndex = 0
+            while queueIndex < queue.count {
+                let pid = queue[queueIndex]
+                queueIndex += 1
                 guard seen.insert(pid).inserted else { continue }
+                rootByPid[pid] = shellPid
                 if let item = itemsByPid[pid] {
                     processes.append(item)
                 }
@@ -109,7 +117,11 @@ enum SidebarProbe {
         }
 
         let portPids = roots + processes.map(\.pid)
-        let ports = listeningPorts(pids: portPids, itemsByPid: itemsByPid)
+        let ports = listeningPorts(
+            pids: portPids,
+            itemsByPid: itemsByPid,
+            rootByPid: rootByPid
+        )
         return (processes, ports)
     }
 
@@ -396,7 +408,9 @@ enum SidebarProbe {
     // MARK: - Private
 
     private nonisolated static func listeningPorts(
-        pids: [pid_t], itemsByPid: [pid_t: ProcessItem]
+        pids: [pid_t],
+        itemsByPid: [pid_t: ProcessItem],
+        rootByPid: [pid_t: pid_t]
     ) -> [PortItem] {
         guard !pids.isEmpty else { return [] }
         // 去重后再拼 -p，lsof 列表过长时仍只查相关 pid。
@@ -422,6 +436,7 @@ enum SidebarProbe {
                 let item = PortItem(
                     port: port,
                     pid: currentPid,
+                    rootShellPid: rootByPid[currentPid] ?? currentPid,
                     processName: itemsByPid[currentPid]?.name ?? "?"
                 )
                 if seen.insert(item.id).inserted {
@@ -439,17 +454,46 @@ enum SidebarProbe {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
 
-        let stdout = Pipe()
-        process.standardOutput = stdout
-        process.standardError = Pipe()
+        // 用临时文件承接输出，避免 ps 输出超过 Pipe 缓冲区时与 wait 互相阻塞。
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qjiao-sidebar-\(UUID().uuidString).log")
+        guard FileManager.default.createFile(atPath: outputURL.path, contents: nil),
+              let output = try? FileHandle(forWritingTo: outputURL)
+        else { return "" }
+        defer {
+            try? output.close()
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
 
         do {
             try process.run()
         } catch {
             return ""
         }
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+
+        // ps/lsof 正常应在毫秒级返回；同时响应 Task 取消，并设置 3 秒硬超时。
+        let deadline = Date().addingTimeInterval(3)
+        while finished.wait(timeout: .now() + 0.05) == .timedOut {
+            let isCancelled = withUnsafeCurrentTask { task in
+                task?.isCancelled ?? false
+            }
+            guard !isCancelled, Date() < deadline else {
+                process.terminate()
+                if finished.wait(timeout: .now() + 0.25) == .timedOut {
+                    Darwin.kill(process.processIdentifier, SIGKILL)
+                    _ = finished.wait(timeout: .now() + 0.5)
+                }
+                break
+            }
+        }
+
+        try? output.synchronize()
+        let data = (try? Data(contentsOf: outputURL)) ?? Data()
         return String(data: data, encoding: .utf8) ?? ""
     }
 }
