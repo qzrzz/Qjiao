@@ -52,7 +52,7 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
 
     private static let maxTextBytes = 5 << 20
     private static let imageExtensions: Set<String> = [
-        "png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp", "icns",
+        "png", "jpg", "jpeg", "gif", "heic", "webp", "jxl", "tiff", "bmp", "icns",
     ]
 
     init(path: String) {
@@ -955,6 +955,8 @@ struct ImageViewerView: View {
     @State private var hoveredGuideId: UUID? = nil
     /// 鼠标指针在容器窗口坐标系下的当前位置
     @State private var mousePosInContainer: CGPoint? = nil
+    /// 是否展示 ImageBuild 处理面板
+    @State private var showImageBuild: Bool = false
 
     /// 获取原图图像及磁盘元数据信息
     private var metadata: ImageMetadata {
@@ -1119,6 +1121,14 @@ struct ImageViewerView: View {
                             guard let win = event.window, win == NSApp.keyWindow || win == NSApp.mainWindow else {
                                 return event
                             }
+                            // Sheet / 模态对话框打开时不缩放，避免滚轮穿透
+                            if win.attachedSheet != nil { return event }
+                            if !win.sheets.isEmpty { return event }
+                            if event.window?.isSheet == true { return event }
+                            if NSApp.windows.contains(where: { $0.isSheet && $0.isVisible }) {
+                                return event
+                            }
+
                             let deltaY = event.deltaY
                             let deltaX = event.deltaX
                             guard abs(deltaY) > 0.01 || abs(deltaX) > 0.01 else { return event }
@@ -1191,6 +1201,18 @@ struct ImageViewerView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showImageBuild) {
+            ImageBuildView(
+                session: .fromViewer(path: file.path),
+                previewImage: image,
+                onDismiss: { outputPath in
+                    showImageBuild = false
+                    if let outputPath {
+                        NSWorkspace.shared.selectFile(outputPath, inFileViewerRootedAtPath: "")
+                    }
+                }
+            )
         }
     }
 
@@ -1403,7 +1425,25 @@ struct ImageViewerView: View {
 
         Divider()
 
-        // 7. 系统 Finder 联动、外部 App 打开与导出
+        // 7. ImageBuild：尺寸 / 格式 / 压缩
+        Button {
+            showImageBuild = true
+        } label: {
+            Label {
+                Text("Image Build…")
+            } icon: {
+                Image("ImageBuild")
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+            }
+        }
+        .disabled(file.path.isEmpty)
+
+        Divider()
+
+        // 8. 系统 Finder 联动、外部 App 打开与导出
         Button {
             openInDefaultApp()
         } label: {
@@ -2357,7 +2397,22 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
-            // 6. 标尺与参考线控制下拉菜单
+            // 6. ImageBuild：尺寸 / 格式转换 / 压缩
+            ModernToolbarButton(
+                isActive: showImageBuild,
+                helpText: "Image Build — 尺寸 / 格式 / 压缩"
+            ) {
+                showImageBuild = true
+            } content: {
+                Image("ImageBuild")
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 13, height: 13)
+            }
+            .disabled(file.path.isEmpty)
+
+            // 7. 标尺与参考线控制下拉菜单
             ModernToolbarMenu(isActive: isRulerEnabled, helpText: "Rulers & Reference Guides") {
                 Toggle("Show Rulers", isOn: $isRulerEnabled)
                 Toggle("Show Guides", isOn: $isGuidesVisible)
@@ -2376,7 +2431,7 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
-            // 7. 背景模式下拉菜单
+            // 8. 背景模式下拉菜单
             ModernToolbarMenu(helpText: "Background Mode") {
                 Picker("Background Mode", selection: $backgroundMode) {
                     ForEach(ImageBackgroundMode.allCases) { mode in
@@ -2391,7 +2446,7 @@ struct ImageViewerView: View {
 
             Spacer(minLength: 4)
 
-            // 8. 响应式元数据数值信息栏 (在窄窗口下平滑自适应降级，绝对避免折行与文本重叠)
+            // 9. 响应式元数据数值信息栏 (在窄窗口下平滑自适应降级，绝对避免折行与文本重叠)
             AdaptiveImageMetadataView(metadata: metadata)
         }
         .padding(.horizontal, 10)

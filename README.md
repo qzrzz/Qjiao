@@ -131,7 +131,22 @@
 - 右侧栏 Project 面板增加 PACKAGE 分组：双行紧凑布局（首行包名与右侧独占仓库跳转图标按钮，次行版本号与 SemVer `[+]` 递增按钮及 `MAJOR` / `MINOR` / `PATCH` / `Git tag` 下拉菜单）；点击快速递增并改写 `package.json` 中的 `version` 字段或生成 Git 标签；若未检测到 `package.json` 或无有效字段则自动隐藏该分组。
 - 重构右侧栏代码结构：`RightSidebarView` 只保留侧栏框架与面板调度，Files、Git、Project、Info 及公共视图按职责拆分；Gradle / Just / Cargo / CMake / Makefile 任务分组统一复用同一组件与交互逻辑。
 - 优化 Project / Info 信息刷新机制：共用脚本目录采集器并并行解析各类任务；项目配置改为文件事件监听，面板每次显示、切换到对应标签或手动点击刷新时强制重新载入，不再通过 2 秒轮询读取文件（定时器仅刷新进程与端口）；切换项目、CWD 或 Session 时立即清理旧列表并取消过期任务；`ps` / `lsof` 支持取消与 3 秒超时。脚本状态使用「项目 + 工具 + 目录 + 名称」唯一键，端口按所属 Shell 精确绑定并在采集完成后即时更新；刷新按钮支持 hover 高亮，刷新期间图标旋转并禁止重复点击。修复 Info 端口按钮不更新、`Cargo.toml` 修改后任务列表不刷新，以及 Project 刷新时版本输入框旧草稿覆盖并阻止重新加载 `package.json` 版本号的问题；版本输入框仅在内容实际改变后于 Enter 或失焦时写盘。
-- 修复终端在窗口尺寸改变（Live Resize）时位置跳动与闪烁：禁用 Ghostty `window-padding-balance`（设为 `false`），锁定 Top/Left Padding 恒定，使余数像素统一在底部与右侧吸收，彻底解决 Resize 窗口时文本向上/向下剧烈位移震荡的问题。
+- 优化 Git 面板：展开收起的分组控件（MERGE CHANGES、STAGED CHANGES、CHANGES、RECENT COMMITS），展开内容添加与 Project 面板一致的左边距（`SidebarPanelMetrics.expandedContentLeading`）；Header 按钮统一添加 Hover 悬浮底色高亮，刷新按钮使用与 Project/Info 面板一致的 `SidebarRefreshButton` 带来平滑 360° 转圈动画；统一分组 Header (`SidebarSectionHeader`) 与文件变更行 (`GitEntryRow`) 右侧操作按钮 (`↰` 撤销 / `+` 暂存) 的 18x18 尺寸、4pt 间距与 8pt 右边距，实现两条操作按钮列点对点的精准垂直对齐。
+- 优化 Git Commit 编辑功能：核心实现封装于独立文件 `GitCommitEditor.swift`，支持编辑任意历史 Commit Message (Reword)、修改作者/邮箱 (Author)、修补合并暂存改动 (Fixup/Amend) 以及丢弃提交 (Drop)；可在 Git 面板 Recent Commits 的右键菜单与极简编辑弹窗中直接交互并自动刷新状态；`Recent Commits` 行增加 Hover 悬浮圆角背景高亮，并开启 `.textSelection(.enabled)` 允许选中文本。
+- 优化 FilesTree 面板：
+  - 顶栏图标按钮（Filter / Sort / Reveal in Finder）采用统一的 `SidebarIconButton` 与 `SidebarMenuIconButton` 视图（标准 22x22 尺寸、5pt 圆角、平滑 hover 悬浮高亮与 active 激活态），保持整个右侧边栏 Header 按钮语言高度统一。
+  - 新增文件排序功能：顶栏增加排序按钮（`arrow.up.arrow.down`），支持按文件名 (`File Name`)、修改时间 (`Modification Date`) 及文件大小 (`Size`) 排序，并支持切换升序 (`Ascending`) / 降序 (`Descending`)，目录始终保持顶部排列，排序设置持久化保存。
+  - 文件夹 Hover 增强：悬停文件夹行时，右侧除了 `Size` 按钮外，新增新建文件夹（`+`）按钮，点击后自动展开该目录并进入内联新建文件夹草稿行。
+- 新增独立图片处理功能模块 `kero/ImageBuild/`（Image Build）：
+  - **尺寸调整**：保持原尺寸 / 百分比 / 指定宽高（可锁定比例）/ 最长边限制；Core Graphics 高质量缩放。
+  - **格式转换**（目标四格式）：
+    - **PNG** → ImageIO 写出 + `oxipng`（可选 `pngquant`）
+    - **JPG** → `cjpegli`（失败回退 ImageIO）
+    - **WebP** → `VendorBin/cwebp`（自包含）；同目录另有 `dwebp` / `img2webp` / `webpinfo` / `webp_quality`
+    - **JXL** → `VendorBin/cjxl` / `djxl` / `jxlinfo`（从 [libjxl](https://github.com/libjxl/libjxl) `v0.12.0` 静态编译，仅链系统库；`scripts/vendor-jxl.sh` 可复现构建；macOS ImageIO 不能写 JXL）
+  - 工具定位：`VendorBin` Bundle → 源码 `kero/VendorBin` → Homebrew → `which`。
+  - 图片查看器顶栏 / 右键 **Image Build…**（资源图标 `ImageBuild`）打开处理面板；Files 树多选图片右键亦可进入。
+  - Image Build：**统一批量**（1 张或 N 张输入 × 导出变体表）；默认导出 `1x` + `_build`，用户修改后会记住；尺寸可输入或下拉（0.5x…4x、16w…512w、`1024x1024`，并支持 `100x200` 宽×高）+ 后缀；压缩 **简单** / **高级**；对话框内滚轮不穿透。
 
 ## 上游移植记录
 

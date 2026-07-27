@@ -79,6 +79,7 @@ struct SidebarView: View {
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
                 }
+                .scrollIndicators(.never)
             }
 
             // 左侧边栏底部的项目归档区：通常收起，可展开显示归档列表
@@ -438,29 +439,36 @@ private struct SidebarProjectRow: View {
     }
 
     private var rowContent: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ProjectIconView(icon: project.icon, isSelected: isSelected)
 
-            VStack(alignment: .leading, spacing: 1) {
-                if isRenaming {
-                    TextField("", text: $renameDraft)
-                        .textFieldStyle(.plain)
-                        .font(SidebarTypography.body(.medium))
-                        .focused($renameFocused)
-                        .onSubmit(commitRename)
-                        .onExitCommand { isRenaming = false }
-                        .onChange(of: renameFocused) {
-                            if !renameFocused, isRenaming {
-                                commitRename()
-                            }
+            if isRenaming {
+                TextField("", text: $renameDraft)
+                    .textFieldStyle(.plain)
+                    .font(SidebarTypography.body(.medium))
+                    .focused($renameFocused)
+                    .onSubmit(commitRename)
+                    .onExitCommand { isRenaming = false }
+                    .onChange(of: renameFocused) {
+                        if !renameFocused, isRenaming {
+                            commitRename()
                         }
-                } else {
+                    }
+            } else if project.isArchived {
+                // 已归档项目：单行精简展示项目名称，隐藏第二行副标题
+                Text(project.name)
+                    .font(SidebarTypography.secondary())
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .lineLimit(1)
+            } else {
+                // 未归档项目：保持标准双行呈现（项目名 + 副标题）
+                VStack(alignment: .leading, spacing: 1) {
                     Text(project.name)
                         .font(SidebarTypography.body())
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .lineLimit(1)
+                    subtitle
                 }
-                subtitle
             }
 
             Spacer(minLength: 0)
@@ -498,7 +506,7 @@ private struct SidebarProjectRow: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.vertical, project.isArchived ? 3 : 6)
         .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 
@@ -765,11 +773,12 @@ private struct SidebarArchiveSection: View {
                             )
                         }
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
+            .clipped()
             .overlay(alignment: .top) {
                 Rectangle()
                     .fill(Color(nsColor: Theme.divider).opacity(0.6))

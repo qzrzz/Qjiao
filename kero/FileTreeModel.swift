@@ -16,6 +16,15 @@ import Foundation
 /// 目录体积不在树刷新时计算（昂贵）；由用户 hover 点 Size 后按需异步统计。
 @MainActor
 final class FileTreeModel: nonisolated ObservableObject {
+    /// 文件排序依据
+    enum FileSortCriteria: String, CaseIterable, Identifiable {
+        case name
+        case date
+        case size
+
+        var id: String { rawValue }
+    }
+
     struct Item: Identifiable, Equatable {
         var id: String { path }
         let name: String
@@ -24,6 +33,8 @@ final class FileTreeModel: nonisolated ObservableObject {
         let depth: Int
         /// 普通文件的字节大小；目录与草稿行不计算，保持列表刷新廉价。
         let fileSize: UInt64?
+        /// 修改时间。
+        let modificationDate: Date?
         /// True for the transient inline "new file/folder" input row, which
         /// has no backing file yet.
         var isDraft = false
@@ -54,6 +65,21 @@ final class FileTreeModel: nonisolated ObservableObject {
     @Published private(set) var renamingPath: String?
     /// The pending new-file/folder input row, if any.
     @Published private(set) var draft: Draft?
+    /// 排序依据（默认按文件名）。
+    @Published private(set) var sortCriteria: FileSortCriteria = {
+        if let raw = UserDefaults.standard.string(forKey: "fileTreeSortCriteria"),
+           let criteria = FileSortCriteria(rawValue: raw) {
+            return criteria
+        }
+        return .name
+    }()
+    /// 排序方向（默认升序）。
+    @Published private(set) var sortAscending: Bool = {
+        if UserDefaults.standard.object(forKey: "fileTreeSortAscending") != nil {
+            return UserDefaults.standard.bool(forKey: "fileTreeSortAscending")
+        }
+        return true
+    }()
     private var expanded: Set<String> = []
     /// ⇧ 范围选择的锚点：最近一次普通单击或 ⌘ 点击的目标。
     private var selectionAnchorPath: String?
@@ -109,6 +135,26 @@ final class FileTreeModel: nonisolated ObservableObject {
             expanded.remove(item.path)
         }
         rebuild()
+    }
+
+    // MARK: - Sorting
+
+    func setSortCriteria(_ criteria: FileSortCriteria) {
+        guard sortCriteria != criteria else { return }
+        sortCriteria = criteria
+        UserDefaults.standard.set(criteria.rawValue, forKey: "fileTreeSortCriteria")
+        rebuild()
+    }
+
+    func setSortAscending(_ ascending: Bool) {
+        guard sortAscending != ascending else { return }
+        sortAscending = ascending
+        UserDefaults.standard.set(ascending, forKey: "fileTreeSortAscending")
+        rebuild()
+    }
+
+    func toggleSortAscending() {
+        setSortAscending(!sortAscending)
     }
 
     // MARK: - Selection
@@ -978,7 +1024,7 @@ final class FileTreeModel: nonisolated ObservableObject {
                 Item(
                     name: "", path: dir + "/\u{1}draft",
                     isDirectory: draft.isDirectory, depth: depth,
-                    fileSize: nil, isDraft: true
+                    fileSize: nil, modificationDate: nil, isDraft: true
                 )
             )
         }
@@ -992,20 +1038,23 @@ final class FileTreeModel: nonisolated ObservableObject {
                 var isDir: ObjCBool = false
                 fm.fileExists(atPath: path, isDirectory: &isDir)
                 let isDirectory = isDir.boolValue
-                // 仅读文件属性；目录体积需递归，不在树刷新路径上计算。
+                let attrs = try? fm.attributesOfItem(atPath: path)
                 let fileSize: UInt64? = {
                     guard !isDirectory else { return nil }
-                    let attrs = try? fm.attributesOfItem(atPath: path)
                     return (attrs?[.size] as? NSNumber)?.uint64Value
                 }()
+                let modificationDate = attrs?[.modificationDate] as? Date
                 return Item(
                     name: name, path: path, isDirectory: isDirectory,
-                    depth: depth, fileSize: fileSize
+                    depth: depth, fileSize: fileSize, modificationDate: modificationDate
                 )
             }
-            .sorted { a, b in
-                if a.isDirectory != b.isDirectory { return a.isDirectory }
-                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            .sorted { [weak self] a, b in
+                guard let self else {
+                    if a.isDirectory != b.isDirectory { return a.isDirectory }
+                    return a.name.localizedStandardCompare(b.name) == .orderedAscending
+                }
+                return self.compareItems(a, b)
             }
 
         for child in children {
@@ -1014,5 +1063,51 @@ final class FileTreeModel: nonisolated ObservableObject {
                 appendChildren(of: child.path, depth: depth + 1, into: &out)
             }
         }
+    }
+
+    /// 比较两个树项排序顺序（同级节点）。
+    private func compareItems(_ a: Item, _ b: Item) -> Bool {
+        // 1. 目录优先保持在最前
+        if a.isDirectory != b.isDirectory {
+            return a.isDirectory
+        }
+
+        // 2. 根据 sortCriteria 比较
+        let isAsc = sortAscending
+        switch sortCriteria {
+        case .name:
+            let cmp = a.name.localizedStandardCompare(b.name)
+            if cmp != .orderedSame {
+                return isAsc ? (cmp == .orderedAscending) : (cmp == .orderedDescending)
+            }
+
+        case .date:
+            let aDate = a.modificationDate ?? Date.distantPast
+            let bDate = b.modificationDate ?? Date.distantPast
+            if aDate != bDate {
+                return isAsc ? (aDate < bDate) : (aDate > bDate)
+            }
+
+        case .size:
+            let aSize = itemEffectiveSize(a)
+            let bSize = itemEffectiveSize(b)
+            if aSize != bSize {
+                return isAsc ? (aSize < bSize) : (aSize > bSize)
+            }
+        }
+
+        // 3. 次要排序：若主属性相同，退回按文件名升序排列（确保稳定排序）
+        return a.name.localizedStandardCompare(b.name) == .orderedAscending
+    }
+
+    /// 获取 Item 用于排序的有效大小：普通文件为 fileSize，目录若已就绪为 ready size，否则为 0。
+    private func itemEffectiveSize(_ item: Item) -> UInt64 {
+        if item.isDirectory {
+            if case .ready(let size) = folderSizeState(for: item.path) {
+                return size
+            }
+            return 0
+        }
+        return item.fileSize ?? 0
     }
 }

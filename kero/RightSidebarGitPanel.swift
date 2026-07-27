@@ -138,26 +138,17 @@ struct GitPanel: View {
                     .foregroundStyle(Color(nsColor: Theme.cursor))
                 PanelHeader(title: "Git", subtitle: model.rootPath)
             }
-            // Only surface progress for user operations and the initial
-            // repository discovery. Routine two-second background polls resolve
-            // in milliseconds; showing a spinner for them just makes the header
-            // flicker.
-            if model.isBusy || model.isResolvingInitialStatus {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.6)
-                    .frame(width: 12, height: 12)
-                    .accessibilityLabel(model.isBusy ? "Git operation in progress" : "Refreshing Git status")
-            }
             if model.isRepo {
-                headerButton("line.3.horizontal.decrease", help: "Filter Changed Files", disabled: false) {
+                GitHeaderIconButton(
+                    systemImage: "line.3.horizontal.decrease",
+                    help: "Filter Changed Files",
+                    active: showFilter
+                ) {
                     showFilter.toggle()
                     if !showFilter { filterText = "" }
                 }
-                headerButton(
-                    "arrow.clockwise",
-                    help: "Refresh Git Status",
-                    disabled: model.isBusy || model.isResolvingInitialStatus
+                SidebarRefreshButton(
+                    isRefreshing: model.isBusy || model.isResolvingInitialStatus
                 ) {
                     model.refresh()
                 }
@@ -254,11 +245,7 @@ struct GitPanel: View {
                 Label("Reveal Repository in Finder", systemImage: "finder")
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .font(SidebarTypography.caption(.medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 18, height: 18)
-                .contentShape(RoundedRectangle(cornerRadius: 4))
+            GitHeaderMenuIcon()
         }
         .buttonStyle(.plain)
         .menuStyle(.button)
@@ -268,21 +255,58 @@ struct GitPanel: View {
         .accessibilityLabel("More Git Actions")
     }
 
-    private func headerButton(
-        _ systemImage: String, help: String, disabled: Bool, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(SidebarTypography.caption(.medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 18, height: 18)
-                .contentShape(RoundedRectangle(cornerRadius: 4))
+    private struct GitHeaderIconButton: View {
+        let systemImage: String
+        let help: String
+        var disabled: Bool = false
+        var active: Bool = false
+        let action: () -> Void
+
+        @State private var isHovering = false
+
+        var body: some View {
+            Button(action: action) {
+                Image(systemName: systemImage)
+                    .font(SidebarTypography.caption(.medium))
+                    .foregroundStyle(
+                        active
+                            ? Color(nsColor: Theme.cursor)
+                            : (disabled ? .secondary.opacity(0.4) : (isHovering ? .primary : .secondary))
+                    )
+                    .frame(width: 22, height: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(
+                                active
+                                    ? Color(nsColor: Theme.cursor).opacity(0.12)
+                                    : (isHovering && !disabled ? Color.primary.opacity(0.08) : Color.clear)
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            .onHover { isHovering = $0 }
+            .help(help)
+            .accessibilityLabel(help)
         }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .opacity(disabled ? 0.4 : 1)
-        .help(help)
-        .accessibilityLabel(help)
+    }
+
+    private struct GitHeaderMenuIcon: View {
+        @State private var isHovering = false
+
+        var body: some View {
+            Image(systemName: "ellipsis")
+                .font(SidebarTypography.caption(.medium))
+                .foregroundStyle(isHovering ? .primary : .secondary)
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(isHovering ? Color.primary.opacity(0.08) : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+                .onHover { isHovering = $0 }
+        }
     }
 
     @ViewBuilder
@@ -702,9 +726,13 @@ struct GitPanel: View {
                                 actionsDisabled: model.isBusy
                             )
                             if !mergeCollapsed {
-                                ForEach(filteredMergeEntries, id: \.mergeRowID) { entry in
-                                    row(entry, status: "U", kind: .merge)
+                                // 展开分组内容添加统一的 12pt 左边距
+                                VStack(alignment: .leading, spacing: 1) {
+                                    ForEach(filteredMergeEntries, id: \.mergeRowID) { entry in
+                                        row(entry, status: "U", kind: .merge)
+                                    }
                                 }
+                                .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                             }
                         }
                         if !filteredStagedEntries.isEmpty {
@@ -720,9 +748,13 @@ struct GitPanel: View {
                                 actionsDisabled: model.isBusy
                             )
                             if !stagedCollapsed {
-                                ForEach(filteredStagedEntries, id: \.stagedRowID) { entry in
-                                    row(entry, status: entry.staged, kind: .staged)
+                                // 展开分组内容添加统一的 12pt 左边距
+                                VStack(alignment: .leading, spacing: 1) {
+                                    ForEach(filteredStagedEntries, id: \.stagedRowID) { entry in
+                                        row(entry, status: entry.staged, kind: .staged)
+                                    }
                                 }
+                                .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                             }
                         }
                         if !filteredChangedEntries.isEmpty {
@@ -741,9 +773,13 @@ struct GitPanel: View {
                                 actionsDisabled: model.isBusy
                             )
                             if !changesCollapsed {
-                                ForEach(filteredChangedEntries, id: \.changedRowID) { entry in
-                                    row(entry, status: entry.unstaged, kind: .unstaged)
+                                // 展开分组内容添加统一的 12pt 左边距
+                                VStack(alignment: .leading, spacing: 1) {
+                                    ForEach(filteredChangedEntries, id: \.changedRowID) { entry in
+                                        row(entry, status: entry.unstaged, kind: .unstaged)
+                                    }
                                 }
+                                .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                             }
                         }
                         if filterText.isEmpty, !model.recentCommits.isEmpty {
@@ -755,9 +791,22 @@ struct GitPanel: View {
                                 actionsDisabled: model.isBusy
                             )
                             if !historyCollapsed {
-                                ForEach(model.recentCommits) { commit in
-                                    GitCommitRow(commit: commit)
+                                // 展开分组内容添加统一的 12pt 左边距
+                                VStack(alignment: .leading, spacing: 1) {
+                                    ForEach(model.recentCommits) { commit in
+                                        GitCommitRow(
+                                            commit: commit,
+                                            isHead: commit.hash == model.recentCommits.first?.hash,
+                                            repoRoot: model.repoRoot,
+                                            disabled: model.isBusy,
+                                            hasStagedChanges: !model.stagedEntries.isEmpty,
+                                            onRefreshNeeded: {
+                                                model.refresh()
+                                            }
+                                        )
+                                    }
                                 }
+                                .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                             }
                         }
                     }
@@ -1049,6 +1098,14 @@ struct GitPanel: View {
 
 private struct GitCommitRow: View {
     let commit: GitStatusModel.RecentCommit
+    let isHead: Bool
+    let repoRoot: String
+    let disabled: Bool
+    let hasStagedChanges: Bool
+    let onRefreshNeeded: () -> Void
+
+    @State private var showEditSheet = false
+    @State private var isHovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -1072,10 +1129,62 @@ private struct GitCommitRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .contentShape(Rectangle())
+        .contentShape(RoundedRectangle(cornerRadius: 4))
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isHovering ? Color.primary.opacity(0.05) : Color.clear)
+        )
+        .onHover { isHovering = $0 }
+        .textSelection(.enabled)
         .contextMenu {
+            Button("Edit Commit…") {
+                showEditSheet = true
+            }
+            .disabled(disabled)
+
+            if hasStagedChanges {
+                Button("Amend Staged Changes into Commit") {
+                    Task {
+                        _ = await GitCommitEditor.amendIntoCommit(
+                            in: repoRoot,
+                            commitHash: commit.hash,
+                            isHead: isHead
+                        )
+                        onRefreshNeeded()
+                    }
+                }
+                .disabled(disabled)
+            }
+
+            Button("Drop Commit", role: .destructive) {
+                Task {
+                    _ = await GitCommitEditor.dropCommit(
+                        in: repoRoot,
+                        commitHash: commit.hash,
+                        isHead: isHead
+                    )
+                    onRefreshNeeded()
+                }
+            }
+            .disabled(disabled)
+
+            Divider()
+
             Button("Copy Commit Hash") { copy(commit.hash) }
             Button("Copy Commit Message") { copy(commit.subject) }
+        }
+        .sheet(isPresented: $showEditSheet) {
+            GitCommitEditSheet(
+                repoRoot: repoRoot,
+                commitHash: commit.hash,
+                shortHash: commit.shortHash,
+                isHead: isHead,
+                onComplete: { success, _ in
+                    if success {
+                        onRefreshNeeded()
+                    }
+                }
+            )
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(commit.subject), \(commit.shortHash), by \(commit.author), \(commit.relativeDate)")
@@ -1165,7 +1274,7 @@ private struct GitEntryRow: View {
     }
 
     private var hoverActions: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             switch kind {
             case .merge:
                 rowButton("plus", help: "Mark Resolved (Stage)", action: stage)
@@ -1185,7 +1294,7 @@ private struct GitEntryRow: View {
             Image(systemName: systemImage)
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 16, height: 16)
+                .frame(width: 18, height: 18)
                 .contentShape(RoundedRectangle(cornerRadius: 3))
         }
         .buttonStyle(.plain)

@@ -1500,10 +1500,6 @@ struct ProjectIconPicker: View {
                     Text("Click “Apply File Icon” to save changes")
                         .font(SidebarTypography.caption())
                         .foregroundStyle(.tertiary)
-                } else if hasImageInClipboard {
-                    Text("Tip: Press ⌘V to paste image from clipboard")
-                        .font(SidebarTypography.caption())
-                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -1558,28 +1554,26 @@ struct ProjectIconPicker: View {
             }
             .buttonStyle(.plain)
 
-            if hasImageInClipboard {
-                Button {
-                    pasteImageFromClipboard()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "doc.on.clipboard.fill")
-                        Text("Paste Image from Clipboard")
-                        Text("⌘V")
-                            .font(SidebarTypography.micro().monospacedDigit())
-                            .opacity(0.75)
-                    }
-                    .font(SidebarTypography.body(.medium))
-                    .foregroundStyle(Color(nsColor: Theme.cursor))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(
-                        Color(nsColor: Theme.cursor).opacity(0.12),
-                        in: Capsule()
-                    )
+            Button {
+                pasteImageFromClipboard()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.on.clipboard.fill")
+                    Text("Paste Image from Clipboard")
+                    Text("⌘V")
+                        .font(SidebarTypography.micro().monospacedDigit())
+                        .opacity(0.75)
                 }
-                .buttonStyle(.plain)
+                .font(SidebarTypography.body(.medium))
+                .foregroundStyle(Color(nsColor: Theme.cursor))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(
+                    Color(nsColor: Theme.cursor).opacity(hasImageInClipboard ? 0.15 : 0.08),
+                    in: Capsule()
+                )
             }
+            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 230)

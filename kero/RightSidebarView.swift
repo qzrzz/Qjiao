@@ -51,6 +51,8 @@ struct RightSidebarView: View {
     /// 下半区底栏选中项：system / note。
     @AppStorage("rightSidebarBottomTab") private var bottomTabRaw: String = RightBottomPanel.system.rawValue
     @State private var wasCWDVisible = false
+    /// 从 Files 树打开的 ImageBuild 会话
+    @State private var imageBuildSession: ImageBuildSession?
 
     private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
     /// 上沿放宽到接近贴底：下半最小可为仅 tabs。
@@ -170,6 +172,17 @@ struct RightSidebarView: View {
             if bottomCollapsed {
                 noteModel.flush()
             }
+        }
+        .sheet(item: $imageBuildSession) { session in
+            ImageBuildView(
+                session: session,
+                onDismiss: { outputPath in
+                    imageBuildSession = nil
+                    if let outputPath {
+                        NSWorkspace.shared.selectFile(outputPath, inFileViewerRootedAtPath: "")
+                    }
+                }
+            )
         }
     }
 
@@ -296,7 +309,10 @@ struct RightSidebarView: View {
                 currentFilePath: openFilePath,
                 openFile: { manager.openFile($0) },
                 openToSide: { manager.openFileToSide($0) },
-                onRename: { manager.fileRenamed(from: $0, to: $1) }
+                onRename: { manager.fileRenamed(from: $0, to: $1) },
+                onImageBuild: { paths in
+                    imageBuildSession = .fromFileTree(paths: paths)
+                }
             )
         case .cwd:
             FileTreePanel(
@@ -306,7 +322,10 @@ struct RightSidebarView: View {
                 currentFilePath: openFilePath,
                 openFile: { manager.openFile($0) },
                 openToSide: { manager.openFileToSide($0) },
-                onRename: { manager.fileRenamed(from: $0, to: $1) }
+                onRename: { manager.fileRenamed(from: $0, to: $1) },
+                onImageBuild: { paths in
+                    imageBuildSession = .fromFileTree(paths: paths)
+                }
             )
         case .git:
             GitPanel(

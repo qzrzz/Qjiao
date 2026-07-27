@@ -87,11 +87,14 @@ struct FileTreePanel: View {
     let openFile: (String) -> Void
     let openToSide: (String) -> Void
     let onRename: (_ oldPath: String, _ newPath: String) -> Void
+    /// 打开 ImageBuild（多→多 / 1→多）；参数为选中的图片路径。
+    var onImageBuild: (([String]) -> Void)? = nil
 
     @State private var isFilterActive = false
     @State private var filterQuery = ""
     @State private var isPanelHovered = false
     @State private var isPanelClicked = false
+    @State private var isCloseFilterHovering = false
     @State private var eventMonitor: Any? = nil
 
     @FocusState private var isFilterFieldFocused: Bool
@@ -134,32 +137,55 @@ struct FileTreePanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 PanelHeader(title: model.rootName, subtitle: model.rootPath)
-                Button {
+
+                SidebarIconButton(
+                    systemImage: "line.3.horizontal.decrease",
+                    help: "Filter files (⌘F)",
+                    active: isFilterActive
+                ) {
                     isFilterActive.toggle()
                     if isFilterActive {
                         isFilterFieldFocused = true
                     } else {
                         dismissFilter()
                     }
-                } label: {
-                    Image(systemName: "line.3.horizontal.decrease.circle")
-                        .font(SidebarTypography.secondary())
-                        .foregroundStyle(isFilterActive ? Color(nsColor: Theme.cursor) : Color.secondary)
                 }
-                .buttonStyle(.plain)
-                .help("Filter files (⌘F)")
 
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.rootPath)])
-                } label: {
-                    Image(systemName: "finder")
-                        .font(SidebarTypography.secondary())
-                        .foregroundStyle(.secondary)
+                SidebarMenuIconButton(
+                    systemImage: "arrow.up.arrow.down",
+                    help: "Sort files",
+                    active: model.sortCriteria != .name || !model.sortAscending
+                ) {
+                    Picker("Sort By", selection: Binding(
+                        get: { model.sortCriteria },
+                        set: { model.setSortCriteria($0) }
+                    )) {
+                        Text("File Name").tag(FileTreeModel.FileSortCriteria.name)
+                        Text("Modification Date").tag(FileTreeModel.FileSortCriteria.date)
+                        Text("Size").tag(FileTreeModel.FileSortCriteria.size)
+                    }
+                    .pickerStyle(.inline)
+
+                    Divider()
+
+                    Picker("Order", selection: Binding(
+                        get: { model.sortAscending },
+                        set: { model.setSortAscending($0) }
+                    )) {
+                        Text("Ascending").tag(true)
+                        Text("Descending").tag(false)
+                    }
+                    .pickerStyle(.inline)
                 }
-                .buttonStyle(.plain)
-                .help("Reveal in Finder")
+
+                SidebarIconButton(
+                    systemImage: "finder",
+                    help: "Reveal in Finder"
+                ) {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.rootPath)])
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -193,7 +219,8 @@ struct FileTreePanel: View {
                                         FileTreeRow(
                                             model: model, item: item, session: session,
                                             currentFilePath: currentFilePath,
-                                            openFile: openFile, openToSide: openToSide, onRename: onRename
+                                            openFile: openFile, openToSide: openToSide, onRename: onRename,
+                                            onImageBuild: onImageBuild
                                         )
                                         .id(item.id)
                                     }
@@ -340,6 +367,11 @@ struct FileTreePanel: View {
     private func setupKeyboardMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Sheet / 模态对话框（如 Image Build）打开时绝不拦截，避免抢走文本输入
+            if Self.isSheetOrModalKeyInput(event) {
+                return event
+            }
+
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
             // 1. ⌘F 快捷键：激活 Filter 输入栏
@@ -393,6 +425,30 @@ struct FileTreePanel: View {
         }
     }
 
+    /// 当前按键是否应交给 Sheet / 模态 / 文本字段，而不是 Files 树。
+    private static func isSheetOrModalKeyInput(_ event: NSEvent) -> Bool {
+        // 事件落在 sheet 窗口上
+        if event.window?.isSheet == true { return true }
+        // 任意可见 sheet（SwiftUI sheet 有时 keyWindow 仍是宿主）
+        if NSApp.windows.contains(where: { $0.isSheet && $0.isVisible }) {
+            return true
+        }
+        if NSApp.modalWindow != nil { return true }
+        // 首响应者是文本编辑控件（输入框 / 文本视图）
+        if let win = NSApp.keyWindow ?? event.window,
+           let responder = win.firstResponder {
+            if responder is NSTextView || responder is NSTextField {
+                return true
+            }
+            let name = String(describing: type(of: responder))
+            if name.contains("TextField") || name.contains("TextView")
+                || name.contains("FieldEditor") || name.contains("TextInput") {
+                return true
+            }
+        }
+        return false
+    }
+
     private func removeKeyboardMonitor() {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
@@ -406,13 +462,28 @@ struct FileTreePanel: View {
               (manager.panelTab == .files || manager.panelTab == .cwd)
         else { return false }
 
+        // Sheet / 模态打开时 Files 树不抢焦点快捷键
+        if NSApp.windows.contains(where: { $0.isSheet && $0.isVisible }) {
+            return false
+        }
+        if NSApp.modalWindow != nil { return false }
+        if let win = NSApp.keyWindow, win.isSheet { return false }
+
         if isFilterActive || isFilterFieldFocused || isTreeFocused || isPanelClicked {
             return true
         }
 
         if let window = NSApp.keyWindow, let responder = window.firstResponder as? NSView {
             let className = String(describing: type(of: responder))
-            if className.contains("Ghostty") || className.contains("STTextView") || className.contains("SourceTextEditor") {
+            if className.contains("Ghostty") || className.contains("STTextView")
+                || className.contains("SourceTextEditor") {
+                return false
+            }
+            // 文本输入控件：不视为 Files 树焦点
+            if responder is NSTextView || responder is NSTextField {
+                return false
+            }
+            if className.contains("TextField") || className.contains("FieldEditor") {
                 return false
             }
             var current: NSView? = responder
@@ -425,7 +496,8 @@ struct FileTreePanel: View {
             }
         }
 
-        return isPanelHovered
+        // 仅悬停不再抢键：避免 sheet 打开时 hover 仍为 true 导致输入被吃掉
+        return false
     }
 
     /// 顶部 Filter 输入栏。
@@ -462,11 +534,16 @@ struct FileTreePanel: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isCloseFilterHovering ? .primary : .secondary)
                     .frame(width: 18, height: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(isCloseFilterHovering ? Color.primary.opacity(0.08) : Color.clear)
+                    )
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onHover { isCloseFilterHovering = $0 }
             .help("Close filter (Esc)")
         }
         .padding(.horizontal, 8)
@@ -497,6 +574,7 @@ private struct FileTreeRow: View {
     let openFile: (String) -> Void
     let openToSide: (String) -> Void
     let onRename: (_ oldPath: String, _ newPath: String) -> Void
+    var onImageBuild: (([String]) -> Void)? = nil
 
     @State private var isHovering = false
     @State private var editingName = ""
@@ -641,6 +719,36 @@ private struct FileTreeRow: View {
         } label: {
             Label("Reveal in Finder", systemImage: "finder")
         }
+
+        // 选中的图片 → ImageBuild（单张为 1→多，多张为多→多）
+        let imagePaths = targets
+            .filter { !$0.isDirectory }
+            .map(\.path)
+            .filter { ImageBuild.supportsImageExtension(($0 as NSString).pathExtension) }
+        if let onImageBuild, !imagePaths.isEmpty {
+            Divider()
+            Button {
+                selectForContextAction()
+                onImageBuild(imagePaths)
+            } label: {
+                Label {
+                    Text(
+                        imagePaths.count == 1
+                            ? "Image Build…"
+                            : "Image Build (\(imagePaths.count))…"
+                    )
+                } icon: {
+                    Image("ImageBuild")
+                        .resizable()
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                }
+            }
+        }
+
+        Divider()
+        // 复制地址
         Button(targets.count == 1 ? "Copy Path" : "Copy Paths") {
             selectForContextAction()
             let text = menuActionTargets.map(\.path).joined(separator: "\n")
@@ -648,7 +756,6 @@ private struct FileTreeRow: View {
             NSPasteboard.general.setString(text, forType: .string)
         }
 
-        Divider()
         // 复制文件本身（fileURL，可粘贴到本树或 Finder）。
         Button(targets.count == 1 ? "Copy" : "Copy \(targets.count) Items") {
             selectForContextAction()
@@ -670,6 +777,7 @@ private struct FileTreeRow: View {
                 selectForContextAction()
                 session?.sendCommand("cd " + rightSidebarShellQuote(only.path) + "\n")
             }
+            Divider()
             Button("New File…") {
                 selectForContextAction()
                 model.beginNewFile(in: only.path)
@@ -785,11 +893,31 @@ private struct FileTreeRow: View {
         }
     }
 
-    /// 行尾体积区：文件直接显示；目录 hover 出 Size，统计中转圈，完成后显示数字。
+    /// 行尾操作与体积区：文件显示大小；目录 hover 出 Size 与新建文件夹（+）按钮。
     @ViewBuilder
     private var trailingSizeControl: some View {
         if item.isDirectory {
-            folderSizeControl
+            HStack(spacing: 4) {
+                folderSizeControl
+                if isHovering {
+                    Button {
+                        model.beginNewFolder(in: item.path)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color(nsColor: Theme.cursor))
+                            .frame(width: 16, height: 16)
+                            .background(
+                                Circle()
+                                    .fill(Color(nsColor: Theme.cursor).opacity(0.14))
+                            )
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("New Folder…")
+                    .layoutPriority(0)
+                }
+            }
         } else if let fileSizeLabel {
             Text(fileSizeLabel)
                 .font(FileTreeFont.caption.monospacedDigit())

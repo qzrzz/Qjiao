@@ -7,7 +7,8 @@
     "release": "bun run scripts/release.ts",
     "appcast": "bun run scripts/generate-appcast.ts",
     "vendor:material-icons": "bun run scripts/vendor-material-icons.ts",
-    "vendor:terminal-app-icons": "bun run scripts/vendor-terminal-app-icons.ts"
+    "vendor:terminal-app-icons": "bun run scripts/vendor-terminal-app-icons.ts",
+    "vendor:jxl": "bash scripts/vendor-jxl.sh"
   },
   "devDependencies": {
     "@types/bun": "latest",

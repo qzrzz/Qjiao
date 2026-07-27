@@ -36,6 +36,91 @@ func rightSidebarShellQuote(_ path: String) -> String {
     "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
+/** 侧边栏/面板统一图标按钮：标准 22x22 尺寸，5pt 圆角，支持 hover 态与 active 态。 */
+struct SidebarIconButton: View {
+    let systemImage: String
+    let help: String
+    var active: Bool = false
+    var disabled: Bool = false
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(SidebarTypography.caption(.medium))
+                .foregroundStyle(
+                    active
+                        ? Color(nsColor: Theme.cursor)
+                        : (disabled ? .secondary.opacity(0.4) : (isHovering ? .primary : .secondary))
+                )
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(
+                            active
+                                ? Color(nsColor: Theme.cursor).opacity(0.12)
+                                : (isHovering && !disabled ? Color.primary.opacity(0.08) : Color.clear)
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+        .animation(.easeInOut(duration: 0.12), value: active)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/** 侧边栏/面板统一菜单图标按钮：带下拉菜单的标准图标按钮，支持 hover 态与 active 态。 */
+struct SidebarMenuIconButton<Content: View>: View {
+    let systemImage: String
+    let help: String
+    var active: Bool = false
+    var disabled: Bool = false
+    @ViewBuilder let menuContent: () -> Content
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            menuContent()
+        } label: {
+            Image(systemName: systemImage)
+                .font(SidebarTypography.caption(.medium))
+                .foregroundStyle(
+                    active
+                        ? Color(nsColor: Theme.cursor)
+                        : (disabled ? .secondary.opacity(0.4) : (isHovering ? .primary : .secondary))
+                )
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(
+                            active
+                                ? Color(nsColor: Theme.cursor).opacity(0.12)
+                                : (isHovering && !disabled ? Color.primary.opacity(0.08) : Color.clear)
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(disabled)
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+        .animation(.easeInOut(duration: 0.12), value: active)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
 /** Project / Info 共用的刷新按钮：hover 高亮，刷新期间旋转并禁止重复点击。 */
 struct SidebarRefreshButton: View {
     let isRefreshing: Bool
@@ -128,7 +213,7 @@ struct SidebarSectionHeader: View {
 
             Spacer(minLength: 0)
 
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 if let trailingView {
                     trailingView
                 }
@@ -150,7 +235,7 @@ struct SidebarSectionHeader: View {
         }
         // Fixed height so the taller hover buttons don't grow the header.
         .frame(height: SidebarTypography.rowMinHeight)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.top, 8)
         .padding(.bottom, 3)
         .onHover { isHovering = $0 }

@@ -650,8 +650,8 @@ struct PackageInfoSection: View {
                     .frame(height: 20)
                 }
             }
-            .padding(.leading, SidebarPanelMetrics.expandedContentLeading + 6)
-            .padding(.trailing, 6)
+            .padding(.leading, SidebarPanelMetrics.expandedContentLeading + 10  )
+            .padding(.trailing, )
             .padding(.vertical, 3)
         }
     }
