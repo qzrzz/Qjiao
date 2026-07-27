@@ -3,6 +3,7 @@
 //  kero
 //
 
+import AppKit
 import Foundation
 
 /// 项目名称、图标和描述的独立配置内容，和会话布局分开保存。
@@ -69,12 +70,14 @@ enum ProjectIconFileStore {
     static func importImage(from sourceURL: URL, projectID: UUID) -> URL? {
         let fm = FileManager.default
         let ext = sourceURL.pathExtension.lowercased()
-        // 允许常见扩展名；无扩展名时按 png 托管。
+        // 允许常见扩展名；无扩展名或未知扩展名但可识别图像时按 png 托管。
         let resolvedExt: String
         if ext.isEmpty {
             resolvedExt = "png"
         } else if allowedExtensions.contains(ext) {
             resolvedExt = ext
+        } else if NSImage(contentsOf: sourceURL) != nil {
+            resolvedExt = "png"
         } else {
             return nil
         }

@@ -36,6 +36,48 @@ func rightSidebarShellQuote(_ path: String) -> String {
     "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
+/** Project / Info 共用的刷新按钮：hover 高亮，刷新期间旋转并禁止重复点击。 */
+struct SidebarRefreshButton: View {
+    let isRefreshing: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.clockwise")
+                .font(SidebarTypography.caption(.medium))
+                .foregroundStyle(
+                    isRefreshing
+                        ? Color(nsColor: Theme.cursor)
+                        : (isHovering ? Color.primary : Color.secondary)
+                )
+                .rotationEffect(.degrees(isRefreshing ? 360 : 0))
+                .animation(
+                    isRefreshing
+                        ? .linear(duration: 0.7).repeatForever(autoreverses: false)
+                        : .default,
+                    value: isRefreshing
+                )
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(
+                            isHovering && !isRefreshing
+                                ? Color.primary.opacity(0.08)
+                                : Color.clear
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .disabled(isRefreshing)
+        .onHover { isHovering = $0 }
+        .help(isRefreshing ? "Refreshing…" : "Refresh")
+        .accessibilityLabel(isRefreshing ? "Refreshing" : "Refresh")
+    }
+}
+
 /** 右侧栏各面板共用的可折叠分组标题。 */
 struct SidebarSectionHeader: View {
     struct Action: Identifiable {
@@ -123,4 +165,3 @@ struct SidebarSectionHeader: View {
         .accessibilityValue(isCollapsed ? "Collapsed" : "Expanded")
     }
 }
-

@@ -281,6 +281,8 @@ struct PackageInfoSection: View {
 
     @FocusState private var isVersionFocused: Bool
     @State private var versionDraft: String = ""
+    @State private var versionBaseline: String = ""
+    @State private var isVersionDirty: Bool = false
     @State private var isUpdatingVersion: Bool = false
 
     private var currentDisplayVersion: String {
@@ -298,13 +300,13 @@ struct PackageInfoSection: View {
         )
     }
 
-    private func syncDraftFromInfo() {
-        guard !isVersionFocused && !isUpdatingVersion else { return }
+    private func syncDraftFromInfo(force: Bool = false) {
+        guard !isUpdatingVersion, force || !isVersionFocused else { return }
         let ver = info.version ?? ""
         let clean = (ver.hasPrefix("v") || ver.hasPrefix("V")) ? String(ver.dropFirst()) : ver
-        if !clean.isEmpty {
-            versionDraft = clean
-        }
+        versionDraft = clean
+        versionBaseline = clean
+        isVersionDirty = false
     }
 
     private func applyVersion(_ newVersion: String) {
@@ -312,7 +314,13 @@ struct PackageInfoSection: View {
         isUpdatingVersion = true
         versionDraft = cleanNew
         if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: cleanNew) {
+            versionBaseline = cleanNew
+            isVersionDirty = false
             onVersionUpdated()
+        } else {
+            // 写入失败时立即恢复磁盘值，避免后续刷新永远被 updating 状态拦截。
+            isUpdatingVersion = false
+            syncDraftFromInfo(force: true)
         }
     }
 
@@ -322,6 +330,10 @@ struct PackageInfoSection: View {
         if isUpdatingVersion {
             if clean == versionDraft {
                 isUpdatingVersion = false
+            } else {
+                // 磁盘结果是最终事实；写入被其他进程覆盖时不保留过期草稿。
+                isUpdatingVersion = false
+                syncDraftFromInfo()
             }
         } else {
             syncDraftFromInfo()
@@ -329,9 +341,13 @@ struct PackageInfoSection: View {
     }
 
     private func commitVersionChange() {
+        guard isVersionDirty else {
+            syncDraftFromInfo(force: true)
+            return
+        }
         let trimmed = versionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            syncDraftFromInfo()
+            syncDraftFromInfo(force: true)
             return
         }
         applyVersion(trimmed)
@@ -484,15 +500,20 @@ struct PackageInfoSection: View {
                                         commitVersionChange()
                                         isVersionFocused = false
                                     }
-                                    .onChange(of: isVersionFocused) { focused in
-                                        if !focused {
+                                    .onChange(of: isVersionFocused) {
+                                        if !isVersionFocused {
+                                            // 内容确实修改过才在失焦时写盘；未修改则允许刷新读取外部版本。
                                             commitVersionChange()
                                         }
+                                    }
+                                    .onChange(of: versionDraft) {
+                                        guard !isUpdatingVersion else { return }
+                                        isVersionDirty = versionDraft != versionBaseline
                                     }
                                     .onAppear {
                                         syncDraftFromInfo()
                                     }
-                                    .onChange(of: info.version) { _ in
+                                    .onChange(of: info.version) {
                                         handleInfoVersionChanged()
                                     }
                                     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

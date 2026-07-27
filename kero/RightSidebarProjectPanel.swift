@@ -614,17 +614,13 @@ struct ProjectPanel: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Button {
-                    model.refresh()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(SidebarTypography.caption(.medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18, height: 18)
-                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                SidebarRefreshButton(isRefreshing: model.isRefreshing) {
+                    // 先结束输入框编辑，让版本等失焦提交完成后再读取磁盘。
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                    DispatchQueue.main.async {
+                        model.refresh()
+                    }
                 }
-                .buttonStyle(.plain)
-                .help("Refresh")
             }
             pathRow
         }
@@ -1047,5 +1043,3 @@ struct EditorDropdownNSButton: NSViewRepresentable {
         }
     }
 }
-
-

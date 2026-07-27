@@ -150,15 +150,44 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// 项目根目录；与终端当前工作目录分开保存。
     @Published var projectDirectory = ""
     /// 项目列表的可选自定义图标；未设置时显示默认文件夹图标。
-    @Published var icon: ProjectIcon?
+    @Published var icon: ProjectIcon? {
+        didSet {
+            ProjectIconThumbnailCache.clearCache()
+            saveConfig()
+        }
+    }
     /// 项目级主题覆盖；默认跟随全局设置。
-    @Published var theme: ProjectTheme = .global
+    @Published var theme: ProjectTheme = .global {
+        didSet {
+            saveConfig()
+        }
+    }
     /// 项目是否已归档，归档后会移至左侧边栏底部的归档栏中。
-    @Published var isArchived: Bool = false
+    @Published var isArchived: Bool = false {
+        didSet {
+            saveConfig()
+        }
+    }
     /// User-configured actions displayed in the right sidebar's Start panel.
     @Published var launchCommands: [ProjectLaunchCommand] = []
     @Published var tabs: [PaneTab] = []
     @Published var selectedTabID: UUID?
+
+    /// 将项目配置（名称、描述、图标、主题、导航路径等）立即持久化保存到磁盘配置文件。
+    func saveConfig() {
+        ProjectConfigStore.save(
+            ProjectConfig(
+                customName: customName,
+                description: description,
+                icon: icon,
+                theme: theme,
+                projectDirectory: projectDirectory,
+                launchCommands: launchCommands,
+                isArchived: isArchived
+            ),
+            for: id
+        )
+    }
     /// 终端直接拖入文件夹时由项目转交给窗口管理器创建新项目。
     var onOpenProjectDirectory: ((URL) -> Bool)? {
         didSet {

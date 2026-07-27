@@ -346,17 +346,9 @@ struct SessionInfoPanel: View {
                     subtitle: infoSubtitle,
                     titleFont: SidebarTypography.body(.semibold)
                 )
-                Button {
+                SidebarRefreshButton(isRefreshing: model.isRefreshing) {
                     model.refresh()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(SidebarTypography.caption(.medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18, height: 18)
-                        .contentShape(RoundedRectangle(cornerRadius: 4))
                 }
-                .buttonStyle(.plain)
-                .help("Refresh")
             }
             pathRow
         }

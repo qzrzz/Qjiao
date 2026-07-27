@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -113,6 +114,12 @@ struct ProjectFileIconImage: View {
 enum ProjectIconThumbnailCache {
     private static let images = NSCache<NSString, NSImage>()
     private static let templates = NSCache<NSString, NSNumber>()
+
+    /// 清理所有图片与模板缓存，确保图标更新后及时重新渲染。
+    static func clearCache() {
+        images.removeAllObjects()
+        templates.removeAllObjects()
+    }
 
     static func key(for preset: ProjectPresetIcon, pointSize: CGFloat) -> String {
         let sizeKey = String(format: "%.1f", pointSize)
@@ -485,7 +492,7 @@ enum SFSymbolCategory: String, CaseIterable, Identifiable {
     }
 
     /// 规则归类用的分类顺序（先匹配优先；Shapes 等宽泛类靠后）。
-    static let assignmentOrder: [SFSymbolCategory] = [
+    nonisolated static let assignmentOrder: [SFSymbolCategory] = [
         .coding,
         .arrows,
         .communication,
@@ -727,22 +734,12 @@ enum SFSymbolCategory: String, CaseIterable, Identifiable {
 // MARK: - SF Symbol catalog
 
 /// 打包的 SF Symbol 名称目录，供图标选择器离线完整浏览与分类。
-enum SFSymbolCatalog {
-    /// 按名称排序的完整目录；首次访问时从 Bundle 解码一次。
-    static let allNames: [String] = {
-        guard let url = Bundle.main.url(
-            forResource: "SFSymbolCatalog", withExtension: "json"
-        ), let data = try? Data(contentsOf: url) else {
-            return []
-        }
-        // 目录值是 SF 版本号，选择器只用 key。
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return [] }
-        return object.keys.sorted()
-    }()
+@MainActor
+final class SFSymbolCatalog {
+    static let shared = SFSymbolCatalog()
 
     /// 适合作为项目图标的常用推荐。
-    static let suggestedNames: [String] = [
+    nonisolated static let suggestedNames: [String] = [
         "folder",
         "folder.fill",
         "terminal",
@@ -795,36 +792,70 @@ enum SFSymbolCatalog {
         "bicycle",
     ]
 
-    /// 各分类下的符号列表（含虚拟分类）；首次访问时归类一次。
-    static let namesByCategory: [SFSymbolCategory: [String]] = {
-        var buckets: [SFSymbolCategory: [String]] = [:]
-        for category in SFSymbolCategory.allCases {
-            buckets[category] = []
-        }
-        buckets[.suggested] = suggestedNames
-        buckets[.all] = allNames
+    private(set) var isLoaded = false
+    private var allNamesCache: [String] = []
+    private var namesByCategoryCache: [SFSymbolCategory: [String]] = [:]
 
-        for name in allNames {
-            var assigned: SFSymbolCategory = .other
-            for category in SFSymbolCategory.assignmentOrder {
-                if category.matches(name) {
-                    assigned = category
-                    break
-                }
+    private init() {}
+
+    /// 后台异步装载全量 SF Symbol 分类索引。
+    func loadCatalogIfNeeded() async {
+        guard !isLoaded else { return }
+        let (all, buckets) = await Task.detached(priority: .utility) {
+            let names: [String]
+            if let url = Bundle.main.url(forResource: "SFSymbolCatalog", withExtension: "json"),
+               let data = try? Data(contentsOf: url),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                names = object.keys.sorted()
+            } else {
+                names = []
             }
-            buckets[assigned, default: []].append(name)
-        }
-        return buckets
-    }()
+
+            var map: [SFSymbolCategory: [String]] = [:]
+            for category in SFSymbolCategory.allCases {
+                map[category] = []
+            }
+            map[.suggested] = Self.suggestedNames
+            map[.all] = names
+
+            for name in names {
+                var assigned: SFSymbolCategory = .other
+                for category in SFSymbolCategory.assignmentOrder {
+                    if category.matches(name) {
+                        assigned = category
+                        break
+                    }
+                }
+                map[assigned, default: []].append(name)
+            }
+            return (names, map)
+        }.value
+
+        allNamesCache = all
+        namesByCategoryCache = buckets
+        isLoaded = true
+    }
 
     /// 指定分类下的符号数量。
-    static func count(in category: SFSymbolCategory) -> Int {
-        namesByCategory[category]?.count ?? 0
+    func count(in category: SFSymbolCategory) -> Int {
+        if category == .suggested { return Self.suggestedNames.count }
+        if !isLoaded {
+            if category == .all { return Self.suggestedNames.count }
+            return 0
+        }
+        return namesByCategoryCache[category]?.count ?? 0
     }
 
     /// 在分类内按查询过滤；空查询返回该分类完整列表。多词空格分隔，要求全部命中。
-    static func filter(_ query: String, in category: SFSymbolCategory) -> [String] {
-        let base = namesByCategory[category] ?? []
+    func filter(_ query: String, in category: SFSymbolCategory) -> [String] {
+        let base: [String]
+        if category == .suggested {
+            base = Self.suggestedNames
+        } else if isLoaded {
+            base = namesByCategoryCache[category] ?? []
+        } else {
+            base = Self.suggestedNames
+        }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return base }
         let tokens = trimmed
@@ -978,6 +1009,10 @@ struct ProjectIconPicker: View {
         .onAppear {
             refreshPresetItems()
             refreshSymbolItems()
+            Task {
+                await SFSymbolCatalog.shared.loadCatalogIfNeeded()
+                refreshSymbolItems()
+            }
         }
         .onChange(of: symbolSearch) { _, newValue in
             // 短延迟后再写 debouncedSearch，输入过程中少做过滤。
@@ -1014,7 +1049,7 @@ struct ProjectIconPicker: View {
     }
 
     private func refreshSymbolItems() {
-        displayedSymbols = SFSymbolCatalog.filter(debouncedSearch, in: selectedCategory)
+        displayedSymbols = SFSymbolCatalog.shared.filter(debouncedSearch, in: selectedCategory)
     }
 
     // MARK: Header / footer
@@ -1256,7 +1291,7 @@ struct ProjectIconPicker: View {
 
     private func categoryRow(_ category: SFSymbolCategory) -> some View {
         let isSelected = selectedCategory == category
-        let count = SFSymbolCatalog.count(in: category)
+        let count = SFSymbolCatalog.shared.count(in: category)
         return Button {
             selectedCategory = category
         } label: {
@@ -1324,7 +1359,7 @@ struct ProjectIconPicker: View {
     }
 
     private var resultCountLabel: String {
-        let total = SFSymbolCatalog.count(in: selectedCategory)
+        let total = SFSymbolCatalog.shared.count(in: selectedCategory)
         let shown = displayedSymbols.count
         let query = debouncedSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         if query.isEmpty {
@@ -1431,83 +1466,219 @@ struct ProjectIconPicker: View {
 
     // MARK: Select File
 
+    @State private var isFileDropTargeted = false
+
+    /// 重新设计的自定义图片/文件图标选择面板（Native English UI）。
     private var filePicker: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Choose a PNG, JPEG, SVG, ICNS, or other image file as the project icon. The file is copied into Qjiao’s config folder so it stays available after restart.")
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Choose an image file (PNG, JPEG, SVG, ICNS, WebP) as the project icon. The file is copied to your Qjiao config folder.")
                 .font(SidebarTypography.secondary())
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(alignment: .center, spacing: 16) {
-                filePreviewBox
-                VStack(alignment: .leading, spacing: 8) {
-                    Button("Choose Image…") {
-                        openImageFilePanel()
-                    }
-                    .keyboardShortcut("o", modifiers: .command)
-
-                    if !selectedFilePath.isEmpty {
-                        Text((selectedFilePath as NSString).lastPathComponent)
-                            .font(SidebarTypography.body(.medium))
-                            .lineLimit(1)
-                        Text(selectedFilePath)
-                            .font(SidebarTypography.caption())
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(2)
-                            .textSelection(.enabled)
-                    } else {
-                        Text("No file selected")
-                            .font(SidebarTypography.caption())
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                Spacer(minLength: 0)
+            if selectedFilePath.isEmpty {
+                dropZoneCard
+            } else {
+                selectedFileCard
             }
 
             if let fileImportError {
-                Text(fileImportError)
-                    .font(SidebarTypography.caption())
-                    .foregroundStyle(.red)
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(SidebarTypography.caption())
+                    Text(fileImportError)
+                        .font(SidebarTypography.caption())
+                }
+                .foregroundStyle(.red)
+                .padding(.horizontal, 4)
             }
 
             Spacer(minLength: 0)
 
-            HStack {
+            HStack(alignment: .center) {
+                if !selectedFilePath.isEmpty {
+                    Text("Click “Apply File Icon” to save changes")
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.tertiary)
+                } else if hasImageInClipboard {
+                    Text("Tip: Press ⌘V to paste image from clipboard")
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.secondary)
+                }
+
                 Spacer()
-                Button("Use File") {
+
+                Button("Apply File Icon") {
                     applySelectedFile()
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(selectedFilePath.isEmpty)
                 .keyboardShortcut(.defaultAction)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            handleFileDrop(providers)
+        .background {
+            // 隐式绑定 ⌘V 全局快捷键实现一键从剪贴板粘贴
+            Button("") {
+                pasteImageFromClipboard()
+            }
+            .keyboardShortcut("v", modifiers: .command)
+            .opacity(0)
         }
     }
 
-    private var filePreviewBox: some View {
-        Group {
-            if !selectedFilePath.isEmpty {
-                ProjectFileIconImage(path: selectedFilePath, size: 64)
-            } else {
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(.tertiary)
+    /// 未选择文件时的拖拽与点击大卡片 Drop Zone。
+    private var dropZoneCard: some View {
+        VStack(spacing: 12) {
+            Button {
+                openImageFilePanel()
+            } label: {
+                VStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(nsColor: Theme.cursor).opacity(isFileDropTargeted ? 0.2 : 0.08))
+                            .frame(width: 50, height: 50)
+
+                        Image(systemName: isFileDropTargeted ? "square.and.arrow.down.fill" : "photo.badge.plus")
+                            .font(.system(size: 22, weight: .regular))
+                            .foregroundStyle(Color(nsColor: Theme.cursor))
+                    }
+
+                    VStack(spacing: 4) {
+                        Text(isFileDropTargeted ? "Drop image to import" : "Drag & drop image here, or click to browse")
+                            .font(SidebarTypography.body(.medium))
+                            .foregroundStyle(.primary)
+
+                        Text("Supports PNG, JPEG, SVG, ICNS, WebP & more")
+                            .font(SidebarTypography.caption())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if hasImageInClipboard {
+                Button {
+                    pasteImageFromClipboard()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.on.clipboard.fill")
+                        Text("Paste Image from Clipboard")
+                        Text("⌘V")
+                            .font(SidebarTypography.micro().monospacedDigit())
+                            .opacity(0.75)
+                    }
+                    .font(SidebarTypography.body(.medium))
+                    .foregroundStyle(Color(nsColor: Theme.cursor))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(
+                        Color(nsColor: Theme.cursor).opacity(0.12),
+                        in: Capsule()
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
-        .frame(width: 88, height: 88)
+        .frame(maxWidth: .infinity)
+        .frame(height: 230)
         .background(
-            Color.primary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    isFileDropTargeted
+                        ? Color(nsColor: Theme.cursor).opacity(0.06)
+                        : Color.primary.opacity(0.03)
+                )
         )
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(
-                    Color.primary.opacity(0.12),
-                    style: StrokeStyle(lineWidth: 1, dash: selectedFilePath.isEmpty ? [5, 4] : [])
+                    isFileDropTargeted
+                        ? Color(nsColor: Theme.cursor)
+                        : Color.primary.opacity(0.16),
+                    style: StrokeStyle(lineWidth: isFileDropTargeted ? 2 : 1.5, dash: [6, 5])
                 )
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isFileDropTargeted) { providers in
+            handleFileDrop(providers)
+        }
+    }
+
+    /// 已选定文件时的预览与管理卡片。
+    private var selectedFileCard: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 16) {
+                // 大预览框
+                ProjectFileIconImage(path: selectedFilePath, size: 68)
+                    .frame(width: 76, height: 76)
+                    .background(
+                        Color.primary.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                    }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text((selectedFilePath as NSString).lastPathComponent)
+                            .font(SidebarTypography.body(.medium))
+                            .lineLimit(1)
+
+                        let ext = (selectedFilePath as NSString).pathExtension.uppercased()
+                        if !ext.isEmpty {
+                            Text(ext)
+                                .font(SidebarTypography.micro(.bold))
+                                .foregroundStyle(Color(nsColor: Theme.cursor))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Color(nsColor: Theme.cursor).opacity(0.15),
+                                    in: RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                )
+                        }
+                    }
+
+                    Text(selectedFilePath)
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            Divider()
+
+            HStack {
+                Button("Choose Different…") {
+                    openImageFilePanel()
+                }
+                .buttonStyle(.borderless)
+
+                Spacer()
+
+                Button("Clear Selection", role: .destructive) {
+                    selectedFilePath = ""
+                    fileImportError = nil
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isFileDropTargeted) { providers in
+            handleFileDrop(providers)
         }
     }
 
@@ -1519,8 +1690,18 @@ struct ProjectIconPicker: View {
         panel.allowedContentTypes = Self.imageContentTypes
         panel.message = "Choose an image for the project icon"
         panel.prompt = "Select"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        applyPickedFileURL(url)
+
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else { return }
+            importPickedFileURL(url)
+        }
+
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            let response = panel.runModal()
+            completion(response)
+        }
     }
 
     private func handleFileDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -1536,15 +1717,15 @@ struct ProjectIconPicker: View {
             }
             guard let url else { return }
             Task { @MainActor in
-                applyPickedFileURL(url)
+                importPickedFileURL(url)
             }
         }
         return true
     }
 
-    private func applyPickedFileURL(_ url: URL) {
+    private func importPickedFileURL(_ url: URL) {
         fileImportError = nil
-        // 安全作用域：部分来源（如 iCloud）需要 startAccessing。
+        // 安全作用域：部分来源（如 iCloud/外接盘）需要 startAccessing。
         let accessed = url.startAccessingSecurityScopedResource()
         defer {
             if accessed { url.stopAccessingSecurityScopedResource() }
@@ -1553,31 +1734,80 @@ struct ProjectIconPicker: View {
             fileImportError = "File not found."
             return
         }
-        // 先校验能否解码为图像，再复制。
-        guard NSImage(contentsOf: url) != nil
-            || url.pathExtension.lowercased() == "svg"
-        else {
-            fileImportError = "Could not read this file as an image."
+        guard let managed = ProjectIconFileStore.importImage(
+            from: url,
+            projectID: project.id
+        ) else {
+            fileImportError = "Failed to import image into the config folder."
             return
         }
-        selectedFilePath = url.path
+        selectedFilePath = managed.path
     }
 
     private func applySelectedFile() {
         guard !selectedFilePath.isEmpty else { return }
-        let sourceURL = URL(fileURLWithPath: selectedFilePath)
-        let accessed = sourceURL.startAccessingSecurityScopedResource()
-        defer {
-            if accessed { sourceURL.stopAccessingSecurityScopedResource() }
+        select(.file(selectedFilePath))
+    }
+
+    // MARK: Pasteboard Helper
+
+    /// 检查系统剪贴板中是否有可用图像或图像文件。
+    private var hasImageInClipboard: Bool {
+        let pb = NSPasteboard.general
+        if NSImage(pasteboard: pb) != nil {
+            return true
         }
-        guard let managed = ProjectIconFileStore.importImage(
-            from: sourceURL,
-            projectID: project.id
-        ) else {
-            fileImportError = "Failed to copy image into the config folder."
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let first = urls.first {
+            let ext = first.pathExtension.lowercased()
+            if ["png", "jpg", "jpeg", "svg", "webp", "icns", "ico", "gif", "bmp", "tiff", "heic"].contains(ext) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// 从剪贴板尝试提取图像或图像文件并直接导入为选定图片。
+    private func pasteImageFromClipboard() {
+        let pb = NSPasteboard.general
+
+        // 1. 如果剪贴板包含复制的文件 URL
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let first = urls.first {
+            let ext = first.pathExtension.lowercased()
+            if ["png", "jpg", "jpeg", "svg", "webp", "icns", "ico", "gif", "bmp", "tiff", "heic"].contains(ext) {
+                importPickedFileURL(first)
+                return
+            }
+        }
+
+        // 2. 如果剪贴板包含位图/截图等像素图像数据
+        if let image = NSImage(pasteboard: pb) {
+            importNSImageFromClipboard(image)
             return
         }
-        select(.file(managed.path))
+
+        fileImportError = "剪贴板中未找到有效图片数据"
+    }
+
+    /// 将 NSImage 数据写入临时 PNG 文件并托管导入。
+    /// - Parameter image: 从剪贴板提取的图像
+    private func importNSImageFromClipboard(_ image: NSImage) {
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            fileImportError = "无法解析剪贴板图像数据"
+            return
+        }
+
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard_\(UUID().uuidString).png")
+        do {
+            try pngData.write(to: tempURL)
+            importPickedFileURL(tempURL)
+            try? FileManager.default.removeItem(at: tempURL)
+        } catch {
+            fileImportError = "导入剪贴板图片失败: \(error.localizedDescription)"
+        }
     }
 
     private static var imageContentTypes: [UTType] {
@@ -1604,6 +1834,8 @@ struct ProjectIconPicker: View {
         } else if case .file = project.icon {
             ProjectIconFileStore.removeManagedIcons(for: project.id)
         }
+        ProjectIconThumbnailCache.clearCache()
+        project.objectWillChange.send()
         project.icon = icon
         dismiss()
     }
@@ -1612,6 +1844,8 @@ struct ProjectIconPicker: View {
         if case .file = project.icon {
             ProjectIconFileStore.removeManagedIcons(for: project.id)
         }
+        ProjectIconThumbnailCache.clearCache()
+        project.objectWillChange.send()
         project.icon = nil
         dismiss()
     }

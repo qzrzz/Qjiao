@@ -116,13 +116,13 @@ struct RightSidebarView: View {
             }
         }
         .onAppear {
-            syncModels()
+            syncModels(reloadActivePanel: true)
             syncSystemPolling()
             syncNoteBinding()
         }
         .onReceive(refreshTimer) { _ in syncModels() }
         .onChange(of: manager.isPanelVisible) {
-            syncModels()
+            syncModels(reloadActivePanel: manager.isPanelVisible)
             syncSystemPolling()
             // 隐藏右侧栏时先落盘，避免防抖未到就丢改动。
             if !manager.isPanelVisible {
@@ -131,7 +131,9 @@ struct RightSidebarView: View {
                 syncNoteBinding()
             }
         }
-        .onChange(of: manager.panelTab) { syncModels() }
+        .onChange(of: manager.panelTab) {
+            syncModels(reloadActivePanel: true)
+        }
         .onChange(of: manager.selectedSession?.id) { syncModels() }
         // A `cd` in the terminal publishes the new cwd immediately (OSC 7 →
         // session.workingDirectory); resync at once instead of waiting for the
@@ -508,9 +510,17 @@ struct RightSidebarView: View {
         .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    private func syncModels() {
+    private func syncModels(reloadActivePanel: Bool = false) {
+        let projectPanelActive = manager.isPanelVisible
+            && (manager.panelTab == .start || manager.panelTab == .project)
+            && manager.selectedProject != nil
+        let infoPanelActive = manager.isPanelVisible
+            && manager.panelTab == .info
+            && manager.selectedSession != nil
+        projectInfo.setFileMonitoringActive(projectPanelActive)
+        sessionInfo.setFileMonitoringActive(infoPanelActive)
+
         guard let project = manager.selectedProject, manager.isPanelVisible else { return }
-        guard manager.panelTab != .start else { return }
         let session = manager.selectedSession
         let cwdVisible = showsCWD
         if manager.panelTab == .files, cwdVisible, !wasCWDVisible {
@@ -523,20 +533,23 @@ struct RightSidebarView: View {
             return
         }
         switch manager.panelTab {
-        case .start:
-            break
-        case .project:
+        case .start, .project:
             // 项目根 + 全 session shell 的进程/端口并集。
             let root = projectRoot(for: project, fallback: session)
             let shellPids = project.sessions.compactMap(\.shellPid)
-            projectInfo.sync(root: root, shellPids: shellPids)
+            projectInfo.sync(
+                root: root,
+                shellPids: shellPids,
+                reloadScripts: reloadActivePanel
+            )
         case .info:
             // 当前终端 cwd 的 scripts + 本 session 进程/端口。
             guard let session else { return }
             sessionInfo.sync(
                 cwd: session.currentDirectoryPath,
                 shellName: session.shellName,
-                shellPid: session.shellPid
+                shellPid: session.shellPid,
+                reloadScripts: reloadActivePanel
             )
         case .files:
             fileTree.sync(root: projectRoot(for: project, fallback: session))

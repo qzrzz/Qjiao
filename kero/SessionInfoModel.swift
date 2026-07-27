@@ -26,6 +26,8 @@ final class SessionInfoModel: nonisolated ObservableObject {
     @Published private(set) var makefileScripts: [UniversalProjectScript] = []
     @Published private(set) var processes: [ProcessItem] = []
     @Published private(set) var ports: [PortItem] = []
+    /// 仅表示用户点击刷新按钮触发的完整刷新，自动轮询不显示转圈。
+    @Published private(set) var isRefreshing = false
 
     private var packageRoot = ""
     private var scriptFileState: SidebarScriptFileState?
@@ -35,9 +37,25 @@ final class SessionInfoModel: nonisolated ObservableObject {
     private var isRefreshingProcesses = false
     private var processGeneration = 0
     private var processTask: Task<Void, Never>?
+    private var manualScriptsPending = false
+    private var manualProcessesPending = false
+    private var isFileMonitoringActive = false
+    private lazy var fileWatcher = SidebarProjectFileWatcher { [weak self] in
+        guard let self else { return }
+        self.syncPackageScripts(root: self.cwdPath, force: true)
+    }
 
-    func sync(cwd: String, shellName: String, shellPid: pid_t?) {
+    func sync(
+        cwd: String,
+        shellName: String,
+        shellPid: pid_t?,
+        reloadScripts: Bool = false
+    ) {
+        let cwdChanged = cwdPath != cwd
         if cwdPath != cwd { cwdPath = cwd }
+        if isFileMonitoringActive {
+            fileWatcher.watch(directory: cwd)
+        }
         if self.shellName != shellName { self.shellName = shellName }
         let pid = shellPid ?? 0
         let pidChanged = self.shellPid != pid
@@ -46,12 +64,29 @@ final class SessionInfoModel: nonisolated ObservableObject {
             clearProcessData()
         }
 
-        syncPackageScripts(root: cwd)
+        if cwdChanged || reloadScripts {
+            syncPackageScripts(root: cwd, force: reloadScripts)
+        }
         refreshProcesses(force: pidChanged)
+    }
+
+    /** 仅在 Info 面板可见时监听当前终端目录的项目配置文件变化。 */
+    func setFileMonitoringActive(_ isActive: Bool) {
+        guard isFileMonitoringActive != isActive else { return }
+        isFileMonitoringActive = isActive
+        if isActive {
+            fileWatcher.watch(directory: cwdPath)
+        } else {
+            fileWatcher.stop()
+        }
     }
 
     /// 手动刷新：强制 scripts + 进程。
     func refresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        manualScriptsPending = true
+        manualProcessesPending = true
         syncPackageScripts(root: cwdPath, force: true)
         refreshProcesses(force: true)
     }
@@ -72,6 +107,7 @@ final class SessionInfoModel: nonisolated ObservableObject {
             packageLoadID = UUID()
             packageLoadTask?.cancel()
             clearScriptData()
+            finishManualScriptsRefresh()
             return
         }
 
@@ -81,11 +117,6 @@ final class SessionInfoModel: nonisolated ObservableObject {
         let needsSync = force
             || rootChanged
             || scriptFileState != state
-            || (state.gradle.isGradleProject && gradleScripts.isEmpty)
-            || (state.just.hasJustfile && justScripts.isEmpty)
-            || (state.cargo.isCargoProject && cargoScripts.isEmpty)
-            || (state.cmake.isCMakeProject && cmakeScripts.isEmpty)
-            || (state.makefile.hasMakefile && makefileScripts.isEmpty)
 
         guard needsSync else { return }
 
@@ -100,6 +131,7 @@ final class SessionInfoModel: nonisolated ObservableObject {
 
         guard state.hasAnyProjectFile else {
             clearScriptData()
+            finishManualScriptsRefresh()
             return
         }
 
@@ -120,6 +152,7 @@ final class SessionInfoModel: nonisolated ObservableObject {
         guard pid > 0 else {
             if !processes.isEmpty { processes = [] }
             if !ports.isEmpty { ports = [] }
+            finishManualProcessesRefresh()
             return
         }
         if isRefreshingProcesses, !force { return }
@@ -161,6 +194,7 @@ final class SessionInfoModel: nonisolated ObservableObject {
         if cargoScripts != catalog.cargoScripts { cargoScripts = catalog.cargoScripts }
         if cmakeScripts != catalog.cmakeScripts { cmakeScripts = catalog.cmakeScripts }
         if makefileScripts != catalog.makefileScripts { makefileScripts = catalog.makefileScripts }
+        finishManualScriptsRefresh()
     }
 
     /// 切换 Session 时不再短暂保留上一终端的进程与端口。
@@ -182,5 +216,24 @@ final class SessionInfoModel: nonisolated ObservableObject {
         guard processGeneration == generation, shellPid == expectedPid else { return }
         if processes != newProcesses { processes = newProcesses }
         if ports != newPorts { ports = newPorts }
+        finishManualProcessesRefresh()
+    }
+
+    private func finishManualScriptsRefresh() {
+        guard manualScriptsPending else { return }
+        manualScriptsPending = false
+        finishManualRefreshIfNeeded()
+    }
+
+    private func finishManualProcessesRefresh() {
+        guard manualProcessesPending else { return }
+        manualProcessesPending = false
+        finishManualRefreshIfNeeded()
+    }
+
+    private func finishManualRefreshIfNeeded() {
+        if !manualScriptsPending && !manualProcessesPending {
+            isRefreshing = false
+        }
     }
 }

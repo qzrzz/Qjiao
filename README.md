@@ -130,7 +130,7 @@
 - 优化右侧栏 Tabs 与 Project 等面板空白区域拖拽逻辑：为右侧 Tabs 顶栏、Project / Info / Files / Git 面板 Header 及 Project 面板空白背景配置 `WindowDragArea`，允许用户拖拽空白区域直接移动窗口。
 - 右侧栏 Project 面板增加 PACKAGE 分组：双行紧凑布局（首行包名与右侧独占仓库跳转图标按钮，次行版本号与 SemVer `[+]` 递增按钮及 `MAJOR` / `MINOR` / `PATCH` / `Git tag` 下拉菜单）；点击快速递增并改写 `package.json` 中的 `version` 字段或生成 Git 标签；若未检测到 `package.json` 或无有效字段则自动隐藏该分组。
 - 重构右侧栏代码结构：`RightSidebarView` 只保留侧栏框架与面板调度，Files、Git、Project、Info 及公共视图按职责拆分；Gradle / Just / Cargo / CMake / Makefile 任务分组统一复用同一组件与交互逻辑。
-- 优化 Project / Info 信息刷新机制：共用脚本目录采集器并并行解析各类任务；切换项目、CWD 或 Session 时立即清理旧列表并取消过期任务；`ps` / `lsof` 支持取消与 3 秒超时。脚本状态使用「项目 + 工具 + 目录 + 名称」唯一键，端口按所属 Shell 精确绑定并在采集完成后即时更新；修复 Info 端口按钮不更新及 `Cargo.toml` 修改后任务列表不刷新的问题。
+- 优化 Project / Info 信息刷新机制：共用脚本目录采集器并并行解析各类任务；项目配置改为文件事件监听，面板每次显示、切换到对应标签或手动点击刷新时强制重新载入，不再通过 2 秒轮询读取文件（定时器仅刷新进程与端口）；切换项目、CWD 或 Session 时立即清理旧列表并取消过期任务；`ps` / `lsof` 支持取消与 3 秒超时。脚本状态使用「项目 + 工具 + 目录 + 名称」唯一键，端口按所属 Shell 精确绑定并在采集完成后即时更新；刷新按钮支持 hover 高亮，刷新期间图标旋转并禁止重复点击。修复 Info 端口按钮不更新、`Cargo.toml` 修改后任务列表不刷新，以及 Project 刷新时版本输入框旧草稿覆盖并阻止重新加载 `package.json` 版本号的问题；版本输入框仅在内容实际改变后于 Enter 或失焦时写盘。
 - 修复终端在窗口尺寸改变（Live Resize）时位置跳动与闪烁：禁用 Ghostty `window-padding-balance`（设为 `false`），锁定 Top/Left Padding 恒定，使余数像素统一在底部与右侧吸收，彻底解决 Resize 窗口时文本向上/向下剧烈位移震荡的问题。
 
 ## 上游移植记录

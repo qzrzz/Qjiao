@@ -28,6 +28,8 @@ final class ProjectPanelModel: nonisolated ObservableObject {
     @Published private(set) var ports: [PortItem] = []
     /// 参与聚合的 shell 数量（header 副标题）。
     @Published private(set) var sessionShellCount = 0
+    /// 仅表示用户点击刷新按钮触发的完整刷新，自动轮询不显示转圈。
+    @Published private(set) var isRefreshing = false
 
     private var packageRoot = ""
     private var scriptFileState: SidebarScriptFileState?
@@ -40,12 +42,24 @@ final class ProjectPanelModel: nonisolated ObservableObject {
     /// 每次启动采集递增，丢弃过期结果。
     private var processGeneration = 0
     private var processTask: Task<Void, Never>?
+    private var manualScriptsPending = false
+    private var manualProcessesPending = false
+    private var isFileMonitoringActive = false
+    private lazy var fileWatcher = SidebarProjectFileWatcher { [weak self] in
+        guard let self else { return }
+        self.syncPackageScripts(root: self.rootPath, force: true)
+    }
 
     /// - Parameters:
     ///   - root: 项目根路径
     ///   - shellPids: 项目内全部 session 的 shell pid
-    func sync(root: String, shellPids: [pid_t]) {
+    ///   - reloadScripts: 面板重新显示或重新切入时强制重读配置文件
+    func sync(root: String, shellPids: [pid_t], reloadScripts: Bool = false) {
+        let rootChanged = rootPath != root
         if rootPath != root { rootPath = root }
+        if isFileMonitoringActive {
+            fileWatcher.watch(directory: root)
+        }
         let unique = Array(Set(shellPids.filter { $0 > 0 })).sorted()
         let pidsChanged = unique != self.shellPids
         if pidsChanged {
@@ -53,13 +67,30 @@ final class ProjectPanelModel: nonisolated ObservableObject {
             sessionShellCount = unique.count
             clearProcessData()
         }
-        syncPackageScripts(root: root)
+        if rootChanged || reloadScripts {
+            syncPackageScripts(root: root, force: reloadScripts)
+        }
         // pid 集合变化或定时轮询都会走到这里；始终刷新进程视图。
         refreshProcesses(force: pidsChanged)
     }
 
+    /** 仅在 Project 面板可见时监听项目配置文件变化。 */
+    func setFileMonitoringActive(_ isActive: Bool) {
+        guard isFileMonitoringActive != isActive else { return }
+        isFileMonitoringActive = isActive
+        if isActive {
+            fileWatcher.watch(directory: rootPath)
+        } else {
+            fileWatcher.stop()
+        }
+    }
+
     /// 手动刷新：强制重读 package.json / Gradle / Just / Cargo / CMake / Makefile Tasks + 进程。
     func refresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        manualScriptsPending = true
+        manualProcessesPending = true
         syncPackageScripts(root: rootPath, force: true)
         refreshProcesses(force: true)
     }
@@ -80,6 +111,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
             packageLoadID = UUID()
             packageLoadTask?.cancel()
             clearScriptData()
+            finishManualScriptsRefresh()
             return
         }
 
@@ -89,11 +121,6 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         let needsSync = force
             || rootChanged
             || scriptFileState != state
-            || (state.gradle.isGradleProject && gradleScripts.isEmpty)
-            || (state.just.hasJustfile && justScripts.isEmpty)
-            || (state.cargo.isCargoProject && cargoScripts.isEmpty)
-            || (state.cmake.isCMakeProject && cmakeScripts.isEmpty)
-            || (state.makefile.hasMakefile && makefileScripts.isEmpty)
 
         guard needsSync else { return }
 
@@ -108,6 +135,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
 
         guard state.hasAnyProjectFile else {
             clearScriptData()
+            finishManualScriptsRefresh()
             return
         }
 
@@ -128,6 +156,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         guard !pids.isEmpty else {
             if !processes.isEmpty { processes = [] }
             if !ports.isEmpty { ports = [] }
+            finishManualProcessesRefresh()
             return
         }
         // 非 force 时若已在采，跳过本轮，避免 2s timer 叠 ps/lsof。
@@ -178,6 +207,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         if cargoScripts != catalog.cargoScripts { cargoScripts = catalog.cargoScripts }
         if cmakeScripts != catalog.cmakeScripts { cmakeScripts = catalog.cmakeScripts }
         if makefileScripts != catalog.makefileScripts { makefileScripts = catalog.makefileScripts }
+        finishManualScriptsRefresh()
     }
 
     /// PID 根变化时不再短暂展示上一项目的进程与端口。
@@ -199,5 +229,24 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         guard processGeneration == generation, shellPids == expectedPids else { return }
         if processes != newProcesses { processes = newProcesses }
         if ports != newPorts { ports = newPorts }
+        finishManualProcessesRefresh()
+    }
+
+    private func finishManualScriptsRefresh() {
+        guard manualScriptsPending else { return }
+        manualScriptsPending = false
+        finishManualRefreshIfNeeded()
+    }
+
+    private func finishManualProcessesRefresh() {
+        guard manualProcessesPending else { return }
+        manualProcessesPending = false
+        finishManualRefreshIfNeeded()
+    }
+
+    private func finishManualRefreshIfNeeded() {
+        if !manualScriptsPending && !manualProcessesPending {
+            isRefreshing = false
+        }
     }
 }
