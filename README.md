@@ -10,6 +10,13 @@
 
 > 相对于 Kero 原版的改动
 
+- 新增本地 AI 统一模块 `kero/LocalAI`：通过各 AI CLI 的 headless / exec 非交互模式调用本地智能体，应用侧只依赖 `LocalAI.prompt` 统一接口。
+  - **支持 Provider**：`grok`（`grok --single`）、`codex`（`codex exec`）、`claude`（`claude -p` / `--print`）、`agy`（`agy --print`）、`opencode`（`opencode run`），以及 **Disabled**。
+  - **设置**：Settings → General → **AI headless provider**；列出全部支持的 CLI，未安装项显示 “Not installed” 且不可选；可 Refresh 重新探测 PATH / 常见安装目录。
+  - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ai.headless-provider`（默认 disabled，不写回）。
+  - **能力**：单轮 prompt、可选工作目录 / model / 超时 / autoApprove；`LocalAIRegistry` 负责安装探测与当前选择。
+  - **AI Select Icon**：基于项目 name / description / 路径末级、`package.json` name·description、`README.md` 前 20 行，以及 **Material Icon Theme** 逻辑名列表（不含 Brands），用 LocalAI 按「Material icon → SF Symbol → Emoji」优先级返回 JSON 并应用；入口为项目列表右键 **AI Select Icon** 与图标选择器 **AI Select**（未启用 provider 时禁用）。
+  - **AI Name & Desc & Icon**：独立模块 `LocalAIProjectMetaSuggest` + `LocalAIProjectMetaTaskStore`；一次请求生成项目 **显示名称**、**描述** 与 **图标** 并写入配置；上下文与 Material 列表复用图标功能；入口为项目列表右键 **AI Name & Desc & Icon**（与纯选图标互斥、可取消、行内转圈）。
 - 左边栏开关（`sidebar.left`，⌘B）：展开时显示在左侧边栏顶栏右侧；收起后移到 Tabs 顶栏左侧（开关左右边距加大：左 16pt / 右 12pt）。
 - 左侧边栏项目归档功能：支持归档与解除归档；归档项目默认收起居于左侧边栏底部，点击可展开查看列表；解除归档后自动回到上方正常项目列表。
 - 左侧边栏顶栏在侧栏开关左侧增加窗口置顶按钮（`pin` / `pin.fill`）：切换当前窗口 `NSWindow.level` 为 floating / normal，激活时 tint。

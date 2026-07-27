@@ -136,6 +136,13 @@ struct SettingsView: View {
                 }
             }
 
+            Section("AI") {
+                Group {
+                    LocalAIHeadlessProviderPicker()
+                }
+                .settingsRowPadding()
+            }
+
             Section("Defaults") {
                 Group {
                 HStack {
@@ -535,8 +542,140 @@ struct SettingsView: View {
             && !settings.directClickMovesCursor
             && !settings.disableZshAutoTitle
             && settings.packageManagerCommand == .npm
+            && settings.localAIHeadlessProvider == .disabled
     }
 
+}
+
+// MARK: - Local AI headless provider
+
+/// General 设置中的 AI headless provider 选择器：列出支持的 CLI，未安装项不可选并标注。
+///
+/// 排版与 `settingWithDescription` 对齐：标题用默认字号，说明用 `.callout`，避免 caption 过小难读。
+private struct LocalAIHeadlessProviderPicker: View {
+    @ObservedObject private var registry = LocalAIRegistry.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("AI headless provider")
+                        .fontWeight(.semibold)
+                    Text("Provide AI capabilities using a local AI CLI.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                // 使用 Menu 而非 Picker，以便对未安装 CLI 使用 .disabled
+                Menu {
+                    ForEach(registry.allStatusesForPicker) { status in
+                        Button {
+                            registry.selectedProvider = status.provider
+                        } label: {
+                            if status.provider == registry.selectedProvider {
+                                Label(status.pickerLabel, systemImage: "checkmark")
+                            } else {
+                                Text(status.pickerLabel)
+                            }
+                        }
+                        .disabled(!status.isAvailable)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(registry.selectedStatus?.pickerLabel ?? LocalAIProviderID.disabled.displayName)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .padding(.top, 1)
+            }
+
+            // 命令预览靠左（浅灰底、宽度随内容）、刷新靠右，同一行节省纵向空间
+            HStack(alignment: .center, spacing: 8) {
+                if registry.selectedProvider != .disabled {
+                    HStack(alignment: .center, spacing: 6) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        // Form 内 SwiftUI Text.textSelection 常无法选中，用只读 NSTextField
+                        SelectableTerminalCommandText(text: registry.selectedProvider.commandHint)
+                            .frame(minHeight: 16, alignment: .leading)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Color.primary.opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+                    // 宽度随命令内容；过长时封顶，避免挤掉 Refresh
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: 280, alignment: .leading)
+                    .clipped()
+                }
+
+                Spacer(minLength: 0)
+
+                Button("Refresh") {
+                    registry.refresh()
+                }
+                .controlSize(.small)
+                .help("Re-scan PATH and common install locations for AI CLIs.")
+            }
+        }
+        .onAppear {
+            registry.refresh()
+        }
+    }
+}
+
+/// 设置 Form 内可拖选 / 复制的只读命令文本；宽度随内容，过长时由外层裁切。
+private struct SelectableTerminalCommandText: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> IntrinsicWidthTextField {
+        let field = IntrinsicWidthTextField(string: text)
+        field.isEditable = false
+        field.isSelectable = true
+        field.isBordered = false
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.backgroundColor = .clear
+        field.focusRingType = .none
+        field.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        field.textColor = NSColor.secondaryLabelColor
+        field.lineBreakMode = .byClipping
+        field.maximumNumberOfLines = 1
+        field.allowsEditingTextAttributes = false
+        field.setContentHuggingPriority(.required, for: .horizontal)
+        field.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return field
+    }
+
+    func updateNSView(_ nsView: IntrinsicWidthTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+            nsView.invalidateIntrinsicContentSize()
+        }
+    }
+}
+
+/// 按文字内容报告 intrinsic width，便于预览胶囊贴合命令长度。
+private final class IntrinsicWidthTextField: NSTextField {
+    override var intrinsicContentSize: NSSize {
+        let font = self.font ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let width = (stringValue as NSString).size(withAttributes: attrs).width.rounded(.up) + 2
+        let height = super.intrinsicContentSize.height
+        return NSSize(width: max(width, 1), height: height)
+    }
 }
 
 /// 设置页的可见分类；每个分类对应顶部一个图标入口。

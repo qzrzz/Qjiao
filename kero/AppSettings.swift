@@ -172,6 +172,13 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 本地 AI headless 提供器（`LocalAI` 统一接口所用 CLI）；默认 disabled。
+    ///
+    /// 写入 `config.toml` 的 `ai.headless-provider`；UI 与运行时通过 `LocalAIRegistry` 同步。
+    @Published var localAIHeadlessProvider: LocalAIProviderID {
+        didSet { save() }
+    }
+
     /// 用户自定义挑选的 `.app` 代码编辑器路径列表。
     @Published var customCodeEditorPaths: [String] {
         didSet { save() }
@@ -273,6 +280,8 @@ final class AppSettings: nonisolated ObservableObject {
         disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
         preferredCodeEditorBundleId = toml["editor.preferred-code-editor"]?.string ?? ""
         preferredAIToolId = toml["ai.preferred-tool"]?.string ?? ""
+        localAIHeadlessProvider = toml["ai.headless-provider"]?.string
+            .flatMap(LocalAIProviderID.init(rawValue:)) ?? .disabled
         customCodeEditorPaths = toml["editor.custom-editors"]?.array?.compactMap(\.string) ?? []
         customCLITools = toml["ai.custom-cli-tools"]?.array?.compactMap(\.string) ?? []
         packageManagerCommand = toml["terminal.package-manager"]?.string
@@ -360,8 +369,11 @@ final class AppSettings: nonisolated ObservableObject {
         systemReachabilityInterval = .default
         preferredCodeEditorBundleId = ""
         preferredAIToolId = ""
+        localAIHeadlessProvider = .disabled
         customCodeEditorPaths = []
         customCLITools = []
+        // 同步 LocalAI 注册表选择，避免设置页仍显示旧 provider
+        LocalAIRegistry.shared.syncFromSettings()
     }
 
     private func save() {
@@ -440,6 +452,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if !preferredAIToolId.isEmpty {
             lines.append("ai.preferred-tool = \(TOML.quote(preferredAIToolId))")
+        }
+        if localAIHeadlessProvider != .disabled {
+            lines.append("ai.headless-provider = \(TOML.quote(localAIHeadlessProvider.rawValue))")
         }
         if !customCodeEditorPaths.isEmpty {
             let quoted = customCodeEditorPaths.map { TOML.quote($0) }.joined(separator: ", ")

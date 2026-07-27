@@ -923,6 +923,10 @@ struct ProjectIconPicker: View {
     /// 当前选中的用户文件路径（未 Apply 前的预览；Apply 后写入 project.icon）。
     @State private var selectedFilePath: String = ""
     @State private var fileImportError: String?
+    /// 共享后台任务（与项目列表右键同一套状态）。
+    @ObservedObject private var aiIconTasks = LocalAIIconTaskStore.shared
+    /// 本面板发起的 AI 任务成功后是否自动关闭（取消不关）。
+    @State private var dismissOnAISuccess = false
     @FocusState private var emojiFieldFocused: Bool
     @FocusState private var symbolSearchFocused: Bool
 
@@ -1062,46 +1066,117 @@ struct ProjectIconPicker: View {
 
     // MARK: Header / footer
 
+    private var isAISelectingIcon: Bool {
+        aiIconTasks.isRunning(project.id)
+    }
+
+    private var aiSelectError: String? {
+        aiIconTasks.state(for: project.id).lastError
+    }
+
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             currentIconPreview
             VStack(alignment: .leading, spacing: 2) {
                 Text("Project Icon")
                     .font(SidebarTypography.title())
-                Text(project.name)
+                if isAISelectingIcon {
+                    // 进行中：显示 provider + 后台运行说明
+                    Text(
+                        aiIconTasks.state(for: project.id).providerLabel
+                            .map { "Selecting with \($0)…" }
+                            ?? "AI selecting icon…"
+                    )
                     .font(SidebarTypography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color(nsColor: Theme.cursor))
                     .lineLimit(1)
+                } else {
+                    Text(project.name)
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let aiSelectError, !isAISelectingIcon {
+                    Text(aiSelectError)
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.red.opacity(0.9))
+                        .lineLimit(2)
+                }
             }
             Spacer(minLength: 0)
+            if isAISelectingIcon {
+                Button("Cancel") {
+                    aiIconTasks.cancel(project.id)
+                }
+                .keyboardShortcut(.cancelAction)
+            } else {
+                Button {
+                    startAISelectIcon()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                        Text("AI Select")
+                    }
+                }
+                .disabled(!LocalAI.isEnabled)
+                .help(
+                    LocalAI.isEnabled
+                        ? "Use LocalAI headless provider to pick an icon (runs in background)"
+                        : "Enable AI headless provider in Settings → General"
+                )
+            }
             if project.icon != nil {
                 Button("Clear") {
                     clearIcon()
                 }
+                .disabled(isAISelectingIcon)
+            }
+        }
+        .onChange(of: aiIconTasks.states[project.id]?.isRunning) { wasRunning, isRunning in
+            // 仅本面板发起且成功结束时关闭；取消或失败保持打开
+            guard dismissOnAISuccess, wasRunning == true, isRunning == false else { return }
+            dismissOnAISuccess = false
+            if aiIconTasks.state(for: project.id).lastError == nil {
+                dismiss()
             }
         }
     }
 
-    /// 当前项目图标（或默认 folder）的大预览。
+    /// 提交后台 AI 选图标（不阻塞选择器；成功后自动 dismiss）。
+    private func startAISelectIcon() {
+        aiIconTasks.clearError(project.id)
+        dismissOnAISuccess = true
+        aiIconTasks.start(for: project)
+    }
+
+    /// 当前项目图标（或默认 folder）的大预览；AI 进行中叠转圈。
     private var currentIconPreview: some View {
-        Group {
-            switch project.icon {
-            case .sfSymbol(let name):
-                Image(systemName: name)
-                    .font(SidebarTypography.pickerIcon())
-            case .emoji(let value):
-                Text(value)
-                    .font(SidebarTypography.pickerEmojiPreview())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-            case .preset(let preset):
-                ProjectPresetIconImage(preset: preset, size: 28, isSelected: true)
-            case .file(let path):
-                ProjectFileIconImage(path: path, size: 28)
-            case nil:
-                Image(systemName: "folder")
-                    .font(SidebarTypography.pickerIcon())
-                    .foregroundStyle(.secondary)
+        ZStack {
+            Group {
+                switch project.icon {
+                case .sfSymbol(let name):
+                    Image(systemName: name)
+                        .font(SidebarTypography.pickerIcon())
+                case .emoji(let value):
+                    Text(value)
+                        .font(SidebarTypography.pickerEmojiPreview())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                case .preset(let preset):
+                    ProjectPresetIconImage(preset: preset, size: 28, isSelected: true)
+                case .file(let path):
+                    ProjectFileIconImage(path: path, size: 28)
+                case nil:
+                    Image(systemName: "folder")
+                        .font(SidebarTypography.pickerIcon())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .opacity(isAISelectingIcon ? 0.25 : 1)
+
+            if isAISelectingIcon {
+                ProgressView()
+                    .controlSize(.small)
             }
         }
         .frame(width: 40, height: 40)

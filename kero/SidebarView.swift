@@ -336,10 +336,17 @@ private struct SidebarProjectRow: View {
     @State private var isIconPickerPresented = false
     @State private var isEditingDescription = false
     @State private var isCloseConfirmationPresented = false
+    @State private var isAISelectIconErrorPresented = false
+    @State private var aiSelectIconError: String?
+    @State private var isAIProjectMetaErrorPresented = false
+    @State private var aiProjectMetaError: String?
     @State private var renameDraft = ""
     @State private var descriptionDraft = ""
     @FocusState private var renameFocused: Bool
     @FocusState private var descriptionFocused: Bool
+    /// 共享后台任务状态：菜单关闭后项目行仍可显示进度。
+    @ObservedObject private var aiIconTasks = LocalAIIconTaskStore.shared
+    @ObservedObject private var aiMetaTasks = LocalAIProjectMetaTaskStore.shared
 
     var body: some View {
         Group {
@@ -396,6 +403,36 @@ private struct SidebarProjectRow: View {
             Button("Change Icon…") {
                 isIconPickerPresented = true
             }
+            // ── AI：名称 + 描述 + 图标
+            if aiMetaTasks.isRunning(project.id) {
+                Button {
+                    aiMetaTasks.cancel(project.id)
+                } label: {
+                    Label("Cancel AI Name & Desc & Icon", systemImage: "xmark.circle")
+                }
+            } else {
+                Button {
+                    startAIProjectMeta()
+                } label: {
+                    Label("AI Name & Desc & Icon", systemImage: "wand.and.stars")
+                }
+                .disabled(!LocalAI.isEnabled || aiIconTasks.isRunning(project.id))
+            }
+            // ── AI：仅图标
+            if aiIconTasks.isRunning(project.id) {
+                Button {
+                    aiIconTasks.cancel(project.id)
+                } label: {
+                    Label("Cancel AI Select Icon", systemImage: "xmark.circle")
+                }
+            } else {
+                Button {
+                    startAISelectIcon()
+                } label: {
+                    Label("AI Select Icon", systemImage: "sparkles")
+                }
+                .disabled(!LocalAI.isEnabled || aiMetaTasks.isRunning(project.id))
+            }
             if project.icon != nil {
                 Button("Clear Icon") {
                     if case .file = project.icon {
@@ -403,6 +440,7 @@ private struct SidebarProjectRow: View {
                     }
                     project.icon = nil
                 }
+                .disabled(isAnyAITaskRunning)
             }
             Divider()
             if project.isArchived {
@@ -436,15 +474,101 @@ private struct SidebarProjectRow: View {
         } message: {
             Text("This will close the project and its terminal sessions.")
         }
+        .alert("AI Select Icon", isPresented: $isAISelectIconErrorPresented) {
+            Button("OK", role: .cancel) {
+                aiIconTasks.clearError(project.id)
+            }
+        } message: {
+            Text(aiSelectIconError ?? "Failed to select icon.")
+        }
+        .alert("AI Name & Desc & Icon", isPresented: $isAIProjectMetaErrorPresented) {
+            Button("OK", role: .cancel) {
+                aiMetaTasks.clearError(project.id)
+            }
+        } message: {
+            Text(aiProjectMetaError ?? "Failed to generate project metadata.")
+        }
+        .onChange(of: aiIconTasks.states[project.id]?.lastError) { _, newError in
+            // 后台任务失败时弹一次 alert（进行中不打扰）
+            guard let newError, !newError.isEmpty,
+                  aiIconTasks.states[project.id]?.isRunning != true
+            else { return }
+            aiSelectIconError = newError
+            isAISelectIconErrorPresented = true
+        }
+        .onChange(of: aiMetaTasks.states[project.id]?.lastError) { _, newError in
+            guard let newError, !newError.isEmpty,
+                  aiMetaTasks.states[project.id]?.isRunning != true
+            else { return }
+            aiProjectMetaError = newError
+            isAIProjectMetaErrorPresented = true
+        }
+    }
+
+    /// 任一 AI 任务进行中（行内转圈共用）。
+    private var isAnyAITaskRunning: Bool {
+        aiIconTasks.isRunning(project.id) || aiMetaTasks.isRunning(project.id)
+    }
+
+    /// 右键菜单：提交后台 AI 选图标（不阻塞 UI）。
+    private func startAISelectIcon() {
+        guard LocalAI.isEnabled else {
+            aiSelectIconError =
+                "Local AI is disabled. Choose an AI headless provider in Settings → General."
+            isAISelectIconErrorPresented = true
+            return
+        }
+        aiIconTasks.start(for: project)
+    }
+
+    /// 右键菜单：后台生成名称、描述与图标。
+    private func startAIProjectMeta() {
+        guard LocalAI.isEnabled else {
+            aiProjectMetaError =
+                "Local AI is disabled. Choose an AI headless provider in Settings → General."
+            isAIProjectMetaErrorPresented = true
+            return
+        }
+        aiMetaTasks.start(for: project)
+    }
+
+    /// 项目图标位：AI 任务进行中显示转圈，菜单关掉后仍可见。
+    private var projectIconSlot: some View {
+        let size: CGFloat = project.isArchived ? 16 : 24
+        let running = isAnyAITaskRunning
+        let helpText: String = {
+            if aiMetaTasks.isRunning(project.id) {
+                return aiMetaTasks.state(for: project.id).providerLabel.map {
+                    "AI generating name, description & icon via \($0)…"
+                } ?? "AI generating name, description & icon…"
+            }
+            if aiIconTasks.isRunning(project.id) {
+                return aiIconTasks.state(for: project.id).providerLabel.map {
+                    "AI selecting icon via \($0)…"
+                } ?? "AI selecting icon…"
+            }
+            return ""
+        }()
+        return ZStack {
+            ProjectIconView(
+                icon: project.icon,
+                isSelected: isSelected,
+                size: size
+            )
+            .opacity(running ? 0.25 : 1)
+
+            if running {
+                ProgressView()
+                    .controlSize(project.isArchived ? .mini : .small)
+                    .help(helpText)
+            }
+        }
+        .frame(width: size, height: size)
     }
 
     private var rowContent: some View {
         HStack(spacing: 6) {
-            ProjectIconView(
-                icon: project.icon,
-                isSelected: isSelected,
-                size: project.isArchived ? 16 : 24
-            )
+            projectIconSlot
 
             if isRenaming {
                 TextField("", text: $renameDraft)
