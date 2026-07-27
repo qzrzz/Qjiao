@@ -467,7 +467,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             builder.withBackgroundOpacity(settings.terminalBackgroundOpacity)
             builder.withWindowPaddingX(10)
             builder.withWindowPaddingY(8)
-            builder.withCustom("window-padding-balance", "true")
+            builder.withCustom("window-padding-balance", "false")
             builder.withCustom("window-padding-color", "extend")
             // Kero owns the app-level command map. Leaving Ghostty's defaults
             // installed makes its performKeyEquivalent intercept shortcuts
