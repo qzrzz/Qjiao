@@ -73,7 +73,7 @@ struct ProjectFileIconImage: View {
 
     var body: some View {
         Group {
-            if let image {
+            if let image = displayImage {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
@@ -89,9 +89,19 @@ struct ProjectFileIconImage: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
-        .task(id: path) {
+        .task(id: "f:\(path)@\(String(format: "%.1f", size))") {
+            image = nil
+            didFail = false
             await load()
         }
+    }
+
+    private var displayImage: NSImage? {
+        let cacheKey = "f:\(path)@\(String(format: "%.1f", size))"
+        if let hit = ProjectIconThumbnailCache.cachedFile(for: cacheKey) {
+            return hit
+        }
+        return image
     }
 
     private func load() async {
@@ -220,10 +230,10 @@ struct ProjectPresetIconImage: View {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
-                    .renderingMode(isTemplate ? .template : .original)
+                    .renderingMode(displayIsTemplate ? .template : .original)
                     .aspectRatio(contentMode: .fit)
                     .foregroundStyle(
-                        isTemplate
+                        displayIsTemplate
                             ? (isSelected ? Color(nsColor: Theme.cursor) : Color.secondary)
                             : Color.primary
                     )
@@ -240,8 +250,13 @@ struct ProjectPresetIconImage: View {
         .frame(width: size, height: size)
         .accessibilityHidden(true)
         .task(id: ProjectIconThumbnailCache.key(for: preset, pointSize: size)) {
-            guard lazyLoad else { return }
-            await loadAsync()
+            loadedImage = nil
+            didFail = false
+            if lazyLoad {
+                await loadAsync()
+            } else {
+                loadSyncIfNeeded()
+            }
         }
         .onAppear {
             if !lazyLoad {
@@ -250,12 +265,25 @@ struct ProjectPresetIconImage: View {
         }
     }
 
+    private var currentCacheHit: (image: NSImage, isTemplate: Bool)? {
+        let key = ProjectIconThumbnailCache.key(for: preset, pointSize: size)
+        return ProjectIconThumbnailCache.cached(for: key)
+    }
+
     private var displayImage: NSImage? {
-        if let loadedImage { return loadedImage }
+        if let hit = currentCacheHit { return hit.image }
         if !lazyLoad {
             return Self.nsImage(for: preset, pointSize: size)
         }
-        return nil
+        return loadedImage
+    }
+
+    private var displayIsTemplate: Bool {
+        if let hit = currentCacheHit { return hit.isTemplate }
+        if !lazyLoad {
+            return Self.isTemplate(preset)
+        }
+        return isTemplate
     }
 
     private func loadSyncIfNeeded() {
