@@ -71,7 +71,7 @@ struct SystemPanel: View {
     private var resourceCard: some View {
         VStack(spacing: 0) {
             compactMetricRow(
-                title: "CPU",
+                title: L10n.t("CPU"),
                 percent: model.snapshot.cpuUsagePercent.map { String(format: "%.0f%%", $0) },
                 // CPU 无「具体用量」字节值，只显示百分比。
                 detail: nil,
@@ -83,7 +83,7 @@ struct SystemPanel: View {
                 afterPercent: { refreshControl }
             )
             compactMetricRow(
-                title: "Mem",
+                title: L10n.t("Mem"),
                 percent: memoryPercentText,
                 detail: memoryDetailText,
                 // 行内文本 hover 显示 used/total/free 详情。
@@ -94,7 +94,7 @@ struct SystemPanel: View {
                 hasValue: model.snapshot.memoryUsedBytes != nil
             )
             compactMetricRow(
-                title: "Disk",
+                title: L10n.t("Disk"),
                 percent: diskPercentText,
                 detail: diskDetailText,
                 // 行内文本（标题/百分比/累计 W）均可 hover 出详情；折线为最近 1 分钟。
@@ -349,7 +349,7 @@ struct SystemPanel: View {
                 .foregroundStyle(accent)
                 .frame(width: 11, height: 11)
                 .padding(.trailing, 2)
-            Text("Net")
+            Text(L10n.t("Net"))
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
@@ -432,7 +432,7 @@ struct SystemPanel: View {
 
             if let publicAddr {
                 HStack(spacing: 4) {
-                    Text("Pub")
+                    Text(L10n.t("Pub"))
                         .font(SidebarTypography.micro(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 36, alignment: .leading)
@@ -450,7 +450,7 @@ struct SystemPanel: View {
     private var ipHeaderButton: some View {
         HStack(spacing: 4) {
             ipIcon
-            Text("IP")
+            Text(L10n.t("IP"))
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
@@ -482,7 +482,7 @@ struct SystemPanel: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Copy local IP address")
+                .help(L10n.t("Copy local IP address"))
             }
         }
     }
@@ -510,7 +510,7 @@ struct SystemPanel: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Copy public IP address")
+            .help(L10n.t("Copy public IP address"))
         }
     }
 
@@ -577,7 +577,7 @@ struct SystemPanel: View {
                 .foregroundStyle(proxyEnabled ? accent : .secondary)
                 .frame(width: 11, height: 11)
                 .padding(.trailing, 2)
-            Text("Proxy")
+            Text(L10n.t("Proxy"))
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
@@ -660,7 +660,7 @@ struct SystemPanel: View {
 
     private var reachabilityHeader: some View {
         HStack(spacing: 4) {
-            Text("Reachability")
+            Text(L10n.t("Reachability"))
                 .font(SidebarTypography.micro(.semibold))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 4)
@@ -674,7 +674,7 @@ struct SystemPanel: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Refresh all sites")
+            .help(L10n.t("Refresh all sites"))
             .disabled(model.reachabilityInterval == .off)
 
             Button {
@@ -690,7 +690,7 @@ struct SystemPanel: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Add site")
+            .help(L10n.t("Add site"))
 
             // 原生菜单按钮：文字 + 右侧系统下拉指示器；Toggle 呈现勾选态。
             Menu {
@@ -712,7 +712,7 @@ struct SystemPanel: View {
             .controlSize(.mini)
             .tint(.secondary)
             .fixedSize()
-            .help("Sampling interval")
+            .help(L10n.t("Sampling interval"))
         }
         .frame(height: 18)
     }
@@ -752,17 +752,17 @@ struct SystemPanel: View {
             TextField("URL", text: $draftURL)
                 .textFieldStyle(.roundedBorder)
             // GET / HEAD：与右键菜单、curl 探测共用同一 method 字段。
-            Picker("Method", selection: $draftMethod) {
+            Picker(L10n.t("Method"), selection: $draftMethod) {
                 ForEach(ReachabilityHTTPMethod.allCases) { method in
                     Text(method.rawValue).tag(method)
                 }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .accessibilityLabel("HTTP method")
+            .accessibilityLabel(L10n.t("HTTP method"))
             HStack {
                 Spacer()
-                Button("Cancel") { siteEditor = nil }
+                Button(L10n.t("Cancel")) { siteEditor = nil }
                     .keyboardShortcut(.cancelAction)
                 Button(state.isAdd ? "Add" : "Save") {
                     commitSiteEditor(state)
@@ -986,7 +986,7 @@ private struct ReachabilitySiteRow: View {
             }
             Divider()
             Button("立即检测", action: onProbeNow)
-            Button("Copy error", action: onCopyError)
+            Button(L10n.t("Copy error"), action: onCopyError)
                 .disabled(!hasLastError)
         }
         .tooltip(rowHelp, edge: .above)

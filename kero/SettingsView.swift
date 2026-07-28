@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var updater = Updater.shared
+    @ObservedObject private var l10n = L10n.shared
     @State private var selectedSection: SettingsSection = .general
 
     /// Installed fixed-pitch families (bundled default first).
@@ -28,6 +29,9 @@ struct SettingsView: View {
                 .frame(maxHeight: .infinity)
         }
         .frame(width: 510, height: 650)
+        .observeLocalization()
+        // 依赖 language，切换语言时整页重绘。
+        .environment(\.l10nLanguage, l10n.language)
     }
 
     /// 顶部图标导航借鉴原生设置应用的分类结构，避免全部选项堆在一张长表单中。
@@ -63,21 +67,39 @@ struct SettingsView: View {
     private var form: some View {
         Form {
             if selectedSection == .general {
-            Section("Appearance") {
+            Section(L10n.t("Language")) {
+                Group {
+                    settingWithDescription(
+                        L10n.t("Interface language"),
+                        L10n.t("Choose the language used for menus, settings, and panels.")
+                    ) {
+                        Picker("", selection: $settings.language) {
+                            ForEach(AppLanguage.allCases) { lang in
+                                Text(lang.nativeDisplayName).tag(lang)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                }
+                .settingsRowPadding()
+            }
+
+            Section(L10n.t("Appearance")) {
                 Group {
                     // A plain row rather than LabeledContent: that stamps its own
                     // label onto every child, leaving all three previews named
                     // "Theme" to VoiceOver instead of System/Light/Dark.
                     HStack {
-                        Text("Theme")
+                        Text(L10n.t("Theme"))
                         Spacer()
                         ThemePicker(selection: $settings.theme)
                     }
                     GhosttyThemePicker(
-                        title: "Dark colors", selection: $settings.themeDark, dark: true
+                        title: L10n.t("Dark colors"), selection: $settings.themeDark, dark: true
                     )
                     GhosttyThemePicker(
-                        title: "Light colors", selection: $settings.themeLight, dark: false
+                        title: L10n.t("Light colors"), selection: $settings.themeLight, dark: false
                     )
                 }
                 .settingsRowPadding()
@@ -86,11 +108,11 @@ struct SettingsView: View {
             Section {
                 Group {
                     backgroundOpacityControl(
-                        "Window background opacity",
+                        L10n.t("Window background opacity"),
                         value: $settings.windowBackgroundOpacity
                     )
                     backgroundOpacityControl(
-                        "Terminal background opacity",
+                        L10n.t("Terminal background opacity"),
                         value: $settings.terminalBackgroundOpacity
                     )
                 }
@@ -101,34 +123,34 @@ struct SettingsView: View {
             if settings.windowBackgroundOpacity < 1 {
                 Section {
                     Group {
-                        Text("Window visual effect material when the window is transparent.")
+                        Text(L10n.t("Window visual effect material when the window is transparent."))
                             .font(.body)
                             .foregroundStyle(.secondary)
 
-                        Picker("Effect material", selection: $settings.visualEffectMaterial) {
-                            Text("Under Window (Default)").tag("underWindowBackground")
-                            Text("Sidebar").tag("sidebar")
-                            Text("HUD Panel").tag("hud")
-                            Text("Popover").tag("popover")
-                            Text("Menu").tag("menu")
-                            Text("Header View").tag("headerView")
-                            Text("Titlebar").tag("titlebar")
+                        Picker(L10n.t("Effect material"), selection: $settings.visualEffectMaterial) {
+                            Text(L10n.t("Under Window (Default)")).tag("underWindowBackground")
+                            Text(L10n.t("Sidebar")).tag("sidebar")
+                            Text(L10n.t("HUD Panel")).tag("hud")
+                            Text(L10n.t("Popover")).tag("popover")
+                            Text(L10n.t("Menu")).tag("menu")
+                            Text(L10n.t("Header View")).tag("headerView")
+                            Text(L10n.t("Titlebar")).tag("titlebar")
                         }
 
-                        Picker("Blending mode", selection: $settings.visualEffectBlendingMode) {
-                            Text("Behind Window").tag("behindWindow")
-                            Text("Within Window").tag("withinWindow")
+                        Picker(L10n.t("Blending mode"), selection: $settings.visualEffectBlendingMode) {
+                            Text(L10n.t("Behind Window")).tag("behindWindow")
+                            Text(L10n.t("Within Window")).tag("withinWindow")
                         }
 
-                        Picker("Active state", selection: $settings.visualEffectState) {
-                            Text("Follow Application").tag("followsApp")
-                            Text("Follow Window Focus").tag("followsWindow")
-                            Text("Always Active").tag("active")
-                            Text("Always Inactive").tag("inactive")
+                        Picker(L10n.t("Active state"), selection: $settings.visualEffectState) {
+                            Text(L10n.t("Follow Application")).tag("followsApp")
+                            Text(L10n.t("Follow Window Focus")).tag("followsWindow")
+                            Text(L10n.t("Always Active")).tag("active")
+                            Text(L10n.t("Always Inactive")).tag("inactive")
                         }
 
                         backgroundOpacityControl(
-                            "Visual effect alpha",
+                            L10n.t("Visual effect alpha"),
                             value: $settings.visualEffectAlpha
                         )
                     }
@@ -136,20 +158,43 @@ struct SettingsView: View {
                 }
             }
 
-            Section("AI") {
+            Section(L10n.t("AI")) {
                 Group {
                     LocalAIHeadlessProviderPicker()
+
+                    settingWithDescription(
+                        L10n.t("Writing language"),
+                        L10n.t(
+                            "Language for AI-generated Git commits, descriptions, and similar text. Projects can override this."
+                        )
+                    ) {
+                        Picker("", selection: $settings.aiWritingLanguage) {
+                            ForEach(AIWritingLanguage.allCases) { lang in
+                                Text(lang.nativeDisplayName).tag(lang)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+
+                    settingWithDescription(
+                        L10n.t("Git Commit Message Emoji"),
+                        L10n.t("Use the Gitmoji convention (e.g. ✨ feat) in AI commit messages.")
+                    ) {
+                        Toggle("", isOn: $settings.gitCommitMessageEmoji)
+                            .labelsHidden()
+                    }
                 }
                 .settingsRowPadding()
             }
 
-            Section("Defaults") {
+            Section(L10n.t("Defaults")) {
                 Group {
                 HStack {
-                    Text("Restore all Qjiao preferences to their defaults.")
+                    Text(L10n.t("Restore all Qjiao preferences to their defaults."))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Reset to Defaults") {
+                    Button(L10n.t("Reset to Defaults")) {
                         settings.resetToDefaults()
                     }
                     .disabled(isUsingDefaults)
@@ -158,14 +203,14 @@ struct SettingsView: View {
                 .settingsRowPadding()
             }
 
-            Section("Updates") {
+            Section(L10n.t("Updates")) {
                 Group {
                     Toggle(
-                        "Automatically check for updates",
+                        L10n.t("Automatically check for updates"),
                         isOn: $updater.automaticallyChecksForUpdates
                     )
 
-                    Button("Check for Updates…") {
+                    Button(L10n.t("Check for Updates…")) {
                         updater.checkForUpdates()
                     }
                     .disabled(!updater.canCheckForUpdates)
@@ -175,10 +220,10 @@ struct SettingsView: View {
             }
 
             if selectedSection == .terminal {
-            Section("Font") {
+            Section(L10n.t("Font")) {
                 Group {
-                Picker("Family", selection: $settings.fontFamily) {
-                    Text("\(TerminalFont.bundledFamily) (Bundled)").tag("")
+                Picker(L10n.t("Family"), selection: $settings.fontFamily) {
+                    Text("\(TerminalFont.bundledFamily) \(L10n.t("(Bundled)"))").tag("")
                     Divider()
                     ForEach(families.dropFirst(), id: \.self) { family in
                         Text(family).tag(family)
@@ -186,7 +231,7 @@ struct SettingsView: View {
                 }
 
                 HStack {
-                    Text("Size")
+                    Text(L10n.t("Size"))
                     Slider(
                         value: $settings.fontSize,
                         in: AppSettings.fontSizeRange,
@@ -206,16 +251,16 @@ struct SettingsView: View {
                 }
 
                 settingWithDescription(
-                    "Use bundled Chinese terminal font",
-                    "Source Han Sans CN VF Mono1200 is used as the terminal CJK fallback."
+                    L10n.t("Use bundled Chinese terminal font"),
+                    L10n.t("Source Han Sans CN VF Mono1200 is used as the terminal CJK fallback.")
                 ) {
                     Toggle("", isOn: $settings.useBundledChineseTerminalFont)
                         .labelsHidden()
                 }
 
                 settingWithDescription(
-                    "Thicken font strokes",
-                    "Renders terminal text with slightly heavier strokes."
+                    L10n.t("Thicken font strokes"),
+                    L10n.t("Renders terminal text with slightly heavier strokes.")
                 ) {
                     Toggle("", isOn: $settings.fontThicken)
                         .labelsHidden()
@@ -224,7 +269,7 @@ struct SettingsView: View {
                 .settingsRowPadding()
             }
 
-            Section("Preview") {
+            Section(L10n.t("Preview")) {
                 Group {
                     // Exercises regular/bold plus Nerd Font icon fallback.
 
@@ -255,19 +300,19 @@ struct SettingsView: View {
                 .settingsRowPadding()
             }
 
-            Section("Features") {
+            Section(L10n.t("Features")) {
                 Group {
                 settingWithDescription(
-                    "Move cursor with direct click",
-                    "Cursor as naturally as in a text editor."
+                    L10n.t("Move cursor with direct click"),
+                    L10n.t("Cursor as naturally as in a text editor.")
                 ) {
                     Toggle("", isOn: $settings.directClickMovesCursor)
                         .labelsHidden()
                 }
 
                 settingWithDescription(
-                    "Disable Zsh Auto Title",
-                    "Sets DISABLE_AUTO_TITLE=true only for new zsh terminals in Qjiao."
+                    L10n.t("Disable Zsh Auto Title"),
+                    L10n.t("Sets DISABLE_AUTO_TITLE=true only for new zsh terminals in Qjiao.")
                 ) {
                     Toggle("", isOn: $settings.disableZshAutoTitle)
                         .labelsHidden()
@@ -280,8 +325,8 @@ struct SettingsView: View {
             Section {
                 Group {
                     settingWithDescription(
-                        "Restore session history on relaunch",
-                        "Reopened terminals show their previous scrollback above a fresh shell."
+                        L10n.t("Restore session history on relaunch"),
+                        L10n.t("Reopened terminals show their previous scrollback above a fresh shell.")
                     ) {
                         Toggle("", isOn: $settings.restoreTerminalHistory)
                             .labelsHidden()
@@ -292,33 +337,33 @@ struct SettingsView: View {
             }
 
             if selectedSection == .editor {
-            Section("Color Theme") {
+            Section(L10n.t("Color Theme")) {
                 Group {
                     EditorThemePicker(
-                        title: "Light colors", selection: $settings.editorThemeLight, dark: false
+                        title: L10n.t("Light colors"), selection: $settings.editorThemeLight, dark: false
                     )
                     EditorThemePicker(
-                        title: "Dark colors", selection: $settings.editorThemeDark, dark: true
+                        title: L10n.t("Dark colors"), selection: $settings.editorThemeDark, dark: true
                     )
                 }
                 .settingsRowPadding()
             }
 
-            Section("Text Editing") {
+            Section(L10n.t("Text Editing")) {
                 Group {
-                Toggle("Wrap lines to editor width", isOn: $settings.wrapLines)
-                Toggle("Show editor status bar", isOn: $settings.showEditorStatusBar)
+                Toggle(L10n.t("Wrap lines to editor width"), isOn: $settings.wrapLines)
+                Toggle(L10n.t("Show editor status bar"), isOn: $settings.showEditorStatusBar)
                 }
                 .settingsRowPadding()
             }
             }
 
             if selectedSection == .files {
-            Section("Font") {
+            Section(L10n.t("Font")) {
                 Group {
-                    Picker("Family", selection: $settings.filesFontFamily) {
+                    Picker(L10n.t("Family"), selection: $settings.filesFontFamily) {
                         // 空字符串 = 内置 Inter Variable，与 Terminal 的 bundled 默认同一约定。
-                        Text("\(FileTreeFont.bundledFamily) (Bundled)").tag("")
+                        Text("\(FileTreeFont.bundledFamily) \(L10n.t("(Bundled)"))").tag("")
                         Divider()
                         ForEach(filesFontFamilies.dropFirst(), id: \.self) { family in
                             Text(family).tag(family)
@@ -326,7 +371,7 @@ struct SettingsView: View {
                     }
 
                     HStack {
-                        Text("Size")
+                        Text(L10n.t("Size"))
                         Slider(
                             value: $settings.filesFontSize,
                             in: AppSettings.filesFontSizeRange,
@@ -355,11 +400,11 @@ struct SettingsView: View {
                 .settingsRowPadding()
             }
 
-            Section("File Tree") {
+            Section(L10n.t("File Tree")) {
                 Group {
                     settingWithDescription(
-                        "Display File Size",
-                        "Show each file’s size on the right in the Files and CWD panels."
+                        L10n.t("Display File Size"),
+                        L10n.t("Show each file’s size on the right in the Files and CWD panels.")
                     ) {
                         Toggle("", isOn: $settings.displayFileSize)
                             .labelsHidden()
@@ -384,7 +429,7 @@ struct SettingsView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                         Text("Qjiao")
                             .font(.title2.weight(.semibold))
-                        Text("A terminal workspace for macOS")
+                        Text(L10n.t("A terminal workspace for macOS"))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -393,17 +438,17 @@ struct SettingsView: View {
                 .settingsRowPadding()
             }
 
-            Section("Project") {
+            Section(L10n.t("Project")) {
                 Group {
                     aboutLinkRow(
                         imageName: "GitHubMark",
-                        title: "Qjiao GitHub",
+                        title: L10n.t("Qjiao GitHub"),
                         subtitle: "qzrzz/Qjiao",
                         url: "https://github.com/qzrzz/Qjiao"
                     )
                     aboutLinkRow(
                         systemImage: "person",
-                        title: "Author",
+                        title: L10n.t("Author"),
                         subtitle: "Qzrzz · qzrzz.com",
                         url: "https://qzrzz.com/"
                     )
@@ -411,17 +456,17 @@ struct SettingsView: View {
                 .settingsRowPadding()
             }
 
-            Section("Acknowledgements") {
+            Section(L10n.t("Acknowledgements")) {
                 Group {
                     aboutLinkRow(
                         systemImage: "arrow.triangle.branch",
-                        title: "Forked from egoist/kero",
+                        title: L10n.t("Forked from egoist/kero"),
                         subtitle: "egoist / kero",
                         url: "https://github.com/egoist/kero"
                     )
                     aboutLinkRow(
                         systemImage: "heart",
-                        title: "Thanks to egoist",
+                        title: L10n.t("Thanks to egoist"),
                         subtitle: "github.com/egoist",
                         url: "https://github.com/egoist"
                     )
@@ -525,6 +570,7 @@ struct SettingsView: View {
             && settings.fontSize == AppSettings.defaultFontSize
             && !settings.fontThicken
             && settings.useBundledChineseTerminalFont
+            && settings.language == .english
             && settings.theme == .system
             && settings.themeDark == Theme.defaultDarkThemeName
             && settings.themeLight == Theme.defaultLightThemeName
@@ -543,6 +589,8 @@ struct SettingsView: View {
             && !settings.disableZshAutoTitle
             && settings.packageManagerCommand == .npm
             && settings.localAIHeadlessProvider == .disabled
+            && settings.aiWritingLanguage == .english
+            && settings.gitCommitMessageEmoji
     }
 
 }
@@ -559,9 +607,9 @@ private struct LocalAIHeadlessProviderPicker: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("AI headless provider")
+                    Text(L10n.t("AI headless provider"))
                         .fontWeight(.semibold)
-                    Text("Provide AI capabilities using a local AI CLI.")
+                    Text(L10n.t("Provide AI capabilities using a local AI CLI."))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -623,11 +671,11 @@ private struct LocalAIHeadlessProviderPicker: View {
 
                 Spacer(minLength: 0)
 
-                Button("Refresh") {
+                Button(L10n.t("Refresh")) {
                     registry.refresh()
                 }
                 .controlSize(.small)
-                .help("Re-scan PATH and common install locations for AI CLIs.")
+                .help(L10n.t("Re-scan PATH and common install locations for AI CLIs."))
             }
         }
         .onAppear {
@@ -691,12 +739,12 @@ private enum SettingsSection: CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .general: "General"
-        case .terminal: "Terminal"
-        case .editor: "Editor"
-        case .files: "Files"
-        case .project: "Project"
-        case .about: "About"
+        case .general: L10n.t("General")
+        case .terminal: L10n.t("Terminal")
+        case .editor: L10n.t("Editor")
+        case .files: L10n.t("Files")
+        case .project: L10n.t("Project")
+        case .about: L10n.t("About")
         }
     }
 
@@ -734,18 +782,18 @@ private struct GhosttyThemePicker: View {
                 ForEach(ThemeMenuCatalog.primary(dark: dark), id: \.self) { name in
                     themeItem(name)
                 }
-                Section("Cool") {
+                Section(L10n.t("Cool")) {
                     ForEach(ThemeMenuCatalog.cool(dark: dark), id: \.self) { name in
                         themeItem(name)
                     }
                 }
-                Section("Warm") {
+                Section(L10n.t("Warm")) {
                     ForEach(ThemeMenuCatalog.warm(dark: dark), id: \.self) { name in
                         themeItem(name)
                     }
                 }
                 Divider()
-                Menu("全部 \(dark ? "Dark" : "Light") 主题") {
+                Menu(dark ? L10n.t("All Dark Themes") : L10n.t("All Light Themes")) {
                     ForEach(ThemeMenuCatalog.all(dark: dark), id: \.self) { name in
                         themeItem(name)
                     }
@@ -798,7 +846,7 @@ private struct EditorThemePicker: View {
             Menu {
                 followGlobalItem
                 Divider()
-                Section("VS Code") {
+                Section(L10n.t("VS Code")) {
                     ForEach(VSCodeEditorTheme.all(dark: dark), id: \.id) { theme in
                         vscodeThemeItem(theme)
                     }
@@ -816,7 +864,7 @@ private struct EditorThemePicker: View {
             set: { if $0 { selection = "" } }
         )) {
             Label {
-                Text("Default")
+                Text(L10n.t("Default"))
             } icon: {
                 Image(nsImage: ThemePreviewImageRenderer.image(for: [Theme.globalDefinition(dark: dark)]))
             }
@@ -1103,7 +1151,7 @@ private struct AddCLIChipField: View {
                 }
 
             if !newCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button("Add") {
+                Button(L10n.t("Add")) {
                     submit()
                 }
                 .font(.system(size: 10, weight: .semibold))
@@ -1140,12 +1188,12 @@ private struct ProjectSettingsSectionView: View {
     var body: some View {
         Group {
             // ── Section 1: Package Manager 独立分组
-            Section("Package Manager") {
+            Section(L10n.t("Package Manager")) {
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Package manager")
+                        Text(L10n.t("Package manager"))
                             .font(.system(size: 13, weight: .medium))
-                        Text("Used for package scripts launched from the Info panel.")
+                        Text(L10n.t("Used for package scripts launched from the Info panel."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1162,10 +1210,10 @@ private struct ProjectSettingsSectionView: View {
             }
 
             // ── Section 2: 快捷打开应用程序与 CLI
-            Section("External Tools") {
+            Section(L10n.t("External Tools")) {
                 VStack(alignment: .leading, spacing: 12) {
                     // 顶部说明文本
-                    Text("\"快速打开\"可用的应用程序和 CLI")
+                    Text(L10n.t("Applications and CLIs available for quick open"))
                         .font(.body)
                         .foregroundStyle(.secondary)
 
@@ -1174,11 +1222,11 @@ private struct ProjectSettingsSectionView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Code Editor Application")
+                            Text(L10n.t("Code Editor Application"))
                                 .font(.system(size: 13, weight: .medium))
                         }
                         Spacer()
-                        Button("Select Application...") {
+                        Button(L10n.t("Select Application...")) {
                             selectCustomEditorApp()
                         }
                         .controlSize(.small)
@@ -1186,7 +1234,7 @@ private struct ProjectSettingsSectionView: View {
 
                     if settings.customCodeEditorPaths.isEmpty {
                         HStack {
-                            Text("Empty")
+                            Text(L10n.t("Empty"))
                                 .font(.system(size: 12))
                                 .foregroundStyle(.tertiary)
                             Spacer()
@@ -1210,7 +1258,7 @@ private struct ProjectSettingsSectionView: View {
                                         .truncationMode(.middle)
                                     Spacer()
 
-                                    Button("Remove") {
+                                    Button(L10n.t("Remove")) {
                                         removeCustomEditor(path: path)
                                     }
                                     .font(.system(size: 11))
@@ -1233,7 +1281,7 @@ private struct ProjectSettingsSectionView: View {
                 // ── 2. CLI 工具
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("CLI")
+                        Text(L10n.t("CLI"))
                             .font(.system(size: 13, weight: .medium))
                     }
 
@@ -1271,8 +1319,8 @@ private struct ProjectSettingsSectionView: View {
 
     private func selectCustomEditorApp() {
         let panel = NSOpenPanel()
-        panel.title = "选择代码编辑器应用"
-        panel.prompt = "选择"
+        panel.title = L10n.t("Select Code Editor Application")
+        panel.prompt = L10n.t("Select")
         panel.allowedContentTypes = [UTType.application, UTType.applicationBundle]
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true

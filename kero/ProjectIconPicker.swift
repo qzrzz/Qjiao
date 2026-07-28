@@ -979,7 +979,7 @@ struct ProjectIconPicker: View {
             header
 
             // 使用传统原生分段控件，采用系统中号尺寸与标准交互。
-            Picker("Icon type", selection: $source) {
+            Picker(L10n.t("Icon type"), selection: $source) {
                 ForEach(Source.allCases) { item in
                     Text(item.rawValue)
                         .tag(item)
@@ -1078,7 +1078,7 @@ struct ProjectIconPicker: View {
         HStack(alignment: .center, spacing: 12) {
             currentIconPreview
             VStack(alignment: .leading, spacing: 2) {
-                Text("Project Icon")
+                Text(L10n.t("Project Icon"))
                     .font(SidebarTypography.title())
                 if isAISelectingIcon {
                     // 进行中：显示 provider + 后台运行说明
@@ -1105,7 +1105,7 @@ struct ProjectIconPicker: View {
             }
             Spacer(minLength: 0)
             if isAISelectingIcon {
-                Button("Cancel") {
+                Button(L10n.t("Cancel")) {
                     aiIconTasks.cancel(project.id)
                 }
                 .keyboardShortcut(.cancelAction)
@@ -1115,7 +1115,7 @@ struct ProjectIconPicker: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "sparkles")
-                        Text("AI Select")
+                        Text(L10n.t("AI Select"))
                     }
                 }
                 .disabled(!LocalAI.isEnabled)
@@ -1126,7 +1126,7 @@ struct ProjectIconPicker: View {
                 )
             }
             if project.icon != nil {
-                Button("Clear") {
+                Button(L10n.t("Clear")) {
                     clearIcon()
                 }
                 .disabled(isAISelectingIcon)
@@ -1260,7 +1260,7 @@ struct ProjectIconPicker: View {
                 }
 
                 if displayedPresetItems.isEmpty {
-                    Text("No icons")
+                    Text(L10n.t("No icons"))
                         .font(SidebarTypography.secondary())
                         .foregroundStyle(.tertiary)
                         .allowsHitTesting(false)
@@ -1323,7 +1323,7 @@ struct ProjectIconPicker: View {
     private var footer: some View {
         HStack {
             Spacer()
-            Button("Cancel") { dismiss() }
+            Button(L10n.t("Cancel")) { dismiss() }
                 .keyboardShortcut(.cancelAction)
         }
     }
@@ -1340,7 +1340,7 @@ struct ProjectIconPicker: View {
                 TextField("SF Symbol name", text: $symbolName)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { useSymbolName() }
-                Button("Use") { useSymbolName() }
+                Button(L10n.t("Use")) { useSymbolName() }
                     .disabled(!canUseSymbolName)
                     .keyboardShortcut(.defaultAction)
             }
@@ -1430,7 +1430,7 @@ struct ProjectIconPicker: View {
                 }
 
                 if displayedSymbols.isEmpty {
-                    Text("No symbols")
+                    Text(L10n.t("No symbols"))
                         .font(SidebarTypography.secondary())
                         .foregroundStyle(.tertiary)
                         .allowsHitTesting(false)
@@ -1512,7 +1512,7 @@ struct ProjectIconPicker: View {
 
     private var emojiPicker: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Use the macOS Character Viewer to browse and search every Emoji and symbol.")
+            Text(L10n.t("Use the macOS Character Viewer to browse and search every Emoji and symbol."))
                 .font(SidebarTypography.secondary())
                 .foregroundStyle(.secondary)
 
@@ -1521,7 +1521,7 @@ struct ProjectIconPicker: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($emojiFieldFocused)
                     .onSubmit { selectEmoji() }
-                Button("Use") { selectEmoji() }
+                Button(L10n.t("Use")) { selectEmoji() }
                     .disabled(emoji.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .keyboardShortcut(.defaultAction)
             }
@@ -1536,7 +1536,7 @@ struct ProjectIconPicker: View {
                         Color.primary.opacity(0.05),
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                     )
-                Button("Browse All Emoji & Symbols…") {
+                Button(L10n.t("Browse All Emoji & Symbols…")) {
                     emojiFieldFocused = true
                     DispatchQueue.main.async {
                         NSApp.orderFrontCharacterPalette(nil)
@@ -1554,7 +1554,7 @@ struct ProjectIconPicker: View {
     /// 重新设计的自定义图片/文件图标选择面板（Native English UI）。
     private var filePicker: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Choose an image file (PNG, JPEG, SVG, ICNS, WebP) as the project icon. The file is copied to your Qjiao config folder.")
+            Text(L10n.t("Choose an image file (PNG, JPEG, SVG, ICNS, WebP) as the project icon. The file is copied to your Qjiao config folder."))
                 .font(SidebarTypography.secondary())
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1580,14 +1580,14 @@ struct ProjectIconPicker: View {
 
             HStack(alignment: .center) {
                 if !selectedFilePath.isEmpty {
-                    Text("Click “Apply File Icon” to save changes")
+                    Text(L10n.t("Click “Apply File Icon” to save changes"))
                         .font(SidebarTypography.caption())
                         .foregroundStyle(.tertiary)
                 }
 
                 Spacer()
 
-                Button("Apply File Icon") {
+                Button(L10n.t("Apply File Icon")) {
                     applySelectedFile()
                 }
                 .buttonStyle(.borderedProminent)
@@ -1628,7 +1628,7 @@ struct ProjectIconPicker: View {
                             .font(SidebarTypography.body(.medium))
                             .foregroundStyle(.primary)
 
-                        Text("Supports PNG, JPEG, SVG, ICNS, WebP & more")
+                        Text(L10n.t("Supports PNG, JPEG, SVG, ICNS, WebP & more"))
                             .font(SidebarTypography.caption())
                             .foregroundStyle(.secondary)
                     }
@@ -1642,7 +1642,7 @@ struct ProjectIconPicker: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "doc.on.clipboard.fill")
-                    Text("Paste Image from Clipboard")
+                    Text(L10n.t("Paste Image from Clipboard"))
                     Text("⌘V")
                         .font(SidebarTypography.micro().monospacedDigit())
                         .opacity(0.75)
@@ -1731,14 +1731,14 @@ struct ProjectIconPicker: View {
             Divider()
 
             HStack {
-                Button("Choose Different…") {
+                Button(L10n.t("Choose Different…")) {
                     openImageFilePanel()
                 }
                 .buttonStyle(.borderless)
 
                 Spacer()
 
-                Button("Clear Selection", role: .destructive) {
+                Button(L10n.t("Clear Selection"), role: .destructive) {
                     selectedFilePath = ""
                     fileImportError = nil
                 }
@@ -1766,7 +1766,7 @@ struct ProjectIconPicker: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = Self.imageContentTypes
         panel.message = "Choose an image for the project icon"
-        panel.prompt = "Select"
+        panel.prompt = L10n.t("Select")
 
         let completion: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .OK, let url = panel.url else { return }

@@ -254,12 +254,12 @@ private struct EditorStatusBar: View {
                 .macTooltip(file.isDirty ? "Unsaved Changes" : "Saved to Disk", shortcut: "⌘S", position: .top)
             Text(file.editorFileSize)
                 .monospacedDigit()
-                .macTooltip("File Size", position: .top)
+                .macTooltip(L10n.t("File Size"), position: .top)
             Spacer()
             if let selection = file.selectionSummary {
                 Text(selection)
                     .monospacedDigit()
-                    .macTooltip("Selection Summary", position: .top)
+                    .macTooltip(L10n.t("Selection Summary"), position: .top)
             }
             Button {
                 settings.wrapLines.toggle()
@@ -269,10 +269,10 @@ private struct EditorStatusBar: View {
             .buttonStyle(.plain)
             .foregroundStyle(settings.wrapLines ? Color.accentColor : .secondary)
             .macTooltip(settings.wrapLines ? "Disable Line Wrapping" : "Enable Line Wrapping", shortcut: "⌥Z", position: .top)
-            .accessibilityLabel("Toggle line wrapping")
+            .accessibilityLabel(L10n.t("Toggle line wrapping"))
 
             Text(file.languageLabel)
-                .macTooltip("Language Mode", position: .top)
+                .macTooltip(L10n.t("Language Mode"), position: .top)
 
             ForEach(formatters) { formatter in
                 if formatter.id == formatters.first?.id {
@@ -1319,13 +1319,13 @@ struct ImageViewerView: View {
         Button {
             copyImageToClipboard()
         } label: {
-            Label("Copy Image", systemImage: "doc.on.doc")
+            Label(L10n.t("Copy Image"), systemImage: "doc.on.doc")
         }
 
         Button {
             copyPathToClipboard()
         } label: {
-            Label("Copy Path", systemImage: "link")
+            Label(L10n.t("Copy Path"), systemImage: "link")
         }
 
         Divider()
@@ -1338,7 +1338,7 @@ struct ImageViewerView: View {
                 offset = .zero
             }
         } label: {
-            Label("Fit View", systemImage: "arrow.up.left.and.arrow.down.right")
+            Label(L10n.t("Fit View"), systemImage: "arrow.up.left.and.arrow.down.right")
         }
 
         Button {
@@ -1348,7 +1348,7 @@ struct ImageViewerView: View {
                 offset = .zero
             }
         } label: {
-            Label("100% Actual Size", systemImage: "1.square")
+            Label(L10n.t("100% Actual Size"), systemImage: "1.square")
         }
 
         Divider()
@@ -1359,7 +1359,7 @@ struct ImageViewerView: View {
                 rotationDegrees += 90
             }
         } label: {
-            Label("Rotate 90° Clockwise", systemImage: "rotate.right")
+            Label(L10n.t("Rotate 90° Clockwise"), systemImage: "rotate.right")
         }
 
         Button {
@@ -1367,7 +1367,7 @@ struct ImageViewerView: View {
                 rotationDegrees -= 90
             }
         } label: {
-            Label("Rotate 90° Counter-Clockwise", systemImage: "rotate.left")
+            Label(L10n.t("Rotate 90° Counter-Clockwise"), systemImage: "rotate.left")
         }
 
         Button {
@@ -1403,25 +1403,25 @@ struct ImageViewerView: View {
                 }
             }
         } label: {
-            Label("Background Mode", systemImage: "square.dashed")
+            Label(L10n.t("Background Mode"), systemImage: "square.dashed")
         }
 
         // 5. 标尺与参考线子菜单
         Menu {
-            Toggle("Show Rulers", isOn: $isRulerEnabled)
-            Toggle("Show Guides", isOn: $isGuidesVisible)
-            Toggle("Lock Guides", isOn: $isGuidesLocked)
+            Toggle(L10n.t("Show Rulers"), isOn: $isRulerEnabled)
+            Toggle(L10n.t("Show Guides"), isOn: $isGuidesVisible)
+            Toggle(L10n.t("Lock Guides"), isOn: $isGuidesLocked)
 
             Divider()
 
             Button(role: .destructive) {
                 guideLines.removeAll()
             } label: {
-                Label("Clear All Guides", systemImage: "trash")
+                Label(L10n.t("Clear All Guides"), systemImage: "trash")
             }
             .disabled(guideLines.isEmpty)
         } label: {
-            Label("Rulers & Guides", systemImage: "ruler")
+            Label(L10n.t("Rulers & Guides"), systemImage: "ruler")
         }
 
         Divider()
@@ -1442,7 +1442,7 @@ struct ImageViewerView: View {
             showImageBuild = true
         } label: {
             Label {
-                Text("Image Build…")
+                Text(L10n.t("Image Build…"))
             } icon: {
                 Image("ImageBuild")
                     .resizable()
@@ -1459,25 +1459,25 @@ struct ImageViewerView: View {
         Button {
             openInDefaultApp()
         } label: {
-            Label("Open in Default App", systemImage: "arrow.up.forward.app")
+            Label(L10n.t("Open in Default App"), systemImage: "arrow.up.forward.app")
         }
 
         Button {
             NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
         } label: {
-            Label("Reveal in Finder", systemImage: "finder")
+            Label(L10n.t("Reveal in Finder"), systemImage: "finder")
         }
 
         Button {
             exportImage()
         } label: {
-            Label("Export Image...", systemImage: "square.and.arrow.up")
+            Label(L10n.t("Export Image..."), systemImage: "square.and.arrow.up")
         }
 
         Button {
             copyMetadataInfoToClipboard()
         } label: {
-            Label("Copy Image Info", systemImage: "info.circle")
+            Label(L10n.t("Copy Image Info"), systemImage: "info.circle")
         }
     }
 
@@ -1889,7 +1889,7 @@ struct ImageViewerView: View {
                     )
             }
             .buttonStyle(.plain)
-            .help("Toggle Rulers")
+            .help(L10n.t("Toggle Rulers"))
         }
     }
 
@@ -1919,7 +1919,7 @@ struct ImageViewerView: View {
                             .foregroundStyle(Color.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("Remove comparison image")
+                    .help(L10n.t("Remove comparison image"))
                 }
                 HStack(spacing: 6) {
                     Text("\(compMeta.pixelWidth) × \(compMeta.pixelHeight) px")
@@ -2030,11 +2030,11 @@ struct ImageViewerView: View {
                 .font(.system(size: 28, weight: .light))
                 .foregroundStyle(isDropTargeted ? Color.accentColor : Color.secondary)
 
-            Text("Compare Image")
+            Text(L10n.t("Compare Image"))
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(.primary)
 
-            Text("Drop an image file here, or paste from clipboard")
+            Text(L10n.t("Drop an image file here, or paste from clipboard"))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -2047,7 +2047,7 @@ struct ImageViewerView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "doc.on.clipboard")
-                        Text("Paste")
+                        Text(L10n.t("Paste"))
                     }
                     .font(.system(size: 11, weight: .regular))
                     .padding(.horizontal, 8)
@@ -2056,7 +2056,7 @@ struct ImageViewerView: View {
                     .cornerRadius(4)
                 }
                 .buttonStyle(.plain)
-                .help("Paste image from clipboard")
+                .help(L10n.t("Paste image from clipboard"))
 
                 // 从文件选择
                 Button {
@@ -2064,7 +2064,7 @@ struct ImageViewerView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "folder")
-                        Text("Choose...")
+                        Text(L10n.t("Choose..."))
                     }
                     .font(.system(size: 11, weight: .regular))
                     .padding(.horizontal, 8)
@@ -2073,7 +2073,7 @@ struct ImageViewerView: View {
                     .cornerRadius(4)
                 }
                 .buttonStyle(.plain)
-                .help("Select a compare image file")
+                .help(L10n.t("Select a compare image file"))
             }
             .padding(.top, 4)
         }
@@ -2333,7 +2333,7 @@ struct ImageViewerView: View {
         HStack(spacing: 5) {
             // 1. 缩放倍数下拉菜单 (固定 128px 宽度)
             ModernToolbarMenu(fixedWidth: 128, helpText: "Zoom Scale Options", shortcutText: "Menu") {
-                Picker("Zoom", selection: Binding(
+                Picker(L10n.t("Zoom"), selection: Binding(
                     get: { zoomOption },
                     set: { newValue in
                         zoomOption = newValue
@@ -2459,16 +2459,16 @@ struct ImageViewerView: View {
 
             // 10. 标尺与参考线控制下拉菜单
             ModernToolbarMenu(isActive: isRulerEnabled, helpText: "Rulers & Guides") {
-                Toggle("Show Rulers", isOn: $isRulerEnabled)
-                Toggle("Show Guides", isOn: $isGuidesVisible)
-                Toggle("Lock Guides", isOn: $isGuidesLocked)
+                Toggle(L10n.t("Show Rulers"), isOn: $isRulerEnabled)
+                Toggle(L10n.t("Show Guides"), isOn: $isGuidesVisible)
+                Toggle(L10n.t("Lock Guides"), isOn: $isGuidesLocked)
 
                 Divider()
 
                 Button(role: .destructive) {
                     guideLines.removeAll()
                 } label: {
-                    Label("Clear All Guides", systemImage: "trash")
+                    Label(L10n.t("Clear All Guides"), systemImage: "trash")
                 }
                 .disabled(guideLines.isEmpty)
             } labelContent: {
@@ -2478,7 +2478,7 @@ struct ImageViewerView: View {
 
             // 11. 背景模式下拉菜单
             ModernToolbarMenu(helpText: "Background Mode") {
-                Picker("Background Mode", selection: $backgroundMode) {
+                Picker(L10n.t("Background Mode"), selection: $backgroundMode) {
                     ForEach(ImageBackgroundMode.allCases) { mode in
                         Text(mode.title).tag(mode)
                     }

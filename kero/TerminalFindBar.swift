@@ -56,7 +56,7 @@ struct TerminalFindBar: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help("Close find bar")
+            .help(L10n.t("Close find bar"))
         }
         .padding(.horizontal, 8)
         .frame(height: 30)

@@ -22,18 +22,18 @@ private struct LaunchersSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             SidebarSectionHeader(
-                title: "LAUNCHERS",
+                title: L10n.t("LAUNCHERS"),
                 count: project.launchCommands.count,
                 isCollapsed: $isCollapsed,
                 actions: [
                     SidebarSectionHeader.Action(
                         systemImage: "play.fill",
-                        help: "Run all launchers in order",
+                        help: L10n.t("Run all launchers in order"),
                         perform: runAllCommands
                     ),
                     SidebarSectionHeader.Action(
                         systemImage: "plus",
-                        help: "Add Launcher",
+                        help: L10n.t("Add Launcher"),
                         perform: addCommand
                     )
                 ],
@@ -58,11 +58,11 @@ private struct LaunchersSection: View {
     /// 空状态视图：无 launcher 时显示提示文案与添加按钮，包含内容左边距
     private var emptyView: some View {
         HStack(spacing: 6) {
-            Text("No launchers")
+            Text(L10n.t("No launchers"))
                 .font(SidebarTypography.caption())
                 .foregroundStyle(.tertiary)
             Spacer()
-            Button("Add Launcher") {
+            Button(L10n.t("Add Launcher")) {
                 addCommand()
             }
             .buttonStyle(.plain)
@@ -499,7 +499,7 @@ struct ProjectPanel: View {
         .onHover { hovering in
             isIconHovered = hovering
         }
-        .help("Set Project Icon")
+        .help(L10n.t("Set Project Icon"))
         .popover(isPresented: $isIconPickerPresented, arrowEdge: .bottom) {
             ProjectIconPicker(project: project)
         }
@@ -527,7 +527,7 @@ struct ProjectPanel: View {
             HStack(spacing: 4) {
                 SidebarIconButton(
                     systemImage: "terminal",
-                    help: "Open Terminal",
+                    help: L10n.t("Open Terminal"),
                     disabled: model.rootPath.isEmpty
                 ) {
                     guard !model.rootPath.isEmpty else { return }
@@ -536,7 +536,7 @@ struct ProjectPanel: View {
 
                 SidebarIconButton(
                     systemImage: "finder",
-                    help: "Open in Finder",
+                    help: L10n.t("Open in Finder"),
                     disabled: model.rootPath.isEmpty
                 ) {
                     guard !model.rootPath.isEmpty else { return }
@@ -545,7 +545,7 @@ struct ProjectPanel: View {
 
                 SidebarIconButton(
                     systemImage: "doc.on.doc",
-                    help: "Copy Path",
+                    help: L10n.t("Copy Path"),
                     disabled: model.rootPath.isEmpty
                 ) {
                     guard !model.rootPath.isEmpty else { return }
@@ -827,7 +827,7 @@ struct AIToolOpenButton: View {
                         registry.open(path: path, with: selected, terminalManager: manager)
                     }
                     .frame(width: 18, height: 26)
-                    .help("选择 AI 工具")
+                    .help(L10n.t("选择 AI 工具"))
                 } else {
                     Image(systemName: "arrow.up.forward")
                         .font(SidebarTypography.micro())
@@ -907,10 +907,10 @@ struct AIDropdownNSButton: NSViewRepresentable {
             // 2. 若同时存在桌面应用与 CLI 工具，插入 CLI 分组标题 Header
             if !desktopTools.isEmpty && !cliTools.isEmpty {
                 if #available(macOS 14.0, *) {
-                    menu.addItem(NSMenuItem.sectionHeader(title: "CLI"))
+                    menu.addItem(NSMenuItem.sectionHeader(title: L10n.t("CLI")))
                 } else {
                     menu.addItem(NSMenuItem.separator())
-                    let headerItem = NSMenuItem(title: "CLI", action: nil, keyEquivalent: "")
+                    let headerItem = NSMenuItem(title: L10n.t("CLI"), action: nil, keyEquivalent: "")
                     headerItem.isEnabled = false
                     menu.addItem(headerItem)
                 }

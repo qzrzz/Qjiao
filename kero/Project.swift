@@ -36,10 +36,10 @@ enum ProjectLaunchCommandType: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .terminal: return "Terminal"
-        case .application: return "Application"
-        case .finderFolder: return "Finder Folder"
-        case .web: return "Webpage"
+        case .terminal: return L10n.t("Terminal")
+        case .application: return L10n.t("Application")
+        case .finderFolder: return L10n.t("Finder Folder")
+        case .web: return L10n.t("Webpage")
         }
     }
 
@@ -65,11 +65,11 @@ enum ProjectLaunchSplit: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .none: return "New Tab"
-        case .left: return "Split Left"
-        case .right: return "Split Right"
-        case .top: return "Split Above"
-        case .bottom: return "Split Below"
+        case .none: return L10n.t("New Tab")
+        case .left: return L10n.t("Split Left")
+        case .right: return L10n.t("Split Right")
+        case .top: return L10n.t("Split Above")
+        case .bottom: return L10n.t("Split Below")
         }
     }
 
@@ -168,10 +168,21 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             saveConfig()
         }
     }
+    /// 项目级 AI 写作语言覆盖；nil 表示跟随全局 `AppSettings.aiWritingLanguage`。
+    @Published var aiWritingLanguage: AIWritingLanguage? {
+        didSet {
+            saveConfig()
+        }
+    }
     /// User-configured actions displayed in the right sidebar's Start panel.
     @Published var launchCommands: [ProjectLaunchCommand] = []
     @Published var tabs: [PaneTab] = []
     @Published var selectedTabID: UUID?
+
+    /// 解析本项目实际使用的 AI 写作语言（项目覆盖优先，否则全局）。
+    var resolvedAIWritingLanguage: AIWritingLanguage {
+        aiWritingLanguage ?? AppSettings.shared.aiWritingLanguage
+    }
 
     /// 将项目配置（名称、描述、图标、主题、导航路径等）立即持久化保存到磁盘配置文件。
     func saveConfig() {
@@ -183,7 +194,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
                 theme: theme,
                 projectDirectory: projectDirectory,
                 launchCommands: launchCommands,
-                isArchived: isArchived
+                isArchived: isArchived,
+                aiWritingLanguage: aiWritingLanguage?.rawValue
             ),
             for: id
         )
@@ -601,12 +613,12 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Do you want to save the changes you made to \(file.name)?"
-        alert.informativeText = "Your changes will be lost if you don't save them."
-        alert.addButton(withTitle: "Save")
-        let dontSave = alert.addButton(withTitle: "Don't Save")
+        alert.informativeText = L10n.t("Your changes will be lost if you don't save them.")
+        alert.addButton(withTitle: L10n.t("Save"))
+        let dontSave = alert.addButton(withTitle: L10n.t("Don't Save"))
         dontSave.keyEquivalent = "d"
         dontSave.keyEquivalentModifierMask = .command
-        let cancel = alert.addButton(withTitle: "Cancel")
+        let cancel = alert.addButton(withTitle: L10n.t("Cancel"))
         cancel.keyEquivalent = "\u{1b}"
 
         let response: NSApplication.ModalResponse

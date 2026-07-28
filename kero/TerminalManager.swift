@@ -1019,7 +1019,8 @@ final class TerminalManager: nonisolated ObservableObject {
                         theme: project.theme,
                         projectDirectory: project.projectDirectory,
                         launchCommands: project.launchCommands,
-                        isArchived: project.isArchived
+                        isArchived: project.isArchived,
+                        aiWritingLanguage: project.aiWritingLanguage?.rawValue
                     ),
                     for: project.id
                 )
@@ -1082,6 +1083,8 @@ final class TerminalManager: nonisolated ObservableObject {
             project.projectDirectory = config?.projectDirectory ?? saved.projectDirectory ?? ""
             project.launchCommands = config?.launchCommands ?? []
             project.isArchived = config?.isArchived ?? saved.isArchived ?? false
+            project.aiWritingLanguage = config?.aiWritingLanguage
+                .flatMap(AIWritingLanguage.init(rawValue:))
             let targetTabIndex = saved.selectedTabIndex ?? 0
             for (tabIndex, tab) in saved.tabs.enumerated() {
                 let isSelectedActiveTab = (projectIndex == targetProjectIndex && tabIndex == targetTabIndex)
@@ -1108,7 +1111,8 @@ final class TerminalManager: nonisolated ObservableObject {
                         theme: project.theme,
                         projectDirectory: project.projectDirectory,
                         launchCommands: project.launchCommands,
-                        isArchived: project.isArchived
+                        isArchived: project.isArchived,
+                        aiWritingLanguage: project.aiWritingLanguage?.rawValue
                     ),
                     for: project.id
                 )

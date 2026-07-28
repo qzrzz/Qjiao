@@ -373,20 +373,20 @@ public struct GitCommitEditSheet: View {
                     .foregroundStyle(Color(nsColor: Theme.cursor))
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("Edit Commit")
+                        Text(L10n.t("Edit Commit"))
                             .font(SidebarTypography.body(.semibold))
                         Text(shortHash)
                             .font(SidebarTypography.caption(.medium, design: .monospaced))
                             .foregroundStyle(Color(nsColor: Theme.cursor))
                         if isHead {
-                            Text("HEAD")
+                            Text(L10n.t("HEAD"))
                                 .font(SidebarTypography.micro(.bold))
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
                                 .background(Capsule().fill(Color.primary.opacity(0.12)))
                         }
                     }
-                    Text("Modify commit message or author info")
+                    Text(L10n.t("Modify commit message or author info"))
                         .font(SidebarTypography.caption())
                         .foregroundStyle(.secondary)
                 }
@@ -400,8 +400,8 @@ public struct GitCommitEditSheet: View {
 
             // 模式切换器 Picker
             Picker("", selection: $selectedTab) {
-                Text("Commit Message").tag(0)
-                Text("Author Info").tag(1)
+                Text(L10n.t("Commit Message")).tag(0)
+                Text(L10n.t("Author Info")).tag(1)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
@@ -413,7 +413,7 @@ public struct GitCommitEditSheet: View {
                 VStack(spacing: 12) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Loading commit details…")
+                    Text(L10n.t("Loading commit details…"))
                         .font(SidebarTypography.caption())
                         .foregroundStyle(.tertiary)
                 }
@@ -423,14 +423,14 @@ public struct GitCommitEditSheet: View {
                     if selectedTab == 0 {
                         // Edit Message Tab
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Subject")
+                            Text(L10n.t("Subject"))
                                 .font(SidebarTypography.caption(.medium))
                                 .foregroundStyle(.secondary)
                             TextField("Commit title", text: $subject)
                                 .textFieldStyle(.roundedBorder)
                                 .font(SidebarTypography.body())
 
-                            Text("Description (Optional)")
+                            Text(L10n.t("Description (Optional)"))
                                 .font(SidebarTypography.caption(.medium))
                                 .foregroundStyle(.secondary)
                                 .padding(.top, 4)
@@ -448,7 +448,7 @@ public struct GitCommitEditSheet: View {
                         // Edit Author Tab
                         VStack(alignment: .leading, spacing: 10) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Author Name")
+                                Text(L10n.t("Author Name"))
                                     .font(SidebarTypography.caption(.medium))
                                     .foregroundStyle(.secondary)
                                 TextField("e.g. John Doe", text: $authorName)
@@ -457,7 +457,7 @@ public struct GitCommitEditSheet: View {
                             }
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Author Email")
+                                Text(L10n.t("Author Email"))
                                     .font(SidebarTypography.caption(.medium))
                                     .foregroundStyle(.secondary)
                                 TextField("e.g. john@example.com", text: $authorEmail)
@@ -490,7 +490,7 @@ public struct GitCommitEditSheet: View {
 
             // Footer 底部控制栏
             HStack(spacing: 10) {
-                Button("Cancel") {
+                Button(L10n.t("Cancel")) {
                     dismiss()
                 }
                 .keyboardShortcut(.escape, modifiers: [])
@@ -506,7 +506,7 @@ public struct GitCommitEditSheet: View {
                         if isSaving {
                             ProgressView().controlSize(.small)
                         }
-                        Text("Save Changes")
+                        Text(L10n.t("Save Changes"))
                     }
                 }
                 .keyboardShortcut(.return, modifiers: [.command])

@@ -113,7 +113,7 @@ struct StartCommandInlineEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Picker("Type", selection: $command.type) {
+            Picker(L10n.t("Type"), selection: $command.type) {
                 ForEach(ProjectLaunchCommandType.allCases) { type in
                     Label(type.title, systemImage: type.systemImage).tag(type)
                 }
@@ -128,7 +128,7 @@ struct StartCommandInlineEditor: View {
 
             HStack {
                 Spacer()
-                Button("Delete", role: .destructive, action: delete)
+                Button(L10n.t("Delete"), role: .destructive, action: delete)
                     .controlSize(.small)
             }
         }
@@ -144,45 +144,45 @@ struct StartCommandInlineEditor: View {
         case .terminal:
             TextField("Command", text: $command.content, axis: .vertical)
                 .lineLimit(2...4)
-            Picker("Split", selection: $command.split) {
+            Picker(L10n.t("Split"), selection: $command.split) {
                 ForEach(ProjectLaunchSplit.allCases) { split in
                     Text(split.title).tag(split)
                 }
             }
-            Text("Runs in a new terminal at the project directory.")
+            Text(L10n.t("Runs in a new terminal at the project directory."))
                 .foregroundStyle(.secondary)
 
         case .application:
             HStack {
                 TextField("Application", text: $command.target)
-                Button("Choose…", action: chooseApplication)
+                Button(L10n.t("Choose…"), action: chooseApplication)
                     .controlSize(.small)
             }
             HStack(spacing: 5) {
-                Text("Templates")
+                Text(L10n.t("Templates"))
                     .foregroundStyle(.secondary)
-                Button("VS Code") { command.target = "/Applications/Visual Studio Code.app" }
-                Button("WebStorm") { command.target = "/Applications/WebStorm.app" }
+                Button(L10n.t("VS Code")) { command.target = "/Applications/Visual Studio Code.app" }
+                Button(L10n.t("WebStorm")) { command.target = "/Applications/WebStorm.app" }
             }
             .buttonStyle(.bordered)
             .controlSize(.mini)
             TextField("Arguments", text: $command.content, axis: .vertical)
                 .lineLimit(1...3)
-            Text("Argument text is passed to the application as one argument.")
+            Text(L10n.t("Argument text is passed to the application as one argument."))
                 .foregroundStyle(.secondary)
 
         case .finderFolder:
             HStack {
                 TextField("Folder", text: $command.content)
-                Button("Choose…", action: chooseFolder)
+                Button(L10n.t("Choose…"), action: chooseFolder)
                     .controlSize(.small)
             }
-            Text("Opens this folder in Finder.")
+            Text(L10n.t("Opens this folder in Finder."))
                 .foregroundStyle(.secondary)
 
         case .web:
             TextField("URL", text: $command.content)
-            Text("A scheme is optional; https:// is used when omitted.")
+            Text(L10n.t("A scheme is optional; https:// is used when omitted."))
                 .foregroundStyle(.secondary)
         }
     }

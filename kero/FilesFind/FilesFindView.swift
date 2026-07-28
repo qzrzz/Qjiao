@@ -96,7 +96,7 @@ public struct FilesFindView: View {
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.plain)
-                .help("Toggle Replace")
+                .help(L10n.t("Toggle Replace"))
 
                 // 搜索输入框 + 三位一体开关 (Aa, \b, .*)
                 HStack(spacing: 4) {
@@ -125,7 +125,7 @@ public struct FilesFindView: View {
 
                     // [Aa] Match Case
                     optionToggleButton(
-                        title: "Aa",
+                        title: L10n.t("Aa"),
                         tooltip: "Match Case",
                         isSelected: $model.options.isCaseSensitive
                     )
@@ -181,7 +181,7 @@ public struct FilesFindView: View {
                                 .foregroundColor(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .help("Replace All (⌥⌘Enter)")
+                        .help(L10n.t("Replace All (⌥⌘Enter)"))
                     }
                     .padding(.horizontal, 6)
                     .padding(.vertical, 4)
@@ -298,7 +298,7 @@ public struct FilesFindView: View {
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
-            .help("Collapse / Expand All")
+            .help(L10n.t("Collapse / Expand All"))
 
             // 清除结果
             Button(action: {
@@ -309,7 +309,7 @@ public struct FilesFindView: View {
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
-            .help("Clear Search Results")
+            .help(L10n.t("Clear Search Results"))
         }
     }
 
@@ -389,7 +389,7 @@ private struct FileResultRowView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("Replace All in File")
+                    .help(L10n.t("Replace All in File"))
                 }
             }
             .padding(.horizontal, 8)
@@ -454,7 +454,7 @@ private struct MatchItemRowView: View {
                             .foregroundColor(Color(nsColor: Theme.accent))
                     }
                     .buttonStyle(.plain)
-                    .help("Replace Match")
+                    .help(L10n.t("Replace Match"))
                 }
 
                 Button(action: {
@@ -465,7 +465,7 @@ private struct MatchItemRowView: View {
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Dismiss Match")
+                .help(L10n.t("Dismiss Match"))
             }
         }
         .padding(.horizontal, 8)

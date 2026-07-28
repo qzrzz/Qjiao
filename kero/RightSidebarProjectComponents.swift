@@ -57,7 +57,7 @@ struct PathDirectorySection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .help(path)
                     .contextMenu {
-                        Button("Copy Path") { copyPath() }
+                        Button(L10n.t("Copy Path")) { copyPath() }
                             .disabled(path.isEmpty)
                     }
 
@@ -358,7 +358,7 @@ struct PackageInfoSection: View {
             Button {
                 let menu = NSMenu()
 
-                let itemOpen = NSMenuItem(title: "Open package.json", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                let itemOpen = NSMenuItem(title: L10n.t("Open package.json"), action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
                 let tOpen = MenuActionTarget { openPackageJSON() }
                 itemOpen.target = tOpen
                 menu.addItem(itemOpen)
@@ -382,8 +382,8 @@ struct PackageInfoSection: View {
 
                 menu.addItem(NSMenuItem.separator())
 
-                let itemTaze = NSMenuItem(title: "Update  Deps (npx taze)", action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
-                let tTaze = MenuActionTarget { manager.runRawCommand("npx taze", title: "npx taze", directory: rootPath) }
+                let itemTaze = NSMenuItem(title: L10n.t("Update  Deps (npx taze)"), action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                let tTaze = MenuActionTarget { manager.runRawCommand("npx taze", title: L10n.t("npx taze"), directory: rootPath) }
                 itemTaze.target = tTaze
                 menu.addItem(itemTaze)
 
@@ -400,13 +400,13 @@ struct PackageInfoSection: View {
                     .contentShape(RoundedRectangle(cornerRadius: 4))
             }
             .buttonStyle(.plain)
-            .help("More Package Options")
+            .help(L10n.t("More Package Options"))
         )
     }
 
     var body: some View {
         SidebarSectionHeader(
-            title: "PACKAGE",
+            title: L10n.t("PACKAGE"),
             count: 0,
             isCollapsed: $isCollapsed,
             actions: [],
@@ -443,7 +443,7 @@ struct PackageInfoSection: View {
                         .onHover { isHoveringCopyName = $0 }
                         .help("Copy package name (\(name))")
                     } else {
-                        Text("package.json")
+                        Text(L10n.t("package.json"))
                             .font(SidebarTypography.secondary(.regular))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -637,7 +637,7 @@ struct PackageInfoSection: View {
                                 }
                                 .buttonStyle(.plain)
                                 .onHover { isHoveringMenu = $0 }
-                                .help("Version Options")
+                                .help(L10n.t("Version Options"))
                             }
                             .padding(1)
                             .background(
@@ -673,7 +673,7 @@ struct PackageScriptsSection: View {
 
     var body: some View {
         SidebarSectionHeader(
-            title: "NPM SCRIPTS",
+            title: L10n.t("NPM SCRIPTS"),
             count: scripts.count,
             isCollapsed: $isCollapsed,
             actions: []
@@ -791,16 +791,16 @@ private struct PackageScriptRow: View {
                 Divider()
             }
             if status == .running {
-                Button("Stop") { stop() }
-                Button("Restart") { restart(.normal) }
+                Button(L10n.t("Stop")) { stop() }
+                Button(L10n.t("Restart")) { restart(.normal) }
             } else {
-                Button("Run") { run(.normal) }
+                Button(L10n.t("Run")) { run(.normal) }
             }
-            Button("Edit package.json") { editPackageJSON() }
+            Button(L10n.t("Edit package.json")) { editPackageJSON() }
             Divider()
-            Button("Run with time") { run(.withTime) }
-            Button("Run with --inspect") { run(.withInspect) }
-            Button("Run with --prof") { run(.withProf) }
+            Button(L10n.t("Run with time")) { run(.withTime) }
+            Button(L10n.t("Run with --inspect")) { run(.withInspect) }
+            Button(L10n.t("Run with --prof")) { run(.withProf) }
         }
     }
 
@@ -899,7 +899,7 @@ private struct PackageScriptRow: View {
                 .onHover { isHoveringRestartBtn = $0 }
 
             case .stopping:
-                Text("Stopping...")
+                Text(L10n.t("Stopping..."))
                     .font(SidebarTypography.micro())
                     .foregroundStyle(.tertiary)
             }
@@ -917,7 +917,7 @@ struct UniversalTasksSectionConfiguration {
     /** Gradle 任务由项目 wrapper 驱动，不额外检查全局命令。 */
     static var gradle: Self {
         Self(
-            title: "GRADLE TASKS",
+            title: L10n.t("GRADLE TASKS"),
             emptyText: "No Gradle tasks found",
             missingToolText: nil,
             isToolInstalled: true
@@ -927,7 +927,7 @@ struct UniversalTasksSectionConfiguration {
     /** Justfile 任务展示配置。 */
     static var just: Self {
         Self(
-            title: "JUSTFILE",
+            title: L10n.t("JUSTFILE"),
             emptyText: "No tasks in Justfile",
             missingToolText: "Install just to run tasks",
             isToolInstalled: JustToolChecker.isJustInstalled
@@ -937,7 +937,7 @@ struct UniversalTasksSectionConfiguration {
     /** Cargo 任务展示配置。 */
     static var cargo: Self {
         Self(
-            title: "CARGO",
+            title: L10n.t("CARGO"),
             emptyText: "No Cargo tasks",
             missingToolText: "Install Rust/Cargo to run tasks",
             isToolInstalled: CargoToolChecker.isCargoInstalled
@@ -947,7 +947,7 @@ struct UniversalTasksSectionConfiguration {
     /** CMake 任务展示配置。 */
     static var cmake: Self {
         Self(
-            title: "CMAKE TASKS",
+            title: L10n.t("CMAKE TASKS"),
             emptyText: "No CMake tasks",
             missingToolText: "Install CMake to run tasks",
             isToolInstalled: CMakeToolChecker.isCMakeInstalled
@@ -957,7 +957,7 @@ struct UniversalTasksSectionConfiguration {
     /** Makefile 任务展示配置。 */
     static var makefile: Self {
         Self(
-            title: "MAKEFILE",
+            title: L10n.t("MAKEFILE"),
             emptyText: "No Makefile tasks",
             missingToolText: "Install make to run tasks",
             isToolInstalled: MakeToolChecker.isMakeInstalled
@@ -1133,13 +1133,13 @@ private struct UniversalScriptRow: View {
                 Divider()
             }
             if status == .running {
-                Button("Stop") { stop() }
-                Button("Restart") { restart(.normal) }
+                Button(L10n.t("Stop")) { stop() }
+                Button(L10n.t("Restart")) { restart(.normal) }
             } else {
-                Button("Run") { run(.normal) }
+                Button(L10n.t("Run")) { run(.normal) }
             }
             Divider()
-            Button("Run with time") { run(.withTime) }
+            Button(L10n.t("Run with time")) { run(.withTime) }
         }
     }
 
@@ -1238,7 +1238,7 @@ private struct UniversalScriptRow: View {
                 .onHover { isHoveringRestartBtn = $0 }
 
             case .stopping:
-                Text("Stopping...")
+                Text(L10n.t("Stopping..."))
                     .font(SidebarTypography.micro())
                     .foregroundStyle(.tertiary)
             }
@@ -1253,7 +1253,7 @@ struct ProcessesSection: View {
 
     var body: some View {
         SidebarSectionHeader(
-            title: "PROCESSES",
+            title: L10n.t("PROCESSES"),
             count: processes.count,
             isCollapsed: $isCollapsed,
             actions: []
@@ -1282,7 +1282,7 @@ struct PortsSection: View {
 
     var body: some View {
         SidebarSectionHeader(
-            title: "PORTS",
+            title: L10n.t("PORTS"),
             count: ports.count,
             isCollapsed: $isCollapsed,
             actions: []

@@ -906,21 +906,29 @@ final class FileTreeModel: nonisolated ObservableObject {
         let alert = NSAlert()
         let count = conflictNames.count
         if count == 1 {
-            alert.messageText = "An item named “\(conflictNames[0])” already exists in this location."
-            alert.informativeText =
+            alert.messageText = L10n.format(
+                "An item named “%@” already exists in this location.",
+                conflictNames[0]
+            )
+            alert.informativeText = L10n.t(
                 "Choose Overwrite or New Name for this paste. The choice applies to all name conflicts in this batch."
+            )
         } else {
-            alert.messageText = "\(count) items already exist in this location."
+            alert.messageText = L10n.format("%d items already exist in this location.", count)
             let preview = conflictNames.prefix(8).joined(separator: "\n")
             let more = count > 8 ? "\n…" : ""
             alert.informativeText =
-                "\(preview)\(more)\n\nChoose one action for all \(count) conflicting items in this paste."
+                "\(preview)\(more)\n\n"
+                + L10n.format(
+                    "Choose one action for all %d conflicting items in this paste.",
+                    count
+                )
         }
         alert.alertStyle = .warning
         // 默认偏安全：新文件名；其次覆盖；取消整批。
-        alert.addButton(withTitle: "New Name")
-        alert.addButton(withTitle: "Overwrite")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.t("New Name"))
+        alert.addButton(withTitle: L10n.t("Overwrite"))
+        alert.addButton(withTitle: L10n.t("Cancel"))
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             return .newName

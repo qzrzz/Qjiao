@@ -99,7 +99,7 @@ struct VerticalSplitHandle: View {
                 )
         }
         .frame(height: 7)
-        .accessibilityLabel("Resize right sidebar sections")
+        .accessibilityLabel(L10n.t("Resize right sidebar sections"))
     }
 
     /// 收起时上半区视觉占比：下半仅留 tabs。

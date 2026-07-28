@@ -131,7 +131,7 @@ struct ImageExportTemplate: Identifiable, Sendable {
     static let all: [ImageExportTemplate] = [
         ImageExportTemplate(
             id: "macos-appicon",
-            title: "macOS App Icon",
+            title: L10n.t("macOS App Icon"),
             detail: "16w…512w、1024×1024",
             rows: [
                 .init(sizeText: "16w", suffix: "_16"),
@@ -144,7 +144,7 @@ struct ImageExportTemplate: Identifiable, Sendable {
         ),
         ImageExportTemplate(
             id: "macos-retina",
-            title: "macOS 1x / 2x",
+            title: L10n.t("macOS 1x / 2x"),
             detail: "原图 + @2x 两倍图",
             rows: [
                 .init(sizeText: "1x", suffix: ""),
@@ -153,7 +153,7 @@ struct ImageExportTemplate: Identifiable, Sendable {
         ),
         ImageExportTemplate(
             id: "android-launcher",
-            title: "Android Launcher",
+            title: L10n.t("Android Launcher"),
             detail: "近似 mdpi…xxxhdpi（预置宽度）",
             rows: [
                 .init(sizeText: "32w", suffix: "_mdpi"),

@@ -25,10 +25,15 @@ struct GitPanel: View {
     }
 
     @ObservedObject var model: GitStatusModel
+    /// 当前项目（用于解析 AI 写作语言项目覆盖）；无项目时仅用全局设置。
+    var project: Project?
     let session: TerminalSession?
     let openFile: (String) -> Void
     let openToSide: (String) -> Void
     let openDiff: (_ entry: GitStatusModel.Entry, _ staged: Bool) -> Void
+
+    @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var aiCommitTasks = LocalAIGitCommitTaskStore.shared
 
     @State private var commitMessage = ""
     @State private var pendingDiscard: PendingDiscard?
@@ -101,7 +106,7 @@ struct GitPanel: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("Discard All Changes", role: .destructive) {
+            Button(L10n.t("Discard All Changes"), role: .destructive) {
                 let snapshot = pendingDiscardAll
                 if !snapshot.isEmpty && snapshot.allSatisfy(discardSnapshotIsCurrent) {
                     model.discardChanges(snapshot.map(\.entry))
@@ -136,12 +141,12 @@ struct GitPanel: View {
                 Image(systemName: "arrow.triangle.branch")
                     .font(SidebarTypography.secondary(.medium))
                     .foregroundStyle(Color(nsColor: Theme.cursor))
-                PanelHeader(title: "Git", subtitle: model.rootPath)
+                PanelHeader(title: L10n.t("Git"), subtitle: model.rootPath)
             }
             if model.isRepo {
                 GitHeaderIconButton(
                     systemImage: "line.3.horizontal.decrease",
-                    help: "Filter Changed Files",
+                    help: L10n.t("Filter Changed Files"),
                     active: showFilter
                 ) {
                     showFilter.toggle()
@@ -179,7 +184,7 @@ struct GitPanel: View {
                 }
                 Divider()
             }
-            Button("Create New Branch…") {
+            Button(L10n.t("Create New Branch…")) {
                 newBranchName = ""
                 showBranchCreator = true
                 DispatchQueue.main.async { branchFieldFocused = true }
@@ -198,51 +203,51 @@ struct GitPanel: View {
         .menuIndicator(.hidden)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .help("Switch or Create Branch")
+        .help(L10n.t("Switch or Create Branch"))
         .accessibilityLabel("Current branch, \(model.branch ?? "detached HEAD")")
     }
 
     private var moreMenu: some View {
         Menu {
-            Button("Fetch") { model.fetch() }
+            Button(L10n.t("Fetch")) { model.fetch() }
                 .disabled(model.isBusy || model.remotes.isEmpty)
-            Button("Pull (Fast-forward Only)") { model.pull() }
+            Button(L10n.t("Pull (Fast-forward Only)")) { model.pull() }
                 .disabled(model.isBusy || !model.hasUpstream)
             if model.hasUpstream {
-                Button("Push") { model.push() }
+                Button(L10n.t("Push")) { model.push() }
                     .disabled(model.isBusy)
             } else if model.remotes.count > 1 {
-                Menu("Publish Branch to") {
+                Menu(L10n.t("Publish Branch to")) {
                     ForEach(model.remotes, id: \.self) { remote in
                         Button(remote) { model.publish(to: remote) }
                     }
                 }
                 .disabled(model.isBusy || model.branch == "detached HEAD")
             } else {
-                Button("Publish Branch") { model.push() }
+                Button(L10n.t("Publish Branch")) { model.push() }
                     .disabled(model.isBusy || model.remotes.isEmpty || model.branch == "detached HEAD")
             }
-            Button("Sync Changes") { model.syncChanges() }
+            Button(L10n.t("Sync Changes")) { model.syncChanges() }
                 .disabled(
                     model.isBusy || model.remotes.isEmpty
                         || (!model.hasUpstream && model.remotes.count != 1)
                         || model.branch == "detached HEAD"
                 )
             Divider()
-            Button("Stash All Changes") { model.stash(includeUntracked: true) }
+            Button(L10n.t("Stash All Changes")) { model.stash(includeUntracked: true) }
                 .disabled(model.isBusy || model.totalChangeCount == 0)
             Button(model.stashCount == 1 ? "Pop Stash" : "Pop Stash (\(model.stashCount))") {
                 model.stashPop()
             }
             .disabled(model.isBusy || model.stashCount == 0)
             Divider()
-            Button("Copy Changed Paths") { copyChangedPaths() }
+            Button(L10n.t("Copy Changed Paths")) { copyChangedPaths() }
                 .disabled(model.totalChangeCount == 0)
-            Button("Copy Repository Path") { copyToPasteboard(model.repoRoot) }
+            Button(L10n.t("Copy Repository Path")) { copyToPasteboard(model.repoRoot) }
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.repoRoot)])
             } label: {
-                Label("Reveal Repository in Finder", systemImage: "finder")
+                Label(L10n.t("Reveal Repository in Finder"), systemImage: "finder")
             }
         } label: {
             GitHeaderMenuIcon()
@@ -251,8 +256,8 @@ struct GitPanel: View {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("More Actions…")
-        .accessibilityLabel("More Git Actions")
+        .help(L10n.t("More Actions…"))
+        .accessibilityLabel(L10n.t("More Git Actions"))
     }
 
     private struct GitHeaderIconButton: View {
@@ -403,8 +408,8 @@ struct GitPanel: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("Dismiss")
-                        .accessibilityLabel("Dismiss Git Result")
+                        .help(L10n.t("Dismiss"))
+                        .accessibilityLabel(L10n.t("Dismiss Git Result"))
                     }
                 }
                 if operationExpanded, !operation.output.isEmpty {
@@ -417,7 +422,7 @@ struct GitPanel: View {
                             .padding(.top, 6)
                     }
                     .frame(maxHeight: 96)
-                    .accessibilityLabel("Git Output")
+                    .accessibilityLabel(L10n.t("Git Output"))
                 }
             }
             .foregroundStyle(operationColor(operation))
@@ -468,7 +473,7 @@ struct GitPanel: View {
                         showBranchCreator = false
                         return .handled
                     }
-                Button("Create", action: createBranch)
+                Button(L10n.t("Create"), action: createBranch)
                     .buttonStyle(.borderless)
                     .font(SidebarTypography.caption(.medium))
                     .disabled(newBranchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
@@ -478,8 +483,8 @@ struct GitPanel: View {
                     Image(systemName: "xmark").font(SidebarTypography.compact())
                 }
                 .buttonStyle(.plain)
-                .help("Cancel")
-                .accessibilityLabel("Cancel Branch Creation")
+                .help(L10n.t("Cancel"))
+                .accessibilityLabel(L10n.t("Cancel Branch Creation"))
             }
             .padding(.horizontal, 8)
             .frame(height: 28)
@@ -509,28 +514,36 @@ struct GitPanel: View {
 
     private var commitBox: some View {
         VStack(spacing: 6) {
-            TextField(commitFieldPlaceholder, text: $commitMessage, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(SidebarTypography.body())
-                .lineLimit(1...4)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+            HStack(alignment: .top, spacing: 4) {
+                GitCommitMessageEditor(
+                    text: $commitMessage,
+                    placeholder: commitFieldPlaceholder,
+                    onCommit: performPrimaryAction
+                )
+                .frame(minHeight: 36, maxHeight: 72)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.primary.opacity(0.05))
                 )
-                .onKeyPress(keys: [.return]) { press in
-                    guard press.modifiers.contains(.command) else { return .ignored }
-                    performPrimaryAction()
-                    return .handled
-                }
+
+                // Message 右侧 AI 生成按钮（sparkles.2）
+                aiCommitMessageButton
+            }
+
+            if let error = aiCommitTasks.state(for: model.repoRoot).lastError, !error.isEmpty {
+                Text(error)
+                    .font(SidebarTypography.caption())
+                    .foregroundStyle(.red.opacity(0.9))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(3)
+            }
 
             HStack(spacing: 4) {
                 actionButton(
                     icon: "checkmark",
                     title: commitButtonTitle,
                     enabled: canCommit(includeAll: false),
-                    help: "Commit staged changes (⌘Return)",
+                    help: L10n.t("Commit staged changes (⌘Return)"),
                     action: performPrimaryAction
                 )
                 commitMenu
@@ -541,25 +554,104 @@ struct GitPanel: View {
                     icon: "arrow.triangle.2.circlepath",
                     title: syncButtonTitle,
                     enabled: !model.isBusy,
-                    help: "Pull remote commits, then push local ones",
+                    help: L10n.t("Pull remote commits, then push local ones"),
                     action: model.syncChanges
                 )
             }
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 8)
+        .onChange(of: aiCommitTasks.states[aiCommitRepoKey]?.lastMessage) { _, newMessage in
+            // 成功生成后写入 Message 输入框
+            guard let newMessage, !newMessage.isEmpty else { return }
+            if let consumed = aiCommitTasks.consumeMessage(model.repoRoot) {
+                commitMessage = consumed
+            }
+        }
+    }
+
+    /// 规范化后的仓库 key，与 TaskStore 一致。
+    private var aiCommitRepoKey: String {
+        (model.repoRoot as NSString).standardizingPath
+    }
+
+    /// 当前是否可发起 AI Commit Message（有变更、有仓库、未忙）。
+    private var canGenerateAICommitMessage: Bool {
+        model.isRepo
+            && !model.repoRoot.isEmpty
+            && !model.isBusy
+            && !aiCommitTasks.isRunning(model.repoRoot)
+            && (model.totalChangeCount > 0 || !model.stagedEntries.isEmpty || !model.changedEntries.isEmpty)
+    }
+
+    /// Message 旁的 AI 按钮：进行中显示取消，否则 sparkles.2。
+    private var aiCommitMessageButton: some View {
+        let running = aiCommitTasks.isRunning(model.repoRoot)
+        return Button {
+            if running {
+                aiCommitTasks.cancel(model.repoRoot, clearError: true)
+            } else {
+                startAICommitMessage()
+            }
+        } label: {
+            Group {
+                if running {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: "sparkles.2")
+                        .font(SidebarTypography.caption(.semibold))
+                }
+            }
+            .frame(width: 28, height: 28)
+            .foregroundStyle(
+                running || (LocalAI.isEnabled && canGenerateAICommitMessage)
+                    ? Color(nsColor: Theme.cursor)
+                    : Color.secondary.opacity(0.55)
+            )
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(0.06))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .disabled(!running && (!LocalAI.isEnabled || !canGenerateAICommitMessage))
+        .help(
+            running
+                ? L10n.t("Cancel AI Commit Message")
+                : (LocalAI.isEnabled
+                    ? L10n.t("Generate commit message with AI")
+                    : L10n.t("Enable AI headless provider in Settings → General"))
+        )
+        .accessibilityLabel(
+            running ? L10n.t("Cancel AI Commit Message") : L10n.t("AI Commit Message")
+        )
+    }
+
+    /// 启动 AI 生成 commit message（全局语言 + 项目覆盖 + Gitmoji 开关）。
+    private func startAICommitMessage() {
+        guard model.isRepo, !model.repoRoot.isEmpty else { return }
+        aiCommitTasks.clearError(model.repoRoot)
+        let language = project?.resolvedAIWritingLanguage ?? settings.aiWritingLanguage
+        aiCommitTasks.start(
+            repoRoot: model.repoRoot,
+            language: language,
+            useEmoji: settings.gitCommitMessageEmoji
+        )
     }
 
     private var commitMenu: some View {
         Menu {
-            Button("Commit Staged") { performCommit(includeAll: false) }
+            Button(L10n.t("Commit Staged")) { performCommit(includeAll: false) }
                 .disabled(!canCommit(includeAll: false))
-            Button("Stage All & Commit") { performCommit(includeAll: true) }
+            Button(L10n.t("Stage All & Commit")) { performCommit(includeAll: true) }
                 .disabled(!canCommit(includeAll: true))
             Divider()
-            Button("Amend Last Commit") { performCommit(includeAll: false, amend: true) }
+            Button(L10n.t("Amend Last Commit")) { performCommit(includeAll: false, amend: true) }
                 .disabled(!canAmend(includeAll: false))
-            Button("Stage All & Amend") { performCommit(includeAll: true, amend: true) }
+            Button(L10n.t("Stage All & Amend")) { performCommit(includeAll: true, amend: true) }
                 .disabled(!canAmend(includeAll: true))
         } label: {
             Image(systemName: "chevron.down")
@@ -576,8 +668,8 @@ struct GitPanel: View {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Commit Options")
-        .accessibilityLabel("Commit Options")
+        .help(L10n.t("Commit Options"))
+        .accessibilityLabel(L10n.t("Commit Options"))
     }
 
     private func actionButton(
@@ -609,13 +701,13 @@ struct GitPanel: View {
     private var commitFieldPlaceholder: String {
         if model.stagedEntries.isEmpty {
             return model.recentCommits.isEmpty
-                ? "Message (stage changes to use ⌘⏎)"
-                : "Message (stage changes to use ⌘⏎, or choose Amend)"
+                ? L10n.t("Message (stage changes to use ⌘⏎)")
+                : L10n.t("Message (stage changes to use ⌘⏎, or choose Amend)")
         }
         if let branch = model.branch {
-            return "Message (⌘⏎ to commit on \"\(branch)\")"
+            return L10n.format("Message (⌘⏎ to commit on \"%@\")", branch)
         }
-        return "Message (⌘⏎ to commit)"
+        return L10n.t("Message (⌘⏎ to commit)")
     }
 
     private var showSyncButton: Bool {
@@ -623,16 +715,18 @@ struct GitPanel: View {
     }
 
     private var syncButtonTitle: String {
-        var title = "Sync Changes"
+        var title = L10n.t("Sync Changes")
         if model.behind > 0 { title += " \(model.behind)↓" }
         if model.ahead > 0 { title += " \(model.ahead)↑" }
         return title
     }
 
     private var commitButtonTitle: String {
-        if model.stagedEntries.count == 1 { return "Commit 1 Staged File" }
-        if model.stagedEntries.count > 1 { return "Commit \(model.stagedEntries.count) Staged Files" }
-        return "Commit Staged"
+        if model.stagedEntries.count == 1 { return L10n.t("Commit 1 Staged File") }
+        if model.stagedEntries.count > 1 {
+            return L10n.format("Commit %d Staged Files", model.stagedEntries.count)
+        }
+        return L10n.t("Commit Staged")
     }
 
     private func canCommit(includeAll: Bool) -> Bool {
@@ -690,8 +784,8 @@ struct GitPanel: View {
                             .foregroundStyle(.tertiary)
                     }
                     .buttonStyle(.plain)
-                    .help("Clear Filter")
-                    .accessibilityLabel("Clear Git Filter")
+                    .help(L10n.t("Clear Filter"))
+                    .accessibilityLabel(L10n.t("Clear Git Filter"))
                 }
             }
             .padding(.horizontal, 8)
@@ -719,7 +813,7 @@ struct GitPanel: View {
                         }
                         if !filteredMergeEntries.isEmpty {
                             SidebarSectionHeader(
-                                title: "MERGE CHANGES",
+                                title: L10n.t("MERGE CHANGES"),
                                 count: filteredMergeEntries.count,
                                 isCollapsed: $mergeCollapsed,
                                 actions: [],
@@ -737,11 +831,11 @@ struct GitPanel: View {
                         }
                         if !filteredStagedEntries.isEmpty {
                             SidebarSectionHeader(
-                                title: "STAGED CHANGES",
+                                title: L10n.t("STAGED CHANGES"),
                                 count: filteredStagedEntries.count,
                                 isCollapsed: $stagedCollapsed,
                                 actions: filterText.isEmpty ? [
-                                    .init(systemImage: "minus", help: "Unstage All Changes") {
+                                    .init(systemImage: "minus", help: L10n.t("Unstage All Changes")) {
                                         model.unstageAll()
                                     }
                                 ] : [],
@@ -759,14 +853,14 @@ struct GitPanel: View {
                         }
                         if !filteredChangedEntries.isEmpty {
                             SidebarSectionHeader(
-                                title: "CHANGES",
+                                title: L10n.t("CHANGES"),
                                 count: filteredChangedEntries.count,
                                 isCollapsed: $changesCollapsed,
                                 actions: filterText.isEmpty ? [
-                                    .init(systemImage: "arrow.uturn.backward", help: "Discard All Changes") {
+                                    .init(systemImage: "arrow.uturn.backward", help: L10n.t("Discard All Changes")) {
                                         requestDiscardAll()
                                     },
-                                    .init(systemImage: "plus", help: "Stage All Changes") {
+                                    .init(systemImage: "plus", help: L10n.t("Stage All Changes")) {
                                         model.stageAll()
                                     },
                                 ] : [],
@@ -784,7 +878,7 @@ struct GitPanel: View {
                         }
                         if filterText.isEmpty, !model.recentCommits.isEmpty {
                             SidebarSectionHeader(
-                                title: "RECENT COMMITS",
+                                title: L10n.t("RECENT COMMITS"),
                                 count: model.recentCommits.count,
                                 isCollapsed: $historyCollapsed,
                                 actions: [],
@@ -800,6 +894,15 @@ struct GitPanel: View {
                                             repoRoot: model.repoRoot,
                                             disabled: model.isBusy,
                                             hasStagedChanges: !model.stagedEntries.isEmpty,
+                                            canAICommitMessage: LocalAI.isEnabled
+                                                && canGenerateAICommitMessage,
+                                            isAICommitRunning: aiCommitTasks.isRunning(model.repoRoot),
+                                            onAICommitMessage: {
+                                                startAICommitMessage()
+                                            },
+                                            onCancelAICommitMessage: {
+                                                aiCommitTasks.cancel(model.repoRoot, clearError: true)
+                                            },
                                             onRefreshNeeded: {
                                                 model.refresh()
                                             }
@@ -896,22 +999,26 @@ struct GitPanel: View {
     private func discardTitle(for entry: GitStatusModel.Entry?) -> String {
         guard let entry else { return "" }
         if entry.isUntracked {
-            return "Delete \(entry.fileName)? Its contents will move to the Trash."
+            return L10n.format("Delete %@? Its contents will move to the Trash.", entry.fileName)
         }
         if entry.isWorktreeRename, let original = entry.origPath {
-            return "Undo this rename? \(entry.fileName) will move to the Trash and \((original as NSString).lastPathComponent) will be restored."
+            return L10n.format(
+                "Undo this rename? %@ will move to the Trash and %@ will be restored.",
+                entry.fileName,
+                (original as NSString).lastPathComponent
+            )
         }
         if entry.isWorktreeCopy {
-            return "Discard this copy? \(entry.fileName) will move to the Trash."
+            return L10n.format("Discard this copy? %@ will move to the Trash.", entry.fileName)
         }
-        return "Discard changes in \(entry.fileName)?"
+        return L10n.format("Discard changes in %@?", entry.fileName)
     }
 
     private func discardActionTitle(for entry: GitStatusModel.Entry?) -> String {
-        guard let entry else { return "Discard Changes" }
-        if entry.isUntracked || entry.isWorktreeCopy { return "Move to Trash" }
-        if entry.isWorktreeRename { return "Undo Rename" }
-        return "Discard Changes"
+        guard let entry else { return L10n.t("Discard Changes") }
+        if entry.isUntracked || entry.isWorktreeCopy { return L10n.t("Move to Trash") }
+        if entry.isWorktreeRename { return L10n.t("Undo Rename") }
+        return L10n.t("Discard Changes")
     }
 
     private func makePendingDiscard(_ entry: GitStatusModel.Entry) -> PendingDiscard {
@@ -1006,14 +1113,14 @@ struct GitPanel: View {
                 .font(SidebarTypography.emptyIcon())
                 .foregroundStyle(.quaternary)
             VStack(spacing: 2) {
-                Text("No Git Repository")
+                Text(L10n.t("No Git Repository"))
                     .font(SidebarTypography.body(.medium))
-                Text("Initialize the terminal’s current directory to start tracking changes.")
+                Text(L10n.t("Initialize the terminal’s current directory to start tracking changes."))
                     .font(SidebarTypography.caption())
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
             }
-            Button("Initialize Repository") {
+            Button(L10n.t("Initialize Repository")) {
                 model.initializeRepository()
             }
             .buttonStyle(.borderedProminent)
@@ -1033,7 +1140,7 @@ struct GitPanel: View {
                 .font(SidebarTypography.emptyIcon())
                 .foregroundStyle(Color(red: 0.88, green: 0.42, blue: 0.36))
             VStack(spacing: 3) {
-                Text("Git Status Unavailable")
+                Text(L10n.t("Git Status Unavailable"))
                     .font(SidebarTypography.body(.medium))
                 Text(message)
                     .font(SidebarTypography.caption(design: .monospaced))
@@ -1042,7 +1149,7 @@ struct GitPanel: View {
                     .lineLimit(5)
                     .textSelection(.enabled)
             }
-            Button("Retry") { model.refresh() }
+            Button(L10n.t("Retry")) { model.refresh() }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(model.isBusy || model.isResolvingInitialStatus)
@@ -1102,6 +1209,11 @@ private struct GitCommitRow: View {
     let repoRoot: String
     let disabled: Bool
     let hasStagedChanges: Bool
+    /// 当前是否可生成 AI Commit Message（LocalAI 已启用且有变更）。
+    let canAICommitMessage: Bool
+    let isAICommitRunning: Bool
+    let onAICommitMessage: () -> Void
+    let onCancelAICommitMessage: () -> Void
     let onRefreshNeeded: () -> Void
 
     @State private var showEditSheet = false
@@ -1137,13 +1249,13 @@ private struct GitCommitRow: View {
         .onHover { isHovering = $0 }
         .textSelection(.enabled)
         .contextMenu {
-            Button("Edit Commit…") {
+            Button(L10n.t("Edit Commit…")) {
                 showEditSheet = true
             }
             .disabled(disabled)
 
             if hasStagedChanges {
-                Button("Amend Staged Changes into Commit") {
+                Button(L10n.t("Amend Staged Changes into Commit")) {
                     Task {
                         _ = await GitCommitEditor.amendIntoCommit(
                             in: repoRoot,
@@ -1156,7 +1268,7 @@ private struct GitCommitRow: View {
                 .disabled(disabled)
             }
 
-            Button("Drop Commit", role: .destructive) {
+            Button(L10n.t("Drop Commit"), role: .destructive) {
                 Task {
                     _ = await GitCommitEditor.dropCommit(
                         in: repoRoot,
@@ -1170,8 +1282,26 @@ private struct GitCommitRow: View {
 
             Divider()
 
-            Button("Copy Commit Hash") { copy(commit.hash) }
-            Button("Copy Commit Message") { copy(commit.subject) }
+            // AI 根据当前工作区变更生成 Message，填入上方输入框
+            if isAICommitRunning {
+                Button {
+                    onCancelAICommitMessage()
+                } label: {
+                    Label(L10n.t("Cancel AI Commit Message"), systemImage: "xmark.circle")
+                }
+            } else {
+                Button {
+                    onAICommitMessage()
+                } label: {
+                    Label(L10n.t("AI Commit Message"), systemImage: "sparkles.2")
+                }
+                .disabled(disabled || !canAICommitMessage)
+            }
+
+            Divider()
+
+            Button(L10n.t("Copy Commit Hash")) { copy(commit.hash) }
+            Button(L10n.t("Copy Commit Message")) { copy(commit.subject) }
         }
         .sheet(isPresented: $showEditSheet) {
             GitCommitEditSheet(
@@ -1277,12 +1407,12 @@ private struct GitEntryRow: View {
         HStack(spacing: 4) {
             switch kind {
             case .merge:
-                rowButton("plus", help: "Mark Resolved (Stage)", action: stage)
+                rowButton("plus", help: L10n.t("Mark Resolved (Stage)"), action: stage)
             case .staged:
-                rowButton("minus", help: "Unstage Changes", action: unstage)
+                rowButton("minus", help: L10n.t("Unstage Changes"), action: unstage)
             case .unstaged:
-                rowButton("arrow.uturn.backward", help: "Discard Changes", action: discard)
-                rowButton("plus", help: "Stage Changes", action: stage)
+                rowButton("arrow.uturn.backward", help: L10n.t("Discard Changes"), action: discard)
+                rowButton("plus", help: L10n.t("Stage Changes"), action: stage)
             }
         }
     }
@@ -1305,23 +1435,23 @@ private struct GitEntryRow: View {
     @ViewBuilder
     private var menu: some View {
         if kind == .merge {
-            Button("Open Changes") { openDiff() }
-            Button("Open Conflicted File") { openFile() }
+            Button(L10n.t("Open Changes")) { openDiff() }
+            Button(L10n.t("Open Conflicted File")) { openFile() }
         } else {
-            Button("Open Changes") { openDiff() }
-            Button("Open File") { openFile() }
+            Button(L10n.t("Open Changes")) { openDiff() }
+            Button(L10n.t("Open File")) { openFile() }
         }
-        Button("Open File to the Side") { openToSide() }
+        Button(L10n.t("Open File to the Side")) { openToSide() }
         Divider()
         switch kind {
         case .merge:
-            Button("Mark Resolved (Stage)") { stage() }
+            Button(L10n.t("Mark Resolved (Stage)")) { stage() }
                 .disabled(disabled)
         case .staged:
-            Button("Unstage Changes") { unstage() }
+            Button(L10n.t("Unstage Changes")) { unstage() }
                 .disabled(disabled)
         case .unstaged:
-            Button("Stage Changes") { stage() }
+            Button(L10n.t("Stage Changes")) { stage() }
                 .disabled(disabled)
             Button(destructiveMenuTitle) { discard() }
                 .disabled(disabled)
@@ -1330,35 +1460,35 @@ private struct GitEntryRow: View {
         Button {
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: absolutePath)])
         } label: {
-            Label("Reveal in Finder", systemImage: "finder")
+            Label(L10n.t("Reveal in Finder"), systemImage: "finder")
         }
-        Button("Copy Path") {
+        Button(L10n.t("Copy Path")) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(absolutePath, forType: .string)
         }
-        Button("Copy Relative Path") { copyRelativePath() }
+        Button(L10n.t("Copy Relative Path")) { copyRelativePath() }
         if let insertInTerminal {
-            Button("Insert Absolute Path in Terminal") { insertInTerminal() }
+            Button(L10n.t("Insert Absolute Path in Terminal")) { insertInTerminal() }
         }
     }
 
     private var statusName: String {
         switch status {
-        case "M": return "Modified"
-        case "A": return "Added"
-        case "?": return "Untracked"
-        case "D": return "Deleted"
-        case "R": return "Renamed"
-        case "C": return "Copied"
-        case "U": return "Conflict"
-        default: return "Changed"
+        case "M": return L10n.t("Modified")
+        case "A": return L10n.t("Added")
+        case "?": return L10n.t("Untracked")
+        case "D": return L10n.t("Deleted")
+        case "R": return L10n.t("Renamed")
+        case "C": return L10n.t("Copied")
+        case "U": return L10n.t("Conflict")
+        default: return L10n.t("Changed")
         }
     }
 
     private var destructiveMenuTitle: String {
-        if entry.isUntracked || entry.isWorktreeCopy { return "Move to Trash…" }
-        if entry.isWorktreeRename { return "Undo Rename…" }
-        return "Discard Changes…"
+        if entry.isUntracked || entry.isWorktreeCopy { return L10n.t("Move to Trash…") }
+        if entry.isWorktreeRename { return L10n.t("Undo Rename…") }
+        return L10n.t("Discard Changes…")
     }
 
     private var statusColor: Color {
@@ -1369,6 +1499,111 @@ private struct GitEntryRow: View {
         case "R", "C": return Color(red: 0.35, green: 0.65, blue: 1.0)
         case "U": return Color(red: 0.74, green: 0.55, blue: 1.0)
         default: return .secondary
+        }
+    }
+}
+
+// MARK: - Git Commit Message Editor (Auto-hiding scrollbar)
+
+struct GitCommitMessageEditor: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var onCommit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.backgroundColor = .clear
+
+        let textView = GitCommitTextView()
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        if let container = textView.textContainer {
+            container.containerSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+            container.widthTracksTextView = true
+            container.lineFragmentPadding = 0
+        }
+        textView.textContainerInset = NSSize(width: 6, height: 6)
+
+        textView.font = NSFont.systemFont(ofSize: 12)
+        textView.textColor = .labelColor
+        textView.placeholderString = placeholder
+        textView.drawsBackground = false
+        textView.backgroundColor = .clear
+        textView.isRichText = false
+        textView.allowsUndo = true
+
+        textView.delegate = context.coordinator
+        textView.onCommit = onCommit
+        scrollView.documentView = textView
+
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? GitCommitTextView else { return }
+        if textView.string != text {
+            textView.string = text
+        }
+        textView.placeholderString = placeholder
+    }
+
+    class Coordinator: NSObject, NSTextViewDelegate {
+        @Binding var text: String
+
+        init(text: Binding<String>) {
+            self._text = text
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            text = textView.string
+        }
+    }
+}
+
+private class GitCommitTextView: NSTextView {
+    var placeholderString: String = "" {
+        didSet { needsDisplay = true }
+    }
+
+    var onCommit: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        // ⌘ + Return
+        if event.keyCode == 36 && event.modifierFlags.contains(.command) {
+            onCommit?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        if string.isEmpty && !placeholderString.isEmpty {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font ?? NSFont.systemFont(ofSize: 12),
+                .foregroundColor: NSColor.tertiaryLabelColor
+            ]
+            let rect = NSRect(
+                x: textContainerInset.width,
+                y: textContainerInset.height,
+                width: bounds.width - textContainerInset.width * 2,
+                height: bounds.height - textContainerInset.height * 2
+            )
+            placeholderString.draw(in: rect, withAttributes: attrs)
         }
     }
 }

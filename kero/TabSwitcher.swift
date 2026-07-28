@@ -353,7 +353,7 @@ struct TabSwitcherOverlay: View {
                     )
                 }
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel("Tab switcher")
+                .accessibilityLabel(L10n.t("Tab switcher"))
             }
         }
         .transition(.opacity.combined(with: .scale(scale: 0.97)))

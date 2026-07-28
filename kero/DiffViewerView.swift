@@ -465,10 +465,10 @@ struct DiffViewerView: View {
     private var conflictBanner: some View {
         HStack(spacing: 6) {
             Image(systemName: "arrow.triangle.merge")
-            Text("Unresolved merge conflict")
+            Text(L10n.t("Unresolved merge conflict"))
                 .fontWeight(.medium)
             Spacer(minLength: 0)
-            Text("Resolve before committing")
+            Text(L10n.t("Resolve before committing"))
                 .foregroundStyle(.secondary)
         }
         .font(.system(size: 11))
@@ -495,7 +495,7 @@ struct DiffViewerView: View {
             .pickerStyle(.segmented)
             .controlSize(.small)
             .fixedSize()
-            .accessibilityLabel("Diff Layout")
+            .accessibilityLabel(L10n.t("Diff Layout"))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

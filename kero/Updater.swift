@@ -76,7 +76,7 @@ struct CheckForUpdatesView: View {
     @ObservedObject var updater: Updater
 
     var body: some View {
-        Button("Check for Updates…") {
+        Button(L10n.t("Check for Updates…")) {
             updater.checkForUpdates()
         }
         .disabled(!updater.canCheckForUpdates)

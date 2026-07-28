@@ -684,15 +684,19 @@ extension TerminalSession: TerminalSurfaceClipboardConfirmationDelegate {
         alert.alertStyle = .warning
         switch request.kind {
         case .unsafePaste:
-            alert.messageText = "Warning: Potentially Unsafe Paste"
-            alert.informativeText = "Pasting this text may execute commands."
+            alert.messageText = L10n.t("Warning: Potentially Unsafe Paste")
+            alert.informativeText = L10n.t("Pasting this text may execute commands.")
         case .osc52Read:
-            alert.messageText = "Authorize Clipboard Access"
-            alert.informativeText = "A terminal program is attempting to read the clipboard."
+            alert.messageText = L10n.t("Authorize Clipboard Access")
+            alert.informativeText = L10n.t("A terminal program is attempting to read the clipboard.")
         }
         alert.accessoryView = Self.clipboardPreview(request.contents)
-        alert.addButton(withTitle: request.kind == .unsafePaste ? "Paste" : "Allow")
-        let cancel = alert.addButton(withTitle: request.kind == .unsafePaste ? "Cancel" : "Deny")
+        alert.addButton(
+            withTitle: request.kind == .unsafePaste ? L10n.t("Paste") : L10n.t("Allow")
+        )
+        let cancel = alert.addButton(
+            withTitle: request.kind == .unsafePaste ? L10n.t("Cancel") : L10n.t("Deny")
+        )
         cancel.keyEquivalent = "\u{1b}"
         Task { @MainActor in
             let response = await alert.beginSheetModal(for: window)

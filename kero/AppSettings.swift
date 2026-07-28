@@ -47,6 +47,14 @@ final class AppSettings: nonisolated ObservableObject {
     static let filesFontSizeRange: ClosedRange<Double> = 10...22
     static let backgroundOpacityRange: ClosedRange<Double> = 0.1...1
 
+    /// UI language. Default is English; persisted as `ui.language`.
+    @Published var language: AppLanguage {
+        didSet {
+            L10n.shared.setLanguage(language)
+            save()
+        }
+    }
+
     /// Light/dark appearance override; `system` follows macOS.
     @Published var theme: AppTheme {
         didSet {
@@ -179,6 +187,20 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// AI 写作语言（Git Commit、描述等生成内容）；默认英文。
+    ///
+    /// 写入 `config.toml` 的 `ai.writing-language`；项目可单独覆盖。
+    @Published var aiWritingLanguage: AIWritingLanguage {
+        didSet { save() }
+    }
+
+    /// 是否在 AI 生成的 Git Commit Message 中使用 Gitmoji emoji；默认开启。
+    ///
+    /// 写入 `config.toml` 的 `ai.git-commit-emoji`。
+    @Published var gitCommitMessageEmoji: Bool {
+        didSet { save() }
+    }
+
     /// 用户自定义挑选的 `.app` 代码编辑器路径列表。
     @Published var customCodeEditorPaths: [String] {
         didSet { save() }
@@ -241,6 +263,7 @@ final class AppSettings: nonisolated ObservableObject {
     private init() {
         let existing = TOML.parse(at: Self.configURL)
         let toml = existing ?? Self.legacyDefaults()
+        language = toml["ui.language"]?.string.flatMap(AppLanguage.init(rawValue:)) ?? .english
         theme = toml["theme"]?.string.flatMap(AppTheme.init(rawValue:)) ?? .system
         themeDark = Self.knownTheme(toml["theme-dark"]?.string, fallback: Theme.defaultDarkThemeName)
         themeLight = Self.knownTheme(toml["theme-light"]?.string, fallback: Theme.defaultLightThemeName)
@@ -282,6 +305,14 @@ final class AppSettings: nonisolated ObservableObject {
         preferredAIToolId = toml["ai.preferred-tool"]?.string ?? ""
         localAIHeadlessProvider = toml["ai.headless-provider"]?.string
             .flatMap(LocalAIProviderID.init(rawValue:)) ?? .disabled
+        aiWritingLanguage = toml["ai.writing-language"]?.string
+            .flatMap(AIWritingLanguage.init(rawValue:)) ?? .english
+        // 默认 true：缺省或非法值均视为开启 Gitmoji。
+        if let emojiFlag = toml["ai.git-commit-emoji"]?.bool {
+            gitCommitMessageEmoji = emojiFlag
+        } else {
+            gitCommitMessageEmoji = true
+        }
         customCodeEditorPaths = toml["editor.custom-editors"]?.array?.compactMap(\.string) ?? []
         customCLITools = toml["ai.custom-cli-tools"]?.array?.compactMap(\.string) ?? []
         packageManagerCommand = toml["terminal.package-manager"]?.string
@@ -301,6 +332,8 @@ final class AppSettings: nonisolated ObservableObject {
         applyAppearance()
         reloadThemeSelection()
         Theme.reloadWindowBackgroundOpacity(windowBackgroundOpacity)
+        // 全部 stored 属性初始化完成后再同步 L10n，避免 init 早期访问 self。
+        L10n.shared.setLanguage(language)
         if needsSave { save() }
     }
 
@@ -346,6 +379,7 @@ final class AppSettings: nonisolated ObservableObject {
     func resetToDefaults() {
         resetFont()
         useBundledChineseTerminalFont = true
+        language = .english
         theme = .system
         themeDark = Theme.defaultDarkThemeName
         themeLight = Theme.defaultLightThemeName
@@ -370,6 +404,8 @@ final class AppSettings: nonisolated ObservableObject {
         preferredCodeEditorBundleId = ""
         preferredAIToolId = ""
         localAIHeadlessProvider = .disabled
+        aiWritingLanguage = .english
+        gitCommitMessageEmoji = true
         customCodeEditorPaths = []
         customCLITools = []
         // 同步 LocalAI 注册表选择，避免设置页仍显示旧 provider
@@ -378,6 +414,10 @@ final class AppSettings: nonisolated ObservableObject {
 
     private func save() {
         var lines: [String] = []
+        // 默认英文：仅在非默认语言时写回，避免污染默认配置。
+        if language != .english {
+            lines.append("ui.language = \(TOML.quote(language.rawValue))")
+        }
         if theme != .system {
             lines.append("theme = \(TOML.quote(theme.rawValue))")
         }
@@ -455,6 +495,14 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if localAIHeadlessProvider != .disabled {
             lines.append("ai.headless-provider = \(TOML.quote(localAIHeadlessProvider.rawValue))")
+        }
+        // 默认英文：仅非默认时写回。
+        if aiWritingLanguage != .english {
+            lines.append("ai.writing-language = \(TOML.quote(aiWritingLanguage.rawValue))")
+        }
+        // 默认 true：仅关闭时写回。
+        if !gitCommitMessageEmoji {
+            lines.append("ai.git-commit-emoji = false")
         }
         if !customCodeEditorPaths.isEmpty {
             let quoted = customCodeEditorPaths.map { TOML.quote($0) }.joined(separator: ", ")

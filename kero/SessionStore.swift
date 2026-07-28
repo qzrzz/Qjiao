@@ -20,6 +20,8 @@ struct ProjectConfig: Codable {
     var launchCommands: [ProjectLaunchCommand]?
     /// 可选，记录项目是否已被归档。
     var isArchived: Bool?
+    /// 可选 AI 写作语言覆盖（`AIWritingLanguage.rawValue`）；nil 表示跟随全局设置。
+    var aiWritingLanguage: String?
 }
 
 /// 项目配置目录存储。

@@ -12,10 +12,12 @@ struct ContentView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var l10n = L10n.shared
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var tabSwitcher = TabSwitcherController()
 
     var body: some View {
+        let _ = l10n.language
         HStack(spacing: 0) {
             if manager.isLeftSidebarVisible {
                 SidebarView(manager: manager)
@@ -191,16 +193,16 @@ struct ContentView: View {
     private var emptyState: some View {
         if manager.selectedProject == nil {
             emptyStatePrompt(
-                title: "No open projects",
-                buttonTitle: "New Project  ⌘N",
+                title: L10n.t("No open projects"),
+                buttonTitle: L10n.t("New Project  ⌘N"),
                 action: { manager.newProject() }
             )
         } else {
             // A project whose tabs were all closed stays open; offer to reopen
             // a session rather than showing the no-projects prompt.
             emptyStatePrompt(
-                title: "No open sessions",
-                buttonTitle: "New Session  ⌘T",
+                title: L10n.t("No open sessions"),
+                buttonTitle: L10n.t("New Session  ⌘T"),
                 action: { manager.newSession() }
             )
         }
@@ -299,7 +301,7 @@ private struct MainHeaderView: View {
                         HeaderIconButton(
                             systemImage: "sidebar.left",
                             isActive: false,
-                            help: "Toggle Left Sidebar (⌘B)",
+                            help: L10n.t("Toggle Left Sidebar (⌘B)"),
                             action: { manager.toggleLeftSidebar() }
                         )
                         .padding(.trailing, Self.leftToggleTrailingPadding)
@@ -325,7 +327,7 @@ private struct MainHeaderView: View {
                             HeaderIconButton(
                                 systemImage: "arrow.down.forward.and.arrow.up.backward",
                                 isActive: true,
-                                help: "Exit Pane Zoom (⇧⌘↩)",
+                                help: L10n.t("Exit Pane Zoom (⇧⌘↩)"),
                                 helpAlignment: .trailing,
                                 action: { manager.togglePaneZoom() }
                             )
@@ -334,7 +336,7 @@ private struct MainHeaderView: View {
                         HeaderIconButton(
                             systemImage: "sidebar.right",
                             isActive: manager.isPanelVisible,
-                            help: "Toggle Right Sidebar (⇧⌘B)",
+                            help: L10n.t("Toggle Right Sidebar (⇧⌘B)"),
                             helpAlignment: .trailing,
                             action: { manager.toggleSidebar() }
                         )
@@ -421,7 +423,7 @@ private struct NewTabButton: View {
     var body: some View {
         HeaderIconButton(
             systemImage: "plus",
-            help: "New Session (⌘T)",
+            help: L10n.t("New Session (⌘T)"),
             action: { project.newSession() }
         )
     }
@@ -436,7 +438,7 @@ private struct TabListButton: View {
         HeaderIconButton(
             systemImage: "chevron.down",
             isActive: isPresented,
-            help: "Show Tab List",
+            help: L10n.t("Show Tab List"),
             helpAlignment: .trailing,
             action: { isPresented.toggle() }
         )
@@ -455,7 +457,7 @@ private struct TabListPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Tabs")
+            Text(L10n.t("Tabs"))
                 .font(SidebarTypography.body(.semibold))
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
@@ -546,7 +548,7 @@ private struct TabListRow: View {
                     }
 
                     if tab.allPanes.count > 1 {
-                        Label("\(tab.allPanes.count) panes", systemImage: "square.split.2x1")
+                        Label(L10n.format("%d panes", tab.allPanes.count), systemImage: "square.split.2x1")
                             .font(SidebarTypography.section())
                             .foregroundStyle(.tertiary)
                     }
@@ -578,7 +580,7 @@ private struct TerminalTabDetails: View {
         if let details {
             detailsView(details)
         } else {
-            Label("Loading terminal details…", systemImage: "hourglass")
+            Label(L10n.t("Loading terminal details…"), systemImage: "hourglass")
                 .font(SidebarTypography.section())
                 .foregroundStyle(.tertiary)
         }
@@ -855,31 +857,31 @@ private struct SessionTabsView: View {
 
     @ViewBuilder
     private func tabContextMenu(for tab: PaneTab) -> some View {
-        Button("Rename…") { renamingTabID = tab.id }
+        Button(L10n.t("Rename…")) { renamingTabID = tab.id }
         if tab.customName != nil {
-            Button("Use Automatic Title") { tab.customName = nil }
+            Button(L10n.t("Use Automatic Title")) { tab.customName = nil }
         }
-        Toggle("Disable Zsh Auto Title", isOn: $settings.disableZshAutoTitle)
+        Toggle(L10n.t("Disable Zsh Auto Title"), isOn: $settings.disableZshAutoTitle)
         Divider()
         if case .file(let file) = tab.focusedContent {
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])
             } label: {
-                Label("Reveal in Finder", systemImage: "finder")
+                Label(L10n.t("Reveal in Finder"), systemImage: "finder")
             }
-            Button("Copy Absolute Path") {
+            Button(L10n.t("Copy Absolute Path")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(file.path, forType: .string)
             }
             Divider()
         }
-        Button("Close") { project.close(tab) }
-        Button("Close Others") { project.closeOthers(tab) }
+        Button(L10n.t("Close")) { project.close(tab) }
+        Button(L10n.t("Close Others")) { project.closeOthers(tab) }
             .disabled(project.tabs.count <= 1)
-        Button("Close Tabs to the Right") { project.closeToRight(of: tab) }
+        Button(L10n.t("Close Tabs to the Right")) { project.closeToRight(of: tab) }
             .disabled(project.tabs.last?.id == tab.id)
         Divider()
-        Button("Close All") { project.closeAll() }
+        Button(L10n.t("Close All")) { project.closeAll() }
     }
 }
 
@@ -1152,13 +1154,13 @@ private struct TabItemChrome: View {
                         size: 13,
                         isSelected: isSelected
                     )
-                    .accessibilityLabel("Running application")
+                    .accessibilityLabel(L10n.t("Running application"))
                 } else if isTerminalRunning {
                     ProgressView()
                         .controlSize(.mini)
                         .tint(isSelected ? Color(nsColor: Theme.cursor) : .secondary)
                         .frame(width: 11, height: 11)
-                        .accessibilityLabel("Command running")
+                        .accessibilityLabel(L10n.t("Command running"))
                 } else {
                     TabStripIconView(
                         systemImage: systemImage,
@@ -1294,7 +1296,7 @@ struct TabContentIcon: View {
                 ProgressView()
                     .controlSize(.small)
                     .tint(tint)
-                    .accessibilityLabel("Command running")
+                    .accessibilityLabel(L10n.t("Command running"))
             } else {
                 Image(systemName: "terminal")
                     .font(SidebarTypography.secondary(.medium))

@@ -210,7 +210,7 @@ struct ImageBuildView: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 22, height: 22)
 
-            Text("Image Build")
+            Text(L10n.t("Image Build"))
                 .font(.system(size: 13, weight: .semibold))
 
             Spacer(minLength: 8)

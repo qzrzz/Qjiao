@@ -33,7 +33,7 @@ struct NotePanel: View {
     private var editor: some View {
         PlainTextEditor(
             text: model.text,
-            placeholder: "Write a note…",
+            placeholder: L10n.t("Write a note…"),
             font: .systemFont(ofSize: SidebarTypography.bodySize),
             textColor: Theme.terminal(dark: colorScheme == .dark).foreground,
             placeholderColor: .tertiaryLabelColor,
@@ -44,7 +44,7 @@ struct NotePanel: View {
             onTextChange: { model.updateText($0) }
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Project note")
+        .accessibilityLabel(L10n.t("Project note"))
     }
 
     private var emptyState: some View {
@@ -52,10 +52,10 @@ struct NotePanel: View {
             Image(systemName: "note.text")
                 .font(SidebarTypography.emptyInlineIcon())
                 .foregroundStyle(.tertiary)
-            Text("No project selected")
+            Text(L10n.t("No project selected"))
                 .font(SidebarTypography.body(.medium))
                 .foregroundStyle(.secondary)
-            Text("Open a project to keep notes")
+            Text(L10n.t("Open a project to keep notes"))
                 .font(SidebarTypography.section())
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -63,7 +63,7 @@ struct NotePanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 12)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("No project selected for notes")
+        .accessibilityLabel(L10n.t("No project selected for notes"))
     }
 }
 

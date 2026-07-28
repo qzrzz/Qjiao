@@ -177,7 +177,7 @@ struct FileTreePanel: View {
 
                 SidebarIconButton(
                     systemImage: "line.3.horizontal.decrease",
-                    help: "Filter files (⌘F)",
+                    help: L10n.t("Filter files (⌘F)"),
                     active: isFilterActive
                 ) {
                     isFilterActive.toggle()
@@ -190,34 +190,34 @@ struct FileTreePanel: View {
 
                 SidebarMenuIconButton(
                     systemImage: "arrow.up.arrow.down",
-                    help: "Sort files",
+                    help: L10n.t("Sort files"),
                     active: model.sortCriteria != .name || !model.sortAscending
                 ) {
-                    Picker("Sort By", selection: Binding(
+                    Picker(L10n.t("Sort By"), selection: Binding(
                         get: { model.sortCriteria },
                         set: { model.setSortCriteria($0) }
                     )) {
-                        Text("File Name").tag(FileTreeModel.FileSortCriteria.name)
-                        Text("Modification Date").tag(FileTreeModel.FileSortCriteria.date)
-                        Text("Size").tag(FileTreeModel.FileSortCriteria.size)
+                        Text(L10n.t("File Name")).tag(FileTreeModel.FileSortCriteria.name)
+                        Text(L10n.t("Modification Date")).tag(FileTreeModel.FileSortCriteria.date)
+                        Text(L10n.t("Size")).tag(FileTreeModel.FileSortCriteria.size)
                     }
                     .pickerStyle(.inline)
 
                     Divider()
 
-                    Picker("Order", selection: Binding(
+                    Picker(L10n.t("Order"), selection: Binding(
                         get: { model.sortAscending },
                         set: { model.setSortAscending($0) }
                     )) {
-                        Text("Ascending").tag(true)
-                        Text("Descending").tag(false)
+                        Text(L10n.t("Ascending")).tag(true)
+                        Text(L10n.t("Descending")).tag(false)
                     }
                     .pickerStyle(.inline)
                 }
 
                 SidebarIconButton(
                     systemImage: "finder",
-                    help: "Reveal in Finder"
+                    help: L10n.t("Reveal in Finder")
                 ) {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.rootPath)])
                 }
@@ -487,7 +487,7 @@ struct FileTreePanel: View {
                                         Image(systemName: "line.3.horizontal.decrease.circle")
                                             .font(.system(size: 18))
                                             .foregroundStyle(.tertiary)
-                                        Text("No matching files")
+                                        Text(L10n.t("No matching files"))
                                             .font(SidebarTypography.caption())
                                             .foregroundStyle(.secondary)
                                     }
@@ -652,7 +652,7 @@ struct FileTreePanel: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Clear filter")
+                .help(L10n.t("Clear filter"))
             }
 
             Button {
@@ -670,7 +670,7 @@ struct FileTreePanel: View {
             }
             .buttonStyle(.plain)
             .onHover { isCloseFilterHovering = $0 }
-            .help("Close filter (Esc)")
+            .help(L10n.t("Close filter (Esc)"))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -943,14 +943,14 @@ private struct FileTreeRow: View {
                 for file in fileTargets { openFile(file.path) }
             }
             if let only = onlyItem, !only.isDirectory {
-                Button("Open to the Side") {
+                Button(L10n.t("Open to the Side")) {
                     selectForContextAction()
                     openToSide(only.path)
                 }
             }
         }
 
-        Button("Open in Default App") {
+        Button(L10n.t("Open in Default App")) {
             selectForContextAction()
             for target in menuActionTargets {
                 NSWorkspace.shared.open(URL(fileURLWithPath: target.path))
@@ -961,7 +961,7 @@ private struct FileTreeRow: View {
             let urls = menuActionTargets.map { URL(fileURLWithPath: $0.path) }
             NSWorkspace.shared.activateFileViewerSelecting(urls)
         } label: {
-            Label("Reveal in Finder", systemImage: "finder")
+            Label(L10n.t("Reveal in Finder"), systemImage: "finder")
         }
 
         // 选中的图片 → ImageBuild（单张为 1→多，多张为多→多）
@@ -1008,7 +1008,7 @@ private struct FileTreeRow: View {
         // 粘贴到右键目标：文件夹内，或文件的父目录。
         // 注意：不在菜单构建期写 selectedPaths；canPaste 只读剪贴板。
         if FileTreeModel.canPasteFromPasteboard {
-            Button("Paste") {
+            Button(L10n.t("Paste")) {
                 selectForContextAction()
                 let dest = model.pasteDestinationDirectory(for: item)
                 model.pasteFromPasteboard(into: dest)
@@ -1017,16 +1017,16 @@ private struct FileTreeRow: View {
 
         if let only = onlyItem, only.isDirectory {
             Divider()
-            Button("cd Here") {
+            Button(L10n.t("cd Here")) {
                 selectForContextAction()
                 session?.sendCommand("cd " + rightSidebarShellQuote(only.path) + "\n")
             }
             Divider()
-            Button("New File…") {
+            Button(L10n.t("New File…")) {
                 selectForContextAction()
                 model.beginNewFile(in: only.path)
             }
-            Button("New Folder…") {
+            Button(L10n.t("New Folder…")) {
                 selectForContextAction()
                 model.beginNewFolder(in: only.path)
             }
@@ -1036,7 +1036,11 @@ private struct FileTreeRow: View {
         let directoryTargets = targets.filter(\.isDirectory)
         if !directoryTargets.isEmpty {
             let n = directoryTargets.count
-            Button(n == 1 ? "Calculate Size" : "Calculate Size (\(n))") {
+            Button(
+                n == 1
+                    ? L10n.t("Calculate Size")
+                    : L10n.format("Calculate Size (%d)", n)
+            ) {
                 selectForContextAction()
                 model.requestFolderSizes(
                     for: directoryTargets.map(\.path),
@@ -1047,7 +1051,7 @@ private struct FileTreeRow: View {
 
         Divider()
         if let only = onlyItem {
-            Button("Rename") {
+            Button(L10n.t("Rename")) {
                 model.beginRename(only)
             }
         }
@@ -1168,7 +1172,7 @@ private struct FileTreeRow: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .help("New Folder…")
+                    .help(L10n.t("New Folder…"))
                     .layoutPriority(0)
                 }
             }
@@ -1198,7 +1202,7 @@ private struct FileTreeRow: View {
                 .controlSize(.mini)
                 .scaleEffect(0.75)
                 .frame(width: 14, height: 14)
-                .help("Calculating folder size…")
+                .help(L10n.t("Calculating folder size…"))
         case .ready:
             if let folderSizeLabel {
                 // Font.monospacedDigit：表格数字宽度固定，列表右侧体积列更稳。
@@ -1677,7 +1681,7 @@ private struct FileQuickPreviewPopoverContentView: View {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 16))
                         .foregroundStyle(.secondary)
-                    Text("No Preview Available")
+                    Text(L10n.t("No Preview Available"))
                         .font(SidebarTypography.caption())
                         .foregroundStyle(.secondary)
                 }

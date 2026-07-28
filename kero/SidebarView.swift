@@ -13,6 +13,7 @@ struct SidebarView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var themeChanges = Theme.changes
+    @ObservedObject private var l10n = L10n.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
     @AppStorage("leftSidebarWidth") private var width: Double = 220
@@ -22,6 +23,7 @@ struct SidebarView: View {
     @State private var isWindowAlwaysOnTop = false
 
     var body: some View {
+        let _ = l10n.language
         VStack(alignment: .leading, spacing: 0) {
             // Header-height strip: traffic lights on the left; pin + collapse
             // on the right (outer margin matches the main header's right-sidebar
@@ -33,15 +35,15 @@ struct SidebarView: View {
                         systemImage: isWindowAlwaysOnTop ? "pin.fill" : "pin",
                         isActive: isWindowAlwaysOnTop,
                         help: isWindowAlwaysOnTop
-                            ? "Stop Keeping on Top"
-                            : "Keep Window on Top",
+                            ? L10n.t("Stop Keeping on Top")
+                            : L10n.t("Keep Window on Top"),
                         helpAlignment: .trailing,
                         action: toggleWindowAlwaysOnTop
                     )
                     HeaderIconButton(
                         systemImage: "sidebar.left",
                         isActive: true,
-                        help: "Toggle Left Sidebar (⌘B)",
+                        help: L10n.t("Toggle Left Sidebar (⌘B)"),
                         helpAlignment: .trailing,
                         action: { manager.toggleLeftSidebar() }
                     )
@@ -263,7 +265,7 @@ private struct SidebarThemeButton: View {
                 }
             }
             Divider()
-            Button("Appearance Settings") {
+            Button(L10n.t("Appearance Settings")) {
                 openSettings()
             }
         }
@@ -371,18 +373,18 @@ private struct SidebarProjectRow: View {
         )
         .onHover { isHovering = $0 }
         .contextMenu {
-            Button("Rename…") {
+            Button(L10n.t("Rename…")) {
                 beginRename()
             }
             if project.customName != nil {
-                Button("Use Automatic Title") {
+                Button(L10n.t("Use Automatic Title")) {
                     project.customName = nil
                 }
             }
-            Button("Edit Description…") {
+            Button(L10n.t("Edit Description…")) {
                 beginDescriptionEdit()
             }
-            Menu("Theme") {
+            Menu(L10n.t("Theme")) {
                 projectThemeItem(.global)
                 curatedThemeMenu(dark: false)
                 Divider()
@@ -392,15 +394,15 @@ private struct SidebarProjectRow: View {
             Button {
                 openProjectDirectory()
             } label: {
-                Label("Open in Finder", systemImage: "finder")
+                Label(L10n.t("Open in Finder"), systemImage: "finder")
             }
             Button {
                 openConfigFolder()
             } label: {
-                Label("Open Config Folder", systemImage: "finder")
+                Label(L10n.t("Open Config Folder"), systemImage: "finder")
             }
             Divider()
-            Button("Change Icon…") {
+            Button(L10n.t("Change Icon…")) {
                 isIconPickerPresented = true
             }
             // ── AI：名称 + 描述 + 图标
@@ -408,13 +410,13 @@ private struct SidebarProjectRow: View {
                 Button {
                     aiMetaTasks.cancel(project.id)
                 } label: {
-                    Label("Cancel AI Name & Desc & Icon", systemImage: "xmark.circle")
+                    Label(L10n.t("Cancel AI Name & Desc & Icon"), systemImage: "xmark.circle")
                 }
             } else {
                 Button {
                     startAIProjectMeta()
                 } label: {
-                    Label("AI Name & Desc & Icon", systemImage: "wand.and.stars")
+                    Label(L10n.t("AI Name & Desc & Icon"), systemImage: "wand.and.stars")
                 }
                 .disabled(!LocalAI.isEnabled || aiIconTasks.isRunning(project.id))
             }
@@ -423,18 +425,18 @@ private struct SidebarProjectRow: View {
                 Button {
                     aiIconTasks.cancel(project.id)
                 } label: {
-                    Label("Cancel AI Select Icon", systemImage: "xmark.circle")
+                    Label(L10n.t("Cancel AI Select Icon"), systemImage: "xmark.circle")
                 }
             } else {
                 Button {
                     startAISelectIcon()
                 } label: {
-                    Label("AI Select Icon", systemImage: "sparkles")
+                    Label(L10n.t("AI Select Icon"), systemImage: "sparkles")
                 }
                 .disabled(!LocalAI.isEnabled || aiMetaTasks.isRunning(project.id))
             }
             if project.icon != nil {
-                Button("Clear Icon") {
+                Button(L10n.t("Clear Icon")) {
                     if case .file = project.icon {
                         ProjectIconFileStore.removeManagedIcons(for: project.id)
                     }
@@ -449,7 +451,7 @@ private struct SidebarProjectRow: View {
                         manager.unarchiveProject(project)
                     }
                 } label: {
-                    Label("Unarchive Project", systemImage: "tray.and.arrow.up")
+                    Label(L10n.t("Unarchive Project"), systemImage: "tray.and.arrow.up")
                 }
             } else {
                 Button {
@@ -457,36 +459,36 @@ private struct SidebarProjectRow: View {
                         manager.archiveProject(project)
                     }
                 } label: {
-                    Label("Archive Project", systemImage: "archivebox")
+                    Label(L10n.t("Archive Project"), systemImage: "archivebox")
                 }
             }
             Divider()
-            Button("Close Project") {
+            Button(L10n.t("Close Project")) {
                 close()
             }
         }
         .sheet(isPresented: $isIconPickerPresented) {
             ProjectIconPicker(project: project)
         }
-        .alert("Close Project?", isPresented: $isCloseConfirmationPresented) {
-            Button("Delete Project", role: .destructive, action: close)
-            Button("Cancel", role: .cancel) {}
+        .alert(L10n.t("Close Project?"), isPresented: $isCloseConfirmationPresented) {
+            Button(L10n.t("Delete Project"), role: .destructive, action: close)
+            Button(L10n.t("Cancel"), role: .cancel) {}
         } message: {
-            Text("This will close the project and its terminal sessions.")
+            Text(L10n.t("This will close the project and its terminal sessions."))
         }
-        .alert("AI Select Icon", isPresented: $isAISelectIconErrorPresented) {
-            Button("OK", role: .cancel) {
+        .alert(L10n.t("AI Select Icon"), isPresented: $isAISelectIconErrorPresented) {
+            Button(L10n.t("OK"), role: .cancel) {
                 aiIconTasks.clearError(project.id)
             }
         } message: {
-            Text(aiSelectIconError ?? "Failed to select icon.")
+            Text(aiSelectIconError ?? L10n.t("Failed to select icon."))
         }
-        .alert("AI Name & Desc & Icon", isPresented: $isAIProjectMetaErrorPresented) {
-            Button("OK", role: .cancel) {
+        .alert(L10n.t("AI Name & Desc & Icon"), isPresented: $isAIProjectMetaErrorPresented) {
+            Button(L10n.t("OK"), role: .cancel) {
                 aiMetaTasks.clearError(project.id)
             }
         } message: {
-            Text(aiProjectMetaError ?? "Failed to generate project metadata.")
+            Text(aiProjectMetaError ?? L10n.t("Failed to generate project metadata."))
         }
         .onChange(of: aiIconTasks.states[project.id]?.lastError) { _, newError in
             // 后台任务失败时弹一次 alert（进行中不打扰）
@@ -617,7 +619,7 @@ private struct SidebarProjectRow: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("Unarchive Project")
+                        .help(L10n.t("Unarchive Project"))
 
                         Button(action: requestClose) {
                             Image(systemName: "xmark")
@@ -673,7 +675,7 @@ private struct SidebarProjectRow: View {
             set: { if $0 { project.theme = theme } }
         )) {
             Label {
-                Text("Follow Global Settings")
+                Text(L10n.t("Follow Global Settings"))
             } icon: {
                 Image(nsImage: ThemePreviewImageRenderer.image(for: [
                     Theme.globalDefinition(dark: false),
@@ -711,20 +713,23 @@ private struct SidebarProjectRow: View {
             ForEach(ThemeMenuCatalog.primary(dark: dark), id: \.self) { name in
                 namedProjectThemeItem(name: name, dark: dark)
             }
-            Section("Cool") {
+            Section(L10n.t("Cool")) {
                 ForEach(ThemeMenuCatalog.cool(dark: dark), id: \.self) { name in
                     namedProjectThemeItem(name: name, dark: dark)
                 }
             }
-            Section("Warm") {
+            Section(L10n.t("Warm")) {
                 ForEach(ThemeMenuCatalog.warm(dark: dark), id: \.self) { name in
                     namedProjectThemeItem(name: name, dark: dark)
                 }
             }
             Divider()
-            allThemeMenu(dark: dark, title: "全部 \(dark ? "Dark" : "Light") 主题")
+            allThemeMenu(
+                dark: dark,
+                title: dark ? L10n.t("All Dark Themes") : L10n.t("All Light Themes")
+            )
         } label: {
-            themeMenuLabel(dark ? "Dark" : "Light", dark: dark)
+            themeMenuLabel(dark ? L10n.t("Dark") : L10n.t("Light"), dark: dark)
         }
     }
 
@@ -820,7 +825,7 @@ private struct SidebarProjectRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         } else if project.sessions.count > 1 {
-            Text("\(project.sessions.count) sessions")
+            Text(L10n.format("%d sessions", project.sessions.count))
                 .font(SidebarTypography.section().monospacedDigit())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -845,7 +850,7 @@ private struct SessionDirectoryLabel: View {
     }
 }
 
-/// 左侧边栏底部的项目归档区组件。通常收起，可点击展开显示已归档的项目列表。
+/// 左侧边栏底部的项目归档区组件。通常收起，可点击展开显示已归档的项目列表。支持搜索与实时筛选。
 private struct SidebarArchiveSection: View {
     @ObservedObject var manager: TerminalManager
     let draggedProjectID: UUID?
@@ -853,12 +858,23 @@ private struct SidebarArchiveSection: View {
     let onDragEnded: () -> Void
 
     @State private var isExpanded: Bool = false
+    @State private var searchText: String = ""
+    @FocusState private var isSearchFieldFocused: Bool
 
     var body: some View {
         let archivedProjects = manager.archivedProjects
         if !archivedProjects.isEmpty {
+            // 根据搜索框关键词过滤已归档项目（比对项目名称和描述）
+            let filteredProjects = archivedProjects.filter { project in
+                let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if query.isEmpty { return true }
+                let nameMatch = project.name.localizedCaseInsensitiveContains(query)
+                let descMatch = project.description?.localizedCaseInsensitiveContains(query) ?? false
+                return nameMatch || descMatch
+            }
+
             VStack(alignment: .leading, spacing: 2) {
-                // 归档栏 Header：显示图标、标题、数量与折叠箭头，点击可展开/收起
+                // 归档栏 Header：显示图标、标题、数量与折叠箭头，点击触发展开/收起
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isExpanded.toggle()
@@ -874,13 +890,14 @@ private struct SidebarArchiveSection: View {
                             .font(SidebarTypography.secondary(.medium))
                             .foregroundStyle(.secondary)
 
-                        Text("Archived")
+                        Text(L10n.t("Archived"))
                             .font(SidebarTypography.secondary(.medium))
                             .foregroundStyle(.secondary)
 
                         Spacer(minLength: 0)
 
-                        Text("\(archivedProjects.count)")
+                        // 数量徽章：有搜索文本时显示筛选出的数量，否则显示总归档数
+                        Text("\(searchText.isEmpty ? archivedProjects.count : filteredProjects.count)")
                             .font(SidebarTypography.micro(.medium).monospacedDigit())
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 5)
@@ -895,23 +912,66 @@ private struct SidebarArchiveSection: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(isExpanded ? "Collapse Archived Projects" : "Expand Archived Projects")
+                .help(isExpanded ? L10n.t("Collapse Archived Projects") : L10n.t("Expand Archived Projects"))
 
-                // 展开时显示归档的项目列表
+                // 展开时常驻显示搜索输入框和归档的项目列表
                 if isExpanded {
                     VStack(spacing: 3) {
-                        ForEach(Array(archivedProjects.enumerated()), id: \.element.id) { index, project in
-                            SidebarProjectRow(
-                                manager: manager,
-                                project: project,
-                                index: index,
-                                isSelected: project.id == manager.selectedProjectID,
-                                select: { manager.selectedProjectID = project.id },
-                                close: { manager.close(project) },
-                                isDragging: draggedProjectID == project.id,
-                                onDrag: { location in onDrag(project.id, location) },
-                                onDragEnded: onDragEnded
-                            )
+                        // 展开后第一行：常驻搜索输入框
+                        HStack(spacing: 4) {
+                            Image(systemName: "magnifyingglass")
+                                .font(SidebarTypography.micro(.regular))
+                                .foregroundStyle(.tertiary)
+
+                            TextField(L10n.t("Search archived projects..."), text: $searchText)
+                                .textFieldStyle(.plain)
+                                .font(SidebarTypography.secondary(.regular))
+                                .focused($isSearchFieldFocused)
+
+                            if !searchText.isEmpty {
+                                Button {
+                                    searchText = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(SidebarTypography.micro(.regular))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Color.primary.opacity(0.05))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .stroke(isSearchFieldFocused ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.12), lineWidth: 1)
+                                )
+                        )
+                        .padding(.vertical, 2)
+
+                        if filteredProjects.isEmpty && !searchText.isEmpty {
+                            Text(L10n.t("No matching projects"))
+                                .font(SidebarTypography.caption(.regular))
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 6)
+                                .padding(.leading, 4)
+                        } else {
+                            ForEach(Array(filteredProjects.enumerated()), id: \.element.id) { index, project in
+                                SidebarProjectRow(
+                                    manager: manager,
+                                    project: project,
+                                    index: index,
+                                    isSelected: project.id == manager.selectedProjectID,
+                                    select: { manager.selectedProjectID = project.id },
+                                    close: { manager.close(project) },
+                                    isDragging: draggedProjectID == project.id,
+                                    onDrag: { location in onDrag(project.id, location) },
+                                    onDragEnded: onDragEnded
+                                )
+                            }
                         }
                     }
                     .padding(.leading, 18)

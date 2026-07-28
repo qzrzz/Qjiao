@@ -74,97 +74,97 @@ struct CommandPaletteView: View {
 
     private var commands: [PaletteCommand] {
         var items: [PaletteCommand] = [
-            PaletteCommand(id: "new-session", title: "New Session", systemImage: "terminal", shortcut: "⌘T") {
+            PaletteCommand(id: "new-session", title: L10n.t("New Session"), systemImage: "terminal", shortcut: "⌘T") {
                 manager.newSession()
             },
-            PaletteCommand(id: "clear-terminal", title: "Clear Terminal", systemImage: "eraser", shortcut: "⌘K") {
+            PaletteCommand(id: "clear-terminal", title: L10n.t("Clear Terminal"), systemImage: "eraser", shortcut: "⌘K") {
                 manager.clearActiveTerminal()
             },
-            PaletteCommand(id: "split-right", title: "Split Right", systemImage: "rectangle.split.2x1", shortcut: "⌘D") {
+            PaletteCommand(id: "split-right", title: L10n.t("Split Right"), systemImage: "rectangle.split.2x1", shortcut: "⌘D") {
                 manager.splitRight()
             },
-            PaletteCommand(id: "split-left", title: "Split Left", systemImage: "rectangle.split.2x1") {
+            PaletteCommand(id: "split-left", title: L10n.t("Split Left"), systemImage: "rectangle.split.2x1") {
                 manager.splitLeft()
             },
-            PaletteCommand(id: "split-down", title: "Split Down", systemImage: "rectangle.split.1x2", shortcut: "⇧⌘D") {
+            PaletteCommand(id: "split-down", title: L10n.t("Split Down"), systemImage: "rectangle.split.1x2", shortcut: "⇧⌘D") {
                 manager.splitDown()
             },
-            PaletteCommand(id: "split-up", title: "Split Up", systemImage: "rectangle.split.1x2") {
+            PaletteCommand(id: "split-up", title: L10n.t("Split Up"), systemImage: "rectangle.split.1x2") {
                 manager.splitUp()
             },
-            PaletteCommand(id: "focus-pane-left", title: "Focus Pane Left", systemImage: "arrow.left", shortcut: "⌥⌘←") {
+            PaletteCommand(id: "focus-pane-left", title: L10n.t("Focus Pane Left"), systemImage: "arrow.left", shortcut: "⌥⌘←") {
                 manager.focusPaneLeft()
             },
-            PaletteCommand(id: "focus-pane-right", title: "Focus Pane Right", systemImage: "arrow.right", shortcut: "⌥⌘→") {
+            PaletteCommand(id: "focus-pane-right", title: L10n.t("Focus Pane Right"), systemImage: "arrow.right", shortcut: "⌥⌘→") {
                 manager.focusPaneRight()
             },
-            PaletteCommand(id: "focus-pane-up", title: "Focus Pane Up", systemImage: "arrow.up", shortcut: "⌥⌘↑") {
+            PaletteCommand(id: "focus-pane-up", title: L10n.t("Focus Pane Up"), systemImage: "arrow.up", shortcut: "⌥⌘↑") {
                 manager.focusPaneUp()
             },
-            PaletteCommand(id: "focus-pane-down", title: "Focus Pane Down", systemImage: "arrow.down", shortcut: "⌥⌘↓") {
+            PaletteCommand(id: "focus-pane-down", title: L10n.t("Focus Pane Down"), systemImage: "arrow.down", shortcut: "⌥⌘↓") {
                 manager.focusPaneDown()
             },
-            PaletteCommand(id: "focus-prev-pane", title: "Focus Previous Pane", systemImage: "arrow.backward.square", shortcut: "⌘[") {
+            PaletteCommand(id: "focus-prev-pane", title: L10n.t("Focus Previous Pane"), systemImage: "arrow.backward.square", shortcut: "⌘[") {
                 manager.focusPreviousPane()
             },
-            PaletteCommand(id: "focus-next-pane", title: "Focus Next Pane", systemImage: "arrow.forward.square", shortcut: "⌘]") {
+            PaletteCommand(id: "focus-next-pane", title: L10n.t("Focus Next Pane"), systemImage: "arrow.forward.square", shortcut: "⌘]") {
                 manager.focusNextPane()
             },
-            PaletteCommand(id: "toggle-pane-zoom", title: "Toggle Pane Zoom", systemImage: "arrow.up.left.and.arrow.down.right", shortcut: "⇧⌘↩") {
+            PaletteCommand(id: "toggle-pane-zoom", title: L10n.t("Toggle Pane Zoom"), systemImage: "arrow.up.left.and.arrow.down.right", shortcut: "⇧⌘↩") {
                 manager.togglePaneZoom()
             },
-            PaletteCommand(id: "equalize-panes", title: "Equalize Panes", systemImage: "rectangle.split.3x1", shortcut: "⌃⌘=") {
+            PaletteCommand(id: "equalize-panes", title: L10n.t("Equalize Panes"), systemImage: "rectangle.split.3x1", shortcut: "⌃⌘=") {
                 manager.equalizePanes()
             },
-            PaletteCommand(id: "resize-pane-up", title: "Resize Pane Up", systemImage: "arrow.up.to.line", shortcut: "⌃⌘↑") {
+            PaletteCommand(id: "resize-pane-up", title: L10n.t("Resize Pane Up"), systemImage: "arrow.up.to.line", shortcut: "⌃⌘↑") {
                 manager.resizePaneUp()
             },
-            PaletteCommand(id: "resize-pane-down", title: "Resize Pane Down", systemImage: "arrow.down.to.line", shortcut: "⌃⌘↓") {
+            PaletteCommand(id: "resize-pane-down", title: L10n.t("Resize Pane Down"), systemImage: "arrow.down.to.line", shortcut: "⌃⌘↓") {
                 manager.resizePaneDown()
             },
-            PaletteCommand(id: "resize-pane-left", title: "Resize Pane Left", systemImage: "arrow.left.to.line", shortcut: "⌃⌘←") {
+            PaletteCommand(id: "resize-pane-left", title: L10n.t("Resize Pane Left"), systemImage: "arrow.left.to.line", shortcut: "⌃⌘←") {
                 manager.resizePaneLeft()
             },
-            PaletteCommand(id: "resize-pane-right", title: "Resize Pane Right", systemImage: "arrow.right.to.line", shortcut: "⌃⌘→") {
+            PaletteCommand(id: "resize-pane-right", title: L10n.t("Resize Pane Right"), systemImage: "arrow.right.to.line", shortcut: "⌃⌘→") {
                 manager.resizePaneRight()
             },
-            PaletteCommand(id: "new-project", title: "New Project", systemImage: "folder.badge.plus", shortcut: "⌘N") {
+            PaletteCommand(id: "new-project", title: L10n.t("New Project"), systemImage: "folder.badge.plus", shortcut: "⌘N") {
                 manager.newProject()
             },
-            PaletteCommand(id: "close-tab", title: "Close Tab", systemImage: "xmark.square", shortcut: "⌘W") {
+            PaletteCommand(id: "close-tab", title: L10n.t("Close Tab"), systemImage: "xmark.square", shortcut: "⌘W") {
                 manager.closeSelectedTab()
             },
-            PaletteCommand(id: "save-file", title: "Save File", systemImage: "square.and.arrow.down", shortcut: "⌘S") {
+            PaletteCommand(id: "save-file", title: L10n.t("Save File"), systemImage: "square.and.arrow.down", shortcut: "⌘S") {
                 manager.saveSelectedFile()
             },
-            PaletteCommand(id: "toggle-left-sidebar", title: "Toggle Left Sidebar", systemImage: "sidebar.left", shortcut: "⌘B") {
+            PaletteCommand(id: "toggle-left-sidebar", title: L10n.t("Toggle Left Sidebar"), systemImage: "sidebar.left", shortcut: "⌘B") {
                 manager.toggleLeftSidebar()
             },
-            PaletteCommand(id: "toggle-sidebar", title: "Toggle Right Sidebar", systemImage: "sidebar.right", shortcut: "⇧⌘B") {
+            PaletteCommand(id: "toggle-sidebar", title: L10n.t("Toggle Right Sidebar"), systemImage: "sidebar.right", shortcut: "⇧⌘B") {
                 manager.toggleSidebar()
             },
-            PaletteCommand(id: "toggle-files", title: "Toggle Files Panel", systemImage: "doc.text", shortcut: "⇧⌘E") {
+            PaletteCommand(id: "toggle-files", title: L10n.t("Toggle Files Panel"), systemImage: "doc.text", shortcut: "⇧⌘E") {
                 manager.togglePanel(.files)
             },
-            PaletteCommand(id: "toggle-git", title: "Toggle Git Panel", systemImage: "arrow.triangle.branch", shortcut: "⇧⌘G") {
+            PaletteCommand(id: "toggle-git", title: L10n.t("Toggle Git Panel"), systemImage: "arrow.triangle.branch", shortcut: "⇧⌘G") {
                 manager.togglePanel(.git)
             },
-            PaletteCommand(id: "toggle-project", title: "Toggle Project Panel", systemImage: "shippingbox", shortcut: nil) {
+            PaletteCommand(id: "toggle-project", title: L10n.t("Toggle Project Panel"), systemImage: "shippingbox", shortcut: nil) {
                 manager.togglePanel(.project)
             },
-            PaletteCommand(id: "toggle-info", title: "Toggle Info Panel", systemImage: "info.circle", shortcut: "⇧⌘I") {
+            PaletteCommand(id: "toggle-info", title: L10n.t("Toggle Info Panel"), systemImage: "info.circle", shortcut: "⇧⌘I") {
                 manager.togglePanel(.info)
             },
-            PaletteCommand(id: "next-tab", title: "Next Tab", systemImage: "arrow.right", shortcut: "⇧⌘]") {
+            PaletteCommand(id: "next-tab", title: L10n.t("Next Tab"), systemImage: "arrow.right", shortcut: "⇧⌘]") {
                 manager.selectNextTab()
             },
-            PaletteCommand(id: "prev-tab", title: "Previous Tab", systemImage: "arrow.left", shortcut: "⇧⌘[") {
+            PaletteCommand(id: "prev-tab", title: L10n.t("Previous Tab"), systemImage: "arrow.left", shortcut: "⇧⌘[") {
                 manager.selectPreviousTab()
             },
-            PaletteCommand(id: "next-project", title: "Next Project", systemImage: "arrow.right.square", shortcut: "⌥⌘]") {
+            PaletteCommand(id: "next-project", title: L10n.t("Next Project"), systemImage: "arrow.right.square", shortcut: "⌥⌘]") {
                 manager.selectNextProject()
             },
-            PaletteCommand(id: "prev-project", title: "Previous Project", systemImage: "arrow.left.square", shortcut: "⌥⌘[") {
+            PaletteCommand(id: "prev-project", title: L10n.t("Previous Project"), systemImage: "arrow.left.square", shortcut: "⌥⌘[") {
                 manager.selectPreviousProject()
             },
         ]
@@ -191,7 +191,7 @@ struct CommandPaletteView: View {
         }
 
         items.append(
-            PaletteCommand(id: "settings", title: "Settings…", systemImage: "gearshape", shortcut: "⌘,") {
+            PaletteCommand(id: "settings", title: L10n.t("Settings…"), systemImage: "gearshape", shortcut: "⌘,") {
                 openSettings()
             }
         )
@@ -345,7 +345,7 @@ struct CommandPaletteView: View {
     private var results: some View {
         let items = filtered
         if items.isEmpty {
-            Text("No matches")
+            Text(L10n.t("No matches"))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)

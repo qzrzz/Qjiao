@@ -49,9 +49,23 @@ enum LocalAICommandBuilder {
         prompt: String
     ) -> LocalAICommand {
         var args: [String] = [
-            "--single", prompt,
             "--output-format", "plain",
         ]
+        if request.disableTools {
+            // 纯文本生成：禁用工具 / 联网 / 子代理，避免卡在权限确认
+            args += [
+                "--tools", "",
+                "--disable-web-search",
+                "--no-subagents",
+                "--permission-mode", "dontAsk",
+            ]
+        }
+        // 长提示词走文件，避免超大 argv
+        if let file = writePromptTempFile(prompt, prefix: "qjiao-localai-grok") {
+            args += ["--prompt-file", file]
+        } else {
+            args += ["--single", prompt]
+        }
         if let cwd = request.workingDirectory, !cwd.isEmpty {
             args += ["--cwd", cwd]
         }
@@ -76,18 +90,33 @@ enum LocalAICommandBuilder {
         request: LocalAIRequest,
         prompt: String
     ) -> LocalAICommand {
-        var args: [String] = ["exec", "--skip-git-repo-check"]
+        var args: [String] = ["exec", "--skip-git-repo-check", "--ephemeral"]
         if let cwd = request.workingDirectory, !cwd.isEmpty {
             args += ["--cd", cwd]
         }
-        if let model = request.model, !model.isEmpty {
-            args += ["--model", model]
+        // 默认 gpt-5.6-luna；请求可覆盖。使用 -m 与 CLI 文档一致。
+        let model = (request.model?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap {
+            $0.isEmpty ? nil : $0
+        } ?? LocalAIProviderID.codexDefaultModel
+        args += ["-m", model]
+        if request.disableTools {
+            // 只读沙箱，减少写盘/跑 shell；仍可能尝试工具，配合超时兜底
+            args += ["--sandbox", "read-only"]
         }
         if request.autoApprove {
             // 仅在调用方明确要求时启用；极度危险，用于可信自动化环境。
             args.append("--dangerously-bypass-approvals-and-sandbox")
         }
-        // prompt 作为位置参数；空时由 stdin 读，这里始终传参。
+        // 长 prompt 走 stdin，避免 ARG_MAX / 挂起
+        if prompt.utf8.count > 6_000 {
+            args.append("-")
+            return LocalAICommand(
+                executable: executable,
+                arguments: args,
+                workingDirectory: request.workingDirectory,
+                stdinText: prompt
+            )
+        }
         args.append(prompt)
         return LocalAICommand(
             executable: executable,
@@ -108,6 +137,11 @@ enum LocalAICommandBuilder {
             "--print",
             "--output-format", "text",
         ]
+        if request.disableTools {
+            // 空 tools = 禁用全部内置工具，避免 Bash/Read 卡住
+            args += ["--tools", ""]
+            args += ["--permission-mode", "dontAsk"]
+        }
         if let model = request.model, !model.isEmpty {
             args += ["--model", model]
         }
@@ -125,19 +159,32 @@ enum LocalAICommandBuilder {
 
     // MARK: - agy
 
-    /// `agy --print <prompt>` 单轮非交互。
+    /// `agy [flags] --print <prompt>` 单轮非交互。
+    ///
+    /// **参数顺序很重要**：`--print` / `-p` 会把**紧随其后的下一个参数**当作 prompt。
+    /// 若写成 `--print --output-format text …`，模型会把 `--output-format` 当成用户问题。
+    /// 正确顺序：其它 flag 在前，最后 `--print` + prompt。
+    ///
+    /// headless 无法弹出 tool 权限确认：若 agent 调了 `command` 等工具会被 auto-deny，
+    /// 并出现 `no output produced`。因此一律带 `--dangerously-skip-permissions`。
+    /// 纯文本场景仍靠 prompt 约束「不要执行额外操作」；不要加 `--sandbox`。
     private static func buildAgy(
         executable: String,
         request: LocalAIRequest,
         prompt: String
     ) -> LocalAICommand {
-        var args: [String] = ["--print", prompt]
+        let seconds = max(15, Int(request.timeout.components.seconds))
+        var args: [String] = [
+            "--output-format", "text",
+            "--dangerously-skip-permissions",
+            // 与 LocalAI 超时大致对齐，避免默认 5m 拖死 UI 转圈
+            "--print-timeout", "\(seconds)s",
+        ]
         if let model = request.model, !model.isEmpty {
             args += ["--model", model]
         }
-        if request.autoApprove {
-            args.append("--dangerously-skip-permissions")
-        }
+        // 必须放在最后：--print 的下一个 argv 才是真正的用户提示词
+        args += ["--print", prompt]
         return LocalAICommand(
             executable: executable,
             arguments: args,
@@ -170,6 +217,18 @@ enum LocalAICommandBuilder {
             arguments: args,
             workingDirectory: request.workingDirectory
         )
+    }
+
+    /// 将长提示词写入临时文件（调用方不负责删除；系统临时目录会清理）。
+    private static func writePromptTempFile(_ prompt: String, prefix: String) -> String? {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(prefix)-\(UUID().uuidString).txt")
+        do {
+            try prompt.write(to: url, atomically: true, encoding: .utf8)
+            return url.path
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - 输出解析

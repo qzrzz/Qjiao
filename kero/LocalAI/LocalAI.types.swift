@@ -7,6 +7,35 @@
 
 import Foundation
 
+// MARK: - 写作语言
+
+/// AI 生成 Git Commit / 描述等内容时使用的自然语言。
+///
+/// 与界面语言 `AppLanguage` 独立：界面可中文、写作仍用英文，或反之。
+/// 全局默认见 `AppSettings.aiWritingLanguage`；项目可在 `Project.aiWritingLanguage` 覆盖。
+enum AIWritingLanguage: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
+    case english = "en"
+    case chineseSimplified = "zh-Hans"
+
+    var id: String { rawValue }
+
+    /// 设置面板与项目覆盖选择器展示名（语言自身名称）。
+    var nativeDisplayName: String {
+        switch self {
+        case .english: return "English"
+        case .chineseSimplified: return "简体中文"
+        }
+    }
+
+    /// 注入提示词的语言标签（给模型读）。
+    var promptLabel: String {
+        switch self {
+        case .english: return "English"
+        case .chineseSimplified: return "Simplified Chinese (简体中文)"
+        }
+    }
+}
+
 // MARK: - Provider
 
 /// 本地 AI headless 提供器标识。
@@ -28,10 +57,13 @@ enum LocalAIProviderID: String, CaseIterable, Identifiable, Codable, Sendable, H
 
     var id: String { rawValue }
 
+    /// Codex 默认模型（`codex exec -m`）；请求未显式指定 model 时使用。
+    static let codexDefaultModel = "gpt-5.6-luna"
+
     /// 设置面板与菜单展示名。
     var displayName: String {
         switch self {
-        case .disabled: return "Disabled"
+        case .disabled: return L10n.t("Disabled")
         case .grok: return "grok"
         case .codex: return "codex"
         case .claude: return "claude"
@@ -56,10 +88,10 @@ enum LocalAIProviderID: String, CaseIterable, Identifiable, Codable, Sendable, H
     /// 设置行副标题：说明 headless / exec 调用方式。
     var commandHint: String {
         switch self {
-        case .disabled: return "Local AI features are turned off."
-        case .grok: return "grok --single (headless)"
+        case .disabled: return L10n.t("Local AI features are turned off.")
+        case .grok: return "grok --single"
         case .codex: return "codex exec"
-        case .claude: return "claude -p / --print"
+        case .claude: return "claude --print"
         case .agy: return "agy --print"
         case .opencode: return "opencode run"
         }
@@ -93,7 +125,7 @@ struct LocalAIProviderStatus: Identifiable, Equatable, Sendable {
         if isAvailable {
             return provider.displayName
         }
-        return "\(provider.displayName) — Not installed"
+        return "\(provider.displayName) — \(L10n.t("Not installed"))"
     }
 }
 
@@ -111,6 +143,8 @@ struct LocalAIRequest: Sendable, Equatable {
     var timeout: Duration
     /// 是否尽量自动批准工具执行（各 CLI 映射到不同危险 flag，默认 false）。
     var autoApprove: Bool
+    /// 尽量关闭工具 / 子代理 / 联网检索，只做纯文本生成（Git Commit 等场景）。
+    var disableTools: Bool
     /// 覆盖全局设置，强制使用某 Provider；nil 时用当前设置。
     var providerOverride: LocalAIProviderID?
 
@@ -120,6 +154,7 @@ struct LocalAIRequest: Sendable, Equatable {
         model: String? = nil,
         timeout: Duration = .seconds(600),
         autoApprove: Bool = false,
+        disableTools: Bool = false,
         providerOverride: LocalAIProviderID? = nil
     ) {
         self.prompt = prompt
@@ -127,6 +162,7 @@ struct LocalAIRequest: Sendable, Equatable {
         self.model = model
         self.timeout = timeout
         self.autoApprove = autoApprove
+        self.disableTools = disableTools
         self.providerOverride = providerOverride
     }
 }

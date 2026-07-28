@@ -12,3 +12,11 @@
 
 - 当前环境使用的是 Xcode 是 beta 版， Xcode-beta.app
 - 界面中的数字要注意使用 monospacedDigit 字体
+
+## I18n
+
+- 用户可见文案必须走 `L10n.t("English source")`；带参数用 `L10n.format("… %@ …", arg)`
+- **英文为 key**（源语言/默认）；中文补在 `kero/L10n/zh-Hans.swift`，缺 key 回退英文
+- 新增语言：`AppLanguage` case + `kero/L10n/<locale>.swift` 词表 + `L10n.t` 的 `switch`
+- 需要随语言切换刷新的 View：观察 `L10n.shared`（读 `l10n.language`）
+- 主题名、品牌名、预览样本文案可不译

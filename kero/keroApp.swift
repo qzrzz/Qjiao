@@ -10,15 +10,20 @@ struct keroApp: App {
     // Held here so Sparkle starts at launch and background checks run even if
     // the menu is never opened.
     @StateObject private var updater = Updater.shared
+    @ObservedObject private var l10n = L10n.shared
 
     init() {
         TerminalFont.registerBundledFonts()
         TerminalNotificationService.shared.configure()
+        // 确保启动时已从 config 同步语言（AppSettings.shared 会触发加载）。
+        _ = AppSettings.shared
     }
 
     var body: some Scene {
         WindowGroup("Qjiao", id: "main") {
             WindowRootView()
+                .observeLocalization()
+                .environment(\.l10nLanguage, l10n.language)
         }
         .windowStyle(.hiddenTitleBar)
         // Keep title-bar dragging away from interactive tabs. The empty
@@ -43,11 +48,13 @@ struct keroApp: App {
 /// reopens windows for any snapshots left over.
 private struct WindowRootView: View {
     @StateObject private var manager = TerminalManager()
+    @ObservedObject private var l10n = L10n.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ContentView(manager: manager)
             .focusedSceneObject(manager)
+            .environment(\.l10nLanguage, l10n.language)
             .onAppear {
                 TerminalManager.openRestoredWindows {
                     openWindow(id: "main")
@@ -62,28 +69,32 @@ private struct WindowRootView: View {
 /// Menu commands routed to the focused window's manager.
 private struct KeroCommands: Commands {
     @FocusedObject private var manager: TerminalManager?
+    @ObservedObject private var l10n = L10n.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        // 读取 language，语言切换时菜单标题刷新。
+        let _ = l10n.language
+
         CommandGroup(replacing: .newItem) {
-            Button("New Project") {
+            Button(L10n.t("New Project")) {
                 manager?.newProject()
             }
             .keyboardShortcut("n", modifiers: .command)
             .disabled(manager == nil)
 
-            Button("New Session") {
+            Button(L10n.t("New Session")) {
                 manager?.newSession()
             }
             .keyboardShortcut("t", modifiers: .command)
             .disabled(manager == nil)
 
-            Button("New Window") {
+            Button(L10n.t("New Window")) {
                 openWindow(id: "main")
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
 
-            Button("Close Pane") {
+            Button(L10n.t("Close Pane")) {
                 // Cmd-W is app-wide: close a pane only when a main window with
                 // an open project is key. Otherwise close the key window
                 // itself — a non-main window (e.g. Settings), or a main window
@@ -99,7 +110,7 @@ private struct KeroCommands: Commands {
         }
 
         CommandGroup(replacing: .saveItem) {
-            Button("Save") {
+            Button(L10n.t("Save")) {
                 manager?.saveSelectedFile()
             }
             .keyboardShortcut("s", modifiers: .command)
@@ -113,8 +124,8 @@ private struct KeroCommands: Commands {
             // the first responder, which keeps them live while the find bar's
             // text field has keyboard focus. ⇧⌘G is already Toggle Git Panel,
             // so Find Previous is reachable by ⇧↩ in the bar instead.
-            Menu("Find") {
-                Button("Search in Files…") {
+            Menu(L10n.t("Find")) {
+                Button(L10n.t("Search in Files…")) {
                     manager?.openSearchInFiles()
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
@@ -122,30 +133,30 @@ private struct KeroCommands: Commands {
 
                 Divider()
 
-                Button("Find…") {
+                Button(L10n.t("Find…")) {
                     manager?.performFindAction(.show)
                 }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(manager?.canFind != true)
 
-                Button("Find and Replace…") {
+                Button(L10n.t("Find and Replace…")) {
                     manager?.performFindAction(.replace)
                 }
                 .keyboardShortcut("f", modifiers: [.command, .option])
                 .disabled(manager?.canReplace != true)
 
-                Button("Find Next") {
+                Button(L10n.t("Find Next")) {
                     manager?.performFindAction(.next)
                 }
                 .keyboardShortcut("g", modifiers: .command)
                 .disabled(manager?.canFind != true)
 
-                Button("Find Previous") {
+                Button(L10n.t("Find Previous")) {
                     manager?.performFindAction(.previous)
                 }
                 .disabled(manager?.canFind != true)
 
-                Button("Use Selection for Find") {
+                Button(L10n.t("Use Selection for Find")) {
                     manager?.performFindAction(.useSelection)
                 }
                 .keyboardShortcut("e", modifiers: .command)
@@ -154,7 +165,7 @@ private struct KeroCommands: Commands {
 
             Divider()
 
-            Button("Clear Terminal") {
+            Button(L10n.t("Clear Terminal")) {
                 manager?.clearActiveTerminal()
             }
             .keyboardShortcut("k", modifiers: .command)
@@ -165,7 +176,7 @@ private struct KeroCommands: Commands {
         CommandGroup(replacing: .printItem) {}
 
         CommandGroup(after: .sidebar) {
-            Button("Command Palette…") {
+            Button(L10n.t("Command Palette…")) {
                 manager?.toggleCommandPalette()
             }
             .keyboardShortcut("p", modifiers: .command)
@@ -173,45 +184,45 @@ private struct KeroCommands: Commands {
 
             Divider()
 
-            Button("Toggle Left Sidebar") {
+            Button(L10n.t("Toggle Left Sidebar")) {
                 manager?.toggleLeftSidebar()
             }
             .keyboardShortcut("b", modifiers: .command)
             .disabled(manager == nil)
 
-            Button("Toggle Right Sidebar") {
+            Button(L10n.t("Toggle Right Sidebar")) {
                 manager?.toggleSidebar()
             }
             .keyboardShortcut("b", modifiers: [.command, .shift])
             .disabled(manager?.selectedProject == nil)
 
-            Button("Toggle Files Panel") {
+            Button(L10n.t("Toggle Files Panel")) {
                 manager?.togglePanel(.files)
             }
             .keyboardShortcut("e", modifiers: [.command, .shift])
             .disabled(manager?.selectedProject == nil)
 
-            Button("Toggle Git Panel") {
+            Button(L10n.t("Toggle Git Panel")) {
                 manager?.togglePanel(.git)
             }
             .keyboardShortcut("g", modifiers: [.command, .shift])
             .disabled(manager?.selectedProject == nil)
 
-            Button("Toggle Info Panel") {
+            Button(L10n.t("Toggle Info Panel")) {
                 manager?.togglePanel(.info)
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
             .disabled(manager?.selectedProject == nil)
         }
 
-        CommandMenu("Projects") {
-            Button("Next Project") {
+        CommandMenu(L10n.t("Projects")) {
+            Button(L10n.t("Next Project")) {
                 manager?.selectNextProject()
             }
             .keyboardShortcut("]", modifiers: [.command, .option])
             .disabled(manager == nil)
 
-            Button("Previous Project") {
+            Button(L10n.t("Previous Project")) {
                 manager?.selectPreviousProject()
             }
             .keyboardShortcut("[", modifiers: [.command, .option])
@@ -227,62 +238,62 @@ private struct KeroCommands: Commands {
             }
         }
 
-        CommandMenu("Tabs") {
-            Button("Split Right") {
+        CommandMenu(L10n.t("Tabs")) {
+            Button(L10n.t("Split Right")) {
                 manager?.splitRight()
             }
             .keyboardShortcut("d", modifiers: .command)
             .disabled(manager?.canSplit != true)
 
-            Button("Split Down") {
+            Button(L10n.t("Split Down")) {
                 manager?.splitDown()
             }
             .keyboardShortcut("d", modifiers: [.command, .shift])
             .disabled(manager?.canSplit != true)
 
-            Button("Split Left") {
+            Button(L10n.t("Split Left")) {
                 manager?.splitLeft()
             }
             .disabled(manager?.canSplit != true)
 
-            Button("Split Up") {
+            Button(L10n.t("Split Up")) {
                 manager?.splitUp()
             }
             .disabled(manager?.canSplit != true)
 
             Divider()
 
-            Button("Focus Pane Left") {
+            Button(L10n.t("Focus Pane Left")) {
                 manager?.focusPaneLeft()
             }
             .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
             .disabled(manager == nil)
 
-            Button("Focus Pane Right") {
+            Button(L10n.t("Focus Pane Right")) {
                 manager?.focusPaneRight()
             }
             .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
             .disabled(manager == nil)
 
-            Button("Focus Pane Up") {
+            Button(L10n.t("Focus Pane Up")) {
                 manager?.focusPaneUp()
             }
             .keyboardShortcut(.upArrow, modifiers: [.command, .option])
             .disabled(manager == nil)
 
-            Button("Focus Pane Down") {
+            Button(L10n.t("Focus Pane Down")) {
                 manager?.focusPaneDown()
             }
             .keyboardShortcut(.downArrow, modifiers: [.command, .option])
             .disabled(manager == nil)
 
-            Button("Focus Previous Pane") {
+            Button(L10n.t("Focus Previous Pane")) {
                 manager?.focusPreviousPane()
             }
             .keyboardShortcut("[", modifiers: .command)
             .disabled(manager == nil)
 
-            Button("Focus Next Pane") {
+            Button(L10n.t("Focus Next Pane")) {
                 manager?.focusNextPane()
             }
             .keyboardShortcut("]", modifiers: .command)
@@ -290,38 +301,38 @@ private struct KeroCommands: Commands {
 
             Divider()
 
-            Button("Toggle Pane Zoom") {
+            Button(L10n.t("Toggle Pane Zoom")) {
                 manager?.togglePaneZoom()
             }
             .keyboardShortcut(.return, modifiers: [.command, .shift])
             .disabled(manager?.hasSplitPanes != true)
 
-            Button("Equalize Panes") {
+            Button(L10n.t("Equalize Panes")) {
                 manager?.equalizePanes()
             }
             .keyboardShortcut("=", modifiers: [.command, .control])
             .disabled(manager?.hasSplitPanes != true)
 
-            Menu("Resize Pane") {
-                Button("Up") {
+            Menu(L10n.t("Resize Pane")) {
+                Button(L10n.t("Up")) {
                     manager?.resizePaneUp()
                 }
                 .keyboardShortcut(.upArrow, modifiers: [.command, .control])
                 .disabled(manager?.hasSplitPanes != true)
 
-                Button("Down") {
+                Button(L10n.t("Down")) {
                     manager?.resizePaneDown()
                 }
                 .keyboardShortcut(.downArrow, modifiers: [.command, .control])
                 .disabled(manager?.hasSplitPanes != true)
 
-                Button("Left") {
+                Button(L10n.t("Left")) {
                     manager?.resizePaneLeft()
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
                 .disabled(manager?.hasSplitPanes != true)
 
-                Button("Right") {
+                Button(L10n.t("Right")) {
                     manager?.resizePaneRight()
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
@@ -330,13 +341,13 @@ private struct KeroCommands: Commands {
 
             Divider()
 
-            Button("Next Tab") {
+            Button(L10n.t("Next Tab")) {
                 manager?.selectNextTab()
             }
             .keyboardShortcut("]", modifiers: [.command, .shift])
             .disabled(manager == nil)
 
-            Button("Previous Tab") {
+            Button(L10n.t("Previous Tab")) {
                 manager?.selectPreviousTab()
             }
             .keyboardShortcut("[", modifiers: [.command, .shift])
@@ -345,7 +356,7 @@ private struct KeroCommands: Commands {
             Divider()
 
             ForEach(Array((manager?.selectedProject?.tabs ?? []).prefix(9).enumerated()), id: \.element.id) { index, tab in
-                Button(tab.displayTitle ?? "Tab \(index + 1)") {
+                Button(tab.displayTitle ?? L10n.format("Tab %d", index + 1)) {
                     manager?.selectTab(index: index)
                 }
                 .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.control, .shift])

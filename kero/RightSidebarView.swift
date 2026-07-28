@@ -16,8 +16,8 @@ private enum RightBottomPanel: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .system: return "System"
-        case .note: return "Note"
+        case .system: return L10n.t("System")
+        case .note: return L10n.t("Note")
         }
     }
 
@@ -35,6 +35,7 @@ struct RightSidebarView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var l10n = L10n.shared
     @StateObject private var fileTree = FileTreeModel()
     @StateObject private var filesFind = FilesFindModel()
     @StateObject private var git = GitStatusModel()
@@ -79,6 +80,7 @@ struct RightSidebarView: View {
     }
 
     var body: some View {
+        let _ = l10n.language
         HStack(spacing: 0) {
             if manager.isPanelVisible {
                 // The divider remains translucent, but must composite over
@@ -333,6 +335,7 @@ struct RightSidebarView: View {
         case .git:
             GitPanel(
                 model: git,
+                project: manager.selectedProject,
                 session: manager.selectedSession,
                 openFile: { manager.openFile($0) },
                 openToSide: { manager.openFileToSide($0) },
@@ -393,7 +396,7 @@ struct RightSidebarView: View {
 
     /// 底栏右侧收起/展开，行为与双击 tabs 一致。
     private var bottomCollapseButton: some View {
-        let title = bottomCollapsed ? "Expand" : "Collapse"
+        let title = bottomCollapsed ? L10n.t("Expand") : L10n.t("Collapse")
         return Button {
             toggleBottomCollapsed()
         } label: {
@@ -448,13 +451,13 @@ struct RightSidebarView: View {
                 WindowDragArea()
 
                 HStack(spacing: availableW < 250 ? 2 : 4) {
-                    tabButton(.project, systemImage: "shippingbox", title: "Project", help: "Project", availableWidth: availableW)
-                    tabButton(.info, systemImage: "info.circle", title: "Info", help: "Info (⇧⌘I)", availableWidth: availableW)
-                    tabButton(.files, systemImage: "folder", title: "Files", help: "Files (⇧⌘E)", availableWidth: availableW)
+                    tabButton(.project, systemImage: "shippingbox", title: L10n.t("Project"), help: L10n.t("Project"), availableWidth: availableW)
+                    tabButton(.info, systemImage: "info.circle", title: L10n.t("Info"), help: L10n.t("Info (⇧⌘I)"), availableWidth: availableW)
+                    tabButton(.files, systemImage: "folder", title: L10n.t("Files"), help: L10n.t("Files (⇧⌘E)"), availableWidth: availableW)
                     if showsCWD {
-                        tabButton(.cwd, systemImage: "terminal", title: "CWD", help: "CWD", availableWidth: availableW)
+                        tabButton(.cwd, systemImage: "terminal", title: L10n.t("CWD"), help: L10n.t("CWD"), availableWidth: availableW)
                     }
-                    tabButton(.git, systemImage: "arrow.triangle.branch", title: "Git", help: "Git (⇧⌘G)", availableWidth: availableW)
+                    tabButton(.git, systemImage: "arrow.triangle.branch", title: L10n.t("Git"), help: L10n.t("Git (⇧⌘G)"), availableWidth: availableW)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 8)

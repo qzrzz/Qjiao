@@ -275,7 +275,7 @@ struct SessionInfoPanel: View {
             HStack(spacing: 4) {
                 SidebarIconButton(
                     systemImage: "finder",
-                    help: "Open in Finder",
+                    help: L10n.t("Open in Finder"),
                     disabled: model.cwdPath.isEmpty
                 ) {
                     guard !model.cwdPath.isEmpty else { return }
@@ -284,7 +284,7 @@ struct SessionInfoPanel: View {
 
                 SidebarIconButton(
                     systemImage: "doc.on.doc",
-                    help: "Copy Path",
+                    help: L10n.t("Copy Path"),
                     disabled: model.cwdPath.isEmpty
                 ) {
                     guard !model.cwdPath.isEmpty else { return }
@@ -380,7 +380,7 @@ struct InfoProcessRow: View {
                         .contentShape(RoundedRectangle(cornerRadius: 3))
                 }
                 .buttonStyle(.plain)
-                .help("Terminate Process")
+                .help(L10n.t("Terminate Process"))
             } else {
                 Text(String(format: "%.0f%% · %@", process.cpu, process.memoryLabel))
                     .font(SidebarTypography.caption().monospacedDigit())
@@ -399,14 +399,14 @@ struct InfoProcessRow: View {
         )
         .onHover { isHovering = $0 }
         .contextMenu {
-            Button("Terminate") { kill(false) }
-            Button("Force Kill") { kill(true) }
+            Button(L10n.t("Terminate")) { kill(false) }
+            Button(L10n.t("Force Kill")) { kill(true) }
             Divider()
-            Button("Copy PID") {
+            Button(L10n.t("Copy PID")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString("\(process.pid)", forType: .string)
             }
-            Button("Copy Executable Path") {
+            Button(L10n.t("Copy Executable Path")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(process.executable, forType: .string)
             }
@@ -462,17 +462,17 @@ struct InfoPortRow: View {
         )
         .onHover { isHovering = $0 }
         .contextMenu {
-            Button("Open in Browser") {
+            Button(L10n.t("Open in Browser")) {
                 if let url = port.url {
                     NSWorkspace.shared.open(url)
                 }
             }
-            Button("Copy URL") {
+            Button(L10n.t("Copy URL")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(urlString, forType: .string)
             }
             Divider()
-            Button("Kill Process (\(port.processName))") { kill(false) }
+            Button(L10n.format("Kill Process (%@)", port.processName)) { kill(false) }
         }
     }
 }
