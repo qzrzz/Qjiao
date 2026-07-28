@@ -28,6 +28,113 @@ private enum RightBottomPanel: String, CaseIterable, Identifiable {
         }
     }
 }
+
+/// 右侧顶栏单个 tab 的展示元数据。
+private struct TopTabItem {
+    let panel: RightPanel
+    let systemImage: String
+    let title: String
+    let help: String
+}
+
+/// 右侧 Tabs 按内容测宽的自适应布局：能完整展示标题时全部展示，
+/// 否则优先保留选中项标题，再退回仅图标。
+private enum SidebarTabLayout {
+    enum TitleMode {
+        /// 全部 tab 显示图标 + 完整标题。
+        case all
+        /// 仅选中项显示标题，其余仅图标。
+        case activeOnly
+        /// 全部仅图标。
+        case iconsOnly
+    }
+
+    struct Result {
+        let mode: TitleMode
+        let spacing: CGFloat
+        let activeIndex: Int
+
+        func showsTitle(at index: Int) -> Bool {
+            switch mode {
+            case .all: return true
+            case .activeOnly: return index == activeIndex
+            case .iconsOnly: return false
+            }
+        }
+    }
+
+    static let iconSide: CGFloat = 14
+    static let iconTitleSpacing: CGFloat = 4
+    static let horizontalPaddingWithTitle: CGFloat = 7
+    static let horizontalPaddingIconOnly: CGFloat = 6
+    static let interTabSpacingWide: CGFloat = 4
+    static let interTabSpacingNarrow: CGFloat = 2
+    static let barHorizontalPadding: CGFloat = 8
+    /// 底栏收起/展开按钮热区边长。
+    static let collapseButtonSide: CGFloat = 24
+    /// 测宽相对渲染的余量，避免字体度量与 SwiftUI 布局的细微偏差裁切尾字。
+    private static let measureSlack: CGFloat = 2
+
+    /// 根据实际文案宽度决定展缩模式与 tab 间距。
+    static func resolve(
+        titles: [String],
+        activeIndex: Int,
+        availableWidth: CGFloat,
+        trailingReserve: CGFloat = 0
+    ) -> Result {
+        let count = titles.count
+        guard count > 0, availableWidth > 0 else {
+            return Result(mode: .iconsOnly, spacing: interTabSpacingNarrow, activeIndex: 0)
+        }
+        let safeActive = min(max(activeIndex, 0), count - 1)
+        let barInsets = barHorizontalPadding * 2 + trailingReserve
+
+        func totalWidth(mode: TitleMode, spacing: CGFloat) -> CGFloat {
+            var sum: CGFloat = 0
+            for (index, title) in titles.enumerated() {
+                let showTitle = mode == .all || (mode == .activeOnly && index == safeActive)
+                sum += chipWidth(title: showTitle ? title : nil)
+            }
+            sum += spacing * CGFloat(max(0, count - 1))
+            return sum + barInsets + measureSlack
+        }
+
+        // 优先全标题 + 宽间距；空间稍紧时缩间距仍尽量全标题。
+        if totalWidth(mode: .all, spacing: interTabSpacingWide) <= availableWidth {
+            return Result(mode: .all, spacing: interTabSpacingWide, activeIndex: safeActive)
+        }
+        if totalWidth(mode: .all, spacing: interTabSpacingNarrow) <= availableWidth {
+            return Result(mode: .all, spacing: interTabSpacingNarrow, activeIndex: safeActive)
+        }
+        if totalWidth(mode: .activeOnly, spacing: interTabSpacingWide) <= availableWidth {
+            return Result(mode: .activeOnly, spacing: interTabSpacingWide, activeIndex: safeActive)
+        }
+        if totalWidth(mode: .activeOnly, spacing: interTabSpacingNarrow) <= availableWidth {
+            return Result(mode: .activeOnly, spacing: interTabSpacingNarrow, activeIndex: safeActive)
+        }
+        return Result(mode: .iconsOnly, spacing: interTabSpacingNarrow, activeIndex: safeActive)
+    }
+
+    /// 单个 chip 宽度：图标固定 14，有标题时再加字距与文案测宽。
+    private static func chipWidth(title: String?) -> CGFloat {
+        if let title {
+            return horizontalPaddingWithTitle * 2
+                + iconSide
+                + iconTitleSpacing
+                + titleWidth(title)
+        }
+        return horizontalPaddingIconOnly * 2 + iconSide
+    }
+
+    private static func titleWidth(_ title: String) -> CGFloat {
+        let font = NSFont.systemFont(
+            ofSize: SidebarTypography.secondarySize,
+            weight: .medium
+        )
+        return ceil((title as NSString).size(withAttributes: [.font: font]).width)
+    }
+}
+
 /// Right sidebar: hidden by default, toggled from the terminal's corner
 /// button or ⇧⌘B. 上半区 Start / Project / Info / Files / CWD / Git；
 /// 下半区 System / Note；中间可拖分割。
@@ -372,15 +479,29 @@ struct RightSidebarView: View {
     }
 
     private var bottomTabBar: some View {
-        HStack(alignment: .center, spacing: 4) {
-            ForEach(RightBottomPanel.allCases) { tab in
-                bottomTabButton(tab)
+        GeometryReader { geo in
+            let titles = RightBottomPanel.allCases.map(\.title)
+            let activeIndex = RightBottomPanel.allCases.firstIndex(of: bottomTab) ?? 0
+            // 右侧收起按钮占位，避免标题把 chevron 挤出可视区。
+            let trailingReserve =
+                SidebarTabLayout.collapseButtonSide + SidebarTabLayout.interTabSpacingWide
+            let layout = SidebarTabLayout.resolve(
+                titles: titles,
+                activeIndex: activeIndex,
+                availableWidth: geo.size.width,
+                trailingReserve: trailingReserve
+            )
+            HStack(alignment: .center, spacing: layout.spacing) {
+                ForEach(Array(RightBottomPanel.allCases.enumerated()), id: \.element.id) { index, tab in
+                    bottomTabButton(tab, showTitle: layout.showsTitle(at: index))
+                }
+                Spacer(minLength: 0)
+                bottomCollapseButton
             }
-            Spacer(minLength: 0)
-            bottomCollapseButton
+            .padding(.horizontal, SidebarTabLayout.barHorizontalPadding)
+            .offset(y: -1.5)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 8)
-        .offset(y: -1.5)
         .frame(height: Self.bottomBarHeight)
         .background { WindowDragArea() }
         .contentShape(Rectangle())
@@ -403,7 +524,10 @@ struct RightSidebarView: View {
             Image(systemName: bottomCollapsed ? "chevron.up" : "chevron.down")
                 .font(SidebarTypography.caption(.medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
+                .frame(
+                    width: SidebarTabLayout.collapseButtonSide,
+                    height: SidebarTabLayout.collapseButtonSide
+                )
                 .contentShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
@@ -411,7 +535,7 @@ struct RightSidebarView: View {
         .accessibilityLabel(title)
     }
 
-    private func bottomTabButton(_ tab: RightBottomPanel) -> some View {
+    private func bottomTabButton(_ tab: RightBottomPanel, showTitle: Bool) -> some View {
         let isActive = bottomTab == tab
         return Button {
             bottomTabRaw = tab.rawValue
@@ -420,7 +544,7 @@ struct RightSidebarView: View {
                 systemImage: tab.systemImage,
                 title: tab.title,
                 isActive: isActive,
-                availableWidth: width
+                showTitle: showTitle
             )
         }
         .buttonStyle(.plain)
@@ -445,22 +569,31 @@ struct RightSidebarView: View {
 
     private var tabBar: some View {
         GeometryReader { geo in
-            let availableW = geo.size.width
+            let items = topTabItems
+            let titles = items.map(\.title)
+            let activeIndex = items.firstIndex { $0.panel == manager.panelTab } ?? 0
+            let layout = SidebarTabLayout.resolve(
+                titles: titles,
+                activeIndex: activeIndex,
+                availableWidth: geo.size.width
+            )
             ZStack(alignment: .leading) {
                 // 右侧顶栏未被面板切换按钮占用的区域可拖动窗口。
                 WindowDragArea()
 
-                HStack(spacing: availableW < 250 ? 2 : 4) {
-                    tabButton(.project, systemImage: "shippingbox", title: L10n.t("Project"), help: L10n.t("Project"), availableWidth: availableW)
-                    tabButton(.info, systemImage: "info.circle", title: L10n.t("Info"), help: L10n.t("Info (⇧⌘I)"), availableWidth: availableW)
-                    tabButton(.files, systemImage: "folder", title: L10n.t("Files"), help: L10n.t("Files (⇧⌘E)"), availableWidth: availableW)
-                    if showsCWD {
-                        tabButton(.cwd, systemImage: "terminal", title: L10n.t("CWD"), help: L10n.t("CWD"), availableWidth: availableW)
+                HStack(spacing: layout.spacing) {
+                    ForEach(Array(items.enumerated()), id: \.element.panel) { index, item in
+                        tabButton(
+                            item.panel,
+                            systemImage: item.systemImage,
+                            title: item.title,
+                            help: item.help,
+                            showTitle: layout.showsTitle(at: index)
+                        )
                     }
-                    tabButton(.git, systemImage: "arrow.triangle.branch", title: L10n.t("Git"), help: L10n.t("Git (⇧⌘G)"), availableWidth: availableW)
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, SidebarTabLayout.barHorizontalPadding)
                 .padding(.top, 12)
                 .padding(.bottom, 4)
             }
@@ -470,12 +603,55 @@ struct RightSidebarView: View {
         .background { WindowDragArea() }
     }
 
+    /// 顶栏可见 tabs（CWD 仅在与项目目录不同时出现）。
+    private var topTabItems: [TopTabItem] {
+        var items: [TopTabItem] = [
+            TopTabItem(
+                panel: .project,
+                systemImage: "shippingbox",
+                title: L10n.t("Project"),
+                help: L10n.t("Project")
+            ),
+            TopTabItem(
+                panel: .info,
+                systemImage: "info.circle",
+                title: L10n.t("Info"),
+                help: L10n.t("Info (⇧⌘I)")
+            ),
+            TopTabItem(
+                panel: .files,
+                systemImage: "folder",
+                title: L10n.t("Files"),
+                help: L10n.t("Files (⇧⌘E)")
+            ),
+        ]
+        if showsCWD {
+            items.append(
+                TopTabItem(
+                    panel: .cwd,
+                    systemImage: "terminal",
+                    title: L10n.t("CWD"),
+                    help: L10n.t("CWD")
+                )
+            )
+        }
+        items.append(
+            TopTabItem(
+                panel: .git,
+                systemImage: "arrow.triangle.branch",
+                title: L10n.t("Git"),
+                help: L10n.t("Git (⇧⌘G)")
+            )
+        )
+        return items
+    }
+
     private func tabButton(
         _ panel: RightPanel,
         systemImage: String,
         title: String,
         help: String,
-        availableWidth: CGFloat
+        showTitle: Bool
     ) -> some View {
         let isActive = manager.panelTab == panel
         return Button {
@@ -485,7 +661,7 @@ struct RightSidebarView: View {
                 systemImage: systemImage,
                 title: title,
                 isActive: isActive,
-                availableWidth: availableWidth
+                showTitle: showTitle
             )
         }
         .buttonStyle(.plain)
@@ -494,39 +670,35 @@ struct RightSidebarView: View {
         .accessibilityValue(isActive ? "Selected" : "Not selected")
     }
 
-    /// 上/下半区共用的 tab 样式：根据可用宽度响应式展缩文本；字重始终 medium，
+    /// 上/下半区共用的 tab 样式：由栏级布局决定是否显示标题；字重始终 medium，
     /// 选中只改颜色和背景，避免 regular↔medium 宽度变化导致抖动。
     private func sidebarTabLabel(
         systemImage: String,
         title: String,
         isActive: Bool,
-        availableWidth: CGFloat = 340
+        showTitle: Bool
     ) -> some View {
-        // 宽屏 (>=340): 全部显示 Icon + Title;
-        // 中屏 (250~340): 仅选中项显示 Icon + Title，未选中项仅显示 Icon;
-        // 窄屏 (<250): 全部仅显示 Icon (选中项带高亮框)。
-        let showTitle: Bool = {
-            if availableWidth >= 340 {
-                return true
-            } else if availableWidth >= 250 {
-                return isActive
-            } else {
-                return false
-            }
-        }()
-
-        return HStack(alignment: .center, spacing: 4) {
+        HStack(alignment: .center, spacing: SidebarTabLayout.iconTitleSpacing) {
             Image(systemName: systemImage)
                 .font(SidebarTypography.caption(.medium))
-                .frame(width: 14, height: 14)
+                .frame(
+                    width: SidebarTabLayout.iconSide,
+                    height: SidebarTabLayout.iconSide
+                )
             if showTitle {
                 Text(title)
                     .font(SidebarTypography.secondary(.medium))
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
         }
         .foregroundStyle(isActive ? .primary : .secondary)
-        .padding(.horizontal, showTitle ? 7 : 6)
+        .padding(
+            .horizontal,
+            showTitle
+                ? SidebarTabLayout.horizontalPaddingWithTitle
+                : SidebarTabLayout.horizontalPaddingIconOnly
+        )
         .frame(height: 24)
         .background(
             RoundedRectangle(cornerRadius: 6)

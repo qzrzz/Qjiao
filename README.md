@@ -133,7 +133,7 @@
   - 适配 Retina 高清屏 (High DPI Display)：自动响应 `screenBackingScale`，实现 1:1 绝对物理像素点对点精准对齐渲染。
 - 优化 System 面板 IP 显示：请求 Cloudflare trace (`https://cloudflare.com/cdn-cgi/trace`) 获取出口 IP 与位置代码，并将 loc 转换为 Emoji 国旗图标（如 🇯🇵）；出口 IP 显示在内网 IP 后面（带有 gap 间隔与独立复制按钮）；支持仅点击 `[图标] IP` 标题区域触发刷新（刷新时 IP 图标平滑旋转转圈）；IP 值与 Net 网络速率值均支持鼠标文本选择。
 - 优化右侧边栏窄宽度布局与防错位溢出：
-  - 顶栏与底栏 Tabs 引入三阶响应式展缩机制（宽屏全文字、中屏仅选中项显示文字非选中项显示图标、极窄屏自动全图标排列），移除阻断鼠标手势的 ScrollView，完全恢复顶部 `WindowDragArea` 的窗口拖拽与双击动作体验。
+  - 顶栏与底栏 Tabs 按实际文案测宽自适应：空间足够时全部显示完整标题，稍紧时仅选中项保留标题，极窄时退回全图标；间距随可用宽度在 4pt / 2pt 间收紧。移除阻断鼠标手势的 ScrollView，完全恢复顶部 `WindowDragArea` 的窗口拖拽与双击动作体验。
   - System 面板 IP 行引入 `ViewThatFits` 自适应机制，宽屏单行展示，窄屏自动切为双行分层，彻底解决内网/公网 IP 宽度溢出导致界面错位的问题。
 - Project Tab 的 Launchers 分组空状态（No launchers）增加内容左边距，保持与其他分组及条目垂直对齐。
 - 新增 Project 面板 `PACKAGE` 信息与操作分组：
