@@ -677,6 +677,76 @@ final class FileTreeModel: nonisolated ObservableObject {
         rebuild()
     }
 
+    // MARK: - Move Items
+
+    /// 将多条文件/目录路径移动到目标目录 `targetDir`。
+    /// - Parameters:
+    ///   - paths: 待移动的源路径数组
+    ///   - targetDir: 目标目录绝对路径
+    ///   - onRename: 文件路径变更回调（用于同步更新打开的主编辑器标签页）
+    func moveItems(paths: [String], into targetDir: String, onRename: ((_ oldPath: String, _ newPath: String) -> Void)? = nil) {
+        let normalizedDestDir = (targetDir as NSString).standardizingPath
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: normalizedDestDir, isDirectory: &isDir),
+              isDir.boolValue
+        else {
+            presentError(
+                L10n.t("Couldn’t move item."),
+                L10n.t("The destination folder is missing or is not a directory.")
+            )
+            return
+        }
+
+        var firstError: String?
+        var movedPaths: [(oldPath: String, newPath: String)] = []
+
+        for srcPath in paths {
+            let normalizedSource = (srcPath as NSString).standardizingPath
+            let itemName = (normalizedSource as NSString).lastPathComponent
+            let destPath = (normalizedDestDir as NSString).appendingPathComponent(itemName)
+
+            if normalizedSource == destPath { continue }
+
+            let fm = FileManager.default
+            if fm.fileExists(atPath: destPath) {
+                if firstError == nil {
+                    firstError = L10n.format("An item named “%@” already exists in this location.", itemName)
+                }
+                continue
+            }
+
+            do {
+                try fm.moveItem(atPath: normalizedSource, toPath: destPath)
+                remapExpanded(from: normalizedSource, to: destPath)
+                remapSelection(from: normalizedSource, to: destPath)
+                remapFolderSizes(from: normalizedSource, to: destPath)
+                movedPaths.append((normalizedSource, destPath))
+            } catch {
+                if firstError == nil {
+                    firstError = L10n.format("Couldn’t move “%@”: %@", itemName, error.localizedDescription)
+                }
+            }
+        }
+
+        if !movedPaths.isEmpty {
+            expanded.insert(normalizedDestDir)
+            let newSelected = Set(movedPaths.map(\.newPath))
+            selectedPaths = newSelected
+            selectionAnchorPath = movedPaths.first?.newPath
+
+            for (oldP, newP) in movedPaths {
+                onRename?(oldP, newP)
+            }
+        }
+
+        rebuild()
+        FileTreeModel.isDraggingFromTree = false
+
+        if let firstError {
+            presentError(L10n.t("Couldn’t move completely."), firstError)
+        }
+    }
+
     // MARK: - Copy / Paste
 
     /// 同名冲突时用户选择：覆盖、使用新文件名、取消后续粘贴。

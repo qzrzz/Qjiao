@@ -78,11 +78,12 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         self.launchCommand = launchCommand
         launchDirectoryURL = artifacts.directoryURL
         shellPidFileURL = artifacts.pidFileURL
-        // 未收到 Shell 主动设置的标题前，使用终端启动目录的最后一级名称。
+        // 根据 zsh 闲时标题配置格式化初始标题，未改动时退回目录最后一级名称。
         let directoryName = URL(fileURLWithPath: directory).lastPathComponent
-        title = directoryName.isEmpty
+        let defaultTitle = directoryName.isEmpty
             ? (shellPath as NSString).lastPathComponent
             : directoryName
+        title = AppSettings.shared.zshIdleTitleStyle.formatTitle(for: directory) ?? defaultTitle
         lastHistorySnapshot = restoredHistory
         super.init()
 
@@ -241,6 +242,16 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     func sendCommand(_ text: String) {
         terminalView.sendText(text)
     }
+
+    /// 当全局闲时标题设置发生变化时，更新此 Session 在 Swift 侧的显示标题。
+    func updateIdleTitleStyle(_ style: ZshIdleTitleStyle) {
+        let directoryName = (currentDirectoryPath as NSString).lastPathComponent
+        let fallback = directoryName.isEmpty
+            ? (shellPath as NSString).lastPathComponent
+            : directoryName
+        title = style.formatTitle(for: currentDirectoryPath) ?? fallback
+    }
+
 
     /// Queues an automated command until this surface has been attached and
     /// its login shell has started. New tabs are mounted asynchronously by
@@ -599,6 +610,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         var environment = [
             "TERM": "xterm-256color",
             "COLORTERM": "truecolor",
+            "QJIAO_CONFIG_DIR": AppSettings.configURL.deletingLastPathComponent().path,
         ]
         if ProcessInfo.processInfo.environment["LANG"] == nil {
             environment["LANG"] = "en_US.UTF-8"
@@ -614,8 +626,8 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             environment["QJIAO_ORIGINAL_ZDOTDIR"] = processEnvironment["ZDOTDIR"] ?? ""
             environment["ZDOTDIR"] = integrationDirectory
             // 只向本应用新建的 zsh 注入此变量；不会改动用户系统终端的环境。
-            if AppSettings.shared.disableZshAutoTitle {
-                environment["DISABLE_AUTO_TITLE"] = "true"
+            if let idleTitle = AppSettings.shared.zshIdleTitleStyle.environmentValue {
+                environment["ZSH_THEME_TERM_TITLE_IDLE"] = idleTitle
             }
         }
         return environment
@@ -840,6 +852,7 @@ extension TerminalSession: TerminalSurfacePwdDelegate {
         guard !path.isEmpty else { return }
         workingDirectory = path.hasPrefix("/")
             ? URL(fileURLWithPath: path).absoluteString : path
+        updateIdleTitleStyle(AppSettings.shared.zshIdleTitleStyle)
     }
 }
 

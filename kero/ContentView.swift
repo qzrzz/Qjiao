@@ -876,7 +876,16 @@ private struct SessionTabsView: View {
         if tab.customName != nil {
             Button(L10n.t("Use Automatic Title")) { tab.customName = nil }
         }
-        Toggle(L10n.t("Disable Zsh Auto Title"), isOn: $settings.disableZshAutoTitle)
+        Menu(L10n.t("Zsh Idle title")) {
+            ForEach(ZshIdleTitleStyle.allCases) { style in
+                Toggle(isOn: Binding(
+                    get: { settings.zshIdleTitleStyle == style },
+                    set: { if $0 { settings.zshIdleTitleStyle = style } }
+                )) {
+                    Text(style.displayName)
+                }
+            }
+        }
         Divider()
         if case .file(let file) = tab.focusedContent {
             Button {

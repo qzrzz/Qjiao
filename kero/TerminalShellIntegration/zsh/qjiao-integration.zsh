@@ -1,8 +1,17 @@
-# Semantic-prompt markers for Qjiao's embedded Ghostty terminal.
+# Semantic-prompt markers and idle title integration for Qjiao's embedded Ghostty terminal.
 # `cl=line` and the `B` input-area marker are required for click-to-move.
 if [[ -o interactive && -z "${_qjiao_semantic_prompt_loaded-}" ]]; then
     builtin typeset -gi _qjiao_semantic_prompt_loaded=1
     builtin typeset -gi _qjiao_command_active=0
+
+    _qjiao_get_idle_title_pattern() {
+        builtin local config_file="${QJIAO_CONFIG_DIR:-$HOME/.config/qjiao}/idle_title"
+        if [[ -r "$config_file" ]]; then
+            builtin cat "$config_file" 2>/dev/null
+        else
+            builtin print -rn -- "${ZSH_THEME_TERM_TITLE_IDLE-}"
+        fi
+    }
 
     _qjiao_precmd() {
         builtin local exit_status=$?
@@ -12,6 +21,12 @@ if [[ -o interactive && -z "${_qjiao_semantic_prompt_loaded-}" ]]; then
         if (( _qjiao_command_active )); then
             builtin print -rn -- $'\e]133;D;'"$exit_status"$'\a'
             _qjiao_command_active=0
+        fi
+
+        builtin local pattern
+        pattern=$(_qjiao_get_idle_title_pattern)
+        if [[ -n "$pattern" ]]; then
+            builtin print -Pn -- $'\e]2;'"$pattern"$'\a'
         fi
 
         # Rebuild from an unmarked prompt each time, so asynchronous prompt

@@ -322,11 +322,16 @@ struct SettingsView: View {
                 }
 
                 settingWithDescription(
-                    L10n.t("Disable Zsh Auto Title"),
-                    L10n.t("Sets DISABLE_AUTO_TITLE=true only for new zsh terminals in Qjiao.")
+                    L10n.t("Custom Idle Tab Title"),
+                    L10n.t("Zsh controlled tab title setting ($ZSH_THEME_TERM_TITLE_IDLE)")
                 ) {
-                    Toggle("", isOn: $settings.disableZshAutoTitle)
-                        .labelsHidden()
+                    Picker("", selection: $settings.zshIdleTitleStyle) {
+                        ForEach(ZshIdleTitleStyle.allCases) { style in
+                            Text(style.displayName).tag(style)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
                 }
 
                 settingWithDescription(
@@ -621,7 +626,6 @@ struct SettingsView: View {
             && settings.filesFontSize == AppSettings.defaultFilesFontSize
             && !settings.restoreTerminalHistory
             && !settings.directClickMovesCursor
-            && !settings.disableZshAutoTitle
             && settings.packageManagerCommand == .npm
             && settings.localAIHeadlessProvider == .disabled
             && settings.aiWritingLanguage == .english

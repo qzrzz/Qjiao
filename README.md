@@ -38,6 +38,7 @@
 - 等宽中文字体来显示终端和代码，可以对齐含有中文的表格、注释了。
   - 默认使用内置 `Source Han Sans CN VF Mono1200` 作为中文等宽回退字体，并可在设置中关闭。
 - 拖拽文件夹自动以该文件夹创建项目并在其中启动终端（排除软件内部 Files / CWD 文件目录树拖拽，避免误触发）。
+- **Files Tree 拖拽移动与确认对话框**：文件树支持将文件和文件夹拖拽移动到目标文件夹或根目录，在移动前弹出 macOS 原生确认对话框（显示具体源文件名/项目数量与目标位置，防止误触）；确认后安全移动磁盘文件，自动展开目标目录并联动更新打开的主编辑器标签页路径。
 - 项目支持自定义图标（预置 / Emoji / SF Symbols / Select File）；图标选择器独立为 `ProjectIconPicker.swift`：
   - **预置**：列出本应用内置 Brands（`TerminalAppIcons`）与 Material Icon Theme 图标，可搜索选择。
   - **SF Symbols**：左侧分类浏览（Suggested / Coding / Arrows…）、分类内搜索防抖、多词过滤。
@@ -47,6 +48,7 @@
   - 数量徽章、当前图标预览与 Clear。
 - 增加 Tabs 选择菜单；顶栏新建标签紧挨标签条，标签总览下拉固定在右侧侧栏按钮旁；左侧栏开关 / 新建 / 下拉 / 右侧栏 / Zoom 共用 `HeaderIconButton`（26pt 热区、caption 图标不变；仅 hover 浅底，按下/激活无底色，激活仅 tint）。右侧工具用 ZStack 固定叠层 + 左侧 padding 硬预留宽度，标签再多也不会挤占下拉/侧栏。
 - 终端可选启用直接点击移动光标。
+- **自定义闲时标签页名**：在「设置 -> 终端 -> 功能」与标签页右键菜单「Zsh Idle title」中新增闲时标签页名设置（$ZSH_THEME_TERM_TITLE_IDLE），提供默认（不修改）、文件夹名在前（%1~ — %n@%m）、2 层文件夹名在前（%2~ — %n@%m）、简短（%1~ — %n）、极简（%1~）等可选项。由 Zsh Prompt 原生控制与无声转义输出，不污染终端 PTY 输入。
 - 在 `kero/FilesFind` 中实现以 VS Code 为目标的全局文件与文本搜索模块：
   - **Files 面板深度集成**：在 Files 面板顶栏支持模式切换（文件树 / 文本搜索），按 `⇧⌘F` 或菜单项一键无缝唤起全局文本搜索模式。
   - **高效搜索引擎驱动**：内置开箱即用的原生 macOS `ripgrep` 可执行二进制（`kero/VendorBin/rg`），优先通过内置 `rg --json` 进行毫秒级流式文本检索；无 `rg` 环境下亦可自动无缝降级至 Swift 多线程并发扫描引擎（`TaskGroup`），智能剔除忽略项（`node_modules`、`.git`、`dist` 等）。

@@ -19,6 +19,94 @@ enum PackageManagerCommand: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// Zsh 闲时标签页名称控制模式。
+enum ZshIdleTitleStyle: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
+    case defaultStyle = "default"
+    case folderFirst = "folderFirst"
+    case twoFolderFirst = "twoFolderFirst"
+    case short = "short"
+    case minimal = "minimal"
+
+    var id: String { rawValue }
+
+    /// 显示文案
+    var displayName: String {
+        switch self {
+        case .defaultStyle:
+            return L10n.t("Default (Do not modify)")
+        case .folderFirst:
+            return L10n.t("Folder first (%1~ — %n@%m)")
+        case .twoFolderFirst:
+            return L10n.t("2-level Folder first (%2~ — %n@%m)")
+        case .short:
+            return L10n.t("Short (%1~ — %n)")
+        case .minimal:
+            return L10n.t("Minimal (%1~)")
+        }
+    }
+
+    /// 对应的 `$ZSH_THEME_TERM_TITLE_IDLE` 环境变量值，`nil` 表示不改动默认设置。
+    var environmentValue: String? {
+        switch self {
+        case .defaultStyle:
+            return nil
+        case .folderFirst:
+            return "%1~ — %n@%m"
+        case .twoFolderFirst:
+            return "%2~ — %n@%m"
+        case .short:
+            return "%1~ — %n"
+        case .minimal:
+            return "%1~"
+        }
+    }
+
+    /// 根据当前目录路径与样式格式化闲时标题；`nil` 表示默认（不修改）。
+    func formatTitle(for directoryPath: String) -> String? {
+        guard let envPattern = environmentValue else { return nil }
+
+        let homeDir = NSHomeDirectory()
+        let relPath: String
+        if directoryPath == homeDir || directoryPath == homeDir + "/" {
+            relPath = "~"
+        } else if directoryPath.hasPrefix(homeDir + "/") {
+            relPath = "~/" + String(directoryPath.dropFirst(homeDir.count + 1))
+        } else {
+            relPath = directoryPath
+        }
+
+        let oneTilde: String
+        let twoTilde: String
+        if relPath == "~" {
+            oneTilde = "~"
+            twoTilde = "~"
+        } else if relPath == "/" || relPath.isEmpty {
+            oneTilde = "/"
+            twoTilde = "/"
+        } else {
+            let components = relPath.split(separator: "/").map(String.init)
+            oneTilde = components.last ?? (directoryPath as NSString).lastPathComponent
+            if components.count >= 2 {
+                twoTilde = components.suffix(2).joined(separator: "/")
+            } else {
+                twoTilde = oneTilde
+            }
+        }
+
+        let user = NSUserName()
+        let rawHost = ProcessInfo.processInfo.hostName
+        let host = rawHost.components(separatedBy: ".").first ?? rawHost
+
+        var result = envPattern
+        result = result.replacingOccurrences(of: "%2~", with: twoTilde)
+        result = result.replacingOccurrences(of: "%1~", with: oneTilde)
+        result = result.replacingOccurrences(of: "%n", with: user)
+        result = result.replacingOccurrences(of: "%m", with: host)
+        return result
+    }
+}
+
+
 /// User-configurable settings, persisted to `$HOME/.config/qjiao/config.toml`.
 /// Views observe this directly; `TerminalManager` re-themes live sessions on
 /// any change.
@@ -160,8 +248,10 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
-    /// 仅为 Qjiao 启动的 zsh 注入 `DISABLE_AUTO_TITLE=true`，阻止 zshrc 自动改写标签标题。
-    @Published var disableZshAutoTitle: Bool {
+
+
+    /// Zsh 控制的闲时标签页名称设置 ($ZSH_THEME_TERM_TITLE_IDLE)。
+    @Published var zshIdleTitleStyle: ZshIdleTitleStyle {
         didSet { save() }
     }
 
@@ -317,7 +407,11 @@ final class AppSettings: nonisolated ObservableObject {
         filesFontSize = Self.filesFontSizeRange.contains(filesSize) ? filesSize : Self.defaultFilesFontSize
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
-        disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
+        zshIdleTitleStyle = toml["terminal.zsh-idle-title-style"]?.string
+            .flatMap(ZshIdleTitleStyle.init(rawValue:))
+            ?? toml["terminal.zsh-idle-title"]?.string
+            .flatMap(ZshIdleTitleStyle.init(rawValue:))
+            ?? .defaultStyle
         enableTerminalHelpBar = toml["terminal.enable-help-bar"]?.bool ?? true
         preferredCodeEditorBundleId = toml["editor.preferred-code-editor"]?.string ?? ""
         preferredAIToolId = toml["ai.preferred-tool"]?.string ?? ""
@@ -417,7 +511,7 @@ final class AppSettings: nonisolated ObservableObject {
         filesFontSize = Self.defaultFilesFontSize
         restoreTerminalHistory = false
         directClickMovesCursor = false
-        disableZshAutoTitle = false
+        zshIdleTitleStyle = .defaultStyle
         enableTerminalHelpBar = true
         packageManagerCommand = .npm
         systemReachabilityInterval = .default
@@ -504,8 +598,9 @@ final class AppSettings: nonisolated ObservableObject {
         if directClickMovesCursor {
             lines.append("terminal.direct-click-moves-cursor = true")
         }
-        if disableZshAutoTitle {
-            lines.append("terminal.disable-zsh-auto-title = true")
+
+        if zshIdleTitleStyle != .defaultStyle {
+            lines.append("terminal.zsh-idle-title-style = \(TOML.quote(zshIdleTitleStyle.rawValue))")
         }
         if !enableTerminalHelpBar {
             lines.append("terminal.enable-help-bar = false")
@@ -543,12 +638,27 @@ final class AppSettings: nonisolated ObservableObject {
                 "system.reachability-interval = \(TOML.quote(systemReachabilityInterval.rawValue))"
             )
         }
+        let homeConfigDir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".config")
+        let prodIdleTitle = homeConfigDir.appendingPathComponent("qjiao/idle_title")
+        let devIdleTitle = homeConfigDir.appendingPathComponent("qjiao-dev/idle_title")
         let dir = Self.configURL.deletingLastPathComponent()
+        let idleTitleFile = dir.appendingPathComponent("idle_title")
         do {
             try FileManager.default.createDirectory(
                 at: dir, withIntermediateDirectories: true)
             try (lines.joined(separator: "\n") + "\n")
                 .write(to: Self.configURL, atomically: true, encoding: .utf8)
+            if let envVal = zshIdleTitleStyle.environmentValue {
+                try? FileManager.default.createDirectory(at: prodIdleTitle.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? FileManager.default.createDirectory(at: devIdleTitle.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? envVal.write(to: prodIdleTitle, atomically: true, encoding: .utf8)
+                try? envVal.write(to: devIdleTitle, atomically: true, encoding: .utf8)
+                try? envVal.write(to: idleTitleFile, atomically: true, encoding: .utf8)
+            } else {
+                try? FileManager.default.removeItem(at: prodIdleTitle)
+                try? FileManager.default.removeItem(at: devIdleTitle)
+                try? FileManager.default.removeItem(at: idleTitleFile)
+            }
         } catch {
             NSLog("kero: failed to write \(Self.configURL.path): \(error)")
         }

@@ -69,6 +69,7 @@ final class TerminalManager: nonisolated ObservableObject {
     private var projectThemeObservations: [UUID: AnyCancellable] = [:]
     private var projectCounter = 0
     private var settingsObservation: AnyCancellable?
+    private var zshIdleTitleObservation: AnyCancellable?
     private var autosaveObservation: AnyCancellable?
     private var terminationObservation: AnyCancellable?
     /// The stable terminal/editor responder displaced by the command palette's
@@ -153,6 +154,12 @@ final class TerminalManager: nonisolated ObservableObject {
             .sink { [weak self] _ in
                 self?.refreshAppearance()
             }
+        zshIdleTitleObservation = AppSettings.shared.$zshIdleTitleStyle
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newStyle in
+                self?.applyZshIdleTitleStyleChange(newStyle)
+            }
         // Every project/tab/selection change re-publishes through the manager,
         // so a debounced sink snapshots layout after mutations settle without
         // reading live terminal contents.
@@ -178,6 +185,18 @@ final class TerminalManager: nonisolated ObservableObject {
 
     var selectedSession: TerminalSession? {
         selectedProject?.selectedSession
+    }
+
+    /// 当 AppSettings 的 zshIdleTitleStyle 发生变化时，即时刷新全部打开终端 Session 的 UI 标签标题。
+    func applyZshIdleTitleStyleChange(_ style: ZshIdleTitleStyle) {
+        for project in projects {
+            for tab in project.tabs {
+                for session in tab.sessions {
+                    session.updateIdleTitleStyle(style)
+                }
+            }
+        }
+        objectWillChange.send()
     }
 
     // MARK: - Projects

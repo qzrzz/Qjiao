@@ -110,6 +110,7 @@ struct FileTreePanel: View {
     /// Search 模式任一输入框是否拥有焦点，用于阻止快捷键漏到终端菜单。
     @State private var isFilesSearchInputFocused = false
     @State private var isCloseFilterHovering = false
+    @State private var isContainerDropTargeted = false
     @State private var eventMonitor: Any? = nil
 
     @State private var selectedRowY: CGFloat? = nil
@@ -534,6 +535,30 @@ struct FileTreePanel: View {
                             .frame(minHeight: geo.size.height, alignment: .top)
                         }
                         .coordinateSpace(name: "FileTreePanelContainer")
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(isContainerDropTargeted ? Color(nsColor: Theme.cursor) : Color.clear, lineWidth: 2)
+                                .padding(2)
+                        )
+                        .onDrop(of: [.fileURL], isTargeted: $isContainerDropTargeted) { providers in
+                            let targetDir = model.rootPath
+                            guard !targetDir.isEmpty else { return false }
+                            let sources: [String]
+                            if FileTreeModel.isDraggingFromTree {
+                                sources = model.selectedItems.map(\.path)
+                            } else {
+                                sources = []
+                            }
+
+                            if !sources.isEmpty {
+                                confirmAndPerformMove(sources: sources, targetDir: targetDir, model: model, onRename: onRename)
+                            } else {
+                                extractURLs(from: providers) { urls in
+                                    confirmAndPerformMove(sources: urls.map(\.path), targetDir: targetDir, model: model, onRename: onRename)
+                                }
+                            }
+                            return true
+                        }
                         .onPreferenceChange(SelectedRowYKey.self) { y in
                             selectedRowY = y
                         }
@@ -821,6 +846,7 @@ private struct FileTreeRow: View {
     var onRowAnchor: ((_ path: String, _ view: NSView) -> Void)? = nil
 
     @State private var isHovering = false
+    @State private var isDropTargeted = false
     @State private var editingName = ""
     @FocusState private var fieldFocused: Bool
 
@@ -875,6 +901,9 @@ private struct FileTreeRow: View {
     }
 
     private var rowBackground: Color {
+        if isDropTargeted {
+            return Color(nsColor: Theme.cursor).opacity(0.35)
+        }
         if isSelected {
             return Color(nsColor: Theme.cursor).opacity(0.22)
         }
@@ -1134,6 +1163,10 @@ private struct FileTreeRow: View {
                 onRowAnchor?(item.path, view)
             }
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(isDropTargeted ? Color(nsColor: Theme.cursor) : Color.clear, lineWidth: 1.5)
+        )
         // simultaneous：单击立即选择（无双击延迟）；双击再打开/展开。
         .onTapGesture {
             onRowClick?()
@@ -1148,6 +1181,26 @@ private struct FileTreeRow: View {
         // path) or into Finder and other apps. 拖的是当前选择组（若本行在选中内）。
         .onDrag {
             dragProvider()
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            let targetDir = item.isDirectory ? item.path : (item.path as NSString).deletingLastPathComponent
+            let sources: [String]
+            if FileTreeModel.isDraggingFromTree {
+                sources = isSelected && model.selectedPaths.count > 1
+                    ? model.selectedItems.map(\.path)
+                    : [item.path]
+            } else {
+                sources = []
+            }
+
+            if !sources.isEmpty {
+                confirmAndPerformMove(sources: sources, targetDir: targetDir, model: model, onRename: onRename)
+            } else {
+                extractURLs(from: providers) { urls in
+                    confirmAndPerformMove(sources: urls.map(\.path), targetDir: targetDir, model: model, onRename: onRename)
+                }
+            }
+            return true
         }
     }
 
@@ -1746,5 +1799,108 @@ private final class AnchorNSView: NSView {
         if window != nil {
             onLayout?(self)
         }
+    }
+}
+
+// MARK: - Drag and Drop Move Helpers
+
+/// 校验并弹出确认移动对话框（NSAlert），用户确认后执行移动操作。
+@MainActor
+fileprivate func confirmAndPerformMove(
+    sources: [String],
+    targetDir: String,
+    model: FileTreeModel,
+    onRename: ((_ oldPath: String, _ newPath: String) -> Void)?
+) {
+    let normalizedTarget = (targetDir as NSString).standardizingPath
+    let validSources = sources.filter { srcPath in
+        let normalizedSource = (srcPath as NSString).standardizingPath
+        let srcDir = (normalizedSource as NSString).deletingLastPathComponent
+
+        // 1. 同目录内无需移动
+        guard srcDir != normalizedTarget else { return false }
+        // 2. 目标就是自身：无效
+        guard normalizedSource != normalizedTarget else { return false }
+        // 3. 不能将文件/文件夹移入自身或其子目录下
+        guard !normalizedTarget.hasPrefix(normalizedSource + "/") else { return false }
+        // 4. 源路径必须存在
+        return FileManager.default.fileExists(atPath: normalizedSource)
+    }
+
+    guard !validSources.isEmpty else {
+        FileTreeModel.isDraggingFromTree = false
+        return
+    }
+
+    let targetDirName = (normalizedTarget as NSString).lastPathComponent
+
+    let alert = NSAlert()
+    if validSources.count == 1 {
+        let srcName = (validSources[0] as NSString).lastPathComponent
+        alert.messageText = L10n.format(
+            "Are you sure you want to move “%@” into “%@”?",
+            srcName,
+            targetDirName
+        )
+        alert.informativeText = L10n.t(
+            "This operation will move the selected item to the new location."
+        )
+    } else {
+        alert.messageText = L10n.format(
+            "Are you sure you want to move %d items into “%@”?",
+            validSources.count,
+            targetDirName
+        )
+        alert.informativeText = L10n.t(
+            "This operation will move the selected items to the new location."
+        )
+    }
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: L10n.t("Move"))
+    alert.addButton(withTitle: L10n.t("Cancel"))
+
+    let response = alert.runModal()
+    if response == .alertFirstButtonReturn {
+        model.moveItems(paths: validSources, into: normalizedTarget, onRename: onRename)
+    }
+    FileTreeModel.isDraggingFromTree = false
+}
+
+/// 从 NSItemProvider 数组异步提取 fileURL。
+fileprivate func extractURLs(from providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {
+    let group = DispatchGroup()
+    var urls: [URL] = []
+    let lock = NSLock()
+
+    for provider in providers {
+        if provider.canLoadObject(ofClass: URL.self) {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { object, _ in
+                if let url = object {
+                    lock.lock()
+                    urls.append(url)
+                    lock.unlock()
+                }
+                group.leave()
+            }
+        } else if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                    lock.lock()
+                    urls.append(url)
+                    lock.unlock()
+                } else if let url = item as? URL {
+                    lock.lock()
+                    urls.append(url)
+                    lock.unlock()
+                }
+                group.leave()
+            }
+        }
+    }
+
+    group.notify(queue: .main) {
+        completion(urls)
     }
 }
