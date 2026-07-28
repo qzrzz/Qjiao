@@ -163,7 +163,7 @@ struct FileTreePanel: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                PanelHeader(title: model.rootName, subtitle: model.rootPath)
+                PanelHeader(title: model.rootName, subtitle: model.rootPath, isSubtitlePath: true)
 
                 SidebarIconButton(
                     systemImage: "magnifyingglass",

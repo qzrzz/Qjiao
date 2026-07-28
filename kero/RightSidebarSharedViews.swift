@@ -7,11 +7,47 @@ import SwiftUI
 
 // MARK: - Shared panel chrome
 
+/// 侧边栏/面板统一路径输入框样式控件。
+/// 使用 TextField 纯文本框，界面字体 (caption)，次要颜色，右侧渐隐遮罩。
+/// 当设置 `displayShortDirPath` 开启时，自动将用户 Home 目录替换为 `~`。
+struct SidebarPathTextField: View {
+    let path: String
+    @ObservedObject private var settings = AppSettings.shared
+
+    var formattedPath: String {
+        guard !path.isEmpty else { return "—" }
+        if settings.displayShortDirPath {
+            return (path as NSString).abbreviatingWithTildeInPath
+        }
+        return path
+    }
+
+    var body: some View {
+        TextField("", text: .constant(formattedPath))
+            .textFieldStyle(.plain)
+            .font(SidebarTypography.caption())
+            .foregroundStyle(Theme.secondaryColor)
+            .lineLimit(1)
+            .help(path)
+            .mask {
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0.85),
+                        .init(color: .clear, location: 1.0)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            }
+    }
+}
+
 struct PanelHeader: View {
     let title: String
     let subtitle: String?
     var titleFont: Font = SidebarTypography.title()
     var subtitleTruncationMode: Text.TruncationMode = .head
+    var isSubtitlePath: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -19,12 +55,16 @@ struct PanelHeader: View {
                 .font(titleFont)
                 .lineLimit(1)
             if let subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(SidebarTypography.caption())
-                    // PID 作为辅助信息显示，但在浅色模式下保持足够对比度。
-                    .foregroundStyle(Theme.secondaryColor)
-                    .lineLimit(1)
-                    .truncationMode(subtitleTruncationMode)
+                if isSubtitlePath {
+                    SidebarPathTextField(path: subtitle)
+                } else {
+                    Text(subtitle)
+                        .font(SidebarTypography.caption())
+                        // PID 作为辅助信息显示，但在浅色模式下保持足够对比度。
+                        .foregroundStyle(Theme.secondaryColor)
+                        .lineLimit(1)
+                        .truncationMode(subtitleTruncationMode)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -43,14 +43,24 @@ struct PathDirectorySection: View {
     @ObservedObject private var registry = CodeEditorRegistry.shared
     @ObservedObject private var aiRegistry = AIToolRegistry.shared
 
+    @ObservedObject private var settings = AppSettings.shared
+
+    private var formattedPath: String {
+        guard !path.isEmpty else { return "—" }
+        if settings.displayShortDirPath {
+            return (path as NSString).abbreviatingWithTildeInPath
+        }
+        return path
+    }
+
     var body: some View {
         SidebarSectionHeader(
             title: sectionTitle, count: 0, isCollapsed: $isCollapsed, actions: []
         )
         if !isCollapsed {
             VStack(alignment: .leading, spacing: 8) {
-                Text(path.isEmpty ? "—" : path)
-                    .font(SidebarTypography.secondary(design: .monospaced))
+                Text(formattedPath)
+                    .font(SidebarTypography.secondary())
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .truncationMode(.head)

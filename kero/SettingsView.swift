@@ -102,6 +102,14 @@ struct SettingsView: View {
                         title: L10n.t("Light colors"), selection: $settings.themeLight, dark: false
                     )
                     ProjectThemeOverrideHint()
+
+                    settingWithDescription(
+                        L10n.t("Short Directory Path"),
+                        L10n.t("Display ~ instead of home directory path.")
+                    ) {
+                        Toggle("", isOn: $settings.displayShortDirPath)
+                            .labelsHidden()
+                    }
                 }
                 .settingsRowPadding()
             }

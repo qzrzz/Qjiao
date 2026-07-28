@@ -255,22 +255,7 @@ struct SessionInfoPanel: View {
 
     private var pathRow: some View {
         HStack(spacing: 6) {
-            TextField("", text: .constant(model.cwdPath.isEmpty ? "—" : model.cwdPath))
-                .textFieldStyle(.plain)
-                .font(SidebarTypography.caption(design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .help(model.cwdPath)
-                .mask {
-                    LinearGradient(
-                        stops: [
-                            .init(color: .black, location: 0.85),
-                            .init(color: .clear, location: 1.0)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                }
+            SidebarPathTextField(path: model.cwdPath)
 
             HStack(spacing: 4) {
                 SidebarIconButton(

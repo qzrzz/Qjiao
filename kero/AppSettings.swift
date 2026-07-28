@@ -132,6 +132,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 面板中的路径显示是否将用户目录缩短为 ~。
+    @Published var displayShortDirPath: Bool {
+        didSet { save() }
+    }
+
     /// Files / CWD 文件树字体族；空字符串表示内置 Inter Variable。
     @Published var filesFontFamily: String {
         didSet { save() }
@@ -302,6 +307,11 @@ final class AppSettings: nonisolated ObservableObject {
             dark: true
         )
         displayFileSize = toml["files.display-file-size"]?.bool ?? true
+        displayShortDirPath = toml["appearance.short-directory-path"]?.bool
+            ?? toml["appearance.display-short-dir-path"]?.bool
+            ?? toml["appearance.display-sort-dir-path"]?.bool
+            ?? toml["display-sort-dir-path"]?.bool
+            ?? false
         filesFontFamily = toml["files.font-family"]?.string ?? ""
         let filesSize = toml["files.font-size"]?.double ?? Self.defaultFilesFontSize
         filesFontSize = Self.filesFontSizeRange.contains(filesSize) ? filesSize : Self.defaultFilesFontSize
@@ -402,6 +412,7 @@ final class AppSettings: nonisolated ObservableObject {
         editorThemeLight = ""
         editorThemeDark = ""
         displayFileSize = true
+        displayShortDirPath = false
         filesFontFamily = ""
         filesFontSize = Self.defaultFilesFontSize
         restoreTerminalHistory = false
@@ -477,6 +488,9 @@ final class AppSettings: nonisolated ObservableObject {
         // 默认 true：仅在关闭时写回，避免污染默认配置文件。
         if !displayFileSize {
             lines.append("files.display-file-size = false")
+        }
+        if displayShortDirPath {
+            lines.append("appearance.short-directory-path = true")
         }
         if !filesFontFamily.isEmpty {
             lines.append("files.font-family = \(TOML.quote(filesFontFamily))")

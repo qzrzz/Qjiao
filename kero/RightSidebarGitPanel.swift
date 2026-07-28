@@ -141,7 +141,7 @@ struct GitPanel: View {
                 Image(systemName: "arrow.triangle.branch")
                     .font(SidebarTypography.secondary(.medium))
                     .foregroundStyle(Color(nsColor: Theme.cursor))
-                PanelHeader(title: L10n.t("Git"), subtitle: model.rootPath)
+                PanelHeader(title: L10n.t("Git"), subtitle: model.rootPath, isSubtitlePath: true)
             }
             if model.isRepo {
                 GitHeaderIconButton(
@@ -194,7 +194,7 @@ struct GitPanel: View {
                 Image(systemName: "arrow.triangle.branch")
                     .font(SidebarTypography.secondary(.medium))
                     .foregroundStyle(Color(nsColor: Theme.cursor))
-                PanelHeader(title: model.branch ?? "Detached HEAD", subtitle: model.rootPath)
+                PanelHeader(title: model.branch ?? "Detached HEAD", subtitle: model.rootPath, isSubtitlePath: true)
             }
             .contentShape(Rectangle())
         }
