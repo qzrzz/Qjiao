@@ -80,7 +80,13 @@
 - 增加终端字体笔画加粗开关，默认关闭。
 - 外观设置支持分别调整窗口背景与终端背景不透明度。
 - 支持 Ghostty 配色主题，亮色和暗色主题可分别设置并应用到整个窗口。
-- 项目右键菜单支持项目级主题：遵循全局设置，或在 Light/Dark 精选、Cool、Warm 分隔项中选择具体 Ghostty 主题，并可从各自菜单内的“全部 Light 主题”“全部 Dark 主题”进入完整目录；主题菜单和全局主题选择器使用背景色、文本色及界面/文件夹强调色预览图标。
+- 项目右键菜单支持项目级配色：与全局 Appearance 一样分 **Light colors / Dark colors** 两套独立覆盖（也可整项「跟随全局」）；只改当前项目在亮/暗环境下的 Ghostty 配色，**不**强制窗口亮暗（亮暗仍由全局 System/Light/Dark 决定）。各侧含精选 / Cool / Warm 与完整目录；菜单项带配色预览图标。旧版「单选并强制亮或暗」配置会迁成对应侧覆盖。
+  - 当活动项目覆盖了全局配色时，**Settings → Appearance** 显示提示：当前生效的 Dark/Light 主题名、来自哪个项目，以及如何改回跟随全局。
+- **用户自定义主题**（Settings → General → Appearance → **Custom Themes**）：
+  - 新建主题时指定 **背景色 / 文本色 / 强调色**：背景与侧栏、文本（侧栏/标签/面板主次文字）、强调色（激活与光标）驱动窗口 chrome；分割线等由三色推导。
+  - 为每个自定义主题指定搭配的 **Ghostty 终端主题**（完整 ANSI palette），并标记为 **Dark** 或 **Light**；可选 **跟随背景色**，让终端背景使用自定义背景色（palette 仍用 Ghostty）。
+  - 自定义主题出现在全局 Dark/Light colors 选择器与项目右键 Theme 菜单的 **Custom** 分组及「全部…」列表中。
+  - 文件保存在 `~/.config/qjiao/themes/{uuid}.json`（Debug 为 `qjiao-dev`）；`config.toml` 的 `theme-dark` / `theme-light` 写入主题显示名。
 - 左侧面板底部增加主题菜单，可快速切换 System、Light、Dark 外观。
 - Default Dark 主题的左侧项目面板改用更深的 `underWindowBackground` 材质，避免系统侧栏材质提亮背景。
 - 修复开启终端不透明度时切换 Tab 后未选中的 Git Diff 对比器透出显示的问题，并将终端背景不透明度设置应用于 Git Diff 对比器。

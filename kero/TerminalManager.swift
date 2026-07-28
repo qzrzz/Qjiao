@@ -908,11 +908,42 @@ final class TerminalManager: nonisolated ObservableObject {
         }
     }
 
-    /// Resolves the active project's explicit theme names before repainting
-    /// terminals and native views. A global project clears the override.
+    /// 套用当前选中项目的 Light/Dark 配色覆盖后重绘终端与原生色。
+    /// `followsGlobal` 的项目会清空覆盖，回到全局 theme-light / theme-dark。
     func reloadActiveProjectTheme() {
-        Theme.reloadProjectSelection(selectedProject?.theme)
+        let project = selectedProject
+        Theme.reloadProjectSelection(project?.theme, projectName: project?.name)
         refreshAppearance()
+    }
+
+    /// 自定义主题重命名 / 删除时，同步所有窗口内项目的 light/dark 覆盖。
+    /// `to == nil` 表示清除该侧覆盖（跟随全局）。
+    static func remapProjectThemeName(from old: String, to new: String?) {
+        for manager in registry {
+            for project in manager.projects {
+                var theme = project.theme
+                var changed = false
+                if theme.dark == old {
+                    theme = theme.withDark(new)
+                    changed = true
+                }
+                if theme.light == old {
+                    theme = theme.withLight(new)
+                    changed = true
+                }
+                if changed {
+                    project.theme = theme
+                }
+            }
+            manager.reloadActiveProjectTheme()
+        }
+    }
+
+    /// 自定义主题配色变更后重绘全部窗口的终端（选择名未变时 settings 观察者不会触发）。
+    static func refreshAllAppearances() {
+        for manager in registry {
+            manager.reloadActiveProjectTheme()
+        }
     }
 
     /// After the first window appears, reopen one window per unclaimed

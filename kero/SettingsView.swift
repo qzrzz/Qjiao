@@ -101,11 +101,14 @@ struct SettingsView: View {
                     GhosttyThemePicker(
                         title: L10n.t("Light colors"), selection: $settings.themeLight, dark: false
                     )
+                    ProjectThemeOverrideHint()
                 }
                 .settingsRowPadding()
             }
 
-            Section {
+            CustomThemesSettingsSection()
+
+            Section(L10n.t("Window")) {
                 Group {
                     backgroundOpacityControl(
                         L10n.t("Window background opacity"),
@@ -768,17 +771,110 @@ private extension View {
     }
 }
 
-/// Ghostty 主题选择器只在第一层展示精选主题，其余目录收进“全部…”。
+/// 当活动项目覆盖了全局 Light/Dark 配色时，在设置外观区显示当前生效主题与原因。
+private struct ProjectThemeOverrideHint: View {
+    @ObservedObject private var themeChanges = Theme.changes
+    @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var l10n = L10n.shared
+
+    var body: some View {
+        // 依赖 themeChanges / settings / 语言，项目覆盖或全局配色变更时刷新提示。
+        let _ = (themeChanges, l10n.language, settings.themeLight, settings.themeDark)
+        if let summary = Theme.projectThemeOverrideSummary {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color(nsColor: Theme.cursor))
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.t("Project color override"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.primaryColor)
+                    Text(reasonText(summary))
+                        .font(.callout)
+                        .foregroundStyle(Theme.secondaryColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                    effectiveLine(
+                        title: L10n.t("Dark colors"),
+                        overrideName: summary.darkOverride,
+                        globalName: settings.themeDark
+                    )
+                    effectiveLine(
+                        title: L10n.t("Light colors"),
+                        overrideName: summary.lightOverride,
+                        globalName: settings.themeLight
+                    )
+                    Text(L10n.t("Change this in the project’s right-click Theme menu, or choose Follow Global Settings."))
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: Theme.cursor).opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color(nsColor: Theme.cursor).opacity(0.18), lineWidth: 1)
+            )
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func reasonText(_ summary: ProjectThemeOverrideSummary) -> String {
+        if let name = summary.projectName, !name.isEmpty {
+            return L10n.format(
+                "The project “%@” is overriding the global color theme for the active window.",
+                name
+            )
+        }
+        return L10n.t("The active project is overriding the global color theme for the active window.")
+    }
+
+    @ViewBuilder
+    private func effectiveLine(title: String, overrideName: String?, globalName: String) -> some View {
+        let effective = overrideName ?? globalName
+        if let overrideName {
+            Text(
+                L10n.format(
+                    "%@: %@ (project). Global setting: %@.",
+                    title,
+                    overrideName,
+                    globalName
+                )
+            )
+            .font(.callout)
+            .foregroundStyle(Theme.primaryColor)
+            .monospacedDigit()
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(L10n.format("%@: %@ (global).", title, effective))
+                .font(.callout)
+                .foregroundStyle(Theme.secondaryColor)
+                .monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Ghostty / 自定义主题选择器：自定义分组在前，精选主题其次，完整目录收进“全部…”。
 private struct GhosttyThemePicker: View {
     let title: String
     @Binding var selection: String
     let dark: Bool
+    @ObservedObject private var customThemes = CustomThemeStore.shared
 
     var body: some View {
         HStack {
             Text(title)
             Spacer()
             Menu {
+                customThemeMenuSection(dark: dark, selection: selection) { name in
+                    selection = name
+                }
                 ForEach(ThemeMenuCatalog.primary(dark: dark), id: \.self) { name in
                     themeItem(name)
                 }
@@ -794,7 +890,7 @@ private struct GhosttyThemePicker: View {
                 }
                 Divider()
                 Menu(dark ? L10n.t("All Dark Themes") : L10n.t("All Light Themes")) {
-                    ForEach(ThemeMenuCatalog.all(dark: dark), id: \.self) { name in
+                    ForEach(ThemeMenuCatalog.allIncludingCustom(dark: dark), id: \.self) { name in
                         themeItem(name)
                     }
                 }
@@ -802,6 +898,8 @@ private struct GhosttyThemePicker: View {
                 themeLabel(selection, dark: dark)
             }
             .menuStyle(.borderlessButton)
+            // 观察 store，新建/删除后刷新菜单项。
+            .id(customThemes.themes.map(\.id))
         }
     }
 

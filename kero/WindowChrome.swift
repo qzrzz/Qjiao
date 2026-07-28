@@ -9,10 +9,10 @@ import SwiftUI
 /// Keeps the traffic-light buttons aligned with the app's 38pt header bar:
 /// 20pt leading, vertically centered on the header's center line. AppKit
 /// re-lays the buttons out on various events, so we re-apply after each.
+///
+/// 窗口亮暗由全局 `AppTheme`（`NSApp.appearance`）决定；项目主题只覆盖配色，
+/// 不再改 `window.appearance`。
 struct WindowChromeAccessor: NSViewRepresentable {
-    var projectTheme: ProjectTheme = .global
-    var onAppearanceChanged: () -> Void = {}
-
     static let buttonCenterY: CGFloat = 21
     static let buttonLeading: CGFloat = 16
     static let buttonSpacing: CGFloat = 20
@@ -25,11 +25,7 @@ struct WindowChromeAccessor: NSViewRepresentable {
         let view = NSView()
         DispatchQueue.main.async {
             if let window = view.window {
-                context.coordinator.attach(
-                    window,
-                    projectTheme: projectTheme,
-                    onAppearanceChanged: onAppearanceChanged
-                )
+                context.coordinator.attach(window)
             }
         }
         return view
@@ -37,11 +33,7 @@ struct WindowChromeAccessor: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         if let window = view.window {
-            context.coordinator.attach(
-                window,
-                projectTheme: projectTheme,
-                onAppearanceChanged: onAppearanceChanged
-            )
+            context.coordinator.attach(window)
         }
     }
 
@@ -49,29 +41,13 @@ struct WindowChromeAccessor: NSViewRepresentable {
     final class Coordinator {
         private weak var window: NSWindow?
         private var observers: [NSObjectProtocol] = []
-        private var lastProjectTheme: ProjectTheme?
 
-        func attach(
-            _ window: NSWindow,
-            projectTheme: ProjectTheme,
-            onAppearanceChanged: @escaping () -> Void
-        ) {
-            let projectThemeChanged = lastProjectTheme != projectTheme
-            lastProjectTheme = projectTheme
-            // A project override is a window appearance, so multiple Qjiao
-            // windows can use different project themes without changing the
-            // app-wide preference. nil inherits NSApp.appearance.
-            window.appearance = projectTheme.nsAppearance
+        func attach(_ window: NSWindow) {
             // SwiftUI background layers can become translucent through the
             // Appearance setting, so the AppKit window must not flatten them
             // onto an opaque system background first.
             window.isOpaque = false
             window.backgroundColor = .clear
-            if projectThemeChanged {
-                DispatchQueue.main.async {
-                    onAppearanceChanged()
-                }
-            }
             guard self.window !== window else { return }
             self.window = window
             // 允许自定义标题栏和 Header 空白区域通过 WindowDragArea 拖拽移动窗口。

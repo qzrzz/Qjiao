@@ -22,7 +22,7 @@ struct PanelHeader: View {
                 Text(subtitle)
                     .font(SidebarTypography.caption())
                     // PID 作为辅助信息显示，但在浅色模式下保持足够对比度。
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryColor)
                     .lineLimit(1)
                     .truncationMode(subtitleTruncationMode)
             }
@@ -54,7 +54,7 @@ struct SidebarIconButton: View {
                 .foregroundStyle(
                     active
                         ? Color(nsColor: Theme.cursor)
-                        : (disabled ? .secondary.opacity(0.4) : (isHovering ? .primary : .secondary))
+                        : (disabled ? Theme.secondaryColor.opacity(0.4) : (isHovering ? Theme.primaryColor : Theme.secondaryColor))
                 )
                 .frame(width: 22, height: 22)
                 .background(
@@ -62,7 +62,7 @@ struct SidebarIconButton: View {
                         .fill(
                             active
                                 ? Color(nsColor: Theme.cursor).opacity(0.12)
-                                : (isHovering && !disabled ? Color.primary.opacity(0.08) : Color.clear)
+                                : (isHovering && !disabled ? Theme.primaryColor.opacity(0.08) : Color.clear)
                         )
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 5))
@@ -96,7 +96,7 @@ struct SidebarMenuIconButton<Content: View>: View {
                 .foregroundStyle(
                     active
                         ? Color(nsColor: Theme.cursor)
-                        : (disabled ? .secondary.opacity(0.4) : (isHovering ? .primary : .secondary))
+                        : (disabled ? Theme.secondaryColor.opacity(0.4) : (isHovering ? Theme.primaryColor : Theme.secondaryColor))
                 )
                 .frame(width: 22, height: 22)
                 .background(
@@ -104,7 +104,7 @@ struct SidebarMenuIconButton<Content: View>: View {
                         .fill(
                             active
                                 ? Color(nsColor: Theme.cursor).opacity(0.12)
-                                : (isHovering && !disabled ? Color.primary.opacity(0.08) : Color.clear)
+                                : (isHovering && !disabled ? Theme.primaryColor.opacity(0.08) : Color.clear)
                         )
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 5))
@@ -136,7 +136,7 @@ struct SidebarRefreshButton: View {
                 .foregroundStyle(
                     isRefreshing
                         ? Color(nsColor: Theme.cursor)
-                        : (isHovering ? Color.primary : Color.secondary)
+                        : (isHovering ? Theme.primaryColor : Theme.secondaryColor)
                 )
                 .rotationEffect(.degrees(isRefreshing ? 360 : 0))
                 .animation(
@@ -150,7 +150,7 @@ struct SidebarRefreshButton: View {
                     RoundedRectangle(cornerRadius: 5)
                         .fill(
                             isHovering && !isRefreshing
-                                ? Color.primary.opacity(0.08)
+                                ? Theme.primaryColor.opacity(0.08)
                                 : Color.clear
                         )
                 )
@@ -190,20 +190,20 @@ struct SidebarSectionHeader: View {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.right")
                         .font(SidebarTypography.chevron())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.secondaryColor)
                         .rotationEffect(.degrees(isCollapsed ? 0 : 90))
                     Text(title)
                         .font(SidebarTypography.section(.semibold))
                         // 分组标题使用次级文字色，提升浅色模式下的可读性。
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.secondaryColor)
                     // 数量紧跟标题，不再右对齐到行尾。
                     if count > 0 {
                         Text("\(count)")
                             .font(SidebarTypography.micro())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.secondaryColor)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.primary.opacity(0.08)))
+                            .background(Capsule().fill(Theme.primaryColor.opacity(0.08)))
                     }
                 }
                 .contentShape(Rectangle())
@@ -222,7 +222,7 @@ struct SidebarSectionHeader: View {
                     Button(action: action.perform) {
                         Image(systemName: action.systemImage)
                             .font(SidebarTypography.micro())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.secondaryColor)
                             .frame(width: 18, height: 18)
                             .contentShape(RoundedRectangle(cornerRadius: 4))
                     }

@@ -156,7 +156,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             saveConfig()
         }
     }
-    /// 项目级主题覆盖；默认跟随全局设置。
+    /// 项目级 Light/Dark 配色覆盖；默认两侧都跟随全局。
     @Published var theme: ProjectTheme = .global {
         didSet {
             saveConfig()

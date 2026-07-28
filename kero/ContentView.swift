@@ -102,22 +102,16 @@ struct ContentView: View {
             TabSwitcherEventMonitor(manager: manager, controller: tabSwitcher)
                 .frame(width: 0, height: 0)
         }
-        .background(
-            WindowChromeAccessor(
-                projectTheme: manager.selectedProject?.theme ?? .global,
-                onAppearanceChanged: manager.reloadActiveProjectTheme
-            )
-        )
+        .background(WindowChromeAccessor())
         .onDrop(of: [UTType.fileURL], isTargeted: nil, perform: addDroppedProjects)
         .onChange(of: colorScheme) {
             manager.refreshAppearance()
         }
         .onChange(of: manager.selectedProject?.theme) {
-            manager.refreshAppearance()
+            // 项目 light/dark 配色覆盖变更：先写入 Theme.projectSelection 再刷终端。
+            manager.reloadActiveProjectTheme()
         }
         .onAppear {
-            // The window appearance may be applied by WindowChromeAccessor
-            // during the first mount; refresh once after that override exists.
             manager.reloadActiveProjectTheme()
             NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { event in
                 FileTreeModel.isDraggingFromTree = false
@@ -216,7 +210,7 @@ struct ContentView: View {
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(.tertiary)
             Text(title)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryColor)
             Button(buttonTitle, action: action)
         }
     }
@@ -365,7 +359,7 @@ enum HeaderTabActionMetrics {
     /// 顶栏左右工具按钮外侧边距：左边栏开关左边距 = 右边栏开关右边距。
     static let edgePadding: CGFloat = 10
     /// 仅 hover 浅底；按下 / 激活无底色。
-    static let hoverFill = Color.primary.opacity(0.06)
+    static let hoverFill = Theme.primaryColor.opacity(0.06)
 }
 
 /// 顶栏统一图标按钮：较大 hit 区、固定 caption 图标；hover 浅底，按下无底色。
@@ -380,7 +374,7 @@ struct HeaderIconButton: View {
 
     private var iconColor: Color {
         if isActive { return Color(nsColor: Theme.cursor) }
-        return isHovering ? .primary : .secondary
+        return isHovering ? Theme.primaryColor : Theme.secondaryColor
     }
 
     var body: some View {
@@ -528,14 +522,14 @@ private struct TabListRow: View {
             HStack(alignment: .top, spacing: 8) {
                 TabContentIcon(
                     content: tab.focusedContent,
-                    tint: isSelected ? Color(nsColor: Theme.cursor) : .secondary
+                    tint: isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor
                 )
                 .frame(width: 16, height: 18)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(tab.displayTitle ?? "Untitled Tab")
                         .font(SidebarTypography.body())
-                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
                         .lineLimit(1)
                         .truncationMode(.tail)
 
@@ -565,7 +559,7 @@ private struct TabListRow: View {
         .focusable(false)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(isSelected ? Color.primary.opacity(0.09) : .clear)
+                .fill(isSelected ? Theme.primaryColor.opacity(0.09) : .clear)
         )
     }
 }
@@ -1018,7 +1012,7 @@ private struct TabRenameChrome: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.09)))
+        .background(RoundedRectangle(cornerRadius: 6).fill(Theme.primaryColor.opacity(0.09)))
         .onAppear { DispatchQueue.main.async { focused = true } }
     }
 
@@ -1158,7 +1152,7 @@ private struct TabItemChrome: View {
                 } else if isTerminalRunning {
                     ProgressView()
                         .controlSize(.mini)
-                        .tint(isSelected ? Color(nsColor: Theme.cursor) : .secondary)
+                        .tint(isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor)
                         .frame(width: 11, height: 11)
                         .accessibilityLabel(L10n.t("Command running"))
                 } else {
@@ -1170,7 +1164,7 @@ private struct TabItemChrome: View {
                 }
                 Text(title)
                     .font(SidebarTypography.body())
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
                     .lineLimit(1)
                     // 标题独占可伸缩空间，右侧的分栏提示、修改提示和关闭按钮始终右对齐。
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1187,14 +1181,14 @@ private struct TabItemChrome: View {
                     Button(action: close) {
                         Image(systemName: "xmark")
                             .font(SidebarTypography.compact(.bold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.secondaryColor)
                             .frame(width: 14, height: 14)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 } else if isDirty {
                     Circle()
-                        .fill(.secondary)
+                        .fill(Theme.secondaryColor)
                         .frame(width: 5, height: 5)
                         .frame(width: 14, height: 14)
                 } else {
@@ -1212,7 +1206,7 @@ private struct TabItemChrome: View {
         .clipped()
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.primary.opacity(0.09) : (isHovering ? Color.primary.opacity(0.04) : .clear))
+                .fill(isSelected ? Theme.primaryColor.opacity(0.09) : (isHovering ? Theme.primaryColor.opacity(0.04) : .clear))
         )
         .onHover { isHovering = $0 }
         .onAppear { updateRetainedWidth() }

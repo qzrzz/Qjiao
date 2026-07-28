@@ -261,6 +261,8 @@ final class AppSettings: nonisolated ObservableObject {
     }
 
     private init() {
+        // 先加载自定义主题目录，使 knownTheme 能识别用户主题。
+        _ = CustomThemeStore.shared
         let existing = TOML.parse(at: Self.configURL)
         let toml = existing ?? Self.legacyDefaults()
         language = toml["ui.language"]?.string.flatMap(AppLanguage.init(rawValue:)) ?? .english
@@ -362,9 +364,9 @@ final class AppSettings: nonisolated ObservableObject {
         return value
     }
 
-    /// Overrides the app-wide appearance so windows using the global project
-    /// theme — and their terminals — follow the choice. Explicit project
-    /// themes set a window-level appearance instead.
+    /// Overrides the app-wide appearance (System / Light / Dark). Project
+    /// themes only swap Ghostty color pairs for the active project and never
+    /// change this value.
     /// Called from `init` because `didSet` doesn't run during initialization.
     func applyAppearance() {
         NSApp?.appearance = theme.nsAppearance

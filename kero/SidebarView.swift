@@ -225,7 +225,7 @@ private struct SidebarFooterButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(SidebarTypography.secondary(.medium))
-                .foregroundStyle(isHovering ? .primary : .secondary)
+                .foregroundStyle(isHovering ? Theme.primaryColor : Theme.secondaryColor)
                 .frame(width: 24, height: 24)
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }
@@ -248,7 +248,7 @@ private struct SidebarThemeButton: View {
         Button(action: toggleTheme) {
             Image(systemName: appearanceIcon)
                 .font(SidebarTypography.secondary(.medium))
-                .foregroundStyle(isHovering ? .primary : .secondary)
+                .foregroundStyle(isHovering ? Theme.primaryColor : Theme.secondaryColor)
                 .frame(width: 24, height: 24)
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }
@@ -369,7 +369,7 @@ private struct SidebarProjectRow: View {
         .opacity(isDragging ? 0.65 : 1)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.primary.opacity(0.09) : (isHovering ? Color.primary.opacity(0.04) : .clear))
+                .fill(isSelected ? Theme.primaryColor.opacity(0.09) : (isHovering ? Theme.primaryColor.opacity(0.04) : .clear))
         )
         .onHover { isHovering = $0 }
         .contextMenu {
@@ -385,10 +385,25 @@ private struct SidebarProjectRow: View {
                 beginDescriptionEdit()
             }
             Menu(L10n.t("Theme")) {
-                projectThemeItem(.global)
-                curatedThemeMenu(dark: false)
+                // 两侧都清空 → 完全跟随全局 Light/Dark colors
+                Toggle(isOn: Binding(
+                    get: { project.theme.followsGlobal },
+                    set: { if $0 { project.theme = .global } }
+                )) {
+                    Label {
+                        Text(L10n.t("Follow Global Settings"))
+                    } icon: {
+                        Image(nsImage: ThemePreviewImageRenderer.image(for: [
+                            Theme.globalDefinition(dark: false),
+                            Theme.globalDefinition(dark: true)
+                        ]))
+                    }
+                    .labelStyle(.titleAndIcon)
+                }
                 Divider()
-                curatedThemeMenu(dark: true)
+                // 与 Settings → Appearance 一致：Light / Dark 两套独立配色
+                projectAppearanceThemeMenu(dark: false)
+                projectAppearanceThemeMenu(dark: true)
             }
             Divider()
             Button {
@@ -588,14 +603,14 @@ private struct SidebarProjectRow: View {
                 // 已归档项目：单行精简展示项目名称，隐藏第二行副标题
                 Text(project.name)
                     .font(SidebarTypography.secondary())
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
                     .lineLimit(1)
             } else {
                 // 未归档项目：保持标准双行呈现（项目名 + 副标题）
                 VStack(alignment: .leading, spacing: 1) {
                     Text(project.name)
                         .font(SidebarTypography.body())
-                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
                         .lineLimit(1)
                     subtitle
                 }
@@ -614,7 +629,7 @@ private struct SidebarProjectRow: View {
                         } label: {
                             Image(systemName: "tray.and.arrow.up")
                                 .font(SidebarTypography.micro(.bold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.secondaryColor)
                                 .frame(width: 16, height: 16)
                                 .contentShape(Rectangle())
                         }
@@ -624,7 +639,7 @@ private struct SidebarProjectRow: View {
                         Button(action: requestClose) {
                             Image(systemName: "xmark")
                                 .font(SidebarTypography.micro(.bold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.secondaryColor)
                                 .frame(width: 16, height: 16)
                                 .contentShape(Rectangle())
                         }
@@ -636,7 +651,7 @@ private struct SidebarProjectRow: View {
                         Button(action: requestClose) {
                             Image(systemName: "xmark")
                                 .font(SidebarTypography.micro(.bold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.secondaryColor)
                                 .frame(width: 16, height: 16)
                                 .contentShape(Rectangle())
                         }
@@ -668,35 +683,81 @@ private struct SidebarProjectRow: View {
         isRenaming = false
     }
 
+    /// 项目某一侧（Light 或 Dark）的配色子菜单；只覆盖该侧，不改亮暗外观。
     @ViewBuilder
-    private func projectThemeItem(_ theme: ProjectTheme) -> some View {
-        Toggle(isOn: Binding(
-            get: { project.theme == theme },
-            set: { if $0 { project.theme = theme } }
-        )) {
-            Label {
-                Text(L10n.t("Follow Global Settings"))
-            } icon: {
-                Image(nsImage: ThemePreviewImageRenderer.image(for: [
-                    Theme.globalDefinition(dark: false),
-                    Theme.globalDefinition(dark: true)
-                ]))
+    private func projectAppearanceThemeMenu(dark: Bool) -> some View {
+        let currentName = dark ? project.theme.dark : project.theme.light
+        let preview = Theme.definition(named: currentName ?? "")
+            ?? Theme.globalDefinition(dark: dark)
+        Menu {
+            // 该侧跟随全局
+            Toggle(isOn: Binding(
+                get: { currentName == nil },
+                set: { if $0 {
+                    project.theme = dark
+                        ? project.theme.withDark(nil)
+                        : project.theme.withLight(nil)
+                } }
+            )) {
+                Label {
+                    Text(L10n.t("Follow Global Settings"))
+                } icon: {
+                    Image(nsImage: ThemePreviewImageRenderer.image(for: [
+                        Theme.globalDefinition(dark: dark)
+                    ]))
+                }
+                .labelStyle(.titleAndIcon)
             }
-            .labelStyle(.titleAndIcon)
+            Divider()
+            customThemeMenuSection(dark: dark, selection: currentName) { name in
+                project.theme = dark
+                    ? project.theme.withDark(name)
+                    : project.theme.withLight(name)
+            }
+            ForEach(ThemeMenuCatalog.primary(dark: dark), id: \.self) { name in
+                namedProjectSideThemeItem(name: name, dark: dark)
+            }
+            Section(L10n.t("Cool")) {
+                ForEach(ThemeMenuCatalog.cool(dark: dark), id: \.self) { name in
+                    namedProjectSideThemeItem(name: name, dark: dark)
+                }
+            }
+            Section(L10n.t("Warm")) {
+                ForEach(ThemeMenuCatalog.warm(dark: dark), id: \.self) { name in
+                    namedProjectSideThemeItem(name: name, dark: dark)
+                }
+            }
+            Divider()
+            Menu {
+                ForEach(ThemeMenuCatalog.allIncludingCustom(dark: dark), id: \.self) { name in
+                    namedProjectSideThemeItem(name: name, dark: dark)
+                }
+            } label: {
+                themeMenuLabel(
+                    dark ? L10n.t("All Dark Themes") : L10n.t("All Light Themes"),
+                    definition: Theme.globalDefinition(dark: dark)
+                )
+            }
+        } label: {
+            themeMenuLabel(
+                dark ? L10n.t("Dark colors") : L10n.t("Light colors"),
+                definition: preview
+            )
         }
     }
 
-    private func namedProjectThemeItem(name: String, dark: Bool) -> some View {
-        let theme: ProjectTheme = if dark {
-            .dark(name: name)
-        } else {
-            .light(name: name)
-        }
+    /// 选中某一侧的具体 Ghostty 主题名（另一侧保持不动）。
+    private func namedProjectSideThemeItem(name: String, dark: Bool) -> some View {
+        let selected = (dark ? project.theme.dark : project.theme.light) == name
         let definition = Theme.definition(named: name)
             ?? Theme.globalDefinition(dark: dark)
         return Toggle(isOn: Binding(
-            get: { project.theme == theme },
-            set: { if $0 { project.theme = theme } }
+            get: { selected },
+            set: { if $0 {
+                project.theme = dark
+                    ? project.theme.withDark(name)
+                    : project.theme.withLight(name)
+            } }
         )) {
             Label {
                 Text(name)
@@ -707,50 +768,11 @@ private struct SidebarProjectRow: View {
         }
     }
 
-    @ViewBuilder
-    private func curatedThemeMenu(dark: Bool) -> some View {
-        Menu {
-            ForEach(ThemeMenuCatalog.primary(dark: dark), id: \.self) { name in
-                namedProjectThemeItem(name: name, dark: dark)
-            }
-            Section(L10n.t("Cool")) {
-                ForEach(ThemeMenuCatalog.cool(dark: dark), id: \.self) { name in
-                    namedProjectThemeItem(name: name, dark: dark)
-                }
-            }
-            Section(L10n.t("Warm")) {
-                ForEach(ThemeMenuCatalog.warm(dark: dark), id: \.self) { name in
-                    namedProjectThemeItem(name: name, dark: dark)
-                }
-            }
-            Divider()
-            allThemeMenu(
-                dark: dark,
-                title: dark ? L10n.t("All Dark Themes") : L10n.t("All Light Themes")
-            )
-        } label: {
-            themeMenuLabel(dark ? L10n.t("Dark") : L10n.t("Light"), dark: dark)
-        }
-    }
-
-    @ViewBuilder
-    private func allThemeMenu(dark: Bool, title: String) -> some View {
-        Menu {
-            ForEach(ThemeMenuCatalog.all(dark: dark), id: \.self) { name in
-                namedProjectThemeItem(name: name, dark: dark)
-            }
-        } label: {
-            themeMenuLabel(title, dark: dark)
-        }
-    }
-
-    private func themeMenuLabel(_ title: String, dark: Bool) -> some View {
+    private func themeMenuLabel(_ title: String, definition: GhosttyThemeDefinition) -> some View {
         Label {
             Text(title)
         } icon: {
-            Image(nsImage: ThemePreviewImageRenderer.image(
-                for: [Theme.globalDefinition(dark: dark)]
-            ))
+            Image(nsImage: ThemePreviewImageRenderer.image(for: [definition]))
         }
         .labelStyle(.titleAndIcon)
     }
@@ -810,7 +832,7 @@ private struct SidebarProjectRow: View {
             TextField("Description", text: $descriptionDraft)
                 .textFieldStyle(.plain)
                 .font(SidebarTypography.section())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryColor)
                 .focused($descriptionFocused)
                 .onSubmit(saveDescription)
                 .onExitCommand(perform: cancelDescriptionEdit)
@@ -822,7 +844,7 @@ private struct SidebarProjectRow: View {
         } else if let description = project.description, !description.isEmpty {
             Text(description)
                 .font(SidebarTypography.section())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryColor)
                 .lineLimit(1)
         } else if project.sessions.count > 1 {
             Text(L10n.format("%d sessions", project.sessions.count))
@@ -891,11 +913,11 @@ private struct SidebarArchiveSection: View {
 
                         Image(systemName: "archivebox")
                             .font(SidebarTypography.secondary(.medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.secondaryColor)
 
                         Text(L10n.t("Archived"))
                             .font(SidebarTypography.secondary(.medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.secondaryColor)
 
                         Spacer(minLength: 0)
 
@@ -907,7 +929,7 @@ private struct SidebarArchiveSection: View {
                             .padding(.vertical, 1)
                             .background(
                                 Capsule()
-                                    .fill(Color.primary.opacity(0.06))
+                                    .fill(Theme.primaryColor.opacity(0.06))
                             )
                     }
                     .padding(.horizontal, 8)
@@ -949,10 +971,10 @@ private struct SidebarArchiveSection: View {
                         .padding(.vertical, 4)
                         .background(
                             RoundedRectangle(cornerRadius: 5)
-                                .fill(Color.primary.opacity(0.05))
+                                .fill(Theme.primaryColor.opacity(0.05))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 5)
-                                        .stroke(isSearchFieldFocused ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.12), lineWidth: 1)
+                                        .stroke(isSearchFieldFocused ? Color(nsColor: Theme.cursor).opacity(0.5) : Theme.primaryColor.opacity(0.12), lineWidth: 1)
                                 )
                         )
                         .padding(.vertical, 2)

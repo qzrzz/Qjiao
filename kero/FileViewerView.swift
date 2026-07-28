@@ -5,6 +5,7 @@
 
 import AppKit
 import Combine
+import Darwin
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -42,6 +43,19 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     @Published var saveError: String?
     /// 当前选择的行数与字符数，供底部状态栏展示。
     @Published private(set) var selectionSummary: String?
+
+    /// 当文件在外部被修改且本地有未保存内容时为 true，触发冲突提示条。
+    @Published var hasExternalConflict = false
+
+    /// 磁盘文件最后一次修改时间
+    private var lastDiskModificationDate: Date?
+    /// 内部写操作标志，防止内部保存触发外部修改检测
+    private var isInternalSaving = false
+
+    /// 监听当前文件和所在目录变动的 DispatchSource 实例列表
+    private nonisolated(unsafe) var watcherSources: [DispatchSourceFileSystemObject] = []
+    private nonisolated(unsafe) var watchDebounceWorkItem: DispatchWorkItem?
+    private var activeCancellables = Set<AnyCancellable>()
 
     /// The editor's scroll view while this file is on screen, so a pane-move
     /// drag can snapshot it for the drag thumbnail. Weak — owned by the mounted
@@ -82,6 +96,13 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         content = .text
         text = string
         savedText = string
+        lastDiskModificationDate = currentDiskModificationDate()
+        startFileWatcher()
+        setupAppFocusObservation()
+    }
+
+    deinit {
+        stopFileWatcher()
     }
 
     var name: String {
@@ -94,6 +115,8 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     func updatePath(_ newPath: String) {
         guard newPath != path else { return }
         path = newPath
+        lastDiskModificationDate = currentDiskModificationDate()
+        startFileWatcher()
     }
 
     /// Recompute `isDirty` from the current `text` against the saved
@@ -113,11 +136,15 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
 
     func save() {
         guard case .text = content, isDirty else { return }
+        isInternalSaving = true
+        defer { isInternalSaving = false }
         do {
             try text.write(toFile: path, atomically: true, encoding: .utf8)
             savedText = text
             isDirty = false
+            hasExternalConflict = false
             saveError = nil
+            lastDiskModificationDate = currentDiskModificationDate()
         } catch {
             saveError = error.localizedDescription
         }
@@ -156,8 +183,128 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         text = formatted
         savedText = formatted
         isDirty = false
+        hasExternalConflict = false
         saveError = nil
+        lastDiskModificationDate = currentDiskModificationDate()
         onReloadEditorText?()
+    }
+
+    /// 用户选择重新载入磁盘内容，抛弃本地未保存修改。
+    func resolveConflictWithReload() {
+        reloadFromDisk()
+    }
+
+    /// 用户选择保留本地未保存修改，忽略外部变动警告。
+    func dismissExternalConflict() {
+        hasExternalConflict = false
+    }
+
+    /// 获取当前磁盘文件的修改时间。
+    private func currentDiskModificationDate() -> Date? {
+        let url = URL(fileURLWithPath: path)
+        return (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    /// 开始监听磁盘文件及所在目录的变更。
+    private func startFileWatcher() {
+        stopFileWatcher()
+        guard case .text = content else { return }
+
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: path) else { return }
+
+        var pathsToWatch: [String] = [path]
+        let parentDir = (path as NSString).deletingLastPathComponent
+        if !parentDir.isEmpty, fileManager.fileExists(atPath: parentDir) {
+            pathsToWatch.append(parentDir)
+        }
+
+        for watchPath in pathsToWatch {
+            let descriptor = open(watchPath, O_EVTONLY)
+            guard descriptor >= 0 else { continue }
+
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: descriptor,
+                eventMask: [.write, .delete, .rename, .extend, .attrib],
+                queue: .main
+            )
+            source.setEventHandler { [weak self] in
+                self?.scheduleCheckDiskChanges()
+            }
+            source.setCancelHandler {
+                close(descriptor)
+            }
+            watcherSources.append(source)
+            source.resume()
+        }
+    }
+
+    /// 停止文件变动监听。
+    private nonisolated func stopFileWatcher() {
+        watchDebounceWorkItem?.cancel()
+        watchDebounceWorkItem = nil
+        let sources = watcherSources
+        watcherSources = []
+        sources.forEach { $0.cancel() }
+    }
+
+    /// 监听应用焦点恢复（切回前台），检查磁盘变动。
+    private func setupAppFocusObservation() {
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.checkDiskChanges()
+            }
+            .store(in: &activeCancellables)
+    }
+
+    /// 防抖调度磁盘变更检查。
+    private func scheduleCheckDiskChanges() {
+        watchDebounceWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.checkDiskChanges()
+        }
+        watchDebounceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
+    }
+
+    /// 检查磁盘文件变动并根据本地 dirty 状态进行静默重载或提示冲突。
+    func checkDiskChanges() {
+        guard case .text = content, !isInternalSaving else { return }
+        guard let diskDate = currentDiskModificationDate() else { return }
+
+        guard let lastDate = lastDiskModificationDate else {
+            lastDiskModificationDate = diskDate
+            return
+        }
+
+        // 修改时间早于或等于已知的修改时间，说明无新变动
+        guard diskDate > lastDate else { return }
+
+        // 读取新数据
+        guard let data = FileManager.default.contents(atPath: path),
+              let newContent = String(data: data, encoding: .utf8)
+        else { return }
+
+        // 内容与当前基线 savedText 相同（例如仅仅修改了时间戳），则不需要重载
+        if newContent == savedText {
+            lastDiskModificationDate = diskDate
+            return
+        }
+
+        lastDiskModificationDate = diskDate
+        if !isDirty {
+            // 本地无改动：静默重载
+            text = newContent
+            savedText = newContent
+            isDirty = false
+            saveError = nil
+            hasExternalConflict = false
+            onReloadEditorText?()
+        } else {
+            // 本地有改动：显示冲突提示条
+            hasExternalConflict = true
+        }
     }
 }
 
@@ -185,6 +332,9 @@ struct FileViewerView: View {
                 ? settings.editorThemeDark
                 : settings.editorThemeLight
             VStack(spacing: 0) {
+                if file.hasExternalConflict {
+                    externalConflictBar
+                }
                 if let error = file.saveError {
                     saveErrorBar(error)
                 }
@@ -221,6 +371,35 @@ struct FileViewerView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private var externalConflictBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(Color(red: 0.90, green: 0.65, blue: 0.15))
+
+            Text("File modified externally")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.primary)
+
+            Spacer(minLength: 0)
+
+            Button("Reload") {
+                file.resolveConflictWithReload()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.mini)
+
+            Button("Keep Local") {
+                file.dismissExternalConflict()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(red: 0.90, green: 0.65, blue: 0.15).opacity(0.12))
     }
 
     private func saveErrorBar(_ message: String) -> some View {
