@@ -878,6 +878,9 @@ private struct SidebarArchiveSection: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isExpanded.toggle()
+                        if isExpanded {
+                            isSearchFieldFocused = true
+                        }
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -917,7 +920,7 @@ private struct SidebarArchiveSection: View {
                 // 展开时常驻显示搜索输入框和归档的项目列表
                 if isExpanded {
                     VStack(spacing: 3) {
-                        // 展开后第一行：常驻搜索输入框
+                        // 展开后第一行：常驻搜索输入框，展开时自动聚焦
                         HStack(spacing: 4) {
                             Image(systemName: "magnifyingglass")
                                 .font(SidebarTypography.micro(.regular))
@@ -927,6 +930,9 @@ private struct SidebarArchiveSection: View {
                                 .textFieldStyle(.plain)
                                 .font(SidebarTypography.secondary(.regular))
                                 .focused($isSearchFieldFocused)
+                                .onAppear {
+                                    isSearchFieldFocused = true
+                                }
 
                             if !searchText.isEmpty {
                                 Button {
@@ -965,7 +971,11 @@ private struct SidebarArchiveSection: View {
                                     project: project,
                                     index: index,
                                     isSelected: project.id == manager.selectedProjectID,
-                                    select: { manager.selectedProjectID = project.id },
+                                    select: {
+                                        withAnimation(.easeInOut(duration: 0.15)) {
+                                            manager.unarchiveProject(project)
+                                        }
+                                    },
                                     close: { manager.close(project) },
                                     isDragging: draggedProjectID == project.id,
                                     onDrag: { location in onDrag(project.id, location) },

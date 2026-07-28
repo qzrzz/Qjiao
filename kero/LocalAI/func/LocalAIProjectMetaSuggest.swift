@@ -4,6 +4,7 @@
 //
 //  使用 LocalAI 为项目一次生成：显示名称、描述、图标（Material / SF / Emoji）。
 //  与 LocalAIIconSuggest 并列的独立功能；上下文与 Material 列表复用其工具方法。
+//  提示词唯一来源：`LocalAI/prompts/ProjectMetaPrompt.swift`。
 //
 
 import AppKit
@@ -42,6 +43,8 @@ enum LocalAIProjectMetaSuggest {
         let currentName = project.name
         let currentDescription = project.description
         let directory = project.projectDirectory
+        // name / description 遵循写作语言；icon 不涉及语言
+        let writingLanguage = project.resolvedAIWritingLanguage
 
         let projectCtx = await Task.detached(priority: .userInitiated) {
             // 复用图标功能的上下文采集（name / path / package.json / README）
@@ -58,12 +61,17 @@ enum LocalAIProjectMetaSuggest {
 
         try Task.checkCancellation()
 
-        let prompt = buildPrompt(icons: iconsText, projectCtx: projectCtx)
+        let prompt = buildPrompt(
+            icons: iconsText,
+            projectCtx: projectCtx,
+            language: writingLanguage
+        )
         print(
             """
             [LocalAIProjectMetaSuggest] ——— prompt begin ———
             project: \(currentName)
             directory: \(directory)
+            writingLanguage: \(writingLanguage.rawValue)
             provider: \(LocalAI.selectedProvider.displayName)
             icons chars: \(iconsText.count)  prompt chars: \(prompt.count)
             \(prompt)
@@ -157,83 +165,13 @@ enum LocalAIProjectMetaSuggest {
 
     // MARK: - Prompt
 
-    /// 名称 + 描述 + 图标 联合提示词（Material 列表仅作 icon 候选）。
-    static func buildPrompt(icons: String, projectCtx: String) -> String {
-        """
-        你需要为 macOS 终端工作区中的一个项目设置：显示名称、简短描述、图标。
-
-        ## 输出字段
-
-        1. **name**（必填）
-           - 项目在侧边栏显示的标题。
-           - 简洁、可读；中文或英文均可；建议 2–40 个字符。
-           - 不要包含路径、引号、emoji（emoji 放在 icon 里）。
-           - 优先采用 package.json name 的可读形式，或 README / 文件夹名提炼。
-
-        2. **description**（必填字段，内容可为空字符串）
-           - 一句话说明项目用途或技术栈。
-           - 建议不超过 80 个字符；没有把握时用空字符串 `""`。
-
-        3. **icon**（必填对象）
-           - 选择优先级必须严格遵守：
-             1) Material 内置 icon（最高）：`type` 为 `"icon"`，`value` 必须是下方列表中的**精确逻辑名**。
-             2) SF Symbol（中）：仅当没有合适 Material 时，`type` 为 `"sf"`。
-             3) Emoji（最低）：仅当前两者都不合适时，`type` 为 `"emoji"`。
-           - 不要编造 Material 列表中不存在的名字。
-
-        ## Material 内置 icon 列表（icon.type=icon 时 value 必须来自本列表）
-
-        ```text
-        \(icons)
-        ```
-
-        ## 项目上下文
-
-        ```text
-        \(projectCtx)
-        ```
-
-        ## 输出要求
-
-        仅返回一个 JSON，不要输出 Markdown，不要添加解释。
-
-        ```json
-        {
-          "name": "项目显示名",
-          "description": "一句话描述",
-          "icon": {
-            "type": "icon | sf | emoji",
-            "value": "..."
-          }
-        }
-        ```
-
-        示例：
-
-        ```json
-        {
-          "name": "Qjiao",
-          "description": "macOS 终端工作区，基于 Kero 二次开发",
-          "icon": { "type": "icon", "value": "folder-client" }
-        }
-        ```
-
-        ```json
-        {
-          "name": "API Server",
-          "description": "Node.js backend",
-          "icon": { "type": "sf", "value": "server.rack" }
-        }
-        ```
-
-        ```json
-        {
-          "name": "Notes",
-          "description": "",
-          "icon": { "type": "emoji", "value": "📝" }
-        }
-        ```
-        """
+    /// 拼装提示词：模板见 `ProjectMetaPrompt`（唯一来源）；含写作语言。
+    static func buildPrompt(
+        icons: String,
+        projectCtx: String,
+        language: AIWritingLanguage
+    ) -> String {
+        ProjectMetaPrompt.build(icons: icons, projectCtx: projectCtx, language: language)
     }
 
     // MARK: - 解析

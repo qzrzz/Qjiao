@@ -19,12 +19,15 @@
   - **设置**：Settings → General → **AI headless provider**；列出全部支持的 CLI，未安装项显示 “Not installed” 且不可选；可 Refresh 重新探测 PATH / 常见安装目录。
   - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ai.headless-provider`（默认 disabled，不写回）。
   - **能力**：单轮 prompt、可选工作目录 / model / 超时 / autoApprove；`LocalAIRegistry` 负责安装探测与当前选择。
+  - **提示词约定（唯一来源）**：全部可调教正文集中在 `kero/LocalAI/prompts/*Prompt.swift`（见 `LocalAIPrompts.swift` 索引）；业务 `*Suggest` 只做上下文采集与组装，禁止旁路 `.md` / 功能文件内大段模板副本。
+    - `GitCommitPrompt` → AI Git Commit Message（遵循 **Writing language**）
+    - `IconSuggestPrompt` → AI Select Icon（**不**涉及写作语言）
+    - `ProjectMetaPrompt` → AI Name & Desc & Icon（**name / description** 遵循 Writing language；icon 除外）
   - **AI Select Icon**：基于项目 name / description / 路径末级、`package.json` name·description、`README.md` 前 20 行，以及 **Material Icon Theme** 逻辑名列表（不含 Brands），用 LocalAI 按「Material icon → SF Symbol → Emoji」优先级返回 JSON 并应用；入口为项目列表右键 **AI Select Icon** 与图标选择器 **AI Select**（未启用 provider 时禁用）。
   - **AI Name & Desc & Icon**：独立模块 `LocalAIProjectMetaSuggest` + `LocalAIProjectMetaTaskStore`；一次请求生成项目 **显示名称**、**描述** 与 **图标** 并写入配置；上下文与 Material 列表复用图标功能；入口为项目列表右键 **AI Name & Desc & Icon**（与纯选图标互斥、可取消、行内转圈）。
   - **AI Git Commit Message**：独立模块 `LocalAIGitCommitSuggest` + `LocalAIGitCommitTaskStore`；根据 staged / unstaged diff 与未跟踪文件摘要，按 Conventional Commit 规范生成提交说明并填入 Git 面板 Message 输入框。
     - **入口**：Git 面板 Message 输入框右侧 **sparkles.2** 按钮；Recent Commits 行右键 **AI Commit Message**（生成中可取消）。
     - **设置**（Settings → General → AI）：**Writing language**（`ai.writing-language`，默认 English；项目可在 `config.json` 的 `aiWritingLanguage` 覆盖）与 **Git Commit Message Emoji**（`ai.git-commit-emoji`，默认开启 Gitmoji）。
-    - **提示词（唯一来源）**：`kero/LocalAI/prompts/GitCommitPrompt.swift`（`GitCommitPrompt` 枚举导出模板与片段；改提示词只改此文件）。
 - 左边栏开关（`sidebar.left`，⌘B）：展开时显示在左侧边栏顶栏右侧；收起后移到 Tabs 顶栏左侧（开关左右边距加大：左 16pt / 右 12pt）。
 - 左侧边栏项目归档功能：支持归档与解除归档；归档项目默认收起居于左侧边栏底部，点击可展开查看列表；解除归档后自动回到上方正常项目列表；已归档栏展开后第一行常驻显示搜索输入框，按项目名与描述实时筛选。
 - 左侧边栏顶栏在侧栏开关左侧增加窗口置顶按钮（`pin` / `pin.fill`）：切换当前窗口 `NSWindow.level` 为 floating / normal，激活时 tint。

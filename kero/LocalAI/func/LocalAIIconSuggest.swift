@@ -3,6 +3,7 @@
 //  kero
 //
 //  使用 LocalAI headless CLI 为项目推荐图标，并解析为 ProjectIcon。
+//  提示词唯一来源：`LocalAI/prompts/IconSuggestPrompt.swift`。
 //
 
 import AppKit
@@ -120,74 +121,9 @@ enum LocalAIIconSuggest {
 
     // MARK: - Prompt
 
-    /// 按产品给定模板拼装提示词。
+    /// 拼装提示词：模板见 `IconSuggestPrompt`（唯一来源）。
     static func buildPrompt(icons: String, projectCtx: String) -> String {
-        """
-        你需要为一个项目选择最合适的图标。
-
-        ## 选择优先级（必须严格遵守）
-
-        1. **Material 内置 icon（最高优先级）**
-           - 仔细检查下方 Material Icon Theme 逻辑名列表。
-           - 如果存在语义明显匹配的图标，必须直接选择，`type` 为 `icon`，`value` 必须是列表中的**精确逻辑名**。
-           - 不要选择 Brands 品牌图；不要编造列表中不存在的名字。
-
-        2. **SF Symbol（中优先级）**
-           - 仅当没有任何合适的 Material icon 时，才从你已知的 SF Symbols 中选择。
-           - 优先选择 Apple 官方推荐、语义清晰、通用且长期稳定的 Symbol。
-
-        3. **Emoji（最低优先级）**
-           - 仅当没有合适的 Material icon，且没有把握选择合适的 SF Symbol 时，才选择一个 Emoji。
-           - Emoji 应尽量表达项目的主要用途，而不是装饰性。
-
-        ## 输入
-
-        ### Material 内置 icon 列表（type=icon 的 value 必须来自本列表）
-
-        ```text
-        \(icons)
-        ```
-
-        ### 项目上下文
-
-        ```text
-        \(projectCtx)
-        ```
-
-        ## 输出要求
-
-        仅返回一个 JSON，不要输出 Markdown，不要添加解释。
-
-        ```json
-        {
-          "type": "icon | sf | emoji",
-          "value": "..."
-        }
-        ```
-
-        示例：
-
-        ```json
-        {
-          "type": "icon",
-          "value": "typescript"
-        }
-        ```
-
-        ```json
-        {
-          "type": "sf",
-          "value": "shippingbox"
-        }
-        ```
-
-        ```json
-        {
-          "type": "emoji",
-          "value": "🫑"
-        }
-        ```
-        """
+        IconSuggestPrompt.build(icons: icons, projectCtx: projectCtx)
     }
 
     // MARK: - 项目上下文

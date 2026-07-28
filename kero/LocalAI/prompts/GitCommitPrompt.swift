@@ -129,9 +129,7 @@ enum GitCommitPrompt {
 
     /// 设置开启「Git Commit Message Emoji」时：按 GitMoji 规范自选，不列举全表。
     static let emojiEnabledNote: String = """
-    使用 GitMoji 规范选择合适的 Emoji。
-    Prefer the Type Reference table above; pick one conventional Gitmoji that matches the change type.
-    Do not invent non-Gitmoji symbols.
+    Use GitMoji emoji, NO web search or external lookup.
     """
 
     /// 设置关闭 emoji 时。
@@ -170,7 +168,7 @@ enum GitCommitPrompt {
     ## Final Instruction
 
     - Base the commit message **only** on the content provided above. Do not gather more context.
-    - **Do not execute any extra actions**: no tools, no shell, no git commands, no file reads/writes, no repo exploration, no staging/committing.
+    - **Do not execute any extra actions**: no tools, no shell, no git commands, no file reads/writes, no repo exploration, no staging/committing, not search internet.
     - Output ONLY the commit message. No markdown fences, no preface, no explanation, no questions.
     """
 }
