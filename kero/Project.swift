@@ -144,7 +144,17 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
 
     /// User-assigned name; when nil the project title follows the
     /// selected session's terminal title.
-    @Published var customName: String?
+    @Published var customName: String? {
+        didSet {
+            saveConfig()
+        }
+    }
+    /// 是否开启自动标题。为 true 时显示终端动态标题且保留 customName 设置；为 false 时优先显示 customName。
+    @Published var useAutoTitle: Bool = false {
+        didSet {
+            saveConfig()
+        }
+    }
     /// 项目的可选描述，显示在项目列表名称下方。
     @Published var description: String?
     /// 项目根目录；与终端当前工作目录分开保存。
@@ -189,6 +199,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         ProjectConfigStore.save(
             ProjectConfig(
                 customName: customName,
+                useAutoTitle: useAutoTitle,
                 description: description,
                 icon: icon,
                 theme: theme,
@@ -229,6 +240,9 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     }
 
     var name: String {
+        if useAutoTitle {
+            return selectedSession?.title ?? fallbackName
+        }
         if let customName, !customName.isEmpty {
             return customName
         }

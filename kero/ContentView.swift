@@ -94,7 +94,11 @@ struct ContentView: View {
         }
         .overlay {
             if tabSwitcher.isPresented, let project = manager.selectedProject {
-                TabSwitcherOverlay(project: project, controller: tabSwitcher)
+                TabSwitcherOverlay(
+                    manager: manager,
+                    project: project,
+                    controller: tabSwitcher
+                )
                     .zIndex(20)
             }
         }
@@ -303,6 +307,7 @@ private struct MainHeaderView: View {
                     HStack(spacing: Self.tabNewSpacing) {
                         if let project = manager.selectedProject {
                             SessionTabsView(
+                                manager: manager,
                                 project: project,
                                 maxStripWidth: stripMaxWidth
                             )
@@ -326,7 +331,7 @@ private struct MainHeaderView: View {
                                 action: { manager.togglePaneZoom() }
                             )
                         }
-                        TabListButton(project: project)
+                        TabListButton(manager: manager, project: project)
                         HeaderIconButton(
                             systemImage: "sidebar.right",
                             isActive: manager.isPanelVisible,
@@ -425,6 +430,7 @@ private struct NewTabButton: View {
 
 /// 顶栏标签总览入口，固定在右侧侧栏按钮旁。
 private struct TabListButton: View {
+    @ObservedObject var manager: TerminalManager
     @ObservedObject var project: Project
     @State private var isPresented = false
 
@@ -437,13 +443,18 @@ private struct TabListButton: View {
             action: { isPresented.toggle() }
         )
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-            TabListPopover(project: project, isPresented: $isPresented)
+            TabListPopover(
+                manager: manager,
+                project: project,
+                isPresented: $isPresented
+            )
         }
     }
 }
 
 /// 可滚动的项目 Tab 下拉面板，标题刻意允许换行以完整显示终端标题。
 private struct TabListPopover: View {
+    @ObservedObject var manager: TerminalManager
     @ObservedObject var project: Project
     @Binding var isPresented: Bool
     @StateObject private var terminalDetails = TerminalTabDetailsLoader()
@@ -493,12 +504,18 @@ private struct TabListPopover: View {
         return terminalDetails.detailsBySessionID[session.id]
     }
 
+    private func showsCommandSpinner(for tab: PaneTab) -> Bool {
+        guard case .session(let session)? = tab.focusedContent else { return false }
+        return manager.isRightSidebarCommandRunning(sessionID: session.id)
+    }
+
     @ViewBuilder
     private var tabRows: some View {
         ForEach(project.tabs) { tab in
             TabListRow(
                 tab: tab,
                 isSelected: tab.id == project.selectedTabID,
+                showsCommandSpinner: showsCommandSpinner(for: tab),
                 terminalDetails: details(for: tab),
                 currentTime: currentTime
             ) {
@@ -513,6 +530,7 @@ private struct TabListPopover: View {
 private struct TabListRow: View {
     @ObservedObject var tab: PaneTab
     let isSelected: Bool
+    let showsCommandSpinner: Bool
     let terminalDetails: TerminalSession.TabListDetails?
     let currentTime: Date
     let select: () -> Void
@@ -522,6 +540,7 @@ private struct TabListRow: View {
             HStack(alignment: .top, spacing: 8) {
                 TabContentIcon(
                     content: tab.focusedContent,
+                    showsCommandSpinner: showsCommandSpinner,
                     tint: isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor
                 )
                 .frame(width: 16, height: 18)
@@ -647,6 +666,7 @@ private final class TerminalTabDetailsLoader: ObservableObject {
 /// Horizontal tabs for one project — terminal sessions and open files.
 /// 新建在条带右侧（`NewTabButton`）；总览下拉固定在侧栏旁（`TabListButton`）。
 private struct SessionTabsView: View {
+    @ObservedObject var manager: TerminalManager
     @ObservedObject var project: Project
     @ObservedObject private var settings = AppSettings.shared
     let maxStripWidth: CGFloat
@@ -702,6 +722,7 @@ private struct SessionTabsView: View {
                 HStack(spacing: 3) {
                     ForEach(project.tabs) { tab in
                         PaneTabItem(
+                            manager: manager,
                             tab: tab,
                             isSelected: tab.id == project.selectedTabID,
                             minWidth: tabMinWidth,
@@ -903,6 +924,7 @@ private struct TabStripContentWidthKey: PreferenceKey {
 /// and layout changes refresh it; the focused content is observed by the
 /// per-kind label below so its live title/dirty state shows.
 private struct PaneTabItem: View {
+    @ObservedObject var manager: TerminalManager
     @ObservedObject var tab: PaneTab
     let isSelected: Bool
     /// 由标签条是否挤满决定：宽松 150 / 压缩 130。
@@ -931,6 +953,9 @@ private struct PaneTabItem: View {
             case .session(let session):
                 SessionTabLabel(
                     session: session,
+                    showsCommandSpinner: manager.isRightSidebarCommandRunning(
+                        sessionID: session.id
+                    ),
                     customTitle: tab.customName,
                     paneCount: paneCount,
                     isSelected: isSelected,
@@ -1026,6 +1051,7 @@ private struct TabRenameChrome: View {
 
 private struct SessionTabLabel: View {
     @ObservedObject var session: TerminalSession
+    let showsCommandSpinner: Bool
     var customTitle: String?
     let paneCount: Int
     let isSelected: Bool
@@ -1045,7 +1071,7 @@ private struct SessionTabLabel: View {
                 manualTitle: customTitle,
                 paneCount: paneCount,
                 isSelected: isSelected,
-                isTerminalRunning: session.isForegroundCommandRunning,
+                isTerminalRunning: showsCommandSpinner,
                 terminalAppIcon: appIcon,
                 minWidth: minWidth,
                 maxWidth: maxWidth,
@@ -1271,10 +1297,11 @@ private struct TabItemChrome: View {
     }
 }
 
-/// Terminal: idle → SF Symbol；前台已知应用 → TerminalAppIcon；未知忙 → spinner。
+/// Terminal: 前台已知应用 → TerminalAppIcon；右侧栏命令 → spinner；其他情况 → SF Symbol。
 /// Open files / diffs use Material icons (same as the Files tree).
 struct TabContentIcon: View {
     let content: PaneContent?
+    var showsCommandSpinner = false
     let tint: Color
     private static let materialSize: CGFloat = 14
 
@@ -1286,7 +1313,7 @@ struct TabContentIcon: View {
                     size: Self.materialSize,
                     isSelected: true
                 )
-            } else if session.isForegroundCommandRunning {
+            } else if showsCommandSpinner {
                 ProgressView()
                     .controlSize(.small)
                     .tint(tint)

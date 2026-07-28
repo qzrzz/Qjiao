@@ -29,6 +29,7 @@
     - **入口**：Git 面板 Message 输入框右侧 **sparkles.2** 按钮；Recent Commits 行右键 **AI Commit Message**（生成中可取消）。
     - **设置**（Settings → General → AI）：**Writing language**（`ai.writing-language`，默认 English；项目可在 `config.json` 的 `aiWritingLanguage` 覆盖）与 **Git Commit Message Emoji**（`ai.git-commit-emoji`，默认开启 Gitmoji）。
 - 左边栏开关（`sidebar.left`，⌘B）：展开时显示在左侧边栏顶栏右侧；收起后移到 Tabs 顶栏左侧（开关左右边距加大：左 16pt / 右 12pt）。
+- **项目使用自动标题优化**：项目右键菜单中的「使用自动标题」改为独立布尔值开关（Toggle）；开启时项目显示终端动态标题，且不影响/清空项目已设置的自定义名称，关闭后可恢复自定义项目名称。
 - 左侧边栏项目归档功能：支持归档与解除归档；归档项目默认收起居于左侧边栏底部，点击可展开查看列表；解除归档后自动回到上方正常项目列表；已归档栏展开后第一行常驻显示搜索输入框，按项目名与描述实时筛选。
 - 左侧边栏顶栏在侧栏开关左侧增加窗口置顶按钮（`pin` / `pin.fill`）：切换当前窗口 `NSWindow.level` 为 floating / normal，激活时 tint。
 - 增加窗口拖拽区域。
@@ -66,13 +67,14 @@
   - **Info**：当前终端 CWD + 该 cwd 下 `package.json` scripts；进程/端口仅当前 session；shell 名 / pid。
   - npm script 在对应路径新开终端运行（Settings 包管理器）；右键 time / `--inspect` / `--prof`；采集逻辑集中于 `SidebarProbe`。
   - 展开分组有左边距；数量徽章紧跟标题；空分组自动收起。
-- 终端前台命令运行时，标签图标显示转圈动画。
+- 从右侧栏启动 npm scripts、项目任务、Start 终端命令等命令时，标签图标显示转圈动画；手动在终端输入命令不再触发转圈，已匹配到的终端应用图标仍优先显示。
 - 右侧 Start 面板可保存、排序并一键启动项目的终端命令、应用程序、Finder 文件夹和网页。
   - 终端启动项可指定新标签标题，并与手动 Tab 重命名共用。
 - 终端启动项可指定新标签或上、下、左、右分屏，并支持一键按顺序启动全部项目命令。
 - 终端通过 OSC 52 读取系统剪贴板时需要确认，并对可能执行命令的粘贴内容显示安全警告。
 - 终端粘贴增强：Finder 复制的文件粘贴为 shell 安全绝对路径；纯图片剪贴板通过原生 Ctrl-V 交给支持图片的 TUI 读取。
 - 新建终端声明 `TERM_PROGRAM=ghostty`，让支持 Ghostty 的 CLI/TUI 自动启用图片等扩展能力。
+- 终端进入 Vi / Vim / Neovim 等编辑器时自动显示上下文帮助栏，支持一键保存退出、放弃更改退出，以及切换 Insert / Normal 模式；可在 Settings → Terminal 中关闭。
 - 为终端内 CLI 增加麦克风输入权限声明，支持语音输入类命令行工具。
 - 升级 PierreDiffsSwift，修复 Git Diff 中中文等非 ASCII 字符的显示问题。
 - Git Diff 升级为虚拟化渲染，仅绘制可见行并在后台高亮，大文件不再阻塞窗口；Diff 字体同步终端字体设置。
@@ -115,7 +117,7 @@
 - System Reachability 支持按站点配置 GET/HEAD：添加/编辑表单分段选择、右键菜单勾选切换并立即重测；curl 探测隔离用户 curl 配置、仅允许 HTTP(S)、按系统 HTTP/HTTPS/SOCKS 代理及绕过规则访问，PAC/WPAD 会明确提示暂不支持；配置随站点持久化。
 - System 面板数字与 IP/代理地址统一 `monospacedDigit`；自定义 Tooltip 单行等宽数字、多行等宽字体以对齐 Mem/Disk 等指标详情。
 - 右侧 Files / CWD / Git 文件列表按文件名与扩展名显示 Material Icon Theme 彩色图标（[vscode-material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme)）；目录名匹配专用文件夹图标，展开/收起使用 open 变体；可用 `bun run scripts/vendor-material-icons.ts` 更新图标资源。
-- 顶栏 Tabs（含 Tab 总览、重命名与分栏拖拽缩略图）对打开的文件 / Diff 使用与文件树相同的 Material Icon；终端 Tab 仍为 SF Symbol，运行中仍显示转圈。
+- 顶栏 Tabs（含 Tab 总览、重命名与分栏拖拽缩略图）对打开的文件 / Diff 使用与文件树相同的 Material Icon；终端 Tab 默认使用 SF Symbol，仅右侧栏发起的命令显示转圈，匹配到终端应用时仍优先显示应用图标。
 - 终端应用图标识别：检测前台进程（如 `agy` / `grok` / `codex` / `claude` / `rsbuild` / `node` 等）并切换 Tab 图标；图标来源为 Material Icon Theme 与本地文件（`icon` 字段指定 `icons/` 下的 `.png` / `.svg` 等文件名，如 `antigravity-color.png`）。配置见 `kero/TerminalAppIcons/apps.json`，用户可在 `~/.config/qjiao/terminal-app-icons.json` 覆盖；`bun run vendor:terminal-app-icons` 可同步 Iconify 资源。枚举前台进程组内全部 PID 并解析 argv（支持 `npm run dev` → `node …/rsbuild`）。
 - 左侧面板底部 Theme 按钮支持左键点击立即切换主题（Light ↔ Dark，System 模式按系统实际外观反转），右键菜单提供主题选择、分割线及 Appearance Settings 快捷入口。
 - 右侧面板下半区底部 Tabs（System/Note 选项卡栏）的最小高度调整为 36，并优化展开逻辑（若之前拖拽将高度缩至最小，点击展开/双击 tabs 时自动恢复至默认 70/30 高度）。

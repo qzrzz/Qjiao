@@ -8,20 +8,22 @@ import Foundation
 
 /// 项目名称、图标和描述的独立配置内容，和会话布局分开保存。
 struct ProjectConfig: Codable {
-    var customName: String?
-    var description: String?
-    var icon: ProjectIcon?
+    var customName: String? = nil
+    /// 可选，是否使用自动标题。
+    var useAutoTitle: Bool? = nil
+    var description: String? = nil
+    var icon: ProjectIcon? = nil
     /// 可选，兼容未设置项目级主题的旧项目配置。
-    var theme: ProjectTheme?
+    var theme: ProjectTheme? = nil
     /// 可选，兼容添加项目目录字段前创建的配置文件。
-    var projectDirectory: String?
+    var projectDirectory: String? = nil
     /// Optional so project configuration written before Start existed keeps
     /// decoding without migration.
-    var launchCommands: [ProjectLaunchCommand]?
+    var launchCommands: [ProjectLaunchCommand]? = nil
     /// 可选，记录项目是否已被归档。
-    var isArchived: Bool?
+    var isArchived: Bool? = nil
     /// 可选 AI 写作语言覆盖（`AIWritingLanguage.rawValue`）；nil 表示跟随全局设置。
-    var aiWritingLanguage: String?
+    var aiWritingLanguage: String? = nil
 }
 
 /// 项目配置目录存储。
@@ -422,6 +424,8 @@ struct SessionSnapshot: Codable {
         /// 项目稳定 ID；旧版快照没有此字段，恢复时会生成新的 ID。
         var id: UUID?
         var customName: String?
+        /// 可选，是否使用自动标题。
+        var useAutoTitle: Bool?
         /// 可选，确保升级前保存的会话仍能正常恢复。
         var description: String?
         /// 可选，确保升级前保存的会话仍能正常恢复。

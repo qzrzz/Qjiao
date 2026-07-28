@@ -195,6 +195,7 @@ struct ProjectPanel: View {
             nameDraft = project.name
         } else {
             project.customName = trimmed
+            project.useAutoTitle = false
         }
     }
 

@@ -270,6 +270,7 @@ private enum TabSwitcherMetrics {
 
 /// 与上游一致的居中预览网格；最多五列，空间不足时自动收缩并垂直滚动。
 struct TabSwitcherOverlay: View {
+    @ObservedObject var manager: TerminalManager
     @ObservedObject var project: Project
     @ObservedObject var controller: TabSwitcherController
     @ObservedObject private var themeChanges = Theme.changes
@@ -294,6 +295,7 @@ struct TabSwitcherOverlay: View {
                             ForEach(Array(project.tabs.enumerated()), id: \.element.id) {
                                 index, tab in
                                 TabSwitcherCard(
+                                    manager: manager,
                                     tab: tab,
                                     index: index,
                                     isHighlighted: tab.id == controller.highlightedTabID,
@@ -411,6 +413,7 @@ struct TabSwitcherOverlay: View {
 
 /// 单个标签卡片包含布局缩略图、内容图标、标题和未保存标记。
 private struct TabSwitcherCard: View {
+    @ObservedObject var manager: TerminalManager
     @ObservedObject var tab: PaneTab
     let index: Int
     let isHighlighted: Bool
@@ -503,10 +506,13 @@ private struct TabSwitcherCard: View {
     /// 例如 Codex、Node 或构建工具；惰性终端会停留在通用终端图标。
     @ViewBuilder
     private var cardIcon: some View {
-        if case .session? = tab.focusedContent {
+        if case .session(let session)? = tab.focusedContent {
             TimelineView(.periodic(from: .now, by: 0.3)) { _ in
                 TabContentIcon(
                     content: tab.focusedContent,
+                    showsCommandSpinner: manager.isRightSidebarCommandRunning(
+                        sessionID: session.id
+                    ),
                     tint: iconTint
                 )
             }

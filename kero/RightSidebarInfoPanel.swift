@@ -302,7 +302,7 @@ struct SessionInfoPanel: View {
                 if let appIcon = session.foregroundAppIcon {
                     TerminalAppIconView(source: appIcon, size: 16, isSelected: true)
                         .frame(width: 24, height: 24)
-                } else if session.isForegroundCommandRunning {
+                } else if manager.isRightSidebarCommandRunning(sessionID: session.id) {
                     ProgressView()
                         .controlSize(.mini)
                         .tint(Color(nsColor: Theme.cursor))

@@ -357,6 +357,9 @@ final class TerminalManager: nonisolated ObservableObject {
 
     /// 记录各项目脚本的执行句柄与耗时信息（KEY: scriptName 或 script.id）
     @Published var packageScriptRecords: [String: UniversalScriptExecutionRecord] = [:]
+    /// 从右侧栏发起的终端命令。Tab 仅为这些 Session 显示通用转圈，
+    /// 手动在终端输入的未知命令仍保留普通终端图标。
+    @Published private var rightSidebarCommandStartedAt: [UUID: Date] = [:]
 
     private var scriptCheckTimer: Timer?
 
@@ -371,15 +374,19 @@ final class TerminalManager: nonisolated ObservableObject {
 
     private func stopScriptCheckTimerIfEmpty() {
         let hasRunning = packageScriptRecords.values.contains { $0.status == .running || $0.status == .stopping }
-        if !hasRunning {
+        if !hasRunning && rightSidebarCommandStartedAt.isEmpty {
             scriptCheckTimer?.invalidate()
             scriptCheckTimer = nil
         }
     }
 
+    /// 当前 Session 是否正在执行由右侧栏发起的命令。
+    func isRightSidebarCommandRunning(sessionID: UUID) -> Bool {
+        rightSidebarCommandStartedAt[sessionID] != nil
+    }
+
     /// 检查并更新所有脚本的运行/空闲状态（如果 shell 前台命令已执行完，标记为完成/停止并统计耗时）
     func checkPackageScriptStatus() {
-        guard !packageScriptRecords.isEmpty else { return }
         let now = Date()
         for (executionKey, record) in packageScriptRecords where record.status == .running {
             guard let project = project(containingSessionID: record.sessionID),
@@ -394,6 +401,23 @@ final class TerminalManager: nonisolated ObservableObject {
             } else if now.timeIntervalSince(record.startedAt) > 0.5 && !session.isForegroundCommandRunning {
                 // 运行超过 0.5 秒且前台命令已被 shell 释放（命令运行结束），判定为完成/停止
                 markScriptAsIdle(executionKey, endedAt: now)
+            }
+        }
+        for (sessionID, startedAt) in Array(rightSidebarCommandStartedAt) {
+            guard let project = project(containingSessionID: sessionID),
+                  let session = project.sessions.first(where: { $0.id == sessionID })
+            else {
+                rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
+                continue
+            }
+
+            if session.hasExited {
+                rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
+            } else if now.timeIntervalSince(startedAt) > 0.5,
+                      session.isInitialized,
+                      !session.isForegroundCommandRunning
+            {
+                rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
             }
         }
         stopScriptCheckTimerIfEmpty()
@@ -434,6 +458,22 @@ final class TerminalManager: nonisolated ObservableObject {
         updated.lastDuration = elapsed
         updated.boundPort = nil
         packageScriptRecords[scriptKey] = updated
+        rightSidebarCommandStartedAt.removeValue(forKey: record.sessionID)
+    }
+
+    /// 注册右侧栏命令对应的 Session，并在终端退出时及时清理转圈状态。
+    private func trackRightSidebarCommand(in session: TerminalSession) {
+        rightSidebarCommandStartedAt[session.id] = Date()
+        startScriptCheckTimerIfNeeded()
+
+        let originalOnExited = session.onExited
+        session.onExited = { [weak self] exitedSession in
+            originalOnExited?(exitedSession)
+            Task { @MainActor in
+                self?.rightSidebarCommandStartedAt.removeValue(forKey: exitedSession.id)
+                self?.stopScriptCheckTimerIfEmpty()
+            }
+        }
     }
 
     /// 通用项目脚本运行接口（支持 NPM, Gradle, uv, PDM, Rust alias, Makefile 等）
@@ -472,7 +512,7 @@ final class TerminalManager: nonisolated ObservableObject {
             lastDuration: oldLastDuration
         )
         packageScriptRecords[scriptKey] = record
-        startScriptCheckTimerIfNeeded()
+        trackRightSidebarCommand(in: session)
 
         // 监听该终端 Session 的退出/销毁
         let originalOnExited = session.onExited
@@ -525,6 +565,7 @@ final class TerminalManager: nonisolated ObservableObject {
         let session = project.newSession(directory: dir)
         project.selectedTab?.customName = title
         session.title = title
+        trackRightSidebarCommand(in: session)
         session.sendCommandWhenReady(command + "\n")
     }
 
@@ -663,6 +704,7 @@ final class TerminalManager: nonisolated ObservableObject {
             let title = command.title.trimmingCharacters(in: .whitespacesAndNewlines)
             project.selectedTab?.customName = title.isEmpty ? nil : title
         }
+        trackRightSidebarCommand(in: session)
         session.sendCommandWhenReady(text + "\n")
     }
 
@@ -1045,6 +1087,7 @@ final class TerminalManager: nonisolated ObservableObject {
                 ProjectConfigStore.save(
                     ProjectConfig(
                         customName: project.customName,
+                        useAutoTitle: project.useAutoTitle,
                         description: project.description,
                         icon: project.icon,
                         theme: project.theme,
@@ -1058,6 +1101,7 @@ final class TerminalManager: nonisolated ObservableObject {
                 return ProjectSnapshot(
                     id: project.id,
                     customName: nil,
+                    useAutoTitle: nil,
                     description: nil,
                     icon: nil,
                     theme: project.theme,
@@ -1108,6 +1152,7 @@ final class TerminalManager: nonisolated ObservableObject {
             let project = makeProject(id: saved.id, createInitialSession: false)
             let config = ProjectConfigStore.load(for: project.id)
             project.customName = config?.customName ?? saved.customName
+            project.useAutoTitle = config?.useAutoTitle ?? saved.useAutoTitle ?? false
             project.description = config?.description ?? saved.description
             project.icon = config?.icon ?? saved.icon
             project.theme = config?.theme ?? saved.theme ?? .global
@@ -1132,11 +1177,12 @@ final class TerminalManager: nonisolated ObservableObject {
                 project.projectDirectory = project.sessions.first?.currentDirectoryPath ?? ""
             }
             // 旧版快照中的项目配置在首次恢复时迁移到独立配置文件。
-            if config == nil || config?.theme == nil
+            if config == nil || config?.useAutoTitle == nil || config?.theme == nil
                 || config?.projectDirectory == nil || config?.launchCommands == nil || config?.isArchived == nil {
                 ProjectConfigStore.save(
                     ProjectConfig(
                         customName: project.customName,
+                        useAutoTitle: project.useAutoTitle,
                         description: project.description,
                         icon: project.icon,
                         theme: project.theme,

@@ -160,6 +160,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 是否在终端底部显示即时上下文帮助栏（如 Vi 编辑辅助）。
+    @Published var enableTerminalHelpBar: Bool {
+        didSet { save() }
+    }
+
     /// The command prefix used by the Info panel's package script launcher.
     @Published var packageManagerCommand: PackageManagerCommand {
         didSet { save() }
@@ -303,6 +308,7 @@ final class AppSettings: nonisolated ObservableObject {
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
         disableZshAutoTitle = toml["terminal.disable-zsh-auto-title"]?.bool ?? false
+        enableTerminalHelpBar = toml["terminal.enable-help-bar"]?.bool ?? true
         preferredCodeEditorBundleId = toml["editor.preferred-code-editor"]?.string ?? ""
         preferredAIToolId = toml["ai.preferred-tool"]?.string ?? ""
         localAIHeadlessProvider = toml["ai.headless-provider"]?.string
@@ -401,6 +407,7 @@ final class AppSettings: nonisolated ObservableObject {
         restoreTerminalHistory = false
         directClickMovesCursor = false
         disableZshAutoTitle = false
+        enableTerminalHelpBar = true
         packageManagerCommand = .npm
         systemReachabilityInterval = .default
         preferredCodeEditorBundleId = ""
@@ -485,6 +492,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if disableZshAutoTitle {
             lines.append("terminal.disable-zsh-auto-title = true")
+        }
+        if !enableTerminalHelpBar {
+            lines.append("terminal.enable-help-bar = false")
         }
         if packageManagerCommand != .npm {
             lines.append("terminal.package-manager = \(TOML.quote(packageManagerCommand.rawValue))")

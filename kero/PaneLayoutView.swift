@@ -484,19 +484,23 @@ private struct PaneView: View {
     private var content: some View {
         switch pane.content {
         case .session(let session):
-            TerminalHostView(
-                session: session,
-                isFocused: isFocused,
-                hasMultiplePanes: tab.hasMultiplePanes,
-                onFocused: focus,
-                onSplit: splitFromMenu,
-                onClose: onClosePane.map { close in
-                    { focus(); close(pane.content) }
-                }
-            )
+            VStack(spacing: 0) {
+                TerminalHostView(
+                    session: session,
+                    isFocused: isFocused,
+                    hasMultiplePanes: tab.hasMultiplePanes,
+                    onFocused: focus,
+                    onSplit: splitFromMenu,
+                    onClose: onClosePane.map { close in
+                        { focus(); close(pane.content) }
+                    }
+                )
                 .overlay(alignment: .topTrailing) {
                     TerminalFindOverlay(find: session.find)
                 }
+
+                TerminalHelpBar(session: session)
+            }
         case .file(let file):
             FileViewerView(file: file, isFocused: isFocused, onFocused: focus, onSplit: splitFromMenu)
                 .background(Color(nsColor: Theme.background.withAlphaComponent(AppSettings.shared.terminalBackgroundOpacity)))

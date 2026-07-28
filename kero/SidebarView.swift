@@ -373,39 +373,8 @@ private struct SidebarProjectRow: View {
         )
         .onHover { isHovering = $0 }
         .contextMenu {
-            Button(L10n.t("Rename…")) {
-                beginRename()
-            }
-            if project.customName != nil {
-                Button(L10n.t("Use Automatic Title")) {
-                    project.customName = nil
-                }
-            }
-            Button(L10n.t("Edit Description…")) {
-                beginDescriptionEdit()
-            }
-            Menu(L10n.t("Theme")) {
-                // 两侧都清空 → 完全跟随全局 Light/Dark colors
-                Toggle(isOn: Binding(
-                    get: { project.theme.followsGlobal },
-                    set: { if $0 { project.theme = .global } }
-                )) {
-                    Label {
-                        Text(L10n.t("Follow Global Settings"))
-                    } icon: {
-                        Image(nsImage: ThemePreviewImageRenderer.image(for: [
-                            Theme.globalDefinition(dark: false),
-                            Theme.globalDefinition(dark: true)
-                        ]))
-                    }
-                    .labelStyle(.titleAndIcon)
-                }
-                Divider()
-                // 与 Settings → Appearance 一致：Light / Dark 两套独立配色
-                projectAppearanceThemeMenu(dark: false)
-                projectAppearanceThemeMenu(dark: true)
-            }
-            Divider()
+            
+            
             Button {
                 openProjectDirectory()
             } label: {
@@ -416,10 +385,23 @@ private struct SidebarProjectRow: View {
             } label: {
                 Label(L10n.t("Open Config Folder"), systemImage: "finder")
             }
+            
             Divider()
+            Button(L10n.t("Rename…")) {
+                beginRename()
+            }
+
+            Button(L10n.t("Edit Description…")) {
+                beginDescriptionEdit()
+            }
             Button(L10n.t("Change Icon…")) {
                 isIconPickerPresented = true
             }
+
+
+            Divider()
+            Toggle(L10n.t("Use Automatic Title"), isOn: $project.useAutoTitle)
+           
             // ── AI：名称 + 描述 + 图标
             if aiMetaTasks.isRunning(project.id) {
                 Button {
@@ -450,15 +432,31 @@ private struct SidebarProjectRow: View {
                 }
                 .disabled(!LocalAI.isEnabled || aiMetaTasks.isRunning(project.id))
             }
-            if project.icon != nil {
-                Button(L10n.t("Clear Icon")) {
-                    if case .file = project.icon {
-                        ProjectIconFileStore.removeManagedIcons(for: project.id)
+
+            Divider()
+            Menu(L10n.t("Theme")) {
+                // 两侧都清空 → 完全跟随全局 Light/Dark colors
+                Toggle(isOn: Binding(
+                    get: { project.theme.followsGlobal },
+                    set: { if $0 { project.theme = .global } }
+                )) {
+                    Label {
+                        Text(L10n.t("Follow Global Settings"))
+                    } icon: {
+                        Image(nsImage: ThemePreviewImageRenderer.image(for: [
+                            Theme.globalDefinition(dark: false),
+                            Theme.globalDefinition(dark: true)
+                        ]))
                     }
-                    project.icon = nil
+                    .labelStyle(.titleAndIcon)
                 }
-                .disabled(isAnyAITaskRunning)
+                Divider()
+                // 与 Settings → Appearance 一致：Light / Dark 两套独立配色
+                projectAppearanceThemeMenu(dark: false)
+                projectAppearanceThemeMenu(dark: true)
             }
+          
+
             Divider()
             if project.isArchived {
                 Button {
@@ -679,7 +677,12 @@ private struct SidebarProjectRow: View {
 
     private func commitRename() {
         let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        project.customName = trimmed.isEmpty ? nil : trimmed
+        if !trimmed.isEmpty {
+            project.customName = trimmed
+            project.useAutoTitle = false
+        } else {
+            project.customName = nil
+        }
         isRenaming = false
     }
 

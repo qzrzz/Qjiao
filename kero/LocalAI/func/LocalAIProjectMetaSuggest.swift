@@ -146,6 +146,7 @@ enum LocalAIProjectMetaSuggest {
         let suggestion = try await suggest(for: project)
 
         project.customName = suggestion.name
+        project.useAutoTitle = false
         project.description = suggestion.description.isEmpty ? nil : suggestion.description
 
         if let icon = suggestion.icon {

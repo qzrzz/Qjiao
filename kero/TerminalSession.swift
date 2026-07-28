@@ -341,6 +341,72 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         return foregroundPid > 0 && foregroundPid != idleProcessGroup
     }
 
+    /// 当前终端处于需要辅助工具栏的特定交互模式（如 Vi/Vim/Neovim）。
+    var activeHelpMode: TerminalHelpMode? {
+        guard isInitialized, !hasExited,
+              let shellPid,
+              let foregroundPid = _terminalView?.foregroundPid,
+              foregroundPid > 0
+        else { return nil }
+
+        let names = TerminalProcessIdentity.foregroundExecutableNames(
+            shellPid: shellPid,
+            foregroundPgid: foregroundPid
+        )
+        for name in names {
+            let lower = name.lowercased()
+            let base = (lower as NSString).lastPathComponent
+            if base == "vi" || base == "vim" || base == "nvim" || base == "view"
+                || base == "vimdiff" || base == "ex" || base == "vi.basic" || base == "vi.recovery" {
+                return .vi
+            }
+        }
+        let lowerTitle = title.lowercased()
+        if lowerTitle.hasPrefix("vi ") || lowerTitle == "vi" || lowerTitle.hasPrefix("vim ") || lowerTitle == "vim" || lowerTitle.hasPrefix("nvim ") || lowerTitle == "nvim" {
+            return .vi
+        }
+        return nil
+    }
+
+    /// 在终端底栏点击辅助按钮时，直接向 PTY 发送控制序列并恢复终端焦点。
+    func executeHelpCommand(_ command: TerminalHelpCommand) {
+        guard isInitialized, let terminalView = _terminalView else { return }
+
+        switch command {
+        case .saveAndExit:
+            executeViExCommand(":wq", in: terminalView)
+        case .exitWithoutSaving:
+            executeViExCommand(":q!", in: terminalView)
+        case .insertMode:
+            Task { @MainActor [weak terminalView] in
+                try? await Task.sleep(for: .milliseconds(20))
+                guard let terminalView else { return }
+                terminalView.window?.makeFirstResponder(terminalView)
+                terminalView.performBindingAction("text:\\x1bi")
+            }
+        case .normalMode:
+            Task { @MainActor [weak terminalView] in
+                try? await Task.sleep(for: .milliseconds(20))
+                guard let terminalView else { return }
+                terminalView.window?.makeFirstResponder(terminalView)
+                terminalView.performBindingAction("text:\\x1b")
+            }
+        }
+    }
+
+    /// 原子发送 Esc、Ex 命令与 Return，避免输入队列重排或把命令写进正文。
+    private func executeViExCommand(
+        _ command: String,
+        in terminalView: KeroTerminalView
+    ) {
+        Task { @MainActor [weak terminalView] in
+            try? await Task.sleep(for: .milliseconds(20))
+            guard let terminalView else { return }
+            terminalView.window?.makeFirstResponder(terminalView)
+            terminalView.performBindingAction("text:\\x1b\(command)\\x0d")
+        }
+    }
+
     // 前台进程图标缓存：按 foreground pgid 节流复用；弱运行时命中（仅 node）
     // 会较短时间后重扫，以便从 argv 识别出 rsbuild 等真实 CLI。
     private var cachedForegroundAppIconPid: pid_t = 0

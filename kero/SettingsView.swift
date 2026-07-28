@@ -321,6 +321,14 @@ struct SettingsView: View {
                         .labelsHidden()
                 }
 
+                settingWithDescription(
+                    L10n.t("Enable Terminal help bar"),
+                    L10n.t("Shows context-sensitive action bars at the bottom of the terminal, such as Vi editing controls.")
+                ) {
+                    Toggle("", isOn: $settings.enableTerminalHelpBar)
+                        .labelsHidden()
+                }
+
                 }
                 .settingsRowPadding()
             }
@@ -445,15 +453,15 @@ struct SettingsView: View {
                 Group {
                     aboutLinkRow(
                         imageName: "GitHubMark",
-                        title: L10n.t("Qjiao GitHub"),
-                        subtitle: "qzrzz/Qjiao",
+                        title: L10n.t("GitHub"),
+                        subtitle: "https://github.com/qzrzz/Qjiao",
                         url: "https://github.com/qzrzz/Qjiao"
                     )
                     aboutLinkRow(
                         imageName: "AuthorLogo",
                         isOriginalColor: true,
-                        title: L10n.t("Author"),
-                        subtitle: "Qzrzz · qzrzz.com",
+                        title: L10n.t("Qzrzz"),
+                        subtitle: "qzrzz.com",
                         url: "https://qzrzz.com/"
                     )
                 }
