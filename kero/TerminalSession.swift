@@ -21,6 +21,8 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     @Published var hasExited = false
     /// 终端引擎与视图是否已完成真正的初始化。惰性 Session 在首次访问或进入前台时建联。
     @Published private(set) var isInitialized = false
+    /// 每次 Ghostty 收到 OSC 133 命令完成报告时递增，供 Git 等事件消费者观察。
+    @Published private(set) var commandCompletionSequence: UInt64 = 0
 
     /// 项目拖拽回调缓存，延迟装载时应用给新建的 terminalView。
     var pendingOnOpenProjectDirectory: ((URL) -> Bool)? {
@@ -578,7 +580,11 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             // least that many normally sized rows while keeping synchronous
             // history exports bounded.
             builder.withCustom("scrollback-limit", "4194304")
-            builder.withCustom("macos-option-as-alt", "true")
+            // 默认保留 macOS 输入源的 Option 组合文字；需要终端 Meta 快捷键时由用户开启。
+            builder.withCustom(
+                "macos-option-as-alt",
+                settings.macosOptionAsAlt ? "true" : "false"
+            )
             builder.withCustom("scrollbar", "never")
             builder.withCustom("clipboard-read", "ask")
             builder.withCustom("clipboard-write", "allow")
@@ -836,6 +842,13 @@ extension TerminalSession: TerminalSurfaceDesktopNotificationDelegate {
 extension TerminalSession: TerminalSurfaceProgressReportDelegate {
     func terminalDidReportProgress(state: TerminalProgressState, percent: Int?) {
         terminalView.applyProgressReport(state: state, percent: percent)
+    }
+}
+
+extension TerminalSession: TerminalSurfaceCommandFinishedDelegate {
+    /// zsh 集成输出 OSC 133;D 后由 Ghostty 回调；递增序号可保留连续相同结果的事件。
+    func terminalDidFinishCommand(exitCode: Int?, durationNanos: UInt64) {
+        commandCompletionSequence &+= 1
     }
 }
 

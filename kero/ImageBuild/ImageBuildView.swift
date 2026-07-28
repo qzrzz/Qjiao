@@ -983,7 +983,7 @@ struct ImageBuildView: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .help("预置尺寸")
+            .help(L10n.t("Preset sizes"))
         }
     }
 

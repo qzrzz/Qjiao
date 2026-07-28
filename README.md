@@ -186,8 +186,14 @@
   - 工具定位：`VendorBin` Bundle → 源码 `kero/VendorBin` → Homebrew → `which`。
   - 图片查看器顶栏 / 右键 **Image Build…**（资源图标 `ImageBuild`）打开处理面板；Files 树多选图片右键亦可进入。
 - 优化 Project 面板 Header 与路径栏：Project Name 与 Project Description 输入框根据当前内容文本/占位符长度自适应调节宽度，聚焦/hover 背景与边框高亮框不再充满整行；路径右侧操作按钮统一使用 `SidebarIconButton`，支持 hover 态高亮与 Tooltip 提示，并在 Finder / Copy Path 左侧新增「在终端中打开」按钮（`terminal`），点击即可在当前项目/路径下建立并切换至新终端 Session。
+- 设置 Terminal → Features 新增 **Use Option as Alt/Meta** 开关：默认保留 macOS 文本输入行为，按需将 Option 组合键发送为终端 Meta 快捷键；配置写入 `terminal.macos-option-as-alt`。
+- 后台终端在停止 GPU surface 合成的基础上进一步压缩隐藏渲染目标，回到前台时自动恢复，降低多 Tab / 多分栏的 GPU 内存占用；内置 `libghostty-spm` 更新至 `1.3.3`。
+- 图片查看器会监听已打开图片的磁盘变更；图片被外部工具覆盖或重新生成后，预览自动刷新，无需关闭标签重新打开。
+- 设置 General → Appearance 新增 **Sidebar font size**：按统一层级同比缩放左、右侧栏及顶栏 Tabs 的文字、图标和行高，并适配当前 `SidebarTypography` 架构；配置写入 `sidebar.font-size`。
+- Git 面板改为事件驱动刷新：终端命令结束、应用重新激活、切换项目 / CWD / Session、Git 操作完成或手动刷新时更新状态；常规定时器不再每 2 秒执行 Git 命令，并合并刷新期间的重复请求。
 
 ## 上游移植记录
 
-- 最近完成比对与移植的上游版本：Kero `v0.1.26`（`1d34745e23dfb420ccada48628a2c9b17e99e76f`）。
+- 最近完成比对与选择性移植的上游基线：Kero `main`（`169ae95d651dad86b71515b06b82f4f6a16efc85`，包含 `v0.1.30`，2026-07-28）。
+- 本轮移植 Option/Meta 设置、隐藏渲染目标内存优化、外部图片变更刷新、侧栏字号和事件驱动 Git 刷新；不移植可选 Alacritty 后端。
 - 已采用上游 `v0.1.24` 的兼容策略，将新建终端的 `TERM_PROGRAM` 设置为 `ghostty`。

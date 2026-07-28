@@ -19,6 +19,7 @@
         var lastPointerSelectionRect: CGRect?
         var pendingSelectionMenuPoint: CGPoint?
         var onFocusChange: ((Bool) -> Void)?
+        var rendererTargetsCompacted = false
 
         /// Pointer shape ghostty last asked for. Seeded with `.text` because
         /// that is what the grid resolves to, and ghostty only emits the action
@@ -65,6 +66,8 @@
             metal.device = MTLCreateSystemDefaultDevice()
             metal.pixelFormat = .bgra8Unorm
             metal.framebufferOnly = true
+            // 终端按输入重绘，第三个全尺寸 IOSurface 只会增加显存占用。
+            metal.maximumDrawableCount = 2
             metal.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
             metal.isOpaque = false
             metal.backgroundColor = NSColor.clear.cgColor
@@ -103,6 +106,12 @@
             }
             core.onMouseShapeChange = { [weak self] shape in
                 self?.applyMouseShape(shape)
+            }
+            core.onRenderSuspended = { [weak self] in
+                self?.compactRendererTargets()
+            }
+            core.onRenderResuming = { [weak self] in
+                self?.restoreRendererTargets()
             }
         }
 

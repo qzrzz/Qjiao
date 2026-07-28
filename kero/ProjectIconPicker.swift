@@ -911,12 +911,16 @@ final class SFSymbolCatalog {
 struct ProjectIconPicker: View {
     /// 图标来源分段（与原生 segmented Picker 的四个选项对应）。
     private enum Source: String, CaseIterable, Identifiable {
-        case preset = "预置"
+        case preset = "Preset"
         case sfSymbols = "SF Symbols"
         case emoji = "Emoji"
         case file = "Select File"
 
         var id: Self { self }
+
+        var title: String {
+            L10n.t(rawValue)
+        }
     }
 
     /// 选择器尺寸：内容区固定高度，切换类型时窗口不抖动。
@@ -1009,7 +1013,7 @@ struct ProjectIconPicker: View {
             // 使用传统原生分段控件，采用系统中号尺寸与标准交互。
             Picker(L10n.t("Icon type"), selection: $source) {
                 ForEach(Source.allCases) { item in
-                    Text(item.rawValue)
+                    Text(item.title)
                         .tag(item)
                 }
             }

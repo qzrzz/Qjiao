@@ -154,7 +154,7 @@ struct ImageExportTemplate: Identifiable, Sendable {
         ImageExportTemplate(
             id: "android-launcher",
             title: L10n.t("Android Launcher"),
-            detail: "近似 mdpi…xxxhdpi（预置宽度）",
+            detail: L10n.t("Approximate mdpi…xxxhdpi (preset width)"),
             rows: [
                 .init(sizeText: "32w", suffix: "_mdpi"),
                 .init(sizeText: "128w", suffix: "_hdpi"),

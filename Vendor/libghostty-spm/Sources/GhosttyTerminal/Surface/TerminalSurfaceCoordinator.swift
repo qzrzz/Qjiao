@@ -46,6 +46,9 @@ final class TerminalSurfaceCoordinator {
     var onMetricsUpdate: (() -> Void)?
     var onCellSizeDidChange: (() -> Void)?
     var onMouseShapeChange: ((TerminalMouseShape) -> Void)?
+    /// 显示可见性变化时释放或恢复昂贵的渲染资源；应用失焦不触发此钩子。
+    var onRenderSuspended: (() -> Void)?
+    var onRenderResuming: (() -> Void)?
 
     /// Called after every display-link render (`tick`).
     ///
@@ -139,8 +142,9 @@ final class TerminalSurfaceCoordinator {
         let newSurface = TerminalSurface(rawSurface)
         surface = newSurface
         newSurface.setOcclusion(effectiveSurfaceVisible)
+        // 隐藏 surface 仍需处理进程、标题和退出事件，只停止绘制。
         controller.shouldProcessWakeup = { [weak self] in
-            self?.canRenderFrame == true
+            self?.isAttached() == true
         }
         controller.onWakeup = { [weak self] in
             self?.requestImmediateTick()
@@ -238,12 +242,18 @@ final class TerminalSurfaceCoordinator {
         }
 
         isDisplayVisible = visible
+        if visible {
+            onRenderResuming?()
+        }
         surface?.setOcclusion(effectiveSurfaceVisible)
 
         if canRenderFrame {
             requestImmediateTick()
         } else {
             stopDisplayLink()
+            if !visible {
+                onRenderSuspended?()
+            }
         }
     }
 

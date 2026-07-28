@@ -24,7 +24,7 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         case unavailable(String)
     }
 
-    let content: Content
+    @Published private(set) var content: Content
     /// Current editor text, written back by the editor on every edit. Not
     /// published: the editor owns display, this is only read back for saves.
     var text: String
@@ -49,6 +49,8 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
 
     /// 磁盘文件最后一次修改时间
     private var lastDiskModificationDate: Date?
+    /// 图片内容指纹；用于识别修改时间精度不足或原子替换造成的外部更新。
+    private var imageFingerprint: Int?
     /// 内部写操作标志，防止内部保存触发外部修改检测
     private var isInternalSaving = false
 
@@ -73,9 +75,14 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         self.path = path
         let url = URL(fileURLWithPath: path)
         if Self.imageExtensions.contains(url.pathExtension.lowercased()),
-           let image = NSImage(contentsOf: url) {
+           let data = try? Data(contentsOf: url),
+           let image = NSImage(data: data) {
             content = .image(image)
             text = ""
+            imageFingerprint = data.hashValue
+            lastDiskModificationDate = currentDiskModificationDate()
+            startFileWatcher()
+            setupAppFocusObservation()
             return
         }
         guard let data = try? Data(contentsOf: url) else {
@@ -208,12 +215,12 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     /// 开始监听磁盘文件及所在目录的变更。
     private func startFileWatcher() {
         stopFileWatcher()
-        guard case .text = content else { return }
 
         let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: path) else { return }
-
-        var pathsToWatch: [String] = [path]
+        var pathsToWatch: [String] = []
+        if fileManager.fileExists(atPath: path) {
+            pathsToWatch.append(path)
+        }
         let parentDir = (path as NSString).deletingLastPathComponent
         if !parentDir.isEmpty, fileManager.fileExists(atPath: parentDir) {
             pathsToWatch.append(parentDir)
@@ -270,6 +277,10 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
 
     /// 检查磁盘文件变动并根据本地 dirty 状态进行静默重载或提示冲突。
     func checkDiskChanges() {
+        if case .image = content {
+            reloadImageFromDiskIfChanged()
+            return
+        }
         guard case .text = content, !isInternalSaving else { return }
         guard let diskDate = currentDiskModificationDate() else { return }
 
@@ -305,6 +316,16 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
             // 本地有改动：显示冲突提示条
             hasExternalConflict = true
         }
+    }
+
+    /// 图片没有编辑态；外部字节变化后直接替换预览，并继续监听原路径。
+    private func reloadImageFromDiskIfChanged() {
+        guard let data = FileManager.default.contents(atPath: path) else { return }
+        let fingerprint = data.hashValue
+        guard fingerprint != imageFingerprint, let image = NSImage(data: data) else { return }
+        imageFingerprint = fingerprint
+        lastDiskModificationDate = currentDiskModificationDate()
+        content = .image(image)
     }
 }
 

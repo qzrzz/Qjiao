@@ -140,7 +140,10 @@ final class TerminalManager: nonisolated ObservableObject {
                     AppSettings.shared.$useBundledChineseTerminalFont.removeDuplicates(),
                     AppSettings.shared.$fontThicken.removeDuplicates()
                 ),
-                AppSettings.shared.$terminalBackgroundOpacity.removeDuplicates()
+                Publishers.CombineLatest(
+                    AppSettings.shared.$terminalBackgroundOpacity.removeDuplicates(),
+                    AppSettings.shared.$macosOptionAsAlt.removeDuplicates()
+                )
             ),
             AppSettings.shared.$directClickMovesCursor.removeDuplicates(),
             Publishers.CombineLatest3(

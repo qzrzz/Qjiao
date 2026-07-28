@@ -180,6 +180,21 @@
             // observable symptom is text rendered at half size after the
             // window crosses to a display with a different
             // backingScaleFactor.
+            if !rendererTargetsCompacted {
+                updateActiveRendererLayer(scale: scale)
+            }
+            // 缓存 layer 仍挂载时，不要用全尺寸指标立即撤销隐藏目标压缩。
+            if !rendererTargetsCompacted || metalLayer !== layer {
+                metalLayer?.contentsScale = scale
+                metalLayer?.drawableSize = CGSize(
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                )
+            }
+        }
+
+        /// 更新当前实际挂载的渲染 layer，可用于全尺寸与隐藏缩略尺寸目标。
+        func updateActiveRendererLayer(scale: CGFloat) {
             layer?.contentsScale = scale
             if let metal = layer as? CAMetalLayer {
                 metal.drawableSize = CGSize(
@@ -187,16 +202,10 @@
                     height: bounds.height * scale
                 )
             }
-            // Mirror to the cached ivar in case anything else still
-            // reads through it during a transitional layout pass.
-            metalLayer?.contentsScale = scale
-            metalLayer?.drawableSize = CGSize(
-                width: bounds.width * scale,
-                height: bounds.height * scale
-            )
         }
 
         func enforceMetalLayerScale() {
+            guard !rendererTargetsCompacted else { return }
             let scale = core.scaleFactor()
             if let layer, layer.contentsScale != scale {
                 layer.contentsScale = scale

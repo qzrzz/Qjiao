@@ -130,6 +130,9 @@ final class AppSettings: nonisolated ObservableObject {
 
     static let defaultFontSize: Double = 13
     static let fontSizeRange: ClosedRange<Double> = 8...32
+    /// 左右侧栏统一 chrome 字号的基准值与可调范围。
+    static let defaultSidebarFontSize: Double = 13
+    static let sidebarFontSizeRange: ClosedRange<Double> = 9...18
     /// Files / CWD 树默认字号，与 chrome `body` 一致。
     static let defaultFilesFontSize: Double = 13
     static let filesFontSizeRange: ClosedRange<Double> = 10...22
@@ -184,8 +187,18 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 左右侧栏的基础字号；`SidebarTypography` 按比例缩放既有层级。
+    @Published var sidebarFontSize: Double {
+        didSet { save() }
+    }
+
     /// Whether Ghostty should render terminal glyphs with thicker strokes.
     @Published var fontThicken: Bool {
+        didSet { save() }
+    }
+
+    /// 是否把 Option 组合键作为终端 Alt/Meta，而不是交给 macOS 输入源生成文字。
+    @Published var macosOptionAsAlt: Bool {
         didSet { save() }
     }
 
@@ -382,7 +395,12 @@ final class AppSettings: nonisolated ObservableObject {
         fontFamily = toml["font-family"]?.string ?? ""
         let size = toml["font-size"]?.double ?? Self.defaultFontSize
         fontSize = Self.fontSizeRange.contains(size) ? size : Self.defaultFontSize
+        let sidebarSize = toml["sidebar.font-size"]?.double ?? Self.defaultSidebarFontSize
+        sidebarFontSize = Self.sidebarFontSizeRange.contains(sidebarSize)
+            ? sidebarSize
+            : Self.defaultSidebarFontSize
         fontThicken = toml["font-thicken"]?.bool ?? false
+        macosOptionAsAlt = toml["terminal.macos-option-as-alt"]?.bool ?? false
         useBundledChineseTerminalFont = toml["terminal.use-bundled-chinese-font"]?.bool ?? true
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
         showEditorStatusBar = toml["editor.show-status-bar"]?.bool ?? true
@@ -485,6 +503,7 @@ final class AppSettings: nonisolated ObservableObject {
     func resetFont() {
         fontFamily = ""
         fontSize = Self.defaultFontSize
+        sidebarFontSize = Self.defaultSidebarFontSize
         fontThicken = false
     }
 
@@ -511,6 +530,7 @@ final class AppSettings: nonisolated ObservableObject {
         filesFontSize = Self.defaultFilesFontSize
         restoreTerminalHistory = false
         directClickMovesCursor = false
+        macosOptionAsAlt = false
         zshIdleTitleStyle = .defaultStyle
         enableTerminalHelpBar = true
         packageManagerCommand = .npm
@@ -563,7 +583,13 @@ final class AppSettings: nonisolated ObservableObject {
             lines.append("font-family = \(TOML.quote(fontFamily))")
         }
         lines.append("font-size = \(TOML.number(fontSize))")
+        if sidebarFontSize != Self.defaultSidebarFontSize {
+            lines.append("sidebar.font-size = \(TOML.number(sidebarFontSize))")
+        }
         if fontThicken { lines.append("font-thicken = true") }
+        if macosOptionAsAlt {
+            lines.append("terminal.macos-option-as-alt = true")
+        }
         if !useBundledChineseTerminalFont {
             lines.append("terminal.use-bundled-chinese-font = false")
         }

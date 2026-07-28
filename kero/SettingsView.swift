@@ -110,6 +110,38 @@ struct SettingsView: View {
                         Toggle("", isOn: $settings.displayShortDirPath)
                             .labelsHidden()
                     }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 12) {
+                            Text(L10n.t("Sidebar font size"))
+                            Spacer()
+                            HStack(spacing: 8) {
+                                Slider(
+                                    value: $settings.sidebarFontSize,
+                                    in: AppSettings.sidebarFontSizeRange,
+                                    step: 1
+                                )
+                                .frame(width: 120)
+                                Text("\(Int(settings.sidebarFontSize)) pt")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 40, alignment: .trailing)
+                                Stepper(
+                                    "",
+                                    value: $settings.sidebarFontSize,
+                                    in: AppSettings.sidebarFontSizeRange,
+                                    step: 1
+                                )
+                                .labelsHidden()
+                            }
+                        }
+                        Text(L10n.t(
+                            "Scales text in both sidebars while preserving the existing visual hierarchy."
+                        ))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    }
                 }
                 .settingsRowPadding()
             }
@@ -318,6 +350,14 @@ struct SettingsView: View {
                     L10n.t("Cursor as naturally as in a text editor.")
                 ) {
                     Toggle("", isOn: $settings.directClickMovesCursor)
+                        .labelsHidden()
+                }
+
+                settingWithDescription(
+                    L10n.t("Use Option as Alt/Meta"),
+                    L10n.t("Sends Option-key combinations to terminal programs as Meta shortcuts instead of macOS text input.")
+                ) {
+                    Toggle("", isOn: $settings.macosOptionAsAlt)
                         .labelsHidden()
                 }
 
@@ -608,7 +648,9 @@ struct SettingsView: View {
     private var isUsingDefaults: Bool {
         settings.fontFamily.isEmpty
             && settings.fontSize == AppSettings.defaultFontSize
+            && settings.sidebarFontSize == AppSettings.defaultSidebarFontSize
             && !settings.fontThicken
+            && !settings.macosOptionAsAlt
             && settings.useBundledChineseTerminalFont
             && settings.language == .english
             && settings.theme == .system

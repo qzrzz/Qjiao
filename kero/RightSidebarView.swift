@@ -167,6 +167,14 @@ struct RightSidebarView: View {
     @State private var imageBuildSession: ImageBuildSession?
 
     private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+    /// 任一项目终端完成命令都会改变对应序号；字典保留连续相同退出结果的事件。
+    private var commandCompletionSequences: [UUID: UInt64] {
+        Dictionary(uniqueKeysWithValues:
+            manager.selectedProject?.sessions.map {
+                ($0.id, $0.commandCompletionSequence)
+            } ?? []
+        )
+    }
     /// 上沿放宽到接近贴底：下半最小可为仅 tabs。
     private static let topFractionRange: ClosedRange<Double> = 0.25...0.98
     private static let defaultTopFraction: Double = 0.70
@@ -235,7 +243,11 @@ struct RightSidebarView: View {
             syncSystemPolling()
             syncNoteBinding()
         }
-        .onReceive(refreshTimer) { _ in syncModels() }
+        // 进程、端口与文件信息继续按需轮询；Git 改由命令完成和激活事件刷新。
+        .onReceive(refreshTimer) { _ in syncModels(refreshGit: false) }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )) { _ in refreshGitForExternalEvent() }
         .onChange(of: manager.isPanelVisible) {
             syncModels(reloadActivePanel: manager.isPanelVisible)
             syncSystemPolling()
@@ -254,6 +266,7 @@ struct RightSidebarView: View {
         // session.workingDirectory); resync at once instead of waiting for the
         // next refreshTimer tick, which is what made the panel lag the change.
         .onChange(of: manager.selectedSession?.workingDirectory) { syncModels() }
+        .onChange(of: commandCompletionSequences) { refreshGitForExternalEvent() }
         .onChange(of: manager.selectedProject?.id) {
             syncModels()
             syncNoteBinding()
@@ -302,6 +315,13 @@ struct RightSidebarView: View {
     /// 笔记绑定当前选中项目；无项目时清空绑定。
     private func syncNoteBinding() {
         noteModel.bind(to: manager.selectedProject?.id)
+    }
+
+    /// Git 事件处理从庞大的 SwiftUI modifier 表达式中拆出，降低 Swift 6 类型推断负担。
+    private func refreshGitForExternalEvent() {
+        guard manager.isPanelVisible else { return }
+        guard manager.panelTab == .git else { return }
+        syncModels()
     }
 
     /// 仅在右侧栏可见、下半区展开且选中 System 时轮询 CLI 指标。
@@ -717,7 +737,10 @@ struct RightSidebarView: View {
         .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    private func syncModels(reloadActivePanel: Bool = false) {
+    private func syncModels(
+        reloadActivePanel: Bool = false,
+        refreshGit: Bool = true
+    ) {
         let projectPanelActive = manager.isPanelVisible
             && (manager.panelTab == .start || manager.panelTab == .project)
             && manager.selectedProject != nil
@@ -764,6 +787,7 @@ struct RightSidebarView: View {
             guard let session else { return }
             fileTree.sync(root: session.currentDirectoryPath)
         case .git:
+            guard refreshGit else { return }
             guard let session else { return }
             git.sync(root: session.currentDirectoryPath)
         }
