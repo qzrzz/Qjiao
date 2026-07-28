@@ -450,7 +450,8 @@ struct SettingsView: View {
                         url: "https://github.com/qzrzz/Qjiao"
                     )
                     aboutLinkRow(
-                        systemImage: "person",
+                        imageName: "AuthorLogo",
+                        isOriginalColor: true,
                         title: L10n.t("Author"),
                         subtitle: "Qzrzz · qzrzz.com",
                         url: "https://qzrzz.com/"
@@ -526,9 +527,17 @@ struct SettingsView: View {
     }
 
     /// About 页面中整行可点击的外部链接，统一展示图标、标题、来源和跳转提示。
+    /// - Parameters:
+    ///   - systemImage: SF Symbol 图标名称
+    ///   - imageName: Asset Catalog 中的自定义图片名称
+    ///   - isOriginalColor: 是否保持图片原本颜色（为 true 时不应用模板渲染和前景色）
+    ///   - title: 链接主标题
+    ///   - subtitle: 链接副标题/来源说明
+    ///   - url: 目标跳转 URL
     private func aboutLinkRow(
         systemImage: String? = nil,
         imageName: String? = nil,
+        isOriginalColor: Bool = false,
         title: String,
         subtitle: String,
         url: String
@@ -537,12 +546,19 @@ struct SettingsView: View {
             HStack(spacing: 12) {
                 Group {
                     if let imageName {
-                        Image(imageName)
-                            .resizable()
-                            .renderingMode(.template)
-                            .scaledToFit()
-                            .padding(6)
-                            .foregroundStyle(.primary)
+                        if isOriginalColor {
+                            Image(imageName)
+                                .resizable()
+                                .scaledToFit()
+                                .padding(4)
+                        } else {
+                            Image(imageName)
+                                .resizable()
+                                .renderingMode(.template)
+                                .scaledToFit()
+                                .padding(6)
+                                .foregroundStyle(.primary)
+                        }
                     } else if let systemImage {
                         Image(systemName: systemImage)
                             .font(.system(size: 14, weight: .medium))
@@ -771,92 +787,43 @@ private extension View {
     }
 }
 
-/// 当活动项目覆盖了全局 Light/Dark 配色时，在设置外观区显示当前生效主题与原因。
+/// 活动项目覆盖全局配色时显示一行简短提示。
 private struct ProjectThemeOverrideHint: View {
     @ObservedObject private var themeChanges = Theme.changes
-    @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var l10n = L10n.shared
 
     var body: some View {
-        // 依赖 themeChanges / settings / 语言，项目覆盖或全局配色变更时刷新提示。
-        let _ = (themeChanges, l10n.language, settings.themeLight, settings.themeDark)
+        let _ = (themeChanges, l10n.language)
         if let summary = Theme.projectThemeOverrideSummary {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "info.circle.fill")
-                    .font(.system(size: 13))
+            Label {
+                Text(summaryText(summary))
+                    .font(.callout)
+                    .foregroundStyle(Theme.secondaryColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "info.circle")
                     .foregroundStyle(Color(nsColor: Theme.cursor))
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.t("Project color override"))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.primaryColor)
-                    Text(reasonText(summary))
-                        .font(.callout)
-                        .foregroundStyle(Theme.secondaryColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                    effectiveLine(
-                        title: L10n.t("Dark colors"),
-                        overrideName: summary.darkOverride,
-                        globalName: settings.themeDark
-                    )
-                    effectiveLine(
-                        title: L10n.t("Light colors"),
-                        overrideName: summary.lightOverride,
-                        globalName: settings.themeLight
-                    )
-                    Text(L10n.t("Change this in the project’s right-click Theme menu, or choose Follow Global Settings."))
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
-            .padding(10)
+            .labelStyle(.titleAndIcon)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: Theme.cursor).opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color(nsColor: Theme.cursor).opacity(0.18), lineWidth: 1)
-            )
             .accessibilityElement(children: .combine)
         }
     }
 
-    private func reasonText(_ summary: ProjectThemeOverrideSummary) -> String {
+    /// 例：Project “Foo” overrides colors: Dark = A, Light = B
+    private func summaryText(_ summary: ProjectThemeOverrideSummary) -> String {
+        var parts: [String] = []
+        if let dark = summary.darkOverride {
+            parts.append(L10n.format("Dark = %@", dark))
+        }
+        if let light = summary.lightOverride {
+            parts.append(L10n.format("Light = %@", light))
+        }
+        let themes = parts.joined(separator: ", ")
         if let name = summary.projectName, !name.isEmpty {
-            return L10n.format(
-                "The project “%@” is overriding the global color theme for the active window.",
-                name
-            )
+            return L10n.format("Project “%@” overrides colors: %@.", name, themes)
         }
-        return L10n.t("The active project is overriding the global color theme for the active window.")
-    }
-
-    @ViewBuilder
-    private func effectiveLine(title: String, overrideName: String?, globalName: String) -> some View {
-        let effective = overrideName ?? globalName
-        if let overrideName {
-            Text(
-                L10n.format(
-                    "%@: %@ (project). Global setting: %@.",
-                    title,
-                    overrideName,
-                    globalName
-                )
-            )
-            .font(.callout)
-            .foregroundStyle(Theme.primaryColor)
-            .monospacedDigit()
-            .fixedSize(horizontal: false, vertical: true)
-        } else {
-            Text(L10n.format("%@: %@ (global).", title, effective))
-                .font(.callout)
-                .foregroundStyle(Theme.secondaryColor)
-                .monospacedDigit()
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        return L10n.format("Project overrides colors: %@.", themes)
     }
 }
 
