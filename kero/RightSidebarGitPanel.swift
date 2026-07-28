@@ -144,7 +144,7 @@ struct GitPanel: View {
                 PanelHeader(title: L10n.t("Git"), subtitle: model.rootPath, isSubtitlePath: true)
             }
             if model.isRepo {
-                GitHeaderIconButton(
+                SidebarIconButton(
                     systemImage: "line.3.horizontal.decrease",
                     help: L10n.t("Filter Changed Files"),
                     active: showFilter
@@ -203,12 +203,15 @@ struct GitPanel: View {
         .menuIndicator(.hidden)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .help(L10n.t("Switch or Create Branch"))
+        .macTooltip(L10n.t("Switch or Create Branch"), position: .bottom)
         .accessibilityLabel("Current branch, \(model.branch ?? "detached HEAD")")
     }
 
     private var moreMenu: some View {
-        Menu {
+        SidebarMenuIconButton(
+            systemImage: "ellipsis",
+            help: L10n.t("More Actions…")
+        ) {
             Button(L10n.t("Fetch")) { model.fetch() }
                 .disabled(model.isBusy || model.remotes.isEmpty)
             Button(L10n.t("Pull (Fast-forward Only)")) { model.pull() }
@@ -249,68 +252,6 @@ struct GitPanel: View {
             } label: {
                 Label(L10n.t("Reveal Repository in Finder"), systemImage: "finder")
             }
-        } label: {
-            GitHeaderMenuIcon()
-        }
-        .buttonStyle(.plain)
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(L10n.t("More Actions…"))
-        .accessibilityLabel(L10n.t("More Git Actions"))
-    }
-
-    private struct GitHeaderIconButton: View {
-        let systemImage: String
-        let help: String
-        var disabled: Bool = false
-        var active: Bool = false
-        let action: () -> Void
-
-        @State private var isHovering = false
-
-        var body: some View {
-            Button(action: action) {
-                Image(systemName: systemImage)
-                    .font(SidebarTypography.caption(.medium))
-                    .foregroundStyle(
-                        active
-                            ? Color(nsColor: Theme.cursor)
-                            : (disabled ? .secondary.opacity(0.4) : (isHovering ? .primary : .secondary))
-                    )
-                    .frame(width: 22, height: 22)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(
-                                active
-                                    ? Color(nsColor: Theme.cursor).opacity(0.12)
-                                    : (isHovering && !disabled ? Color.primary.opacity(0.08) : Color.clear)
-                            )
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 5))
-            }
-            .buttonStyle(.plain)
-            .disabled(disabled)
-            .onHover { isHovering = $0 }
-            .help(help)
-            .accessibilityLabel(help)
-        }
-    }
-
-    private struct GitHeaderMenuIcon: View {
-        @State private var isHovering = false
-
-        var body: some View {
-            Image(systemName: "ellipsis")
-                .font(SidebarTypography.caption(.medium))
-                .foregroundStyle(isHovering ? .primary : .secondary)
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(isHovering ? Color.primary.opacity(0.08) : Color.clear)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 5))
-                .onHover { isHovering = $0 }
         }
     }
 
@@ -384,31 +325,24 @@ struct GitPanel: View {
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     if !operation.output.isEmpty {
-                        Button {
+                        GitChromeIconButton(
+                            systemImage: "chevron.right",
+                            help: operationExpanded
+                                ? L10n.t("Hide Git Output")
+                                : L10n.t("Show Git Output"),
+                            rotationDegrees: operationExpanded ? 90 : 0
+                        ) {
                             operationExpanded.toggle()
-                        } label: {
-                            Image(systemName: "chevron.right")
-                                .font(SidebarTypography.compact())
-                                .rotationEffect(.degrees(operationExpanded ? 90 : 0))
-                                .frame(width: 16, height: 16)
-                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        .help(operationExpanded ? "Hide Git Output" : "Show Git Output")
-                        .accessibilityLabel(operationExpanded ? "Hide Git Output" : "Show Git Output")
                     }
                     if !operation.isRunning {
-                        Button {
+                        GitChromeIconButton(
+                            systemImage: "xmark",
+                            help: L10n.t("Dismiss")
+                        ) {
                             operationExpanded = false
                             model.dismissOperation()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(SidebarTypography.compact())
-                                .frame(width: 16, height: 16)
-                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        .help(L10n.t("Dismiss"))
                         .accessibilityLabel(L10n.t("Dismiss Git Result"))
                     }
                 }
@@ -477,13 +411,13 @@ struct GitPanel: View {
                     .buttonStyle(.borderless)
                     .font(SidebarTypography.caption(.medium))
                     .disabled(newBranchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
-                Button {
+                    .macTooltip(L10n.t("Create New Branch…"), position: .top)
+                GitChromeIconButton(
+                    systemImage: "xmark",
+                    help: L10n.t("Cancel")
+                ) {
                     showBranchCreator = false
-                } label: {
-                    Image(systemName: "xmark").font(SidebarTypography.compact())
                 }
-                .buttonStyle(.plain)
-                .help(L10n.t("Cancel"))
                 .accessibilityLabel(L10n.t("Cancel Branch Creation"))
             }
             .padding(.horizontal, 8)
@@ -543,7 +477,8 @@ struct GitPanel: View {
                     icon: "checkmark",
                     title: commitButtonTitle,
                     enabled: canCommit(includeAll: false),
-                    help: L10n.t("Commit staged changes (⌘Return)"),
+                    help: L10n.t("Commit staged changes"),
+                    shortcut: "⌘↩",
                     action: performPrimaryAction
                 )
                 commitMenu
@@ -587,44 +522,28 @@ struct GitPanel: View {
     /// Message 旁的 AI 按钮：进行中显示取消，否则 sparkles.2。
     private var aiCommitMessageButton: some View {
         let running = aiCommitTasks.isRunning(model.repoRoot)
-        return Button {
+        let enabled = running || (LocalAI.isEnabled && canGenerateAICommitMessage)
+        let helpText = running
+            ? L10n.t("Cancel AI Commit Message")
+            : (LocalAI.isEnabled
+                ? L10n.t("Generate commit message with AI")
+                : L10n.t("Enable AI headless provider in Settings → General"))
+        return GitChromeIconButton(
+            systemImage: "sparkles.2",
+            help: helpText,
+            disabled: !running && (!LocalAI.isEnabled || !canGenerateAICommitMessage),
+            isProminent: enabled,
+            side: 28,
+            cornerRadius: 6,
+            showsProgress: running,
+            idleBackgroundOpacity: 0.06
+        ) {
             if running {
                 aiCommitTasks.cancel(model.repoRoot, clearError: true)
             } else {
                 startAICommitMessage()
             }
-        } label: {
-            Group {
-                if running {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(width: 14, height: 14)
-                } else {
-                    Image(systemName: "sparkles.2")
-                        .font(SidebarTypography.caption(.semibold))
-                }
-            }
-            .frame(width: 28, height: 28)
-            .foregroundStyle(
-                running || (LocalAI.isEnabled && canGenerateAICommitMessage)
-                    ? Color(nsColor: Theme.cursor)
-                    : Color.secondary.opacity(0.55)
-            )
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.primary.opacity(0.06))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.plain)
-        .disabled(!running && (!LocalAI.isEnabled || !canGenerateAICommitMessage))
-        .help(
-            running
-                ? L10n.t("Cancel AI Commit Message")
-                : (LocalAI.isEnabled
-                    ? L10n.t("Generate commit message with AI")
-                    : L10n.t("Enable AI headless provider in Settings → General"))
-        )
         .accessibilityLabel(
             running ? L10n.t("Cancel AI Commit Message") : L10n.t("AI Commit Message")
         )
@@ -643,7 +562,13 @@ struct GitPanel: View {
     }
 
     private var commitMenu: some View {
-        Menu {
+        GitChromeMenuButton(
+            systemImage: "chevron.down",
+            help: L10n.t("Commit Options"),
+            side: 24,
+            cornerRadius: 6,
+            idleBackgroundOpacity: 0.06
+        ) {
             Button(L10n.t("Commit Staged")) { performCommit(includeAll: false) }
                 .disabled(!canCommit(includeAll: false))
             Button(L10n.t("Stage All & Commit")) { performCommit(includeAll: true) }
@@ -653,49 +578,22 @@ struct GitPanel: View {
                 .disabled(!canAmend(includeAll: false))
             Button(L10n.t("Stage All & Amend")) { performCommit(includeAll: true, amend: true) }
                 .disabled(!canAmend(includeAll: true))
-        } label: {
-            Image(systemName: "chevron.down")
-                .font(SidebarTypography.compact())
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.primary.opacity(0.06))
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.plain)
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(L10n.t("Commit Options"))
-        .accessibilityLabel(L10n.t("Commit Options"))
     }
 
     private func actionButton(
         icon: String, title: String, enabled: Bool, help: String,
+        shortcut: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(SidebarTypography.caption(.semibold))
-                Text(title)
-                    .font(SidebarTypography.secondary(.medium))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(nsColor: Theme.cursor).opacity(enabled ? 0.85 : 0.3))
-            )
-            .foregroundStyle(.white)
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .help(help)
-        .accessibilityLabel(title)
+        GitPrimaryActionButton(
+            icon: icon,
+            title: title,
+            enabled: enabled,
+            help: help,
+            shortcut: shortcut,
+            action: action
+        )
     }
 
     private var commitFieldPlaceholder: String {
@@ -776,15 +674,16 @@ struct GitPanel: View {
                     .textFieldStyle(.plain)
                     .font(SidebarTypography.secondary())
                 if !filterText.isEmpty {
-                    Button {
+                    GitChromeIconButton(
+                        systemImage: "xmark.circle.fill",
+                        help: L10n.t("Clear Filter"),
+                        side: 18,
+                        cornerRadius: 4,
+                        font: SidebarTypography.caption(),
+                        idleForeground: Color.secondary.opacity(0.75)
+                    ) {
                         filterText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(SidebarTypography.caption())
-                            .foregroundStyle(.tertiary)
                     }
-                    .buttonStyle(.plain)
-                    .help(L10n.t("Clear Filter"))
                     .accessibilityLabel(L10n.t("Clear Git Filter"))
                 }
             }
@@ -1203,6 +1102,164 @@ struct GitPanel: View {
     }
 }
 
+// MARK: - Git chrome controls (hover + Tooltip)
+
+/// Git 面板主操作按钮（Commit / Sync）：hover 提亮，并显示 macTooltip。
+private struct GitPrimaryActionButton: View {
+    let icon: String
+    let title: String
+    let enabled: Bool
+    let help: String
+    var shortcut: String? = nil
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(SidebarTypography.caption(.semibold))
+                Text(title)
+                    .font(SidebarTypography.secondary(.medium))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(nsColor: Theme.cursor).opacity(fillOpacity))
+            )
+            .foregroundStyle(.white.opacity(enabled ? 1 : 0.85))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+        .macTooltip(enabled ? help : nil, shortcut: shortcut, position: .top)
+        .accessibilityLabel(title)
+        .accessibilityHint(help)
+    }
+
+    private var fillOpacity: Double {
+        guard enabled else { return 0.3 }
+        return isHovering ? 1.0 : 0.85
+    }
+}
+
+/// Git 面板图标按钮：统一 hover 浅底 / 前景提亮 + macTooltip。
+private struct GitChromeIconButton: View {
+    let systemImage: String
+    let help: String
+    var disabled: Bool = false
+    var isProminent: Bool = false
+    var side: CGFloat = 16
+    var cornerRadius: CGFloat = 4
+    var font: Font = SidebarTypography.compact()
+    var rotationDegrees: Double = 0
+    var showsProgress: Bool = false
+    var idleBackgroundOpacity: Double = 0
+    var idleForeground: Color = .secondary
+    var tooltipPosition: MacTooltipPosition = .top
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: max(12, side - 14), height: max(12, side - 14))
+                } else {
+                    Image(systemName: systemImage)
+                        .font(font)
+                        .rotationEffect(.degrees(rotationDegrees))
+                }
+            }
+            .frame(width: side, height: side)
+            .foregroundStyle(foreground)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(backgroundFill)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+        .animation(.easeInOut(duration: 0.15), value: rotationDegrees)
+        .macTooltip(help, position: tooltipPosition)
+        .accessibilityLabel(help)
+    }
+
+    private var foreground: Color {
+        if disabled {
+            return idleForeground.opacity(0.45)
+        }
+        if isProminent {
+            return Color(nsColor: Theme.cursor)
+        }
+        return isHovering ? .primary : idleForeground
+    }
+
+    private var backgroundFill: Color {
+        if disabled {
+            return Color.primary.opacity(idleBackgroundOpacity * 0.5)
+        }
+        if isHovering {
+            return Color.primary.opacity(max(idleBackgroundOpacity + 0.06, 0.1))
+        }
+        return Color.primary.opacity(idleBackgroundOpacity)
+    }
+}
+
+/// Git 面板菜单图标按钮：与 `GitChromeIconButton` 视觉一致。
+private struct GitChromeMenuButton<Content: View>: View {
+    let systemImage: String
+    let help: String
+    var side: CGFloat = 24
+    var cornerRadius: CGFloat = 6
+    var idleBackgroundOpacity: Double = 0.06
+    var tooltipPosition: MacTooltipPosition = .top
+    @ViewBuilder let menuContent: () -> Content
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            menuContent()
+        } label: {
+            Image(systemName: systemImage)
+                .font(SidebarTypography.compact())
+                .foregroundStyle(isHovering ? .primary : .secondary)
+                .frame(width: side, height: side)
+                .background(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(
+                            Color.primary.opacity(
+                                isHovering
+                                    ? max(idleBackgroundOpacity + 0.06, 0.1)
+                                    : idleBackgroundOpacity
+                            )
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
+        }
+        .buttonStyle(.plain)
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+        .macTooltip(help, position: tooltipPosition)
+        .accessibilityLabel(help)
+    }
+}
+
 private struct GitCommitRow: View {
     let commit: GitStatusModel.RecentCommit
     let isHead: Bool
@@ -1420,16 +1477,16 @@ private struct GitEntryRow: View {
     private func rowButton(
         _ systemImage: String, help: String, action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(SidebarTypography.micro(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 18, height: 18)
-                .contentShape(RoundedRectangle(cornerRadius: 3))
+        GitChromeIconButton(
+            systemImage: systemImage,
+            help: help,
+            side: 18,
+            cornerRadius: 4,
+            font: SidebarTypography.micro(.semibold),
+            tooltipPosition: .top
+        ) {
+            action()
         }
-        .buttonStyle(.plain)
-        .help(help)
-        .accessibilityLabel(help)
     }
 
     @ViewBuilder

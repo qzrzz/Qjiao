@@ -67,6 +67,8 @@ private enum SidebarTabLayout {
     static let iconTitleSpacing: CGFloat = 4
     static let horizontalPaddingWithTitle: CGFloat = 7
     static let horizontalPaddingIconOnly: CGFloat = 6
+    /// tab chip 右侧相对左侧多出的内边距，避免标题贴边。
+    static let trailingPaddingExtra: CGFloat = 2
     static let interTabSpacingWide: CGFloat = 4
     static let interTabSpacingNarrow: CGFloat = 2
     static let barHorizontalPadding: CGFloat = 8
@@ -119,11 +121,12 @@ private enum SidebarTabLayout {
     private static func chipWidth(title: String?) -> CGFloat {
         if let title {
             return horizontalPaddingWithTitle * 2
+                + trailingPaddingExtra
                 + iconSide
                 + iconTitleSpacing
                 + titleWidth(title)
         }
-        return horizontalPaddingIconOnly * 2 + iconSide
+        return horizontalPaddingIconOnly * 2 + trailingPaddingExtra + iconSide
     }
 
     private static func titleWidth(_ title: String) -> CGFloat {
@@ -694,10 +697,17 @@ struct RightSidebarView: View {
         }
         .foregroundStyle(isActive ? .primary : .secondary)
         .padding(
-            .horizontal,
+            .leading,
             showTitle
                 ? SidebarTabLayout.horizontalPaddingWithTitle
                 : SidebarTabLayout.horizontalPaddingIconOnly
+        )
+        .padding(
+            .trailing,
+            (showTitle
+                ? SidebarTabLayout.horizontalPaddingWithTitle
+                : SidebarTabLayout.horizontalPaddingIconOnly)
+                + SidebarTabLayout.trailingPaddingExtra
         )
         .frame(height: 24)
         .background(

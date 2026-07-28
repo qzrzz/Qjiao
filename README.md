@@ -135,6 +135,7 @@
 - 优化右侧边栏窄宽度布局与防错位溢出：
   - 顶栏与底栏 Tabs 按实际文案测宽自适应：空间足够时全部显示完整标题，稍紧时仅选中项保留标题，极窄时退回全图标；间距随可用宽度在 4pt / 2pt 间收紧。移除阻断鼠标手势的 ScrollView，完全恢复顶部 `WindowDragArea` 的窗口拖拽与双击动作体验。
   - System 面板 IP 行引入 `ViewThatFits` 自适应机制，宽屏单行展示，窄屏自动切为双行分层，彻底解决内网/公网 IP 宽度溢出导致界面错位的问题。
+- **Git 面板按钮交互**：Header 筛选 / 刷新 / 更多、Commit / Sync 主按钮、AI 生成 Message、提交选项菜单、变更行 Stage/Unstage/Discard、分组标题批量操作等统一增加 hover 浅底高亮，并接入 `macTooltip` 极速 Tooltip（Commit 显示 `⌘↩` 快捷键角标）。
 - Project Tab 的 Launchers 分组空状态（No launchers）增加内容左边距，保持与其他分组及条目垂直对齐。
 - 新增 Project 面板 `PACKAGE` 信息与操作分组：
   - 自动解析根目录 `package.json` 中的 `name`、`version` 与 `repository` 仓库链接。

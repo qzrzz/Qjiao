@@ -129,6 +129,7 @@ extension L10n {
         "Commit Message": "提交信息",
         "Commit Options": "提交选项",
         "Commit Staged": "提交已暂存",
+        "Commit staged changes": "提交已暂存的变更",
         "Commit staged changes (⌘Return)": "提交已暂存的变更 (⌘Return)",
         "Compare Image": "对比图片",
         "Compare Mode": "对比模式",
