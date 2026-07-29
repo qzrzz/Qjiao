@@ -125,22 +125,53 @@ enum LocalAIGitCommitSuggest {
 
     // MARK: - Diff
 
-    /// 精简变更摘要：优先 staged；有 staged 时不再附 unstaged。
+    /// 检查仓库中是否有已暂存 (Staged) 的文件变更。
     ///
-    /// 结构：name-status + 短 stat + 每文件截断后的 `--unified=0` patch。
-    /// 未跟踪文件只列路径，不读正文，避免 prompt 膨胀拖慢 AI。
-    nonisolated static func collectDiff(in repoRoot: String) throws -> String {
-        // 1) 有 staged 则只描述 staged（与「Commit Staged」语义一致，体积更小）
-        let stagedSummary = compactDiffSection(
-            title: "Staged",
-            cached: true,
+    /// 通过解析 `git status --porcelain=v1` 中每个文件的首个状态字符（Index 状态）：
+    /// - 若首字符不是 `' '`（未暂存/无变更）、`'?'`（未跟踪）、`'!'`（忽略），则代表 index 中存在已暂存变更。
+    /// - Parameter repoRoot: 仓库根目录路径。
+    /// - Returns: 若存在已暂存变更返回 true，否则返回 false。
+    nonisolated static func hasStagedChanges(in repoRoot: String) -> Bool {
+        let status = GitStatusModel.runGit(
+            ["status", "--porcelain=v1", "--no-renames"],
             in: repoRoot
         )
-        if let stagedSummary {
-            return finalizeDiff(stagedSummary)
+        guard status.status == 0 else { return false }
+        for line in status.stdout.split(separator: "\n") {
+            guard line.count >= 2 else { continue }
+            let stagedChar = line.first!
+            if stagedChar != "?" && stagedChar != " " && stagedChar != "!" {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// 收集并精简变更摘要（分情况处理）：
+    /// 1. 如果已暂存 (Staged) 存在：仅仅包含已暂存 (Staged) 变更，绝对不包含已变更 (Unstaged) 或未跟踪文件。
+    /// 2. 如果已暂存 (Staged) 为空：才包含已变更 (Unstaged diff) 与未跟踪文件 (Untracked paths)。
+    ///
+    /// - Parameter repoRoot: 仓库根目录绝对路径。
+    /// - Returns: 格式化与截断后的 Git Diff 字符串。
+    /// - Throws: `LocalAIGitCommitSuggestError.noChanges` 当没有任何可用的变更时。
+    nonisolated static func collectDiff(in repoRoot: String) throws -> String {
+        // 1) 判断已暂存 (Staged) 变更是否存在
+        if hasStagedChanges(in: repoRoot) {
+            // 已暂存存在：仅描述已暂存 (Staged)
+            let stagedSummary = compactDiffSection(
+                title: "Staged",
+                cached: true,
+                in: repoRoot
+            )
+            if let stagedSummary {
+                return finalizeDiff(stagedSummary)
+            } else {
+                // 若已暂存存在但在 compactDiffSection 中未提取出 patch，仍抛出无有效变更，绝不降级至 Unstaged
+                throw LocalAIGitCommitSuggestError.noChanges
+            }
         }
 
-        // 2) 无 staged：unstaged patch + 未跟踪路径列表
+        // 2) 若已暂存 (Staged) 为空：才收集已变更 (Unstaged patch + 未跟踪路径列表)
         var sections: [String] = []
         if let unstaged = compactDiffSection(
             title: "Unstaged",
