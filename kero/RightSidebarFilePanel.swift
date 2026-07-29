@@ -164,7 +164,11 @@ struct FileTreePanel: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
+                // 仅标题区接管面板键盘焦点；工具按钮与下方 Filter 栏不要挂
+                // makeFirstResponder(nil)，否则会清掉 Filter TextField 焦点。
                 PanelHeader(title: model.rootName, subtitle: model.rootPath, isSubtitlePath: true)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(panelTreeActivateGesture)
 
                 SidebarIconButton(
                     systemImage: "magnifyingglass",
@@ -186,7 +190,7 @@ struct FileTreePanel: View {
                 ) {
                     isFilterActive.toggle()
                     if isFilterActive {
-                        isFilterFieldFocused = true
+                        activateFilterField()
                     } else {
                         dismissFilter()
                     }
@@ -268,15 +272,6 @@ struct FileTreePanel: View {
                 FilePreviewPopoverManager.shared.close()
             }
         }
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                if manager.filePanelMode == .tree {
-                    isPanelClicked = true
-                    isTreeFocused = true
-                    NSApp.keyWindow?.makeFirstResponder(nil)
-                }
-            }
-        )
         .onChange(of: model.selectedPaths) { _ in
             updateQuickPreviewState()
             // 如果 Quick Look 预览窗口已打开，选中项改变时实时更新 Quick Look 预览
@@ -384,8 +379,7 @@ struct FileTreePanel: View {
                     }
                     if isFilesTreeActiveOrFocused() {
                         Task { @MainActor in
-                            isFilterActive = true
-                            isFilterFieldFocused = true
+                            activateFilterField()
                         }
                         return nil // 拦截 ⌘F，不触发主菜单 Find 命令
                     }
@@ -575,6 +569,8 @@ struct FileTreePanel: View {
                         .focused($isTreeFocused)
                         .focusable(true)
                         .focusEffectDisabled()
+                        // 焦点接管只挂在文件树上，不覆盖 Filter 输入栏。
+                        .simultaneousGesture(panelTreeActivateGesture)
                         .onAppear {
                             scrollProxy = proxy
                         }
@@ -626,6 +622,7 @@ struct FileTreePanel: View {
         // isPanelClicked 等 SwiftUI 状态判断。否则 Files 曾被点击后，
         // 再点击本来就已选中的终端 pane 不会改变 focusedPaneID，
         // 残留的 isPanelClicked 会继续截走终端的 ⌘F / 方向键等按键。
+        // Filter TextField 等文本输入聚焦时也不应截获方向键/字母定位。
         if let window = NSApp.keyWindow, let responder = window.firstResponder as? NSView {
             let className = String(describing: type(of: responder))
             if responder is NSTextView || responder is NSTextField
@@ -715,6 +712,34 @@ struct FileTreePanel: View {
         )
         .padding(.horizontal, 10)
         .padding(.bottom, 6)
+        .onChange(of: isFilterFieldFocused) { focused in
+            if focused {
+                // 与文件树 .focusable 互斥，避免树抢回键盘焦点。
+                isTreeFocused = false
+            }
+        }
+    }
+
+    /// 点击 Header / 文件树时接管面板键盘焦点（从终端/编辑器手中抢走 firstResponder）。
+    /// 故意不挂在 Filter 栏上：makeFirstResponder(nil) 会清掉 TextField 焦点，
+    /// 并导致 SwiftUI FocusState 与 AppKit 失同步，之后再也点不进输入框。
+    private var panelTreeActivateGesture: some Gesture {
+        TapGesture().onEnded {
+            guard manager.filePanelMode == .tree else { return }
+            isPanelClicked = true
+            isTreeFocused = true
+            isFilterFieldFocused = false
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }
+    }
+
+    /// 打开/重新聚焦 Filter 输入框，避免与文件树 focusable 视图抢焦点。
+    private func activateFilterField() {
+        isFilterActive = true
+        isTreeFocused = false
+        isPanelClicked = true
+        // 同步设置即可：激活手势已不再盖住 Filter 按钮与输入栏。
+        isFilterFieldFocused = true
     }
 
     /// 关闭与重置 Filter 状态，复位焦点至文件树列表。
@@ -1053,6 +1078,27 @@ private struct FileTreeRow: View {
         ) {
             selectForContextAction()
             let text = menuActionTargets.map(\.path).joined(separator: "\n")
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+
+        Button(
+            targets.count == 1
+                ? L10n.t("Copy Relative Path")
+                : L10n.t("Copy Relative Paths")
+        ) {
+            selectForContextAction()
+            let root = model.rootPath
+            let rootPrefix = root.hasSuffix("/") ? root : root + "/"
+            let text = menuActionTargets.map { target -> String in
+                if target.path == root {
+                    return "."
+                } else if target.path.hasPrefix(rootPrefix) {
+                    return String(target.path.dropFirst(rootPrefix.count))
+                } else {
+                    return target.path
+                }
+            }.joined(separator: "\n")
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         }
