@@ -145,14 +145,6 @@ struct SidebarView: View {
             }
         }
         .overlay(alignment: .trailing) {
-            if !Theme.isDefault(dark: colorScheme == .dark) {
-                Rectangle()
-                    .fill(Color(nsColor: Theme.divider))
-                    .frame(width: 1)
-                    .allowsHitTesting(false)
-            }
-        }
-        .overlay(alignment: .trailing) {
             SidebarResizeHandle(
                 edge: .trailing,
                 width: $width,

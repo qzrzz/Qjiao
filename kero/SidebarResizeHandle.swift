@@ -6,8 +6,11 @@
 import AppKit
 import SwiftUI
 
-/// Invisible drag strip overlaid on a sidebar's inner edge. Dragging
+/// Drag strip overlaid on a sidebar's inner edge. Dragging
 /// resizes within `range`; double-click snaps back to `defaultWidth`.
+///
+/// 优化热区：实际可操作区域 (`handleWidth`，默认 13pt) 居中跨越侧边栏边界两侧，
+/// 远大于 1pt 的可视分割线，方便鼠标 hover 及拖拽，光标靠近即变为调节样式。
 struct SidebarResizeHandle: View {
     /// Edge of the sidebar this handle sits on: `.trailing` for the left
     /// sidebar, `.leading` for the right one (flips the drag direction).
@@ -15,40 +18,55 @@ struct SidebarResizeHandle: View {
     @Binding var width: Double
     let range: ClosedRange<Double>
     let defaultWidth: Double
+    /// 可操作热区宽度（默认 13pt，扩大响应范围）。
+    var handleWidth: CGFloat = 13
 
     @State private var baseline: Double?
 
     var body: some View {
-        Rectangle()
-            .fill(Color.clear)
-            .frame(width: 7)
-            .contentShape(Rectangle())
-            // Not `NSCursor.columnResize.push()` from `onHover`, which looks
-            // equivalent but loses: it pushes onto the shared cursor stack from
-            // outside AppKit's own pointer resolution, and AppKit resets the
-            // pointer as it leaves a registered cursor rect — which is what a
-            // neighbouring editor is covered in (STTextView adds an I-beam rect
-            // over its text). Coming off the text onto the handle, that reset
-            // lands after the push and wins, so the handle dragged fine while
-            // showing a plain arrow, giving no sign it was there.
-            // `pointerStyle` registers through the same resolution instead.
-            .pointerStyle(.columnResize)
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { value in
-                        let base = baseline ?? width
-                        baseline = base
-                        let delta = edge == .trailing
-                            ? value.translation.width
-                            : -value.translation.width
-                        width = min(max(base + delta, range.lowerBound), range.upperBound)
-                        NSCursor.columnResize.set()
-                    }
-                    .onEnded { _ in baseline = nil }
-            )
-            .simultaneousGesture(
-                TapGesture(count: 2).onEnded { width = defaultWidth }
-            )
+        ZStack {
+            // 可视 1pt 分割竖线
+            Rectangle()
+                .fill(Color(nsColor: Theme.divider))
+                .frame(width: 1)
+                .allowsHitTesting(false)
+
+            // 扩展的透明热区（实际可操作区）
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: handleWidth)
+                .contentShape(Rectangle())
+        }
+        .frame(width: handleWidth)
+        // 将热区中心对齐在侧栏边框线上（向两侧扩展响应范围）
+        .offset(x: edge == .trailing ? (handleWidth - 1) / 2 : -(handleWidth - 1) / 2)
+
+        // Not `NSCursor.columnResize.push()` from `onHover`, which looks
+        // equivalent but loses: it pushes onto the shared cursor stack from
+        // outside AppKit's own pointer resolution, and AppKit resets the
+        // pointer as it leaves a registered cursor rect — which is what a
+        // neighbouring editor is covered in (STTextView adds an I-beam rect
+        // over its text). Coming off the text onto the handle, that reset
+        // lands after the push and wins, so the handle dragged fine while
+        // showing a plain arrow, giving no sign it was there.
+        // `pointerStyle` registers through the same resolution instead.
+        .pointerStyle(.columnResize)
+        .gesture(
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { value in
+                    let base = baseline ?? width
+                    baseline = base
+                    let delta = edge == .trailing
+                        ? value.translation.width
+                        : -value.translation.width
+                    width = min(max(base + delta, range.lowerBound), range.upperBound)
+                    NSCursor.columnResize.set()
+                }
+                .onEnded { _ in baseline = nil }
+        )
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded { width = defaultWidth }
+        )
     }
 }
 

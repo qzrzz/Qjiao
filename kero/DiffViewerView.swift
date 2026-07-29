@@ -511,7 +511,7 @@ struct DiffViewerView: View {
             Image(systemName: icon)
                 .font(.system(size: 24, weight: .light))
                 .foregroundStyle(.quaternary)
-            Text(text)
+            Text(L10n.t(text))
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)

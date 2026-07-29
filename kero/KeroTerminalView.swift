@@ -186,10 +186,10 @@ final class KeroTerminalView: AppTerminalView {
 
     private func contextMenu(initialURL: String?) -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(contextItem("Copy", #selector(copy(_:))))
-        menu.addItem(contextItem("Paste", #selector(NSText.paste(_:))))
+        menu.addItem(contextItem(L10n.t("Copy"), #selector(copy(_:))))
+        menu.addItem(contextItem(L10n.t("Paste"), #selector(NSText.paste(_:))))
         menu.addItem(.separator())
-        menu.addItem(contextItem("Select All", #selector(selectAll(_:))))
+        menu.addItem(contextItem(L10n.t("Select All"), #selector(selectAll(_:))))
         menu.addItem(.separator())
         for item in splitTarget.browserMenuItems(initialURL: initialURL) {
             menu.addItem(item)
@@ -390,14 +390,14 @@ final class SplitMenuTarget: NSObject {
 
     func menuItems() -> [NSMenuItem] {
         var items = [
-            item("Split Right", #selector(splitRight)),
-            item("Split Left", #selector(splitLeft)),
-            item("Split Up", #selector(splitUp)),
-            item("Split Down", #selector(splitDown)),
+            item(L10n.t("Split Right"), #selector(splitRight)),
+            item(L10n.t("Split Left"), #selector(splitLeft)),
+            item(L10n.t("Split Up"), #selector(splitUp)),
+            item(L10n.t("Split Down"), #selector(splitDown)),
         ]
         if onClose != nil {
             items.append(.separator())
-            items.append(item("Close Pane", #selector(closePane)))
+            items.append(item(L10n.t("Close Pane"), #selector(closePane)))
         }
         return items
     }

@@ -102,3 +102,23 @@ extension EnvironmentValues {
         set { self[L10nLanguageKey.self] = newValue }
     }
 }
+
+#if canImport(AppKit)
+import AppKit
+
+extension L10n {
+    /// 递归将 AppKit NSMenu 及子菜单的菜单项标题传入 `L10n.t(...)` 进行本地化翻译。
+    @MainActor
+    static func localizeMenu(_ menu: NSMenu) {
+        for item in menu.items {
+            if !item.title.isEmpty {
+                item.title = t(item.title)
+            }
+            if let submenu = item.submenu {
+                localizeMenu(submenu)
+            }
+        }
+    }
+}
+#endif
+

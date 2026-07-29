@@ -978,7 +978,11 @@ private struct FileTreeRow: View {
         let onlyItem = targets.count == 1 ? targets[0] : nil
 
         if !fileTargets.isEmpty {
-            Button(fileTargets.count == 1 ? "Open" : "Open \(fileTargets.count) Files") {
+            Button(
+                fileTargets.count == 1
+                    ? L10n.t("Open")
+                    : L10n.format("Open %d Files", fileTargets.count)
+            ) {
                 selectForContextAction()
                 for file in fileTargets { openFile(file.path) }
             }
@@ -1027,8 +1031,8 @@ private struct FileTreeRow: View {
                 Label {
                     Text(
                         imagePaths.count == 1
-                            ? "Image Build…"
-                            : "Image Build (\(imagePaths.count))…"
+                            ? L10n.t("Image Build…")
+                            : L10n.format("Image Build (%d)…", imagePaths.count)
                     )
                 } icon: {
                     Image("ImageBuild")
@@ -1042,7 +1046,11 @@ private struct FileTreeRow: View {
 
         Divider()
         // 复制地址
-        Button(targets.count == 1 ? "Copy Path" : "Copy Paths") {
+        Button(
+            targets.count == 1
+                ? L10n.t("Copy Path")
+                : L10n.t("Copy Paths")
+        ) {
             selectForContextAction()
             let text = menuActionTargets.map(\.path).joined(separator: "\n")
             NSPasteboard.general.clearContents()
@@ -1050,7 +1058,11 @@ private struct FileTreeRow: View {
         }
 
         // 复制文件本身（fileURL，可粘贴到本树或 Finder）。
-        Button(targets.count == 1 ? "Copy" : "Copy \(targets.count) Items") {
+        Button(
+            targets.count == 1
+                ? L10n.t("Copy")
+                : L10n.format("Copy %d Items", targets.count)
+        ) {
             selectForContextAction()
             model.copyToPasteboard(paths: menuActionTargets.map(\.path))
         }
@@ -1105,7 +1117,9 @@ private struct FileTreeRow: View {
             }
         }
         Button(
-            targets.count == 1 ? "Move to Trash" : "Move \(targets.count) Items to Trash",
+            targets.count == 1
+                ? L10n.t("Move to Trash")
+                : L10n.format("Move %d Items to Trash", targets.count),
             role: .destructive
         ) {
             selectForContextAction()

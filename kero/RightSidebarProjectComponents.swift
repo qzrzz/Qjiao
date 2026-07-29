@@ -25,7 +25,7 @@ func sidebarAutoCollapse(
 }
 
 func sidebarEmptyRow(_ text: String) -> some View {
-    Text(text)
+    Text(L10n.t(text))
         .font(SidebarTypography.secondary())
         .foregroundStyle(.secondary)
         .padding(.horizontal, 8)
@@ -790,7 +790,7 @@ private struct PackageScriptRow: View {
         .onTapGesture(count: 1) {
             onSelect()
         }
-        .help(script.command)
+        .macTooltip(script.command.isEmpty ? nil : script.command, position: .bottom, delay: 0.8)
         .contextMenu {
             if let port = boundPort {
                 Button("Open http://localhost:\(port) in Browser") {
@@ -1052,7 +1052,7 @@ struct UniversalTasksSection: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(SidebarTypography.micro())
                 .foregroundStyle(.orange)
-            Text(text)
+            Text(L10n.t(text))
                 .font(SidebarTypography.caption())
                 .foregroundStyle(.secondary)
         }
@@ -1132,7 +1132,13 @@ private struct UniversalScriptRow: View {
         .onTapGesture(count: 1) {
             onSelect()
         }
-        .help(script.category.buildExecutionCommand(scriptName: script.name, rawCommand: script.command, directory: script.directory))
+        .macTooltip(
+            script.category == .npm
+                ? (script.command.isEmpty ? script.category.buildExecutionCommand(scriptName: script.name, rawCommand: script.command, directory: script.directory) : script.command)
+                : script.category.buildExecutionCommand(scriptName: script.name, rawCommand: script.command, directory: script.directory),
+            position: .bottom,
+            delay: 0.8
+        )
         .contextMenu {
             if let port = boundPort {
                 Button("Open http://localhost:\(port) in Browser") {

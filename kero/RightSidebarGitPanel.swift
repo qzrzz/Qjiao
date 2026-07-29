@@ -708,7 +708,7 @@ struct GitPanel: View {
                         if model.totalChangeCount == 0 {
                             cleanState
                         } else if visibleChangeCount == 0 {
-                            inlinePlaceholder(icon: "line.3.horizontal.decrease", text: "No changed files match “\(filterText)”")
+                            inlinePlaceholder(icon: "line.3.horizontal.decrease", text: L10n.format("No changed files match “%@”", filterText))
                         }
                         if !filteredMergeEntries.isEmpty {
                             SidebarSectionHeader(
@@ -982,7 +982,7 @@ struct GitPanel: View {
             Image(systemName: icon)
                 .font(SidebarTypography.emptyIcon())
                 .foregroundStyle(.quaternary)
-            Text(text)
+            Text(L10n.t(text))
                 .font(SidebarTypography.secondary())
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -995,7 +995,7 @@ struct GitPanel: View {
             Image(systemName: icon)
                 .font(SidebarTypography.emptyInlineIcon())
                 .foregroundStyle(.quaternary)
-            Text(text)
+            Text(L10n.t(text))
                 .font(SidebarTypography.caption())
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)

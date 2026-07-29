@@ -376,6 +376,7 @@ final class FocusReportingTextView: STTextView {
         for item in splitTarget.browserMenuItems() { menu.addItem(item) }
         menu.addItem(.separator())
         for item in splitTarget.menuItems() { menu.addItem(item) }
+        L10n.localizeMenu(menu)
         return menu
     }
 }

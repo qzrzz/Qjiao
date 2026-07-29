@@ -386,7 +386,14 @@ struct FileViewerView: View {
                 }
             }
         case .image(let image):
-            ImageViewerView(file: file, image: image)
+            ImageViewerView(
+                file: file,
+                image: image,
+                onFocused: onFocused,
+                onSplit: onSplit,
+                onNewBrowserTab: onNewBrowserTab,
+                onNewBrowserPane: onNewBrowserPane
+            )
         case .unavailable(let reason):
             VStack(spacing: 8) {
                 Image(systemName: "doc")
@@ -406,19 +413,19 @@ struct FileViewerView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(Color(red: 0.90, green: 0.65, blue: 0.15))
 
-            Text("File modified externally")
+            Text(L10n.t("File modified externally"))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.primary)
 
             Spacer(minLength: 0)
 
-            Button("Reload") {
+            Button(L10n.t("Reload")) {
                 file.resolveConflictWithReload()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.mini)
 
-            Button("Keep Local") {
+            Button(L10n.t("Keep Local")) {
                 file.dismissExternalConflict()
             }
             .buttonStyle(.bordered)
@@ -433,7 +440,7 @@ struct FileViewerView: View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 10))
-            Text("Could not save: \(message)")
+            Text(L10n.format("Could not save: %@", message))
                 .font(.system(size: 11))
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -455,9 +462,9 @@ private struct EditorStatusBar: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Label(file.isDirty ? "Unsaved" : "Saved", systemImage: file.isDirty ? "circle" : "checkmark.circle")
+            Label(file.isDirty ? L10n.t("Unsaved") : L10n.t("Saved"), systemImage: file.isDirty ? "circle" : "checkmark.circle")
                 .foregroundStyle(.secondary)
-                .macTooltip(file.isDirty ? "Unsaved Changes" : "Saved to Disk", shortcut: "⌘S", position: .top)
+                .macTooltip(file.isDirty ? L10n.t("Unsaved Changes") : L10n.t("Saved to Disk"), shortcut: "⌘S", position: .top)
             Text(file.editorFileSize)
                 .monospacedDigit()
                 .macTooltip(L10n.t("File Size"), position: .top)
@@ -474,7 +481,7 @@ private struct EditorStatusBar: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(settings.wrapLines ? Color.accentColor : .secondary)
-            .macTooltip(settings.wrapLines ? "Disable Line Wrapping" : "Enable Line Wrapping", shortcut: "⌥Z", position: .top)
+            .macTooltip(settings.wrapLines ? L10n.t("Disable Line Wrapping") : L10n.t("Enable Line Wrapping"), shortcut: "⌥Z", position: .top)
             .accessibilityLabel(L10n.t("Toggle line wrapping"))
 
             Text(file.languageLabel)
@@ -491,8 +498,8 @@ private struct EditorStatusBar: View {
             if let formatterError {
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
-                    .macTooltip("Formatting Error: \(formatterError)", position: .top)
-                    .accessibilityLabel("Formatting failed: \(formatterError)")
+                    .macTooltip(L10n.format("Formatting Error: %@", formatterError), position: .top)
+                    .accessibilityLabel(L10n.format("Formatting failed: %@", formatterError))
             }
         }
         .font(.system(size: 11))
@@ -506,7 +513,7 @@ private struct EditorStatusBar: View {
     private func format(with formatter: EditorFormatter) {
         if file.isDirty { file.save() }
         guard !file.isDirty else {
-            formatterError = file.saveError ?? "Save the file before formatting it."
+            formatterError = file.saveError ?? L10n.t("Save the file before formatting it.")
             return
         }
         formattingID = formatter.id
@@ -546,7 +553,7 @@ private struct EditorStatusBar: View {
         .buttonStyle(.plain)
         .foregroundStyle(Color.accentColor)
         .disabled(formattingID != nil)
-        .macTooltip(formatter.id == formatters.first?.id ? "Format Document (\(formatter.title))" : "Format Document", shortcut: formatter.id == formatters.first?.id ? "⌥⌘P" : nil, position: .top)
+        .macTooltip(formatter.id == formatters.first?.id ? L10n.format("Format Document (%@)", formatter.title) : L10n.t("Format Document"), shortcut: formatter.id == formatters.first?.id ? "⌥⌘P" : nil, position: .top)
     }
 }
 
@@ -778,7 +785,7 @@ enum ImageZoomOption: Hashable, Identifiable, CaseIterable {
     /// 下拉菜单英文文案
     var title: String {
         switch self {
-        case .fit: return "Fit"
+        case .fit: return L10n.t("Fit")
         case .p10: return "10%"
         case .p25: return "25%"
         case .p50: return "50%"
@@ -817,11 +824,11 @@ enum ImageBackgroundMode: String, CaseIterable, Identifiable {
     /// 英文文案
     var title: String {
         switch self {
-        case .defaultTheme: return "Default"
-        case .black: return "Black"
-        case .white: return "White"
-        case .checkerboard: return "Light Checkerboard"
-        case .darkCheckerboard: return "Dark Checkerboard"
+        case .defaultTheme: return L10n.t("Default")
+        case .black: return L10n.t("Black")
+        case .white: return L10n.t("White")
+        case .checkerboard: return L10n.t("Light Checkerboard")
+        case .darkCheckerboard: return L10n.t("Dark Checkerboard")
         }
     }
 }
@@ -1113,6 +1120,10 @@ struct LeftRulerCanvas: View {
 struct ImageViewerView: View {
     @ObservedObject var file: FileTab
     let image: NSImage
+    var onFocused: () -> Void = {}
+    var onSplit: (PaneDropEdge) -> Void = { _ in }
+    var onNewBrowserTab: (String?) -> Void = { _ in }
+    var onNewBrowserPane: (String?) -> Void = { _ in }
 
     @State private var zoomOption: ImageZoomOption = .fit
     /// 鼠标滚轮/触控板产生的自由放缩倍率 (nil 时表示使用 zoomOption 的预设)
@@ -1440,7 +1451,7 @@ struct ImageViewerView: View {
             HStack(spacing: 5) {
                 Image(systemName: "photo")
                     .font(.system(size: 10))
-                Text("Original: \(file.name)")
+                Text(L10n.format("Original: %@", file.name))
                     .font(.system(size: 11, weight: .regular))
                     .lineLimit(1)
             }
@@ -1581,7 +1592,7 @@ struct ImageViewerView: View {
                 isFlippedHorizontal.toggle()
             }
         } label: {
-            Label(isFlippedHorizontal ? "Reset Flip Horizontal" : "Flip Horizontal", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right.fill")
+            Label(isFlippedHorizontal ? L10n.t("Reset Flip Horizontal") : L10n.t("Flip Horizontal"), systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right.fill")
         }
 
         Button {
@@ -1589,7 +1600,7 @@ struct ImageViewerView: View {
                 isFlippedVertical.toggle()
             }
         } label: {
-            Label(isFlippedVertical ? "Reset Flip Vertical" : "Flip Vertical", systemImage: "arrow.up.and.down.righttriangle.up.righttriangle.down.fill")
+            Label(isFlippedVertical ? L10n.t("Reset Flip Vertical") : L10n.t("Flip Vertical"), systemImage: "arrow.up.and.down.righttriangle.up.righttriangle.down.fill")
         }
 
         Divider()
@@ -1638,7 +1649,7 @@ struct ImageViewerView: View {
                 isCompareMode.toggle()
             }
         } label: {
-            Label(isCompareMode ? "Exit Compare Mode" : "Compare Mode", systemImage: "square.split.2x1")
+            Label(isCompareMode ? L10n.t("Exit Compare Mode") : L10n.t("Compare Mode"), systemImage: "square.split.2x1")
         }
 
         Divider()
@@ -1684,6 +1695,53 @@ struct ImageViewerView: View {
             copyMetadataInfoToClipboard()
         } label: {
             Label(L10n.t("Copy Image Info"), systemImage: "info.circle")
+        }
+
+        Divider()
+
+        // 9. 浏览器与分屏操作组 (参考终端/文本编辑器右键菜单)
+        Button {
+            onFocused()
+            onNewBrowserTab(nil)
+        } label: {
+            Label(L10n.t("New Browser Tab"), systemImage: "globe")
+        }
+
+        Button {
+            onFocused()
+            onNewBrowserPane(nil)
+        } label: {
+            Label(L10n.t("New Browser Pane"), systemImage: "square.split.2x1")
+        }
+
+        Divider()
+
+        Button {
+            onFocused()
+            onSplit(.right)
+        } label: {
+            Label(L10n.t("Split Right"), systemImage: "rectangle.split.2x1")
+        }
+
+        Button {
+            onFocused()
+            onSplit(.left)
+        } label: {
+            Label(L10n.t("Split Left"), systemImage: "rectangle.split.2x1")
+        }
+
+        Button {
+            onFocused()
+            onSplit(.top)
+        } label: {
+            Label(L10n.t("Split Up"), systemImage: "rectangle.split.1x2")
+        }
+
+        Button {
+            onFocused()
+            onSplit(.bottom)
+        } label: {
+            Label(L10n.t("Split Down"), systemImage: "rectangle.split.1x2")
         }
     }
 
@@ -1757,9 +1815,9 @@ struct ImageViewerView: View {
 
         if orientation == .horizontal {
             let targets: [(pos: CGFloat, label: String)] = [
-                (0, "Top Edge"),
-                (CGFloat(metadata.pixelHeight) / 2.0, "Center"),
-                (CGFloat(metadata.pixelHeight), "Bottom Edge")
+                (0, L10n.t("Top Edge")),
+                (CGFloat(metadata.pixelHeight) / 2.0, L10n.t("Center")),
+                (CGFloat(metadata.pixelHeight), L10n.t("Bottom Edge"))
             ]
             for target in targets {
                 if abs(rawPixelPos - target.pos) <= snapThresholdPx {
@@ -1768,9 +1826,9 @@ struct ImageViewerView: View {
             }
         } else {
             let targets: [(pos: CGFloat, label: String)] = [
-                (0, "Left Edge"),
-                (CGFloat(metadata.pixelWidth) / 2.0, "Center"),
-                (CGFloat(metadata.pixelWidth), "Right Edge")
+                (0, L10n.t("Left Edge")),
+                (CGFloat(metadata.pixelWidth) / 2.0, L10n.t("Center")),
+                (CGFloat(metadata.pixelWidth), L10n.t("Right Edge"))
             ]
             for target in targets {
                 if abs(rawPixelPos - target.pos) <= snapThresholdPx {
@@ -1820,7 +1878,7 @@ struct ImageViewerView: View {
                     if isHovered || isDragging {
                         let textStr: String = {
                             if isOutOfBounds {
-                                return "Release to Delete"
+                                return L10n.t("Release to Delete")
                             } else if let label = snapInfo.snapLabel {
                                 return "Y: \(Int(round(activePos))) px • \(label)"
                             } else {
@@ -1894,7 +1952,7 @@ struct ImageViewerView: View {
                     if isHovered || isDragging {
                         let textStr: String = {
                             if isOutOfBounds {
-                                return "Release to Delete"
+                                return L10n.t("Release to Delete")
                             } else if let label = snapInfo.snapLabel {
                                 return "X: \(Int(round(activePos))) px • \(label)"
                             } else {
@@ -2103,12 +2161,12 @@ struct ImageViewerView: View {
     @ViewBuilder
     private var topRightOverlay: some View {
         if let compMeta = compareMetadata {
-            let name = compareImagePath != nil ? ((compareImagePath! as NSString).lastPathComponent) : "Clipboard Image"
+            let name = compareImagePath != nil ? ((compareImagePath! as NSString).lastPathComponent) : L10n.t("Clipboard Image")
             VStack(alignment: .trailing, spacing: 3) {
                 HStack(spacing: 5) {
                     Image(systemName: "photo.badge.plus")
                         .font(.system(size: 10))
-                    Text("Compare: \(name)")
+                    Text(L10n.format("Compare: %@", name))
                         .font(.system(size: 11, weight: .regular))
                         .lineLimit(1)
 
@@ -2484,7 +2542,7 @@ struct ImageViewerView: View {
             return "\(percent)%"
         } else if zoomOption == .fit {
             let percent = Int(round(currentScale * 100))
-            return "Fit (\(percent)%)"
+            return L10n.format("Fit (%@)", "\(percent)%")
         } else {
             return zoomOption.title
         }
@@ -2538,7 +2596,7 @@ struct ImageViewerView: View {
     private func imageControlToolbar(currentScale: CGFloat) -> some View {
         HStack(spacing: 5) {
             // 1. 缩放倍数下拉菜单 (自适应/纯百分比文本)
-            ModernToolbarMenu(fixedWidth: 88, helpText: "Zoom Scale Options", shortcutText: "Menu") {
+            ModernToolbarMenu(fixedWidth: 100, helpText: "Zoom Scale Options", shortcutText: "Menu") {
                 Picker(L10n.t("Zoom"), selection: Binding(
                     get: { zoomOption },
                     set: { newValue in
@@ -2824,7 +2882,7 @@ private struct ModernToolbarButton<Content: View>: View {
                 isHovered = hover
             }
         }
-        .macTooltip(helpText, shortcut: shortcutText)
+        .macTooltip(helpText.map { L10n.t($0) }, shortcut: shortcutText)
     }
 
     private var backgroundColor: Color {
@@ -2887,7 +2945,7 @@ private struct ModernToolbarMenu<Content: View, LabelContent: View>: View {
                 isHovered = hover
             }
         }
-        .macTooltip(helpText, shortcut: shortcutText)
+        .macTooltip(helpText.map { L10n.t($0) }, shortcut: shortcutText)
     }
 
     private var backgroundColor: Color {

@@ -20,3 +20,7 @@
 - 新增语言：`AppLanguage` case + `kero/L10n/<locale>.swift` 词表 + `L10n.t` 的 `switch`
 - 需要随语言切换刷新的 View：观察 `L10n.shared`（读 `l10n.language`）
 - 主题名、品牌名、预览样本文案可不译
+
+- 术语不翻译：
+  - Image Build
+  - 
