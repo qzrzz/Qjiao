@@ -98,7 +98,7 @@
 - 修复开启终端不透明度时切换 Tab 后未选中的 Git Diff 对比器透出显示的问题，并将终端背景不透明度设置应用于 Git Diff 对比器。
 - 终端 Tab 宽度展示：未挤满时最小 150、最大 220；标签条已满（需要横向滚动）时最小 130、最大 140，空间足够再恢复；标题变长立即扩张，变短延迟收缩并带过渡动画，减少抖动。
 - 优化文件查看器（FileViewer）工具栏：提取可复用原生 macOS 风格 Tooltip 系统 ([MacTooltip.swift](file:///Users/yarna/Project/Qzrzz/Code/Qjiao/kero/MacTooltip.swift))，支持极速悬停弹出、快捷键 Badge 格式与自适应多方位 (.top / .bottom 等) 定位；移除工具栏按钮悬停放大动画，恢复沉稳平整的原生 macOS 操作手感，并增强图像旋转、镜像翻转与双图对比视图。
-- 设置面板改为顶部图标分类导航，按 General、Terminal、Editor、Files、About 分组展示配置项；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
+- 设置面板采用**左侧分类导航 + 右侧表单**布局（General / Terminal / Editor / Files / Project / About）；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
 - 设置 Editor 分组支持分别选择 Light / Dark 编辑器配色；两种外观都可独立跟随全局与当前项目主题或设置专用主题，不改变终端和窗口主题；编辑器专用主题内置 VS Code 风格的 Dark+、Light+、GitHub Dark、GitHub Light、One Dark、One Light、Monokai Pro、Xcode、Ayu、Solarized，并直接使用其语法 token 配色即时重绘。
 - 源码文本编辑器增加可开关的英文底部状态栏：显示保存状态、当前文件大小、选区行数/字符数、文件格式，以及项目本地 `oxfmt`（优先）或 `prettier` 的格式化入口；格式化会先保存并以 `--write` 改写当前文件后重新载入。
 - 设置 Files 分组：Display File Size 默认开启，可在右侧 Files / CWD 文件树中显示文件大小（目录不在刷新时自动计算）；关闭时写入 `files.display-file-size = false`。

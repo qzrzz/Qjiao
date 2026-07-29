@@ -20,48 +20,77 @@ struct SettingsView: View {
     /// Files 树可选字体族（内置 Inter 第一项；设置里空字符串映射到该默认）。
     private let filesFontFamilies = FileTreeFont.selectableFamilies()
 
+    /// 左侧分类栏宽度（图标 + 文案一行排布）。
+    private static let sidebarWidth: CGFloat = 168
+    /// 右侧表单内容区宽度，与原先整页宽度接近，保证控件布局稳定。
+    private static let contentWidth: CGFloat = 520
+    private static let windowHeight: CGFloat = 650
+
     var body: some View {
-        VStack(spacing: 0) {
-            sectionPicker
-            Divider()
-            // 分类切换时内容多少不同；让表单始终填满固定区域，避免窗口和导航跟随内容跳动。
-            form
+        // 左右分栏：左侧分类导航，右侧对应表单（替代原先顶部图标 Tabs）。
+        HStack(spacing: 0) {
+            sectionSidebar
+                .frame(width: Self.sidebarWidth)
                 .frame(maxHeight: .infinity)
+
+            Divider()
+
+            // 分类切换时内容多少不同；让表单始终填满固定区域，避免窗口跟随内容跳动。
+            form
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 510, height: 650)
+        .frame(
+            width: Self.sidebarWidth + Self.contentWidth,
+            height: Self.windowHeight
+        )
         .observeLocalization()
         // 依赖 language，切换语言时整页重绘。
         .environment(\.l10nLanguage, l10n.language)
     }
 
-    /// 顶部图标导航借鉴原生设置应用的分类结构，避免全部选项堆在一张长表单中。
-    private var sectionPicker: some View {
-        HStack(spacing: 7) {
+    /// 左侧纵向分类导航：图标 + 标题同行，选中项浅底高亮（贴近系统设置侧栏）。
+    private var sectionSidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(SettingsSection.allCases) { section in
-                Button { selectedSection = section } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: section.systemImage)
-                            .font(.system(size: 15, weight: .medium))
+                let isSelected = selectedSection == section
+                Button {
+                    selectedSection = section
+                } label: {
+                    Label {
                         Text(section.title)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                            .lineLimit(1)
+                    } icon: {
+                        Image(systemName: section.systemImage)
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(width: 18, alignment: .center)
                     }
-                    .foregroundStyle(selectedSection == section ? Color.accentColor : .secondary)
-                    // 六个分类时略收窄卡片，避免顶栏横向溢出固定窗口宽度。
-                    .frame(width: 66, height: 58)
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(isSelected ? Color.accentColor : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
                     .background(
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(selectedSection == section ? Color.accentColor.opacity(0.10) : .clear)
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(isSelected ? Color.accentColor.opacity(0.12) : .clear)
                     )
-                    // 让整张可见导航卡片都能点击，而不是仅图标和文字响应点击。
-                    .contentShape(RoundedRectangle(cornerRadius: 7))
+                    .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                // 分类切换后不保留键盘焦点的蓝色描边；选中状态仅由填充色表达。
+                // 分类切换后不保留键盘焦点描边；选中仅由底色与字重表达。
                 .focusEffectDisabled()
-                .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityLabel(section.title)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background {
+            // 与内容区轻微分隔，侧栏略抬起。
+            Color(nsColor: .windowBackgroundColor).opacity(0.55)
+        }
     }
 
     private var form: some View {
@@ -807,8 +836,8 @@ private final class IntrinsicWidthTextField: NSTextField {
     }
 }
 
-/// 设置页的可见分类；每个分类对应顶部一个图标入口。
-private enum SettingsSection: CaseIterable, Identifiable {
+/// 设置页的可见分类；每个分类对应左侧导航一项。
+private enum SettingsSection: CaseIterable, Identifiable, Hashable {
     case general
     case terminal
     case editor
