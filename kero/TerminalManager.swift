@@ -8,6 +8,7 @@ import Combine
 import Foundation
 import GhosttyTerminal
 import SwiftUI
+import WebKit
 
 /// Files 面板的模式（文件树 / 全局搜寻）
 enum FilePanelMode: String, Codable {
@@ -473,6 +474,27 @@ final class TerminalManager: nonisolated ObservableObject {
         project.newSession(directory: directory)
     }
 
+    /// 在当前项目中新建浏览器 Tab；无项目时先建立正常项目上下文。
+    func newBrowserTab(initialURL: String? = nil) {
+        let project = selectedProject ?? newProject()
+        project.newBrowserTab(
+            initialURL: initialURL,
+            initialFocus: initialURL == nil ? .addressBar : .webContent
+        )
+    }
+
+    /// 在聚焦 Pane 旁创建浏览器 Pane。
+    func newBrowserPane(
+        toward edge: PaneDropEdge = .right,
+        initialURL: String? = nil
+    ) {
+        selectedProject?.newBrowserPane(
+            toward: edge,
+            initialURL: initialURL,
+            initialFocus: initialURL == nil ? .addressBar : .webContent
+        )
+    }
+
     typealias PackageScriptStatus = UniversalScriptStatus
     typealias PackageScriptExecutionRecord = UniversalScriptExecutionRecord
     typealias PackageScriptRunMode = UniversalScriptRunMode
@@ -865,7 +887,7 @@ final class TerminalManager: nonisolated ObservableObject {
         switch selectedProject?.focusedContent {
         case .session(let session): session.find.perform(action)
         case .file(let file): file.performFindAction(action)
-        case .diff, .none: break
+        case .browser, .diff, .none: break
         }
     }
 
@@ -874,7 +896,7 @@ final class TerminalManager: nonisolated ObservableObject {
     var canFind: Bool {
         switch selectedProject?.focusedContent {
         case .session, .file: return true
-        case .diff, .none: return false
+        case .browser, .diff, .none: return false
         }
     }
 
@@ -934,6 +956,37 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Whether the selected tab is showing a zoomed pane — drives the header's
     /// exit-zoom indicator.
     var isPaneZoomed: Bool { selectedProject?.isPaneZoomed ?? false }
+
+    // MARK: - Browser
+
+    private var selectedBrowser: BrowserTab? {
+        if case .browser(let browser)? = selectedProject?.focusedContent {
+            return browser
+        }
+        return nil
+    }
+
+    var hasSelectedBrowser: Bool { selectedBrowser != nil }
+
+    func focusBrowserAddressBar() {
+        selectedBrowser?.requestAddressFocus()
+    }
+
+    func reloadSelectedBrowser() {
+        selectedBrowser?.reload()
+    }
+
+    func stopSelectedBrowser() {
+        selectedBrowser?.stopLoading()
+    }
+
+    func openSelectedPageInDefaultBrowser() {
+        selectedBrowser?.openInDefaultBrowser()
+    }
+
+    func copySelectedBrowserAddress() {
+        selectedBrowser?.copyAddress()
+    }
 
     func selectNextTab() {
         selectedProject?.selectNext()
@@ -1015,8 +1068,8 @@ final class TerminalManager: nonisolated ObservableObject {
         } else {
             commandPaletteWindow = NSApp.keyWindow
             if let responder = commandPaletteWindow?.firstResponder,
-               responder is KeroTerminalView || responder is FocusReportingTextView {
-                commandPalettePreviousResponder = responder
+               let stableResponder = stableWorkspaceResponder(from: responder) {
+                commandPalettePreviousResponder = stableResponder
             } else {
                 commandPalettePreviousResponder = nil
             }
@@ -1045,11 +1098,33 @@ final class TerminalManager: nonisolated ObservableObject {
             // editor. Never let restoration race that newer focus and win.
             if let current = window.firstResponder,
                current !== responder,
-               current is KeroTerminalView || current is FocusReportingTextView {
+               self.stableWorkspaceResponder(from: current) != nil {
                 return
             }
             window.makeFirstResponder(responder)
         }
+    }
+
+    /// 返回可跨命令面板稳定恢复的宿主 responder；排除会被 SwiftUI 输入框复用的普通 field editor。
+    private func stableWorkspaceResponder(
+        from responder: NSResponder
+    ) -> NSResponder? {
+        if responder is KeroTerminalView || responder is FocusReportingTextView {
+            return responder
+        }
+        if let addressField = responder as? BrowserAddressTextField {
+            return addressField
+        }
+        if let fieldEditor = responder as? NSTextView,
+           let addressField = fieldEditor.delegate as? BrowserAddressTextField {
+            return addressField
+        }
+        var view = responder as? NSView
+        while let current = view {
+            if current is WKWebView { return responder }
+            view = current.superview
+        }
+        return nil
     }
 
     /// Shows the sidebar on `panel`, or hides it if already showing that panel.
@@ -1249,6 +1324,8 @@ final class TerminalManager: nonisolated ObservableObject {
             return .session(workingDirectory: session.currentDirectoryPath)
         case .file(let file):
             return .file(path: file.path, editorState: file.editorState)
+        case .browser(let browser):
+            return .browser(url: browser.snapshotURL)
         case .diff(let diff):
             return .diff(
                 repoRoot: diff.repoRoot, path: diff.path, staged: diff.staged,

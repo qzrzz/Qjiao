@@ -356,12 +356,11 @@ private extension String {
 /// from disk.
 struct SessionSnapshot: Codable {
     struct ProjectSnapshot: Codable {
-        /// A single pane's content — the terminal/file/diff it holds. The case
-        /// shapes match the pre-split format exactly, so old saved tabs (which
-        /// were one of these directly) still decode; see `TabSnapshot`.
+        /// 一个 Pane 的终端、文件、浏览器或 Diff 内容；旧 case 形状保持不变以兼容历史快照。
         enum PaneContentSnapshot: Codable {
             case session(workingDirectory: String)
             case file(path: String, editorState: EditorState?)
+            case browser(url: String?)
             case diff(repoRoot: String, path: String, staged: Bool, untracked: Bool, origPath: String?)
         }
 
@@ -369,8 +368,7 @@ struct SessionSnapshot: Codable {
             var content: PaneContentSnapshot
             var weight: Double
             /// Key into the sidecar terminal-history store for a session pane;
-            /// nil for files, diffs, or when history restore is off. Optional so
-            /// snapshots written before this feature still decode.
+            /// 文件、浏览器、Diff 或关闭历史恢复时为 nil。
             var historyKey: String?
         }
 

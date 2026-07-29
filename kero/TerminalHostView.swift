@@ -21,6 +21,8 @@ struct TerminalHostView: NSViewRepresentable {
     var onFocused: () -> Void = {}
     /// Splits this pane on the given edge — wired to the context-menu items.
     var onSplit: (PaneDropEdge) -> Void = { _ in }
+    var onNewBrowserTab: (String?) -> Void = { _ in }
+    var onNewBrowserPane: (String?) -> Void = { _ in }
     /// Closes this pane when the terminal is part of a split layout.
     var onClose: (() -> Void)?
 
@@ -36,6 +38,8 @@ struct TerminalHostView: NSViewRepresentable {
         terminal.setSurfaceVisible(true)
         terminal.onBecomeFirstResponder = onFocused
         terminal.splitTarget.onSplit = onSplit
+        terminal.splitTarget.onNewBrowserTab = onNewBrowserTab
+        terminal.splitTarget.onNewBrowserPane = onNewBrowserPane
         terminal.splitTarget.onClose = onClose
         let scrollbar = session.overlayScrollbar
         terminal.translatesAutoresizingMaskIntoConstraints = false
@@ -60,6 +64,8 @@ struct TerminalHostView: NSViewRepresentable {
         session.terminalView.setSurfaceVisible(true)
         session.terminalView.onBecomeFirstResponder = onFocused
         session.terminalView.splitTarget.onSplit = onSplit
+        session.terminalView.splitTarget.onNewBrowserTab = onNewBrowserTab
+        session.terminalView.splitTarget.onNewBrowserPane = onNewBrowserPane
         session.terminalView.splitTarget.onClose = onClose
         let container = view as? TerminalContainerView
         container?.focusOnAppear = isFocused

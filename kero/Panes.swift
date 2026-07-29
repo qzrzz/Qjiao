@@ -7,18 +7,18 @@ import AppKit
 import Combine
 import Foundation
 
-/// The leaf content of a pane: a terminal session, an open file, or a git
-/// diff. A project tab used to *be* one of these; now a tab is a niri-style
-/// layout of panes, and this is what sits at each leaf.
+/// Pane 叶子内容：终端、文件、浏览器或 Git Diff。
 enum PaneContent: nonisolated Identifiable {
     case session(TerminalSession)
     case file(FileTab)
+    case browser(BrowserTab)
     case diff(DiffTab)
 
     nonisolated var id: UUID {
         switch self {
         case .session(let session): return session.id
         case .file(let file): return file.id
+        case .browser(let browser): return browser.id
         case .diff(let diff): return diff.id
         }
     }
@@ -35,6 +35,7 @@ extension PaneContent {
         switch self {
         case .session(let session): return session.title
         case .file(let file): return file.name
+        case .browser(let browser): return browser.title
         case .diff(let diff): return diff.title
         }
     }
@@ -43,6 +44,7 @@ extension PaneContent {
         switch self {
         case .session: return "terminal"
         case .file: return "doc.text"
+        case .browser: return "globe"
         case .diff: return "plus.forwardslash.minus"
         }
     }
@@ -52,6 +54,7 @@ extension PaneContent {
         switch self {
         case .session: return nil
         case .file(let file): return file.name
+        case .browser: return nil
         case .diff(let diff): return diff.name
         }
     }
@@ -148,6 +151,13 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
 
     var diffs: [DiffTab] {
         allContents.compactMap { if case .diff(let diff) = $0 { return diff }; return nil }
+    }
+
+    var browsers: [BrowserTab] {
+        allContents.compactMap {
+            if case .browser(let browser) = $0 { return browser }
+            return nil
+        }
     }
 
     var hasMultiplePanes: Bool { allPanes.count > 1 }

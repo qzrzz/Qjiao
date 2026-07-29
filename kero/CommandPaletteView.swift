@@ -134,6 +134,20 @@ struct CommandPaletteView: View {
             PaletteCommand(id: "new-session", title: L10n.t("New Session"), systemImage: "terminal", shortcut: "⌘T") {
                 manager.newSession()
             },
+            PaletteCommand(
+                id: "new-browser-tab",
+                title: L10n.t("New Browser Tab"),
+                systemImage: "globe"
+            ) {
+                manager.newBrowserTab()
+            },
+            PaletteCommand(
+                id: "new-browser-pane",
+                title: L10n.t("New Browser Pane"),
+                systemImage: "globe"
+            ) {
+                manager.newBrowserPane()
+            },
             PaletteCommand(id: "clear-terminal", title: L10n.t("Clear Terminal"), systemImage: "eraser", shortcut: "⌘K") {
                 manager.clearActiveTerminal()
             },

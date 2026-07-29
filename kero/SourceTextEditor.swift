@@ -71,6 +71,8 @@ struct SourceTextEditor: NSViewRepresentable {
     var isFocused: Bool = true
     var onFocused: () -> Void = {}
     var onSplit: (PaneDropEdge) -> Void = { _ in }
+    var onNewBrowserTab: (String?) -> Void = { _ in }
+    var onNewBrowserPane: (String?) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(file: file)
@@ -81,6 +83,8 @@ struct SourceTextEditor: NSViewRepresentable {
         let textView = FocusReportingTextView()
         textView.onBecomeFirstResponder = onFocused
         textView.splitTarget.onSplit = onSplit
+        textView.splitTarget.onNewBrowserTab = onNewBrowserTab
+        textView.splitTarget.onNewBrowserPane = onNewBrowserPane
         scrollView.wantsLayer = true
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
@@ -178,6 +182,10 @@ struct SourceTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? STTextView else { return }
         (textView as? FocusReportingTextView)?.onBecomeFirstResponder = onFocused
         (textView as? FocusReportingTextView)?.splitTarget.onSplit = onSplit
+        (textView as? FocusReportingTextView)?.splitTarget.onNewBrowserTab =
+            onNewBrowserTab
+        (textView as? FocusReportingTextView)?.splitTarget.onNewBrowserPane =
+            onNewBrowserPane
         apply(to: textView, scrollView: scrollView)
         context.coordinator.updateSyntaxTheme(syntaxTheme)
         // Take focus on the unfocused→focused edge (keyboard navigation moving
@@ -364,6 +372,8 @@ final class FocusReportingTextView: STTextView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event) ?? NSMenu()
+        menu.addItem(.separator())
+        for item in splitTarget.browserMenuItems() { menu.addItem(item) }
         menu.addItem(.separator())
         for item in splitTarget.menuItems() { menu.addItem(item) }
         return menu

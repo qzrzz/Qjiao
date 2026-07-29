@@ -858,6 +858,12 @@ extension TerminalSession: TerminalSurfaceOpenURLDelegate {
     }
 }
 
+extension TerminalSession: TerminalSurfaceHoverLinkDelegate {
+    func terminalDidUpdateHoverLink(_ url: String?) {
+        terminalView.hoveredLink = url
+    }
+}
+
 extension TerminalSession: TerminalSurfacePwdDelegate {
     func terminalDidChangeWorkingDirectory(_ path: String) {
         guard !path.isEmpty else { return }

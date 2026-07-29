@@ -50,7 +50,13 @@ struct ContentView: View {
                             PaneLayoutView(
                                 tab: tab,
                                 onSplit: { manager.split(toward: $0) },
-                                onClosePane: { manager.closePane($0) }
+                                onClosePane: { manager.closePane($0) },
+                                onNewBrowserTab: {
+                                    manager.newBrowserTab(initialURL: $0)
+                                },
+                                onNewBrowserPane: {
+                                    manager.newBrowserPane(initialURL: $0)
+                                }
                             )
                         } else {
                             emptyState
@@ -881,6 +887,17 @@ private struct SessionTabsView: View {
             }
             Divider()
         }
+        if case .browser(let browser) = tab.focusedContent,
+           !browser.urlString.isEmpty {
+            Button(L10n.t("Open in Default Browser")) {
+                browser.openInDefaultBrowser()
+            }
+            .disabled(browser.shareURL == nil)
+            Button(L10n.t("Copy Address")) {
+                browser.copyAddress()
+            }
+            Divider()
+        }
         Button(L10n.t("Close")) { project.close(tab) }
         Button(L10n.t("Close Others")) { project.closeOthers(tab) }
             .disabled(project.tabs.count <= 1)
@@ -932,6 +949,7 @@ private struct PaneTabItem: View {
             TabRenameChrome(
                 systemImage: tab.focusedContent?.systemImage ?? "terminal",
                 materialFileName: tab.focusedContent?.materialFileName,
+                browserIcon: focusedBrowser,
                 initialValue: tab.displayTitle ?? "",
                 commit: { value in
                     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -966,6 +984,17 @@ private struct PaneTabItem: View {
                     select: select,
                     close: close
                 )
+            case .browser(let browser):
+                BrowserTabLabel(
+                    browser: browser,
+                    customTitle: tab.customName,
+                    paneCount: paneCount,
+                    isSelected: isSelected,
+                    minWidth: minWidth,
+                    maxWidth: maxWidth,
+                    select: select,
+                    close: close
+                )
             case .diff(let diff):
                 TabItemChrome(
                     systemImage: "plus.forwardslash.minus",
@@ -985,6 +1014,13 @@ private struct PaneTabItem: View {
             }
         }
     }
+
+    private var focusedBrowser: BrowserTab? {
+        if case .browser(let browser) = tab.focusedContent {
+            return browser
+        }
+        return nil
+    }
 }
 
 /// Inline editor for a tab title; Enter/focus loss commits and Escape cancels.
@@ -992,6 +1028,7 @@ private struct TabRenameChrome: View {
     let systemImage: String
     /// 打开文件 / Diff 时用 Material 图标，与文件树一致。
     var materialFileName: String? = nil
+    var browserIcon: BrowserTab?
     let initialValue: String
     let commit: (String) -> Void
     let end: () -> Void
@@ -1002,12 +1039,14 @@ private struct TabRenameChrome: View {
     init(
         systemImage: String,
         materialFileName: String? = nil,
+        browserIcon: BrowserTab? = nil,
         initialValue: String,
         commit: @escaping (String) -> Void,
         end: @escaping () -> Void
     ) {
         self.systemImage = systemImage
         self.materialFileName = materialFileName
+        self.browserIcon = browserIcon
         self.initialValue = initialValue
         self.commit = commit
         self.end = end
@@ -1016,7 +1055,15 @@ private struct TabRenameChrome: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            TabStripIconView(systemImage: systemImage, materialFileName: materialFileName, isSelected: true)
+            if let browserIcon {
+                BrowserFaviconView(browser: browserIcon, size: 13)
+            } else {
+                TabStripIconView(
+                    systemImage: systemImage,
+                    materialFileName: materialFileName,
+                    isSelected: true
+                )
+            }
             TextField("", text: $draft)
                 .textFieldStyle(.plain)
                 .font(SidebarTypography.body())
@@ -1101,6 +1148,34 @@ private struct FileTabLabel: View {
     }
 }
 
+/// 浏览器标签标题和 favicon 会随页面导航实时更新。
+private struct BrowserTabLabel: View {
+    @ObservedObject var browser: BrowserTab
+    var customTitle: String?
+    let paneCount: Int
+    let isSelected: Bool
+    var minWidth: CGFloat = 150
+    var maxWidth: CGFloat = 220
+    let select: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        TabItemChrome(
+            systemImage: "globe",
+            browserIcon: browser,
+            title: customTitle ?? browser.title,
+            manualTitle: customTitle,
+            paneCount: paneCount,
+            isSelected: isSelected,
+            minWidth: minWidth,
+            maxWidth: maxWidth,
+            select: select,
+            close: close
+        )
+        .help(browser.urlString)
+    }
+}
+
 /// 顶栏 Tab / 重命名条上的图标：打开文件用 Material Icon，终端等仍用 SF Symbol。
 private struct TabStripIconView: View {
     let systemImage: String
@@ -1134,6 +1209,8 @@ private struct TabItemChrome: View {
     let systemImage: String
     /// 非空时优先显示 Material 文件图标（打开的文件 / Diff）。
     var materialFileName: String? = nil
+    /// 浏览器优先显示站点 favicon。
+    var browserIcon: BrowserTab? = nil
     let title: String
     /// 非空时表示用户手动指定的标签名，应立即采用其对应宽度。
     var manualTitle: String?
@@ -1158,7 +1235,10 @@ private struct TabItemChrome: View {
     var body: some View {
         Button(action: select) {
             HStack(spacing: 5) {
-                if let terminalAppIcon {
+                if let browserIcon {
+                    BrowserFaviconView(browser: browserIcon, size: 13)
+                        .opacity(isSelected ? 1 : 0.78)
+                } else if let terminalAppIcon {
                     // 识别到 agy / codex 等应用时显示其图标，替代通用转圈。
                     TerminalAppIconView(
                         source: terminalAppIcon,
@@ -1297,7 +1377,10 @@ struct TabContentIcon: View {
     private static let materialSize: CGFloat = 14
 
     var body: some View {
-        if case .session(let session)? = content {
+        if case .browser(let browser)? = content {
+            BrowserFaviconView(browser: browser, size: Self.materialSize)
+                .foregroundStyle(tint)
+        } else if case .session(let session)? = content {
             if let appIcon = session.foregroundAppIcon {
                 TerminalAppIconView(
                     source: appIcon,

@@ -133,6 +133,11 @@ private struct KeroCommands: Commands {
             .keyboardShortcut("t", modifiers: .command)
             .disabled(manager == nil)
 
+            Button(L10n.t("New Browser Tab")) {
+                manager?.newBrowserTab()
+            }
+            .disabled(manager == nil)
+
             Button(L10n.t("New Window")) {
                 openWindow(id: "main")
             }
@@ -280,6 +285,37 @@ private struct KeroCommands: Commands {
                 }
                 .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
             }
+        }
+
+        CommandMenu(L10n.t("Browser")) {
+            Button(L10n.t("Focus Address Bar")) {
+                manager?.focusBrowserAddressBar()
+            }
+            .keyboardShortcut("l", modifiers: .command)
+            .disabled(manager?.hasSelectedBrowser != true)
+
+            Button(L10n.t("Reload Page")) {
+                manager?.reloadSelectedBrowser()
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(manager?.hasSelectedBrowser != true)
+
+            Button(L10n.t("Stop Loading")) {
+                manager?.stopSelectedBrowser()
+            }
+            .disabled(manager?.hasSelectedBrowser != true)
+
+            Divider()
+
+            Button(L10n.t("Copy Address")) {
+                manager?.copySelectedBrowserAddress()
+            }
+            .disabled(manager?.hasSelectedBrowser != true)
+
+            Button(L10n.t("Open in Default Browser")) {
+                manager?.openSelectedPageInDefaultBrowser()
+            }
+            .disabled(manager?.hasSelectedBrowser != true)
         }
 
         CommandMenu(L10n.t("Tabs")) {

@@ -15,6 +15,8 @@ final class KeroTerminalView: AppTerminalView {
     /// 保留属性以免会话/项目层配置代码失效；返回 true 表示已消费该目录。
     var onOpenProjectDirectory: ((URL) -> Bool)?
     let splitTarget = SplitMenuTarget()
+    /// Ghostty 当前识别到的悬停链接，⌘-右键时作为浏览器初始地址。
+    var hoveredLink: String?
 
     private let progressBar = KeroTerminalProgressBarView(frame: .zero)
     private var progressReportTimer: Timer?
@@ -164,22 +166,34 @@ final class KeroTerminalView: AppTerminalView {
     /// matches Kero's existing UI, including focusing before Paste.
     override func rightMouseDown(with event: NSEvent) {
         focusForInteraction()
-        NSMenu.popUpContextMenu(contextMenu(), with: event, for: self)
+        NSMenu.popUpContextMenu(
+            contextMenu(initialURL: browserInitialURL(for: event)),
+            with: event,
+            for: self
+        )
     }
 
     override func rightMouseUp(with event: NSEvent) {}
 
     override func menu(for event: NSEvent) -> NSMenu? {
         focusForInteraction()
-        return contextMenu()
+        return contextMenu(initialURL: browserInitialURL(for: event))
     }
 
-    private func contextMenu() -> NSMenu {
+    private func browserInitialURL(for event: NSEvent) -> String? {
+        event.modifierFlags.contains(.command) ? hoveredLink : nil
+    }
+
+    private func contextMenu(initialURL: String?) -> NSMenu {
         let menu = NSMenu()
         menu.addItem(contextItem("Copy", #selector(copy(_:))))
         menu.addItem(contextItem("Paste", #selector(NSText.paste(_:))))
         menu.addItem(.separator())
         menu.addItem(contextItem("Select All", #selector(selectAll(_:))))
+        menu.addItem(.separator())
+        for item in splitTarget.browserMenuItems(initialURL: initialURL) {
+            menu.addItem(item)
+        }
         menu.addItem(.separator())
         for item in splitTarget.menuItems() { menu.addItem(item) }
         return menu
@@ -354,7 +368,25 @@ private final class KeroTerminalProgressBarView: NSView {
 /// validation so these actions remain enabled even when there is no selection.
 final class SplitMenuTarget: NSObject {
     var onSplit: ((PaneDropEdge) -> Void)?
+    var onNewBrowserTab: ((String?) -> Void)?
+    var onNewBrowserPane: ((String?) -> Void)?
     var onClose: (() -> Void)?
+    private var browserInitialURL: String?
+
+    /// 返回浏览器创建菜单；终端的 ⌘-右键会携带当前悬停链接。
+    func browserMenuItems(initialURL: String? = nil) -> [NSMenuItem] {
+        browserInitialURL = initialURL
+        return [
+            item(
+                L10n.t("New Browser Tab"),
+                #selector(newBrowserTab)
+            ),
+            item(
+                L10n.t("New Browser Pane"),
+                #selector(newBrowserPane)
+            ),
+        ]
+    }
 
     func menuItems() -> [NSMenuItem] {
         var items = [
@@ -380,5 +412,11 @@ final class SplitMenuTarget: NSObject {
     @objc private func splitLeft() { onSplit?(.left) }
     @objc private func splitUp() { onSplit?(.top) }
     @objc private func splitDown() { onSplit?(.bottom) }
+    @objc private func newBrowserTab() {
+        onNewBrowserTab?(browserInitialURL)
+    }
+    @objc private func newBrowserPane() {
+        onNewBrowserPane?(browserInitialURL)
+    }
     @objc private func closePane() { onClose?() }
 }

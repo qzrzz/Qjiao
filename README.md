@@ -176,6 +176,7 @@
 - 终端 Tab 惰性加载机制（Lazy Allocation）：启动时反序列化快照仅为当前活跃选中的 Tab 实例化 LibGhostty 引擎与 Shell 进程，所有后台 Tab 保持惰性装载；在首次切换到目标 Tab 时低于 10ms 瞬间无感激活，将包含数十个历史 Tab 时的 App 启动内存占用从 ~1.0GB 降低至 ~60MB。
 - 已初始化但位于后台的终端停止 GPU surface 合成，回到前台时自动恢复，降低多 Tab / 多分栏的 GPU 显存占用。
 - 优化 Ctrl-Tab / Ctrl-Shift-Tab 标签切换器：按住 Control 预选、松开确认、Esc 取消；采用与上游一致的自适应预览卡片网格，展示终端、文件、图片与 Diff 缩略内容；复用顶部终端 Tab 的动态图标，可显示当前前台应用；并且只截取已经初始化的终端，打开切换器不会启动后台惰性 Shell。
+- **原生内置浏览器**：基于 `WKWebView` 提供浏览器 Tab 与分屏 Pane，地址栏兼具 URL 输入和 Google 搜索，支持前进、后退、刷新、停止加载、复制地址及在默认浏览器中打开；浏览器 URL 随窗口快照保存和恢复，网页标题与 favicon 会同步到顶部标签、标签总览和 Ctrl-Tab 预览；网页链接右键可在新浏览器 Tab / Pane 中打开，并可从命令面板、应用菜单、终端与编辑器右键菜单创建浏览器；浏览器地址栏、网页内容与命令面板之间会按 Pane 选择恢复焦点。本功能仅接入 Ghostty，不包含 Alacritty 后端、bridge 或 Rust 代码。
 - Project / Info 的 Processes 列表过滤已经退出且等待回收的僵尸进程。
 - 优化右侧栏 Tabs 与 Project 等面板空白区域拖拽逻辑：为右侧 Tabs 顶栏、Project / Info / Files / Git 面板 Header 及 Project 面板空白背景配置 `WindowDragArea`，允许用户拖拽空白区域直接移动窗口。
 - 右侧栏 Project 面板增加 PACKAGE 分组：双行紧凑布局（首行包名与右侧独占仓库跳转图标按钮，次行版本号与 SemVer `[+]` 递增按钮及 `MAJOR` / `MINOR` / `PATCH` / `Git tag` 下拉菜单）；点击快速递增并改写 `package.json` 中的 `version` 字段或生成 Git 标签；若未检测到 `package.json` 或无有效字段则自动隐藏该分组。
@@ -214,6 +215,6 @@
 - 最近完成比对与选择性移植的上游基线：Kero `main`（`058694c1e280237545f1cf4d6b14145b81e5b3cb`，包含 `v0.1.33`，2026-07-29）。
 - 移植上游 commit [`fe9f622b6b55c087d5d6f449b0159d3f1e227766`](https://github.com/egoist/kero/commit/fe9f622b6b55c087d5d6f449b0159d3f1e227766)：“Add Open in Kero to Finder's folder context menu”，添加 Finder 右键文件夹服务菜单功能，在 Qjiao 中重命名为 “Open in Qjiao” 并适配项目生命周期与窗口接管。
 - 移植上游 commit [`7bb18e6390ed4f883d15e6711460f88c36ea7d95`](https://github.com/egoist/kero/commit/7bb18e6390ed4f883d15e6711460f88c36ea7d95)、[`8c01a817d5fa085c9579f9569d9783ba38629bda`](https://github.com/egoist/kero/commit/8c01a817d5fa085c9579f9569d9783ba38629bda)、[`c79789b767e30901035471f8ef334b07a1666abf`](https://github.com/egoist/kero/commit/c79789b767e30901035471f8ef334b07a1666abf) 与 [`4d882462e840f4d1f5a0db1791d4165b1ebccbb5`](https://github.com/egoist/kero/commit/4d882462e840f4d1f5a0db1791d4165b1ebccbb5)：保持选中 Tab 可见、修复命令面板指针与 Escape 交互、在命令面板搜索项目文件，以及停止向终端注入 `LANG`；文件索引和文案已适配 Qjiao 的项目目录、忽略策略与 `L10n`。
-- 暂不移植上游 `v0.1.32` 的原生浏览器 Tab / Pane；该功能留作后续独立移植，且不包含可选 Alacritty 后端。
+- 移植上游 Kero `v0.1.32` commit [`46977b25d777c7fe98d32af016efd0274f6828c1`](https://github.com/egoist/kero/commit/46977b25d777c7fe98d32af016efd0274f6828c1)、[`c210d551c9d99dc085c5876c677845848f030d8f`](https://github.com/egoist/kero/commit/c210d551c9d99dc085c5876c677845848f030d8f) 与 [`d9d759c17a37a6d307cf9727d034bbd70053a5d8`](https://github.com/egoist/kero/commit/d9d759c17a37a6d307cf9727d034bbd70053a5d8) 的原生浏览器功能；最新比对基线仍为 Kero `main` `058694c1e280237545f1cf4d6b14145b81e5b3cb`（包含 `v0.1.33`，2026-07-29）。已适配 Qjiao 的 Pane、动态标题、URL 快照、主题、L10n、Ctrl-Tab 预览与 Ghostty 右键菜单，并明确排除所有 Alacritty 后端、bridge 与 Rust 代码。
 - 本轮移植 Option/Meta 设置、隐藏渲染目标内存优化、外部图片变更刷新、侧栏字号和事件驱动 Git 刷新；不移植可选 Alacritty 后端。
 - 已采用上游 `v0.1.24` 的兼容策略，将新建终端的 `TERM_PROGRAM` 设置为 `ghostty`。

@@ -662,6 +662,8 @@ private struct TabSwitcherPanePreview: View {
                 terminalPreviewView(session)
             case .file(let file):
                 filePreviewView(file)
+            case .browser(let browser):
+                browserPreviewView(browser)
             case .diff(let diff):
                 diffPreviewView(diff)
             }
@@ -758,6 +760,34 @@ private struct TabSwitcherPanePreview: View {
             alignment: .topLeading
         )
         .padding(4)
+    }
+
+    /// 浏览器预览不重新渲染网页，使用 favicon、标题和地址避免切换器触发额外加载。
+    private func browserPreviewView(_ browser: BrowserTab) -> some View {
+        VStack(spacing: 5) {
+            BrowserFaviconView(
+                browser: browser,
+                size: 18,
+                fallbackSystemImage: browser.isLoading
+                    ? "globe.americas.fill"
+                    : "globe"
+            )
+            .font(.system(size: 17, weight: .light))
+            .foregroundStyle(Color(nsColor: Theme.accent))
+            Text(browser.title)
+                .font(.system(size: 8, weight: .medium))
+                .lineLimit(1)
+            if !browser.urlString.isEmpty {
+                Text(browser.urlString)
+                    .font(.system(size: 5.5))
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(6)
     }
 
     private var previewForeground: NSColor {

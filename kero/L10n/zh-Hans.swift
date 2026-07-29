@@ -653,6 +653,26 @@ extension L10n {
         "Zoom": "缩放",
         "选择 AI 工具": "选择 AI 工具",
 
+        // MARK: Browser
+        "Back": "后退",
+        "Browser": "浏览器",
+        "Copy Address": "复制地址",
+        "Focus Address Bar": "聚焦地址栏",
+        "Forward": "前进",
+        "New Browser Pane": "新建浏览器窗格",
+        "New Browser Tab": "新建浏览器标签页",
+        "Open in Default Browser": "在默认浏览器中打开",
+        "Open Link in New Browser Pane": "在新浏览器窗格中打开链接",
+        "Open Link in New Browser Tab": "在新浏览器标签页中打开链接",
+        "Open Link in New Window": "在新窗口中打开链接",
+        "Reload Page": "重新加载页面",
+        "Reload Page (⌘R)": "重新加载页面 (⌘R)",
+        "Search or enter website name": "搜索或输入网站名称",
+        "Stop Loading": "停止加载",
+        "The webpage stopped responding.": "网页已停止响应。",
+        "This webpage couldn’t be loaded.": "无法加载此网页。",
+        "Try Again": "重试",
+
         // MARK: Dynamic / format strings
         "A theme named \"%@\" already exists.": "已存在名为 “%@” 的主题。",
         "Ghostty theme used for the terminal palette.": "终端色板使用的 Ghostty 主题。",

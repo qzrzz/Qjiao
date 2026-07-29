@@ -265,6 +265,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// Tabs publish layout changes (splits, focus, resize); re-publish them so
     /// the strip re-renders and autosave fires.
     private var tabObservations: [UUID: AnyCancellable] = [:]
+    /// 浏览器导航会改变动态标题和快照 URL，因此同样向 Project 转发变化。
+    private var browserObservations: [UUID: AnyCancellable] = [:]
 
     /// Pass `createInitialSession: false` when restoring a saved project;
     /// the caller then rebuilds the tabs itself.
@@ -307,7 +309,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         tabs.flatMap { tab in tab.diffs.map { (diff: $0, tabID: tab.id) } }
     }
 
-    /// The focused terminal session; while a file (or diff) pane is focused it
+    /// The focused terminal session; while a file, browser, or diff pane is focused it
     /// has no directory of its own, so panels that need a working directory
     /// (file tree, git, info) track a terminal that does: one sharing the
     /// file's tab (a split), else the session the file was opened from (the
@@ -542,6 +544,57 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         return nil
     }
 
+    // MARK: - Browser
+
+    /// 在当前标签旁创建原生浏览器 Tab。
+    @discardableResult
+    func newBrowserTab(
+        initialURL: String? = nil,
+        initialFocus: BrowserTab.InitialFocus = .addressBar
+    ) -> BrowserTab {
+        let context = selectedSession
+        let browser = makeBrowser(
+            initialURL: initialURL,
+            initialFocus: initialFocus
+        )
+        let tab = makeTab(content: .browser(browser))
+        tab.contextSession = context
+        insertNextToSelected(tab)
+        selectedTabID = tab.id
+        return browser
+    }
+
+    /// 在当前聚焦 Pane 的指定方向创建原生浏览器 Pane。
+    @discardableResult
+    func newBrowserPane(
+        toward edge: PaneDropEdge = .right,
+        initialURL: String? = nil,
+        initialFocus: BrowserTab.InitialFocus = .addressBar
+    ) -> BrowserTab? {
+        guard let tab = selectedTab, tab.canSplit else { return nil }
+        let browser = makeBrowser(
+            initialURL: initialURL,
+            initialFocus: initialFocus
+        )
+        tab.split(Pane(content: .browser(browser)), toward: edge)
+        return browser
+    }
+
+    private func makeBrowser(
+        initialURL: String?,
+        initialFocus: BrowserTab.InitialFocus
+    ) -> BrowserTab {
+        let browser = BrowserTab(
+            initialURL: initialURL,
+            initialFocus: initialFocus
+        )
+        browserObservations[browser.id] = browser.objectWillChange.sink {
+            [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        return browser
+    }
+
     /// After a rename on disk, re-points any open file pane at its new path —
     /// the renamed file itself, or any file beneath a renamed directory.
     func updateFilePaths(from oldPath: String, to newPath: String) {
@@ -619,6 +672,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             Task { @MainActor in
                 _ = await confirmCloseUnsaved(file, in: window)
             }
+        case .browser:
+            removePaneWithContent(content.id)
         case .diff:
             removePaneWithContent(content.id)
         }
@@ -836,6 +891,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             let file = FileTab(path: path)
             if let editorState { file.editorState = editorState }
             return .file(file)
+        case .browser(let url):
+            return .browser(makeBrowser(initialURL: url, initialFocus: .none))
         case .diff(let repoRoot, let path, let staged, let untracked, let origPath):
             return .diff(DiffTab(
                 repoRoot: repoRoot, path: path, staged: staged,
@@ -870,8 +927,9 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     private func removePaneWithContent(_ contentID: UUID) {
         for tab in tabs {
             guard let paneID = tab.paneID(forContent: contentID) else { continue }
-            // Keyed by session id; a no-op for files and diffs.
+            // 两类观察表按内容 id 清理，其他内容类型为 no-op。
             sessionObservations[contentID] = nil
+            browserObservations[contentID] = nil
             if !tab.removePane(paneID) {
                 remove(tabID: tab.id)
             }
@@ -884,6 +942,9 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         let tab = tabs[index]
         for session in tab.sessions {
             sessionObservations[session.id] = nil
+        }
+        for browser in tab.browsers {
+            browserObservations[browser.id] = nil
         }
         tabObservations[tabID] = nil
         tabs.remove(at: index)

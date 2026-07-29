@@ -16,6 +16,9 @@ struct PaneLayoutView: View {
     var onSplit: (PaneDropEdge) -> Void = { _ in }
     /// Closes the pane that owns a context menu action.
     var onClosePane: ((PaneContent) -> Void)?
+    /// 由终端、编辑器和网页链接右键菜单触发的浏览器创建动作。
+    var onNewBrowserTab: (String?) -> Void = { _ in }
+    var onNewBrowserPane: (String?) -> Void = { _ in }
 
     /// Gap between tiles, which doubles as the divider hit area. The same
     /// value insets the whole grid from the parent, so the spacing around the
@@ -78,7 +81,9 @@ struct PaneLayoutView: View {
                     onMove: { _ in },
                     onMoveEnded: {},
                     onSplit: onSplit,
-                    onClosePane: onClosePane
+                    onClosePane: onClosePane,
+                    onNewBrowserTab: onNewBrowserTab,
+                    onNewBrowserPane: onNewBrowserPane
                 )
             } else {
                 grid
@@ -166,7 +171,9 @@ struct PaneLayoutView: View {
                     onMove: { updateDropTarget(source: pane.id, location: $0) },
                     onMoveEnded: { commitPaneMove() },
                     onSplit: onSplit,
-                    onClosePane: tab.hasMultiplePanes ? onClosePane : nil
+                    onClosePane: tab.hasMultiplePanes ? onClosePane : nil,
+                    onNewBrowserTab: onNewBrowserTab,
+                    onNewBrowserPane: onNewBrowserPane
                 )
                 .frame(width: width, height: heights[paneIndex])
                 if paneIndex < column.panes.count - 1 {
@@ -325,6 +332,7 @@ struct PaneLayoutView: View {
         case .session(let session):
             return session.terminalView.paneSnapshot()
         case .file(let file): return file.editorView?.paneSnapshot()
+        case .browser(let browser): return browser.webView.paneSnapshot()
         default: return nil
         }
     }
@@ -436,6 +444,8 @@ private struct PaneView: View {
     let onSplit: (PaneDropEdge) -> Void
     /// Closes this pane from the terminal context menu when the tab is split.
     let onClosePane: ((PaneContent) -> Void)?
+    let onNewBrowserTab: (String?) -> Void
+    let onNewBrowserPane: (String?) -> Void
 
     /// Height of the grab strip at the pane's top.
     private let handleHeight: CGFloat = 8
@@ -480,6 +490,16 @@ private struct PaneView: View {
         onSplit(edge)
     }
 
+    private func newBrowserTabFromMenu(initialURL: String?) {
+        focus()
+        onNewBrowserTab(initialURL)
+    }
+
+    private func newBrowserPaneFromMenu(initialURL: String?) {
+        focus()
+        onNewBrowserPane(initialURL)
+    }
+
     @ViewBuilder
     private var content: some View {
         switch pane.content {
@@ -491,6 +511,8 @@ private struct PaneView: View {
                     hasMultiplePanes: tab.hasMultiplePanes,
                     onFocused: focus,
                     onSplit: splitFromMenu,
+                    onNewBrowserTab: newBrowserTabFromMenu,
+                    onNewBrowserPane: newBrowserPaneFromMenu,
                     onClose: onClosePane.map { close in
                         { focus(); close(pane.content) }
                     }
@@ -502,9 +524,29 @@ private struct PaneView: View {
                 TerminalHelpBar(session: session)
             }
         case .file(let file):
-            FileViewerView(file: file, isFocused: isFocused, onFocused: focus, onSplit: splitFromMenu)
+            FileViewerView(
+                file: file,
+                isFocused: isFocused,
+                onFocused: focus,
+                onSplit: splitFromMenu,
+                onNewBrowserTab: newBrowserTabFromMenu,
+                onNewBrowserPane: newBrowserPaneFromMenu
+            )
                 .background(Color(nsColor: Theme.background.withAlphaComponent(AppSettings.shared.terminalBackgroundOpacity)))
                 .clipShape(RoundedRectangle(cornerRadius: tab.hasMultiplePanes ? 6 : 0, style: .continuous))
+        case .browser(let browser):
+            BrowserView(
+                browser: browser,
+                isFocused: isFocused,
+                onFocused: focus,
+                onNewBrowserTab: newBrowserTabFromMenu,
+                onNewBrowserPane: newBrowserPaneFromMenu
+            )
+            .background(Color(nsColor: Theme.background))
+            .clipShape(RoundedRectangle(
+                cornerRadius: tab.hasMultiplePanes ? 6 : 0,
+                style: .continuous
+            ))
         case .diff:
             // Rendered by the always-mounted diff stack behind the layout; stay
             // transparent and non-interactive so clicks and scrolls reach it.
