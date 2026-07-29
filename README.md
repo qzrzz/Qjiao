@@ -10,6 +10,8 @@
 
 > 相对于 Kero 原版的改动
 
+- 新增 `web/` 产品官网：基于 Figma 的黑绿视觉实现 Qjiao 长页介绍，使用 Vite、React、TypeScript 6 与 Base UI；首屏及 AI Agent、项目、文件、脚本任务、Git、启动器、包管理、开发服务器、代码格式化、图片查看与图片构建均拆分为独立 Feature 组件，每个组件的 Figma 切图保存在自身 `assets/` 目录；功能截图遇到 Figma 组件或组件实例时直接导出顶层节点，每个功能组只保留一张带 Alpha 的 2× 组合切图，不再拆解其内部图层；网站内置 Pally 与 General Sans 可变字体，并按 `Group 2` 的整组 Mask 裁切层级、`multiply` 色彩叠加模式还原应用图标关键帧动画，Logo 动画采用 4 秒单程的往复播放并支持减少动态效果偏好；生产构建通过 Sharp 将 PNG、JPG、SVG（包括 `public/` 静态资源）无损转换为 WebP 并重写引用，`dist` 只发布 WebP 图片；Bun 管理依赖并支持独立的本地开发、预览与构建；修正 Detect Dev Server 与 Code Formatting 功能组信息块的垂直定位。
+- 官网功能组统一桌面端 `180px`、移动端 `72px` 的垂直间距节奏，Web Dev 分区上间距收敛为 `180px`，末尾 Image Build 不再额外保留底部间距。
 - **I18n 界面多语言**：默认英文，可在设置中切换语言；目前支持 **English** 与 **简体中文**。
   - **设置**：Settings → General → **Language** / **界面语言**。
   - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ui.language`（`en` 默认不写回；`zh-Hans` 为简体中文）。
@@ -27,7 +29,7 @@
   - **AI Name & Desc & Icon**：独立模块 `LocalAIProjectMetaSuggest` + `LocalAIProjectMetaTaskStore`；一次请求生成项目 **显示名称**、**描述** 与 **图标** 并写入配置；上下文与 Material 列表复用图标功能；入口为项目列表右键 **AI Name & Desc & Icon**（与纯选图标互斥、可取消、行内转圈）。
   - **AI Git Commit Message**：独立模块 `LocalAIGitCommitSuggest` + `LocalAIGitCommitTaskStore`；根据 staged / unstaged diff 与未跟踪文件摘要，按 Conventional Commit 规范生成提交说明并填入 Git 面板 Message 输入框。
     - **入口**：Git 面板 Message 输入框右侧 **sparkles.2** 按钮；Recent Commits 行右键 **AI Commit Message**（生成中可取消）。
-    - **设置**（Settings → General → AI）：**Writing language**（`ai.writing-language`，默认 English；项目可在 `config.json` 的 `aiWritingLanguage` 覆盖）与 **Git Commit Message Emoji**（`ai.git-commit-emoji`，默认开启 Gitmoji）。
+    - **设置**（Settings → General → AI）：**Writing language**（`ai.writing-language`，默认 English，支持英语、简体中文、繁体中文、日语、韩语、法语、德语、西班牙语、葡萄牙语、俄语、意大利语等常用语言；项目可在 `config.json` 的 `aiWritingLanguage` 覆盖）与 **Git Commit Message Emoji**（`ai.git-commit-emoji`，默认开启 Gitmoji）。
 - 左边栏开关（`sidebar.left`，⌘B）：展开时显示在左侧边栏顶栏右侧；收起后移到 Tabs 顶栏左侧（开关左右边距加大：左 16pt / 右 12pt）。
 - **项目使用自动标题优化**：项目右键菜单中的「使用自动标题」改为独立布尔值开关（Toggle）；开启时项目显示终端动态标题，且不影响/清空项目已设置的自定义名称，关闭后可恢复自定义项目名称。
 - 左侧边栏项目归档功能：支持归档与解除归档；归档项目默认收起居于左侧边栏底部，点击可展开查看列表；解除归档后自动回到上方正常项目列表；已归档栏展开后第一行常驻显示搜索输入框，按项目名与描述实时筛选。
@@ -37,7 +39,10 @@
 - 右面板文本颜色提升可读性。
 - 等宽中文字体来显示终端和代码，可以对齐含有中文的表格、注释了。
   - 默认使用内置 `Source Han Sans CN VF Mono1200` 作为中文等宽回退字体，并可在设置中关闭。
-- 拖拽文件夹自动以该文件夹创建项目并在其中启动终端（排除软件内部 Files / CWD 文件目录树拖拽，避免误触发）。
+- **拖拽文件夹打开项目**（仅左侧边栏）：
+  - 从 Finder 将文件夹拖到**左侧项目栏** → 若列表中已有同路径项目则激活（归档中则先解除归档），否则新建项目并在该目录启动终端。
+  - 拖到终端区域仍为插入 Shell 路径（与文件一致），不再整窗拦截创建项目，避免覆盖终端 drop。
+  - 排除软件内部 Files / CWD 文件树拖拽，避免误触发。
 - **Files Tree 拖拽移动与确认对话框**：文件树支持将文件和文件夹拖拽移动到目标文件夹或根目录，在移动前弹出 macOS 原生确认对话框（显示具体源文件名/项目数量与目标位置，防止误触）；确认后安全移动磁盘文件，自动展开目标目录并联动更新打开的主编辑器标签页路径。
 - 项目支持自定义图标（预置 / Emoji / SF Symbols / Select File）；图标选择器独立为 `ProjectIconPicker.swift`：
   - **预置**：列出本应用内置 Brands（`TerminalAppIcons`）与 Material Icon Theme 图标，可搜索选择。
@@ -53,7 +58,8 @@
   - **Files 面板深度集成**：在 Files 面板顶栏支持模式切换（文件树 / 文本搜索），按 `⇧⌘F` 或菜单项一键无缝唤起全局文本搜索模式。
   - **高效搜索引擎驱动**：内置开箱即用的原生 macOS `ripgrep` 可执行二进制（`kero/VendorBin/rg`），优先通过内置 `rg --json` 进行毫秒级流式文本检索；无 `rg` 环境下亦可自动无缝降级至 Swift 多线程并发扫描引擎（`TaskGroup`），智能剔除忽略项（`node_modules`、`.git`、`dist` 等）。
   - **完整的 VS Code 搜索控制**：支持搜索与替换框、区分大小写 (`Aa`)、全字匹配 (`\b`)、正则表达式 (`.*`)，以及精准的包含文件与排除文件过滤规则 (`files to include/exclude`)。
-  - **精细的结果展示与交互**：按文件树/平铺归类展示匹配结果，高亮显示文本上下文与匹配关键字，支持单条替换与项目一键全替换；点击任意结果匹配行直接在编辑器中定位并切至目标代码行与光标。
+  - **精细的结果展示与交互**：按文件树/平铺归类展示匹配结果，高亮显示文本上下文与匹配关键字，支持单条替换与项目一键全替换；点击搜索结果（文件头或具体匹配行）直接打开对应文件；若文件已经打开，会自动切换当前 Tab 并将光标精确定位且尽可能平滑滚动至屏幕/视口垂直中心。
+- **文件树右键菜单在终端打开**：文件目录树（Files / CWD 面板）及侧边栏项目右键菜单新增「在终端打开」（Open in Terminal）功能；选择文件或目录右键即可在对应目录创建并切换至新的终端会话标签页。
 - 项目支持添加描述，并显示在项目列表中。
 - 项目右键菜单支持在 Finder 中打开项目目录和配置文件夹。
 - 项目名称、图标和描述改为保存在配置文件夹的独立项目配置文件中。
@@ -68,6 +74,7 @@
   - **Project**：项目根路径 + 根 `package.json` scripts；进程/端口为项目下**全部 session** shell 子孙的并集（一次 `ps` + 一次 `lsof`）。
   - **Info**：当前终端 CWD + 该 cwd 下 `package.json` scripts；进程/端口仅当前 session；shell 名 / pid。
   - npm script 在对应路径新开终端运行（Settings 包管理器）；右键 time / `--inspect` / `--prof`；采集逻辑集中于 `SidebarProbe`。
+- **包管理器设置选项优化**：Settings → Project → 包管理器新增「自动识别」（Auto Detect）选项，根据项目的 `packageManager` 字段及 lockfile（`bun.lock`/`pnpm-lock.yaml`/`yarn.lock`/`package-lock.json`）智能选取包管理器；显示文案去掉 `run` 后缀（如 `自动识别`、`npm`、`bun`、`pnpm`、`yarn` 等）。
   - 展开分组有左边距；数量徽章紧跟标题；空分组自动收起。
 - 从右侧栏启动 npm scripts、项目任务、Start 终端命令等命令时，标签图标显示转圈动画；手动在终端输入命令不再触发转圈，已匹配到的终端应用图标仍优先显示。
 - 右侧 Start 面板可保存、排序并一键启动项目的终端命令、应用程序、Finder 文件夹和网页。
@@ -190,6 +197,7 @@
 - 后台终端在停止 GPU surface 合成的基础上进一步压缩隐藏渲染目标，回到前台时自动恢复，降低多 Tab / 多分栏的 GPU 内存占用；内置 `libghostty-spm` 更新至 `1.3.3`。
 - 图片查看器会监听已打开图片的磁盘变更；图片被外部工具覆盖或重新生成后，预览自动刷新，无需关闭标签重新打开。
 - 设置 General → Appearance 新增 **Sidebar font size**：按统一层级同比缩放左、右侧栏及顶栏 Tabs 的文字、图标和行高，并适配当前 `SidebarTypography` 架构；配置写入 `sidebar.font-size`。
+- 优化设置窗口为系统设置风格的左侧分类布局与一体化标题栏；窗口外框和 SwiftUI 根视图使用同一固定尺寸，消除右侧内容区底部多出的标题栏高度空白；左侧底部增加应用信息卡片，版本号可点击检查更新，地球按钮可打开 Qjiao GitHub。
 - Git 面板改为事件驱动刷新：终端命令结束、应用重新激活、切换项目 / CWD / Session、Git 操作完成或手动刷新时更新状态；常规定时器不再每 2 秒执行 Git 命令，并合并刷新期间的重复请求。
 - 优化 Project 面板 Launchers 启动器：
   - **Finder 启动项**：路径解析支持相对路径（如 `./`、`.` 或相对子目录）、波浪号路径（`~/`）与绝对路径，运行或选择文件夹弹窗（Choose…）时默认以项目根目录为基准定位。

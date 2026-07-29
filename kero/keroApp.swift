@@ -31,14 +31,40 @@ struct keroApp: App {
         .windowBackgroundDragBehavior(.disabled)
         .defaultSize(width: 900, height: 600)
         .commands {
+            // 不用 Settings Scene（偏好面板类型），改为普通 Window 才能正确 hiddenTitleBar。
+            SettingsCommands()
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updater)
             }
             KeroCommands()
         }
 
-        Settings {
+        // 设置用独立 Window，而非 Settings Scene：
+        // Settings 场景是专用 NSPanel 偏好窗，titlebarAppearsTransparent / fullSizeContentView
+        // 等样式受限，左右分栏 + 透明标题栏会显得「窗口类型不对」。
+        Window(L10n.t("Settings"), id: "settings") {
             SettingsView()
+                .observeLocalization()
+                .environment(\.l10nLanguage, l10n.language)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultSize(width: 696, height: 600)
+    }
+}
+
+/// ⌘, 打开设置 Window（替代系统 Settings Scene 自动菜单项）。
+private struct SettingsCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var l10n = L10n.shared
+
+    var body: some Commands {
+        let _ = l10n.language
+        CommandGroup(replacing: .appSettings) {
+            Button(L10n.t("Settings…")) {
+                openWindow(id: "settings")
+            }
+            .keyboardShortcut(",", modifiers: .command)
         }
     }
 }

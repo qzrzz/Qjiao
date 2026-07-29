@@ -1132,7 +1132,7 @@ private struct UniversalScriptRow: View {
         .onTapGesture(count: 1) {
             onSelect()
         }
-        .help(script.category.buildExecutionCommand(scriptName: script.name, rawCommand: script.command))
+        .help(script.category.buildExecutionCommand(scriptName: script.name, rawCommand: script.command, directory: script.directory))
         .contextMenu {
             if let port = boundPort {
                 Button("Open http://localhost:\(port) in Browser") {

@@ -6,7 +6,6 @@
 import AppKit
 import Combine
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject var manager: TerminalManager
@@ -107,7 +106,7 @@ struct ContentView: View {
                 .frame(width: 0, height: 0)
         }
         .background(WindowChromeAccessor())
-        .onDrop(of: [UTType.fileURL], isTargeted: nil, perform: addDroppedProjects)
+        // 文件夹创建项目改由左侧边栏 onDrop 处理，避免整窗拦截导致终端无法接收路径 drop。
         .onChange(of: colorScheme) {
             manager.refreshAppearance()
         }
@@ -122,50 +121,6 @@ struct ContentView: View {
                 return event
             }
         }
-    }
-
-    /// 接收从 Finder 拖入窗口的文件夹；每个有效文件夹都会创建一个项目。
-    /// - Parameter providers: 拖拽传入的 NSItemProvider 数组
-    /// - Returns: 是否接收该 Drop 操作
-    private func addDroppedProjects(_ providers: [NSItemProvider]) -> Bool {
-        guard !providers.isEmpty else { return false }
-
-        let dragPb = NSPasteboard(name: .drag)
-        let isInternalFileTreeDrag = FileTreeModel.isDraggingFromTree ||
-            (dragPb.types?.contains(NSPasteboard.PasteboardType("com.qjiao.filetree-item")) ?? false) ||
-            (FileTreeModel.activeTreeDragPasteboardChangeCount == dragPb.changeCount)
-
-        if isInternalFileTreeDrag {
-            FileTreeModel.isDraggingFromTree = false
-            return false
-        }
-
-        // 过滤掉软件内部文件树拖拽的项
-        let externalProviders = providers.filter { provider in
-            !provider.registeredTypeIdentifiers.contains("com.qjiao.filetree-item") &&
-            !provider.hasItemConformingToTypeIdentifier("com.qjiao.filetree-item")
-        }
-        guard !externalProviders.isEmpty else { return false }
-
-        for provider in externalProviders {
-            provider.loadItem(
-                forTypeIdentifier: UTType.fileURL.identifier,
-                options: nil
-            ) { item, _ in
-                let url: URL? = if let url = item as? URL {
-                    url
-                } else if let data = item as? Data {
-                    URL(dataRepresentation: data, relativeTo: nil)
-                } else {
-                    nil
-                }
-                guard let url else { return }
-                Task { @MainActor in
-                    _ = manager.addProject(at: url)
-                }
-            }
-        }
-        return true
     }
 
     /// Sessions in the visible tab are owned by `TerminalHostView`; every

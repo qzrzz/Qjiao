@@ -65,6 +65,8 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     weak var editorView: NSView?
     /// 当前挂载编辑器的文本同步回调；使用弱引用捕获，避免文件与协调器互相持有。
     var onReloadEditorText: (() -> Void)?
+    /// 当外部触发精确定位（如从搜索结果点击跳转）时的回调
+    var onJumpToSelection: ((NSRange) -> Void)?
 
     private static let maxTextBytes = 5 << 20
     private static let imageExtensions: Set<String> = [

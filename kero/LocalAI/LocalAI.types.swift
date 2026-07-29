@@ -16,6 +16,21 @@ import Foundation
 enum AIWritingLanguage: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
     case english = "en"
     case chineseSimplified = "zh-Hans"
+    case chineseTraditional = "zh-Hant"
+    case japanese = "ja"
+    case korean = "ko"
+    case french = "fr"
+    case german = "de"
+    case spanish = "es"
+    case portuguese = "pt"
+    case russian = "ru"
+    case italian = "it"
+    case dutch = "nl"
+    case polish = "pl"
+    case turkish = "tr"
+    case vietnamese = "vi"
+    case arabic = "ar"
+    case hindi = "hi"
 
     var id: String { rawValue }
 
@@ -24,6 +39,21 @@ enum AIWritingLanguage: String, CaseIterable, Identifiable, Codable, Sendable, H
         switch self {
         case .english: return "English"
         case .chineseSimplified: return "简体中文"
+        case .chineseTraditional: return "繁體中文"
+        case .japanese: return "日本語"
+        case .korean: return "한국어"
+        case .french: return "Français"
+        case .german: return "Deutsch"
+        case .spanish: return "Español"
+        case .portuguese: return "Português"
+        case .russian: return "Русский"
+        case .italian: return "Italiano"
+        case .dutch: return "Nederlands"
+        case .polish: return "Polski"
+        case .turkish: return "Türkçe"
+        case .vietnamese: return "Tiếng Việt"
+        case .arabic: return "العربية"
+        case .hindi: return "हिन्दी"
         }
     }
 
@@ -32,6 +62,21 @@ enum AIWritingLanguage: String, CaseIterable, Identifiable, Codable, Sendable, H
         switch self {
         case .english: return "English"
         case .chineseSimplified: return "Simplified Chinese (简体中文)"
+        case .chineseTraditional: return "Traditional Chinese (繁體中文)"
+        case .japanese: return "Japanese (日本語)"
+        case .korean: return "Korean (한국어)"
+        case .french: return "French (Français)"
+        case .german: return "German (Deutsch)"
+        case .spanish: return "Spanish (Español)"
+        case .portuguese: return "Portuguese (Português)"
+        case .russian: return "Russian (Русский)"
+        case .italian: return "Italian (Italiano)"
+        case .dutch: return "Dutch (Nederlands)"
+        case .polish: return "Polish (Polski)"
+        case .turkish: return "Turkish (Türkçe)"
+        case .vietnamese: return "Vietnamese (Tiếng Việt)"
+        case .arabic: return "Arabic (العربية)"
+        case .hindi: return "Hindi (हिन्दी)"
         }
     }
 }

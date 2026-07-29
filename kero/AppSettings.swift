@@ -8,15 +8,54 @@ import Combine
 import Foundation
 import GhosttyTheme
 
-/// Command prefix used when running a package script from the Info panel.
+/// Info 面板执行 package 脚本时使用的命令前缀。
 enum PackageManagerCommand: String, CaseIterable, Identifiable {
+    case auto = "auto"
     case bun = "bun run"
     case npm = "npm run"
     case pnpm = "pnpm run"
+    case yarn = "yarn run"
     case vp = "vp run"
     case nub = "nub run"
 
     var id: String { rawValue }
+
+    /// 包管理器的显示名称（不含 run 后缀，例如 "自动识别"、"npm"、"bun"）
+    var displayName: String {
+        switch self {
+        case .auto: return L10n.t("Auto Detect")
+        case .bun: return "bun"
+        case .npm: return "npm"
+        case .pnpm: return "pnpm"
+        case .yarn: return "yarn"
+        case .vp: return "vp"
+        case .nub: return "nub"
+        }
+    }
+
+    /// 获取具体生效的包管理器执行命令前缀（如 "npm run"、"bun run" 等）
+    func resolveCommandPrefix(for directory: String? = nil) -> String {
+        if self == .auto {
+            if let directory = directory, !directory.isEmpty {
+                let info = SidebarProbe.detectPackageManager(directory: directory)
+                return info.name == "yarn" ? "yarn run" : "\(info.name) run"
+            }
+            return "npm run"
+        }
+        return rawValue
+    }
+
+    /// 获取具体生效的包管理器显示名称（如 "npm"、"pnpm" 等）
+    func resolveDisplayName(for directory: String? = nil) -> String {
+        if self == .auto {
+            if let directory = directory, !directory.isEmpty {
+                let info = SidebarProbe.detectPackageManager(directory: directory)
+                return info.name
+            }
+            return "npm"
+        }
+        return displayName
+    }
 }
 
 /// Zsh 闲时标签页名称控制模式。
@@ -446,7 +485,7 @@ final class AppSettings: nonisolated ObservableObject {
         customCodeEditorPaths = toml["editor.custom-editors"]?.array?.compactMap(\.string) ?? []
         customCLITools = toml["ai.custom-cli-tools"]?.array?.compactMap(\.string) ?? []
         packageManagerCommand = toml["terminal.package-manager"]?.string
-            .flatMap(PackageManagerCommand.init(rawValue:)) ?? .npm
+            .flatMap(PackageManagerCommand.init(rawValue:)) ?? .auto
         // 优先 config.toml；无则迁移旧 UserDefaults，最后回落默认 30s。
         var needsSave = existing == nil
         if let raw = toml["system.reachability-interval"]?.string,
@@ -538,7 +577,7 @@ final class AppSettings: nonisolated ObservableObject {
         macosOptionAsAlt = false
         zshIdleTitleStyle = .defaultStyle
         enableTerminalHelpBar = true
-        packageManagerCommand = .npm
+        packageManagerCommand = .auto
         systemReachabilityInterval = .default
         preferredCodeEditorBundleId = ""
         preferredAIToolId = ""
@@ -636,7 +675,7 @@ final class AppSettings: nonisolated ObservableObject {
         if !enableTerminalHelpBar {
             lines.append("terminal.enable-help-bar = false")
         }
-        if packageManagerCommand != .npm {
+        if packageManagerCommand != .auto {
             lines.append("terminal.package-manager = \(TOML.quote(packageManagerCommand.rawValue))")
         }
         if !preferredCodeEditorBundleId.isEmpty {

@@ -173,6 +173,9 @@ struct FileTreePanel: View {
                 ) {
                     withAnimation(.easeInOut(duration: 0.15)) {
                         manager.filePanelMode = manager.filePanelMode == .search ? .tree : .search
+                        if manager.filePanelMode == .search {
+                            findModel.focusSearchField()
+                        }
                     }
                 }
 
@@ -267,9 +270,11 @@ struct FileTreePanel: View {
         }
         .simultaneousGesture(
             TapGesture().onEnded {
-                isPanelClicked = true
-                isTreeFocused = true
-                NSApp.keyWindow?.makeFirstResponder(nil)
+                if manager.filePanelMode == .tree {
+                    isPanelClicked = true
+                    isTreeFocused = true
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                }
             }
         )
         .onChange(of: model.selectedPaths) { _ in
@@ -359,6 +364,7 @@ struct FileTreePanel: View {
                         Task { @MainActor in
                             dismissFilter()
                             manager.filePanelMode = .search
+                            findModel.focusSearchField()
                         }
                         return nil
                     }
@@ -370,7 +376,10 @@ struct FileTreePanel: View {
                         }
                         return nil
                     }
-                    if manager.filePanelMode == .search, isFilesSearchInputFocused {
+                    if manager.filePanelMode == .search {
+                        Task { @MainActor in
+                            findModel.focusSearchField()
+                        }
                         return nil
                     }
                     if isFilesTreeActiveOrFocused() {
@@ -499,6 +508,7 @@ struct FileTreePanel: View {
                                         ForEach(itemsToDisplay) { item in
                                             FileTreeRow(
                                                 model: model, item: item, session: session,
+                                                manager: manager,
                                                 currentFilePath: currentFilePath,
                                                 openFile: openFile, openToSide: openToSide, onRename: onRename,
                                                 onImageBuild: onImageBuild,
@@ -837,6 +847,7 @@ private struct FileTreeRow: View {
     @ObservedObject private var settings = AppSettings.shared
     let item: FileTreeModel.Item
     let session: TerminalSession?
+    var manager: TerminalManager? = nil
     let currentFilePath: String?
     let openFile: (String) -> Void
     let openToSide: (String) -> Void
@@ -991,6 +1002,15 @@ private struct FileTreeRow: View {
             NSWorkspace.shared.activateFileViewerSelecting(urls)
         } label: {
             Label(L10n.t("Reveal in Finder"), systemImage: "finder")
+        }
+        Button {
+            selectForContextAction()
+            let targetPath = onlyItem?.path ?? item.path
+            let isDir = onlyItem?.isDirectory ?? item.isDirectory
+            let targetDir = isDir ? targetPath : (targetPath as NSString).deletingLastPathComponent
+            manager?.newSession(directory: targetDir)
+        } label: {
+            Label(L10n.t("Open in Terminal"), systemImage: "terminal")
         }
 
         // 选中的图片 → ImageBuild（单张为 1→多，多张为多→多）

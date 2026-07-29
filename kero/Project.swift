@@ -248,7 +248,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             for: id
         )
     }
-    /// 终端直接拖入文件夹时由项目转交给窗口管理器创建新项目。
+    /// 历史回调：曾用于「终端 drop 文件夹 → 创建项目」。
+    /// 现已改为左侧边栏 drop；保留字段以免会话层配置代码失效，默认不接线。
     var onOpenProjectDirectory: ((URL) -> Bool)? {
         didSet {
             for session in sessions {
@@ -472,6 +473,10 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
                case .file(let file) = pane.content,
                let editorState {
                 file.editorState = editorState
+                if let location = editorState.selectionLocation {
+                    let range = NSRange(location: location, length: editorState.selectionLength ?? 0)
+                    file.onJumpToSelection?(range)
+                }
             }
             return
         }

@@ -6,6 +6,7 @@
 import AppKit
 import GhosttyTheme
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Vertical tab strip listing projects, otty-style. Each row is a project;
 /// its sessions show as horizontal tabs in the main header.
@@ -15,12 +16,14 @@ struct SidebarView: View {
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject private var l10n = L10n.shared
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @AppStorage("leftSidebarWidth") private var width: Double = 220
     @State private var draggedProjectID: UUID?
     @State private var projectFrames: [UUID: CGRect] = [:]
     /// 当前窗口是否置顶（`NSWindow.level == .floating`）。
     @State private var isWindowAlwaysOnTop = false
+    /// Finder 等外部文件夹拖入侧栏时的高亮反馈。
+    @State private var isFolderDropTargeted = false
 
     var body: some View {
         let _ = l10n.language
@@ -107,7 +110,7 @@ struct SidebarView: View {
                         systemImage: "gearshape",
                         tooltip: "Settings (⌘,)",
                         tooltipAlignment: .trailing
-                    ) { openSettings() }
+                    ) { openWindow(id: "settings") }
                 }
             }
             .frame(height: 24)
@@ -132,6 +135,15 @@ struct SidebarView: View {
                 }
             }
         }
+        .overlay {
+            // 外部文件夹拖入侧栏时的边框提示。
+            if isFolderDropTargeted {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(0.75), lineWidth: 2)
+                    .padding(4)
+                    .allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .trailing) {
             if !Theme.isDefault(dark: colorScheme == .dark) {
                 Rectangle()
@@ -148,7 +160,58 @@ struct SidebarView: View {
                 defaultWidth: 220
             )
         }
+        // 仅左侧边栏接收「以文件夹创建/激活项目」的 drop，不与终端路径 drop 抢手势。
+        .onDrop(
+            of: [UTType.fileURL],
+            isTargeted: $isFolderDropTargeted,
+            perform: handleFolderDrop
+        )
         .onPreferenceChange(ProjectFramePreferenceKey.self) { projectFrames = $0 }
+    }
+
+    /// 从 Finder 拖入文件夹到左侧边栏：已有同路径项目则激活，否则新建。
+    private func handleFolderDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+
+        let dragPb = NSPasteboard(name: .drag)
+        let isInternalFileTreeDrag = FileTreeModel.isDraggingFromTree
+            || (dragPb.types?.contains(NSPasteboard.PasteboardType("com.qjiao.filetree-item")) ?? false)
+            || (FileTreeModel.activeTreeDragPasteboardChangeCount == dragPb.changeCount)
+        if isInternalFileTreeDrag {
+            FileTreeModel.isDraggingFromTree = false
+            return false
+        }
+
+        let externalProviders = providers.filter { provider in
+            !provider.registeredTypeIdentifiers.contains("com.qjiao.filetree-item")
+                && !provider.hasItemConformingToTypeIdentifier("com.qjiao.filetree-item")
+        }
+        guard !externalProviders.isEmpty else { return false }
+
+        var accepted = false
+        for provider in externalProviders {
+            guard provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) else {
+                continue
+            }
+            accepted = true
+            provider.loadItem(
+                forTypeIdentifier: UTType.fileURL.identifier,
+                options: nil
+            ) { item, _ in
+                let url: URL? = if let url = item as? URL {
+                    url
+                } else if let data = item as? Data {
+                    URL(dataRepresentation: data, relativeTo: nil)
+                } else {
+                    nil
+                }
+                guard let url else { return }
+                Task { @MainActor in
+                    _ = manager.addProject(at: url)
+                }
+            }
+        }
+        return accepted
     }
 
     private func updateProjectDrag(source: UUID, location: CGPoint) {
@@ -273,7 +336,7 @@ private struct SidebarFooterButton: View {
 private struct SidebarThemeButton: View {
     @ObservedObject var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @State private var isHovering = false
 
     var body: some View {
@@ -298,7 +361,7 @@ private struct SidebarThemeButton: View {
             }
             Divider()
             Button(L10n.t("Appearance Settings")) {
-                openSettings()
+                openWindow(id: "settings")
             }
         }
     }
@@ -404,114 +467,7 @@ private struct SidebarProjectRow: View {
                 .fill(isSelected ? Theme.primaryColor.opacity(0.09) : (isHovering ? Theme.primaryColor.opacity(0.04) : .clear))
         )
         .onHover { isHovering = $0 }
-        .contextMenu {
-            
-            
-            Button {
-                openProjectDirectory()
-            } label: {
-                Label(L10n.t("Open in Finder"), systemImage: "finder")
-            }
-            Button {
-                openConfigFolder()
-            } label: {
-                Label(L10n.t("Open Config Folder"), systemImage: "finder")
-            }
-            
-            Divider()
-            Button(L10n.t("Rename…")) {
-                beginRename()
-            }
-
-            Button(L10n.t("Edit Description…")) {
-                beginDescriptionEdit()
-            }
-            Button(L10n.t("Change Icon…")) {
-                isIconPickerPresented = true
-            }
-
-
-            Divider()
-            Toggle(L10n.t("Use Automatic Title"), isOn: $project.useAutoTitle)
-           
-            // ── AI：名称 + 描述 + 图标
-            if aiMetaTasks.isRunning(project.id) {
-                Button {
-                    aiMetaTasks.cancel(project.id)
-                } label: {
-                    Label(L10n.t("Cancel AI Name & Desc & Icon"), systemImage: "xmark.circle")
-                }
-            } else {
-                Button {
-                    startAIProjectMeta()
-                } label: {
-                    Label(L10n.t("AI Name & Desc & Icon"), systemImage: "wand.and.stars")
-                }
-                .disabled(!LocalAI.isEnabled || aiIconTasks.isRunning(project.id))
-            }
-            // ── AI：仅图标
-            if aiIconTasks.isRunning(project.id) {
-                Button {
-                    aiIconTasks.cancel(project.id)
-                } label: {
-                    Label(L10n.t("Cancel AI Select Icon"), systemImage: "xmark.circle")
-                }
-            } else {
-                Button {
-                    startAISelectIcon()
-                } label: {
-                    Label(L10n.t("AI Select Icon"), systemImage: "sparkles")
-                }
-                .disabled(!LocalAI.isEnabled || aiMetaTasks.isRunning(project.id))
-            }
-
-            Divider()
-            Menu(L10n.t("Theme")) {
-                // 两侧都清空 → 完全跟随全局 Light/Dark colors
-                Toggle(isOn: Binding(
-                    get: { project.theme.followsGlobal },
-                    set: { if $0 { project.theme = .global } }
-                )) {
-                    Label {
-                        Text(L10n.t("Follow Global Settings"))
-                    } icon: {
-                        Image(nsImage: ThemePreviewImageRenderer.image(for: [
-                            Theme.globalDefinition(dark: false),
-                            Theme.globalDefinition(dark: true)
-                        ]))
-                    }
-                    .labelStyle(.titleAndIcon)
-                }
-                Divider()
-                // 与 Settings → Appearance 一致：Light / Dark 两套独立配色
-                projectAppearanceThemeMenu(dark: false)
-                projectAppearanceThemeMenu(dark: true)
-            }
-          
-
-            Divider()
-            if project.isArchived {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        manager.unarchiveProject(project)
-                    }
-                } label: {
-                    Label(L10n.t("Unarchive Project"), systemImage: "tray.and.arrow.up")
-                }
-            } else {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        manager.archiveProject(project)
-                    }
-                } label: {
-                    Label(L10n.t("Archive Project"), systemImage: "archivebox")
-                }
-            }
-            Divider()
-            Button(L10n.t("Close Project")) {
-                close()
-            }
-        }
+        .contextMenu { projectContextMenu }
         .sheet(isPresented: $isIconPickerPresented) {
             ProjectIconPicker(project: project)
         }
@@ -549,6 +505,117 @@ private struct SidebarProjectRow: View {
             else { return }
             aiProjectMetaError = newError
             isAIProjectMetaErrorPresented = true
+        }
+    }
+
+    @ViewBuilder
+    private var projectContextMenu: some View {
+        Button {
+            openProjectDirectory()
+        } label: {
+            Label(L10n.t("Open in Finder"), systemImage: "finder")
+        }
+        Button {
+            manager.selectedProjectID = project.id
+            let dir = project.selectedSession?.currentDirectoryPath
+            manager.newSession(directory: dir)
+        } label: {
+            Label(L10n.t("Open in Terminal"), systemImage: "terminal")
+        }
+        Button {
+            openConfigFolder()
+        } label: {
+            Label(L10n.t("Open Config Folder"), systemImage: "finder")
+        }
+        
+        Divider()
+        Button(L10n.t("Rename…")) {
+            beginRename()
+        }
+
+        Button(L10n.t("Edit Description…")) {
+            beginDescriptionEdit()
+        }
+        Button(L10n.t("Change Icon…")) {
+            isIconPickerPresented = true
+        }
+
+        Divider()
+        Toggle(L10n.t("Use Automatic Title"), isOn: $project.useAutoTitle)
+       
+        // ── AI：名称 + 描述 + 图标
+        if aiMetaTasks.isRunning(project.id) {
+            Button {
+                aiMetaTasks.cancel(project.id)
+            } label: {
+                Label(L10n.t("Cancel AI Name & Desc & Icon"), systemImage: "xmark.circle")
+            }
+        } else {
+            Button {
+                startAIProjectMeta()
+            } label: {
+                Label(L10n.t("AI Name & Desc & Icon"), systemImage: "wand.and.stars")
+            }
+            .disabled(!LocalAI.isEnabled || aiIconTasks.isRunning(project.id))
+        }
+        // ── AI：仅图标
+        if aiIconTasks.isRunning(project.id) {
+            Button {
+                aiIconTasks.cancel(project.id)
+            } label: {
+                Label(L10n.t("Cancel AI Select Icon"), systemImage: "xmark.circle")
+            }
+        } else {
+            Button {
+                startAISelectIcon()
+            } label: {
+                Label(L10n.t("AI Select Icon"), systemImage: "sparkles")
+            }
+            .disabled(!LocalAI.isEnabled || aiMetaTasks.isRunning(project.id))
+        }
+
+        Divider()
+        Menu(L10n.t("Theme")) {
+            Toggle(isOn: Binding(
+                get: { project.theme.followsGlobal },
+                set: { if $0 { project.theme = .global } }
+            )) {
+                Label {
+                    Text(L10n.t("Follow Global Settings"))
+                } icon: {
+                    Image(nsImage: ThemePreviewImageRenderer.image(for: [
+                        Theme.globalDefinition(dark: false),
+                        Theme.globalDefinition(dark: true)
+                    ]))
+                }
+                .labelStyle(.titleAndIcon)
+            }
+            Divider()
+            projectAppearanceThemeMenu(dark: false)
+            projectAppearanceThemeMenu(dark: true)
+        }
+
+        Divider()
+        if project.isArchived {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    manager.unarchiveProject(project)
+                }
+            } label: {
+                Label(L10n.t("Unarchive Project"), systemImage: "tray.and.arrow.up")
+            }
+        } else {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    manager.archiveProject(project)
+                }
+            } label: {
+                Label(L10n.t("Archive Project"), systemImage: "archivebox")
+            }
+        }
+        Divider()
+        Button(L10n.t("Close Project")) {
+            close()
         }
     }
 

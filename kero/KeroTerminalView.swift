@@ -11,7 +11,8 @@ import GhosttyTerminal
 final class KeroTerminalView: AppTerminalView {
     /// Fired whenever direct interaction makes this pane the active one.
     var onBecomeFirstResponder: (() -> Void)?
-    /// 文件夹拖入终端时创建项目；文件仍按原行为粘贴绝对路径。
+    /// 兼容旧接线：终端不再用此回调创建项目（改由左侧边栏 drop）。
+    /// 保留属性以免会话/项目层配置代码失效；返回 true 表示已消费该目录。
     var onOpenProjectDirectory: ((URL) -> Bool)?
     let splitTarget = SplitMenuTarget()
 
@@ -200,37 +201,16 @@ final class KeroTerminalView: AppTerminalView {
         canReadFileURLs(sender) ? .copy : []
     }
 
-    /// 将拖入的文件/文件夹绝对路径进行 Shell 转义并插入到当前终端命令行提示符后。
-    /// 外部拖入的文件夹会触发打开项目，内部文件树拖拽则始终作为路径插入。
+    /// 将拖入的文件/文件夹绝对路径做 Shell 转义后插入当前终端命令行。
+    /// 创建项目请拖到左侧边栏；终端 drop（含外部 Finder 与内部文件树）一律插入路径。
     /// - Parameter sender: 拖拽 Session 信息
     /// - Returns: 是否成功执行拖放操作
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard let urls = fileURLs(sender), !urls.isEmpty else { return false }
-        let isInternalFileTreeDrag = FileTreeModel.isDraggingFromTree ||
-            (sender.draggingPasteboard.types?.contains(
-                NSPasteboard.PasteboardType("com.qjiao.filetree-item")
-            ) ?? false) ||
-            (FileTreeModel.activeTreeDragPasteboardChangeCount == sender.draggingPasteboard.changeCount)
-
         FileTreeModel.isDraggingFromTree = false
 
-        if isInternalFileTreeDrag {
-            // 内部文件树拖拽到终端：不管是否为文件夹，一律作为路径插入命令行，不触发打开项目
-            focusForInteraction()
-            let text = urls.map { Self.shellToken(for: $0.path) }.joined(separator: " ")
-            sendText(text + " ")
-            return true
-        }
-
-        let directoryURLs = urls.filter(Self.isDirectory)
-        let openedDirectories = directoryURLs.filter { url in
-            onOpenProjectDirectory?(url) ?? false
-        }
-        let fileURLs = urls.filter { !Self.isDirectory($0) }
-        // 文件夹被窗口接收为项目后，不再把它的路径输入到当前命令行。
-        guard !fileURLs.isEmpty else { return !openedDirectories.isEmpty }
         focusForInteraction()
-        let text = fileURLs.map { Self.shellToken(for: $0.path) }.joined(separator: " ")
+        let text = urls.map { Self.shellToken(for: $0.path) }.joined(separator: " ")
         sendText(text + " ")
         return true
     }
@@ -245,14 +225,6 @@ final class KeroTerminalView: AppTerminalView {
         sender.draggingPasteboard.readObjects(
             forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
         ) as? [URL]
-    }
-
-    /// Finder 拖放的 URL 是否指向一个目录。
-    private static func isDirectory(_ url: URL) -> Bool {
-        var isDirectory: ObjCBool = false
-        return FileManager.default.fileExists(
-            atPath: url.path, isDirectory: &isDirectory
-        ) && isDirectory.boolValue
     }
 
     private static func shellToken(for path: String) -> String {

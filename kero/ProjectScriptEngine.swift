@@ -40,11 +40,11 @@ public enum ProjectScriptCategory: String, Codable, CaseIterable, Identifiable {
     }
 
     /// 命令行默认运行命令格式化
-    public func buildExecutionCommand(scriptName: String, rawCommand: String) -> String {
+    public func buildExecutionCommand(scriptName: String, rawCommand: String, directory: String? = nil) -> String {
         switch self {
         case .npm:
-            let pm = AppSettings.shared.packageManagerCommand.rawValue
-            return "\(pm) \(shellQuote(scriptName))"
+            let pmPrefix = AppSettings.shared.packageManagerCommand.resolveCommandPrefix(for: directory)
+            return "\(pmPrefix) \(shellQuote(scriptName))"
         case .gradle:
             return "./gradlew \(shellQuote(scriptName))"
         case .just:
@@ -63,11 +63,11 @@ public enum ProjectScriptCategory: String, Codable, CaseIterable, Identifiable {
     }
 
     /// 生成终端 Tab 专属标题格式: "<scriptName> (<category/pm> run)"
-    public func buildTabTitle(scriptName: String) -> String {
+    public func buildTabTitle(scriptName: String, directory: String? = nil) -> String {
         switch self {
         case .npm:
-            let pm = AppSettings.shared.packageManagerCommand.rawValue
-            return "\(scriptName) (\(pm) run)"
+            let pmName = AppSettings.shared.packageManagerCommand.resolveDisplayName(for: directory)
+            return "\(scriptName) (\(pmName) run)"
         default:
             return "\(scriptName) (\(rawValue) run)"
         }

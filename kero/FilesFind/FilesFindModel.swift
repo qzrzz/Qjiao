@@ -26,6 +26,8 @@ public final class FilesFindModel: ObservableObject {
     @Published public var statusMessage: String = ""
     /// 搜索耗时（秒）
     @Published public var searchDuration: Double = 0.0
+    /// 请求聚焦 Searcher 主搜索框的信号
+    @Published public var focusSearchTrigger: UUID = UUID()
 
     /// 当前搜索任务引用
     private var currentTask: Task<Void, Never>?
@@ -33,6 +35,11 @@ public final class FilesFindModel: ObservableObject {
     private var currentRootPath: String = ""
 
     public init() {}
+
+    /// 触发搜索框获得焦点
+    public func focusSearchField() {
+        focusSearchTrigger = UUID()
+    }
 
     /// 总匹配结果数
     public var totalMatchCount: Int {

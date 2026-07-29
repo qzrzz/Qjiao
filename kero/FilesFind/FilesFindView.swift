@@ -71,6 +71,9 @@ public struct FilesFindView: View {
                 model.performSearch(rootPath: newPath)
             }
         }
+        .onChange(of: model.focusSearchTrigger) { _, _ in
+            focusedInput = .search
+        }
         .onChange(of: focusedInput) { _, input in
             onInputFocusChanged(input == .search, input != nil)
         }
@@ -152,10 +155,6 @@ public struct FilesFindView: View {
                     RoundedRectangle(cornerRadius: 4)
                         .stroke(focusedInput == .search ? Color(nsColor: Theme.accent) : Color.gray.opacity(0.3), lineWidth: 1)
                 )
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    focusedInput = .search
-                }
             }
 
             // 第二行：替换文本框 (当展开时显示)
@@ -191,10 +190,6 @@ public struct FilesFindView: View {
                         RoundedRectangle(cornerRadius: 4)
                             .stroke(focusedInput == .replace ? Color(nsColor: Theme.accent) : Color.gray.opacity(0.3), lineWidth: 1)
                     )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        focusedInput = .replace
-                    }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -340,6 +335,13 @@ private struct FileResultRowView: View {
 
     @State private var isHovered: Bool = false
 
+    private func openFirstMatchInFile() {
+        let firstMatch = fileResult.matches.first
+        let line = firstMatch?.lineNumber ?? 1
+        let col = firstMatch?.column ?? 0
+        onOpenMatch(fileResult.path, line, col)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // 文件头行
@@ -397,7 +399,7 @@ private struct FileResultRowView: View {
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
             .onTapGesture {
-                model.toggleFileExpand(fileResult)
+                openFirstMatchInFile()
             }
 
             // 文件下的匹配行列表

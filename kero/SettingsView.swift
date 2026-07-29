@@ -21,13 +21,27 @@ struct SettingsView: View {
     private let filesFontFamilies = FileTreeFont.selectableFamilies()
 
     /// 左侧分类栏宽度（图标 + 文案一行排布）。
-    private static let sidebarWidth: CGFloat = 168
+    private static let sidebarWidth: CGFloat = 176
     /// 右侧表单内容区宽度，与原先整页宽度接近，保证控件布局稳定。
     private static let contentWidth: CGFloat = 520
-    private static let windowHeight: CGFloat = 650
+    /// 窗口内容高度（contentSize）。
+    private static let windowHeight: CGFloat = 600
+    /// 设置窗顶栏高度：容纳红绿灯，分类标题与其垂直居中对齐。
+    private static let titlebarHeight: CGFloat = 48
+
+    private static var contentSize: CGSize {
+        CGSize(
+            width: sidebarWidth + contentWidth,
+            height: windowHeight
+        )
+    }
 
     var body: some View {
-        // 左右分栏：左侧分类导航，右侧对应表单（替代原先顶部图标 Tabs）。
+        // 布局原则（系统设置风格）：
+        // - hiddenTitleBar + fullSizeContentView：内容通顶，自行用 titlebarHeight 占位
+        // - 不依赖 top safe area（与主窗口一致，避免标题栏上空一条 / 双倍顶距）
+        // - 左侧顶栏留给红绿灯；右侧顶栏放分类名；两者同高 48pt 对齐
+        // - 根 frame 固定；configurator 钉死完整窗口尺寸
         HStack(spacing: 0) {
             sectionSidebar
                 .frame(width: Self.sidebarWidth)
@@ -35,62 +49,184 @@ struct SettingsView: View {
 
             Divider()
 
-            // 分类切换时内容多少不同；让表单始终填满固定区域，避免窗口跟随内容跳动。
-            form
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 0) {
+                contentTitleBar
+                form
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
+        // 600pt 是设置窗的理想外框高度；通顶标题栏会改变 hosting view 的
+        // 实际可用高度，因此这里允许根布局填满窗口，避免底部再露出空白带。
         .frame(
-            width: Self.sidebarWidth + Self.contentWidth,
-            height: Self.windowHeight
+            minWidth: Self.contentSize.width,
+            maxWidth: .infinity,
+            minHeight: Self.contentSize.height,
+            maxHeight: .infinity
+        )
+        // 整窗自管顶栏，忽略系统 top safe area，消除「标题栏空白 + 第二行标题」叠层。
+        .ignoresSafeArea(edges: .top)
+        .background {
+            // 侧栏材质 / 右侧实色通顶到红绿灯区域。
+            HStack(spacing: 0) {
+                sidebarMaterial
+                    .frame(width: Self.sidebarWidth)
+                Color(nsColor: .windowBackgroundColor)
+            }
+        }
+        .background(
+            SettingsWindowConfigurator(contentSize: Self.contentSize)
         )
         .observeLocalization()
-        // 依赖 language，切换语言时整页重绘。
         .environment(\.l10nLanguage, l10n.language)
     }
 
-    /// 左侧纵向分类导航：图标 + 标题同行，选中项浅底高亮（贴近系统设置侧栏）。
-    private var sectionSidebar: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(SettingsSection.allCases) { section in
-                let isSelected = selectedSection == section
-                Button {
-                    selectedSection = section
-                } label: {
-                    Label {
-                        Text(section.title)
-                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                            .lineLimit(1)
-                    } icon: {
-                        Image(systemName: section.systemImage)
-                            .font(.system(size: 13, weight: .medium))
-                            .frame(width: 18, alignment: .center)
-                    }
-                    .labelStyle(.titleAndIcon)
-                    .foregroundStyle(isSelected ? Color.accentColor : .primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(isSelected ? Color.accentColor.opacity(0.12) : .clear)
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                // 分类切换后不保留键盘焦点描边；选中仅由底色与字重表达。
-                .focusEffectDisabled()
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-                .accessibilityLabel(section.title)
-            }
+    /// 右侧顶栏：与红绿灯同高，分类名垂直居中，可拖窗。
+    private var contentTitleBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: selectedSection.systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(selectedSection.title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background {
-            // 与内容区轻微分隔，侧栏略抬起。
-            Color(nsColor: .windowBackgroundColor).opacity(0.55)
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .frame(height: Self.titlebarHeight)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.06))
+                .frame(height: 1)
         }
+        .background { WindowDragArea() }
+    }
+
+    private var sidebarMaterial: some View {
+        ZStack {
+            VisualEffectView(
+                material: .sidebar,
+                blendingMode: .behindWindow,
+                state: .followsWindowActiveState,
+                alphaValue: 1
+            )
+            Color(nsColor: .windowBackgroundColor).opacity(0.35)
+        }
+    }
+
+    /// 设置侧栏底部的应用身份卡片：版本号检查更新，地球按钮打开项目主页。
+    private var sidebarAppCard: some View {
+        HStack(spacing: 8) {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 30, height: 30)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Qjiao")
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+
+                Button {
+                    updater.checkForUpdates()
+                } label: {
+                    Text("v\(appVersion)")
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .focusEffectDisabled()
+                .disabled(!updater.canCheckForUpdates)
+                .help(L10n.t("Check for Updates…"))
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                guard let url = URL(string: "https://github.com/qzrzz/Qjiao") else { return }
+                NSWorkspace.shared.open(url)
+            } label: {
+                Image(systemName: "globe")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .help(L10n.t("Qjiao GitHub"))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.055))
+        )
+    }
+
+    /// 当前应用的营销版本号；构建配置缺失时保持稳定的占位显示。
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    /// 左侧分类导航：顶栏占位与右侧标题对齐，列表从占位下方开始。
+    private var sectionSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 红绿灯旁空白：高度与右侧 contentTitleBar 一致，可拖窗。
+            Color.clear
+                .frame(height: Self.titlebarHeight)
+                .frame(maxWidth: .infinity)
+                .background { WindowDragArea() }
+
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SettingsSection.allCases) { section in
+                    let isSelected = selectedSection == section
+                    Button {
+                        selectedSection = section
+                    } label: {
+                        Label {
+                            Text(section.title)
+                                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                                .lineLimit(1)
+                        } icon: {
+                            Image(systemName: section.systemImage)
+                                .font(.system(size: 13, weight: .medium))
+                                .frame(width: 18, alignment: .center)
+                        }
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(isSelected ? Color.accentColor : .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(isSelected ? Color.accentColor.opacity(0.12) : .clear)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .focusEffectDisabled()
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .accessibilityLabel(section.title)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            sidebarAppCard
+                .padding(.horizontal, 8)
+                .padding(.bottom, 10)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background { sidebarMaterial }
     }
 
     private var form: some View {
@@ -140,36 +276,35 @@ struct SettingsView: View {
                             .labelsHidden()
                     }
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        // 与终端 Size 同行布局：Slider 吃满剩余宽度，避免右侧挤在 120pt 里。
+                        HStack(spacing: 10) {
                             Text(L10n.t("Sidebar font size"))
-                            Spacer()
-                            HStack(spacing: 8) {
-                                Slider(
-                                    value: $settings.sidebarFontSize,
-                                    in: AppSettings.sidebarFontSizeRange,
-                                    step: 1
-                                )
-                                .frame(width: 120)
-                                Text("\(Int(settings.sidebarFontSize)) pt")
-                                    .monospacedDigit()
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 40, alignment: .trailing)
-                                Stepper(
-                                    "",
-                                    value: $settings.sidebarFontSize,
-                                    in: AppSettings.sidebarFontSizeRange,
-                                    step: 1
-                                )
-                                .labelsHidden()
-                            }
+                                .layoutPriority(1)
+                            Slider(
+                                value: $settings.sidebarFontSize,
+                                in: AppSettings.sidebarFontSizeRange,
+                                step: 1
+                            )
+                            .frame(minWidth: 160, maxWidth: .infinity)
+                            Text("\(Int(settings.sidebarFontSize)) pt")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .frame(width: 44, alignment: .trailing)
+                            Stepper(
+                                "",
+                                value: $settings.sidebarFontSize,
+                                in: AppSettings.sidebarFontSizeRange,
+                                step: 1
+                            )
+                            .labelsHidden()
                         }
                         Text(L10n.t(
                             "Scales text in both sidebars while preserving the existing visual hierarchy."
                         ))
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .settingsRowPadding()
@@ -343,17 +478,14 @@ struct SettingsView: View {
 
             Section(L10n.t("Preview")) {
                 Group {
-                    // Exercises regular/bold plus Nerd Font icon fallback.
-
+                    // 随 Family / Size / 中文回退 / Thicken 即时刷新。
                     VStack(alignment: .leading, spacing: 6) {
-
                         Text("Qjiao ❯ echo \"the quick brown fox\" 0O 1lI")
 
                         Text("\u{E0A0} main \u{E0B0} ~/dev/qjiao \u{E711} \u{F024B} \u{F0A7D}")
 
                         Text("bold — permission denied (os error 13)")
-
-                            .bold()
+                            .font(Font(previewBoldFont))
 
                         Text("""
                         ┌────┬──────────────┬──────────┬────────────┐
@@ -362,12 +494,11 @@ struct SettingsView: View {
                         │ 06 │ 青椒         │ 测试中   │ Testing    │
                         └────┴──────────────┴──────────┴────────────┘
                         """)
-
                     }
-
-
-                .font(Font(previewFont))
-                .padding(.vertical, 4)
+                    .font(Font(previewFont))
+                    .padding(.vertical, 4)
+                    // 切换 thicken 时略带动画，便于察觉描边变化。
+                    .animation(.easeInOut(duration: 0.12), value: settings.fontThicken)
                 }
                 .settingsRowPadding()
             }
@@ -570,15 +701,24 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 510)
+        // 铺满右侧内容列，避免固定 510 宽度在 520 列里留缝或底异常块。
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
+    /// Preview 用字体：与终端相同解析；开启 Thicken 时用更重字重近似 Ghostty font-thicken。
     private var previewFont: NSFont {
         TerminalFont.resolve(
             family: settings.fontFamily,
             size: CGFloat(settings.fontSize),
-            useBundledChineseFallback: settings.useBundledChineseTerminalFont
+            useBundledChineseFallback: settings.useBundledChineseTerminalFont,
+            thicken: settings.fontThicken
         )
+    }
+
+    /// Preview 中 “bold” 行：在 thicken 基础上再抬一档字重，保持与正文的对比。
+    private var previewBoldFont: NSFont {
+        let base = previewFont
+        return NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
     }
 
     private func backgroundOpacityControl(
@@ -697,7 +837,7 @@ struct SettingsView: View {
             && settings.filesFontSize == AppSettings.defaultFilesFontSize
             && !settings.restoreTerminalHistory
             && !settings.directClickMovesCursor
-            && settings.packageManagerCommand == .npm
+            && settings.packageManagerCommand == .auto
             && settings.localAIHeadlessProvider == .disabled
             && settings.aiWritingLanguage == .english
             && settings.gitCommitMessageEmoji
@@ -833,6 +973,101 @@ private final class IntrinsicWidthTextField: NSTextField {
         let width = (stringValue as NSString).size(withAttributes: attrs).width.rounded(.up) + 2
         let height = super.intrinsicContentSize.height
         return NSSize(width: max(width, 1), height: height)
+    }
+}
+
+// MARK: - Settings window chrome
+
+/// 普通 Window 上启用「内容通顶」标题栏，钉死完整窗口尺寸，并对齐红绿灯。
+///
+/// - `hiddenTitleBar` 只藏标题文字
+/// - `fullSizeContentView` + 透明标题栏 → 侧栏/标题画到红绿灯行
+/// - 强制窗口外框等于 SwiftUI 根视图尺寸 → 避免标题栏高度被重复计入而在底部留白
+/// - 红绿灯按 48pt 顶栏垂直居中（不改 isOpaque，设置窗保持不透明）
+private struct SettingsWindowConfigurator: NSViewRepresentable {
+    let contentSize: CGSize
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { Self.apply(to: view.window, contentSize: contentSize) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            Self.apply(to: view.window, contentSize: contentSize)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            Self.apply(to: view.window, contentSize: contentSize)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            Self.apply(to: nsView.window, contentSize: contentSize)
+        }
+    }
+
+    private static func apply(to window: NSWindow?, contentSize: CGSize) {
+        guard let window else { return }
+        window.title = L10n.t("Settings")
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        if !window.styleMask.contains(.fullSizeContentView) {
+            window.styleMask.insert(.fullSizeContentView)
+        }
+        // 设置窗保持不透明，避免透明标题栏透出桌面。
+        window.isOpaque = true
+        window.backgroundColor = .windowBackgroundColor
+        window.isMovableByWindowBackground = false
+
+        // fullSizeContentView 会让内容覆盖标题栏，但 setContentSize 仍会把标题栏高度
+        // 加到窗口外框。直接固定外框，才能让 600pt 根视图恰好覆盖整个设置窗口。
+        let target = NSSize(
+            width: contentSize.width.rounded(.up),
+            height: contentSize.height.rounded(.up)
+        )
+        // 保留标准 titled window 的 styleMask，只通过尺寸上下限禁用缩放，
+        // 避免直接移除 resizable 改变新版 macOS 的窗口控制按钮外观。
+        window.minSize = target
+        window.maxSize = target
+        if abs(window.frame.width - target.width) > 0.5
+            || abs(window.frame.height - target.height) > 0.5
+        {
+            var frame = window.frame
+            // 调整尺寸时保持窗口左上角不动，避免设置窗在首次显示后向上跳动。
+            frame.origin.y += frame.height - target.height
+            frame.size = target
+            window.setFrame(frame, display: true)
+        }
+
+        // 红绿灯落在 48pt 顶栏垂直中线（水平间距沿用主窗口常量）。
+        repositionTrafficLights(in: window)
+    }
+
+    /// 48pt 顶栏的红绿灯垂直中心（相对窗口顶边向下）。
+    private static let trafficLightCenterY: CGFloat = 24
+
+    private static func repositionTrafficLights(in window: NSWindow) {
+        guard !window.styleMask.contains(.fullScreen) else { return }
+        let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        for (index, type) in types.enumerated() {
+            guard let button = window.standardWindowButton(type),
+                  let superview = button.superview
+            else { continue }
+            let centerInWindow = NSPoint(
+                x: WindowChromeAccessor.buttonLeading
+                    + CGFloat(index) * WindowChromeAccessor.buttonSpacing
+                    + button.frame.width / 2,
+                y: window.frame.height - trafficLightCenterY
+            )
+            let center = superview.convert(centerInWindow, from: nil)
+            let origin = NSPoint(
+                x: center.x - button.frame.width / 2,
+                y: center.y - button.frame.height / 2
+            )
+            if button.frame.origin != origin {
+                button.setFrameOrigin(origin)
+            }
+        }
     }
 }
 
@@ -1356,7 +1591,7 @@ private struct ProjectSettingsSectionView: View {
                     Spacer()
                     Picker("", selection: $settings.packageManagerCommand) {
                         ForEach(PackageManagerCommand.allCases) { command in
-                            Text(command.rawValue).tag(command)
+                            Text(command.displayName).tag(command)
                         }
                     }
                     .labelsHidden()

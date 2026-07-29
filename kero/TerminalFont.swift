@@ -34,7 +34,8 @@ enum TerminalFont {
         return resolve(
             family: settings.fontFamily,
             size: CGFloat(settings.fontSize),
-            useBundledChineseFallback: settings.useBundledChineseTerminalFont
+            useBundledChineseFallback: settings.useBundledChineseTerminalFont,
+            thicken: settings.fontThicken
         )
     }
 
@@ -45,19 +46,33 @@ enum TerminalFont {
     /// cascade entries. They cover CJK text and PUA icon glyphs without a
     /// user-installed patched font. JetBrains Mono covers Powerline separators
     /// itself, so those never hit the fallback.
+    ///
+    /// - Parameter thicken: 近似 Ghostty `font-thicken`：优先 Medium/Semibold 字面，
+    ///   否则合成略重字重（设置页 Preview 与 UI 预览用；真实终端仍走 Ghostty 配置）。
     static func resolve(
         family: String,
         size: CGFloat,
-        useBundledChineseFallback: Bool
+        useBundledChineseFallback: Bool,
+        thicken: Bool = false
     ) -> NSFont {
+        // AppKit weight：5 = regular，7 ≈ medium/semibold，比直接 bold 更接近 thicken。
+        let weight = thicken ? 7 : 5
         let base: NSFont
         if !family.isEmpty, family != bundledFamily,
-           let chosen = NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: size) {
+           let chosen = NSFontManager.shared.font(
+               withFamily: family, traits: [], weight: weight, size: size
+           ) {
             base = chosen
+        } else if thicken, let medium = NSFont(name: "JetBrainsMono-Bold", size: size) {
+            // 无独立 Medium 时用 Bold 近似加粗描边（仅 Preview；终端仍用 Ghostty thicken）。
+            base = medium
         } else if let bundled = NSFont(name: "JetBrainsMono-Regular", size: size) {
             base = bundled
         } else {
-            return .monospacedSystemFont(ofSize: size, weight: .regular)
+            return .monospacedSystemFont(
+                ofSize: size,
+                weight: thicken ? .medium : .regular
+            )
         }
         var cascade = [NSFontDescriptor]()
         if useBundledChineseFallback {
@@ -65,7 +80,12 @@ enum TerminalFont {
         }
         cascade.append(NSFontDescriptor(name: symbolsFontName, size: size))
         let descriptor = base.fontDescriptor.addingAttributes([.cascadeList: cascade])
-        return NSFont(descriptor: descriptor, size: size) ?? base
+        let resolved = NSFont(descriptor: descriptor, size: size) ?? base
+        // 族内无更重字面时，对 regular 做一次合成加粗作为 thicken 回退。
+        if thicken, !resolved.fontDescriptor.symbolicTraits.contains(.bold) {
+            return NSFontManager.shared.convert(resolved, toHaveTrait: .boldFontMask)
+        }
+        return resolved
     }
 
     /// Fixed-pitch families available for the font picker, bundled default

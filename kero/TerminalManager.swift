@@ -209,22 +209,44 @@ final class TerminalManager: nonisolated ObservableObject {
         insert(project)
     }
 
-    /// 将指定文件夹作为一个新项目打开，并让首个终端从该文件夹启动。
+    /// 打开文件夹为项目：若已有同目录项目则激活（归档中则先解除），否则新建并启动终端。
     @discardableResult
     func addProject(at directoryURL: URL) -> Bool {
-        let directoryURL = directoryURL.standardizedFileURL
+        let directoryURL = directoryURL
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(
             atPath: directoryURL.path, isDirectory: &isDirectory
         ), isDirectory.boolValue
         else { return false }
 
+        let path = directoryURL.path
+        if let existing = projects.first(where: { Self.projectDirectoryMatches($0, path: path) }) {
+            if existing.isArchived {
+                unarchiveProject(existing)
+            } else {
+                selectedProjectID = existing.id
+            }
+            return true
+        }
+
         let project = makeProject(createInitialSession: false)
         project.customName = directoryURL.lastPathComponent
-        project.projectDirectory = directoryURL.path
-        project.newSession(directory: directoryURL.path)
+        project.projectDirectory = path
+        project.newSession(directory: path)
         insert(project)
         return true
+    }
+
+    /// 规范化后比较项目目录是否与给定路径相同。
+    private static func projectDirectoryMatches(_ project: Project, path: String) -> Bool {
+        guard !project.projectDirectory.isEmpty else { return false }
+        let projectPath = URL(fileURLWithPath: project.projectDirectory)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+            .path
+        return projectPath == path
     }
 
     /// 将项目插入当前项目之后，并把它设为当前项目。
@@ -247,10 +269,8 @@ final class TerminalManager: nonisolated ObservableObject {
             fallbackName: "Project \(projectCounter)",
             createInitialSession: createInitialSession
         )
-        // 文件夹拖到任意终端时，通过所属项目转发到管理器统一创建项目。
-        project.onOpenProjectDirectory = { [weak self] directoryURL in
-            self?.addProject(at: directoryURL) ?? false
-        }
+        // 文件夹创建项目仅接受左侧边栏 drop；终端 drop 改为插入路径，不再走此回调。
+        project.onOpenProjectDirectory = nil
         projectObservations[project.id] = project.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
@@ -364,13 +384,15 @@ final class TerminalManager: nonisolated ObservableObject {
 
     // MARK: - Sessions
 
-    /// New session in the current project; creates a project if none exist.
-    func newSession() {
+    /// 在当前项目中新建终端会话（若项目不存在则创建新项目）；可指定初始工作目录。
+    /// - Parameter directory: 终端会话初始工作目录路径，传 nil 时默认使用项目目录或当前会话目录。
+    func newSession(directory: String? = nil) {
         guard let project = selectedProject else {
             newProject()
+            selectedProject?.newSession(directory: directory)
             return
         }
-        project.newSession()
+        project.newSession(directory: directory)
     }
 
     typealias PackageScriptStatus = UniversalScriptStatus
@@ -521,7 +543,7 @@ final class TerminalManager: nonisolated ObservableObject {
         }
 
         let session = project.newSession(directory: resolvedDirectory)
-        let tabTitle = script.category.buildTabTitle(scriptName: script.name)
+        let tabTitle = script.category.buildTabTitle(scriptName: script.name, directory: script.directory)
         project.selectedTab?.customName = tabTitle
         session.title = tabTitle
 
@@ -545,7 +567,7 @@ final class TerminalManager: nonisolated ObservableObject {
             }
         }
 
-        let baseCmd = script.category.buildExecutionCommand(scriptName: script.name, rawCommand: script.command)
+        let baseCmd = script.category.buildExecutionCommand(scriptName: script.name, rawCommand: script.command, directory: script.directory)
         let command: String
         switch mode {
         case .normal:

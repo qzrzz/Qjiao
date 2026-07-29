@@ -133,7 +133,11 @@ struct SourceTextEditor: NSViewRepresentable {
             let limit = (textView.text ?? "").utf16.count
             let start = min(max(0, location), limit)
             let length = min(max(0, state.selectionLength ?? 0), limit - start)
-            textView.textSelection = NSRange(location: start, length: length)
+            let targetRange = NSRange(location: start, length: length)
+            textView.textSelection = targetRange
+            DispatchQueue.main.async {
+                textView.centerSelectionInVisibleArea(nil)
+            }
         }
 
         context.coordinator.attach(textView: textView, scrollView: scrollView)
@@ -255,6 +259,9 @@ struct SourceTextEditor: NSViewRepresentable {
             file.onReloadEditorText = { [weak self] in
                 self?.reloadTextFromFile()
             }
+            file.onJumpToSelection = { [weak self] range in
+                self?.jumpToSelection(range)
+            }
             scrollObserver = NotificationCenter.default.addObserver(
                 forName: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView,
@@ -312,6 +319,30 @@ struct SourceTextEditor: NSViewRepresentable {
             textView.textSelection = selection
             file.updateSelectionSummary(selection)
             textView.needsLayout = true
+        }
+
+        /// 跳转并选中指定 range 范围，同时尽可能将其滚动至屏幕/视口垂直中心
+        private func jumpToSelection(_ range: NSRange) {
+            guard let textView else { return }
+            let textLength = (file.text as NSString).length
+            let location = min(max(0, range.location), textLength)
+            let length = min(max(0, range.length), textLength - location)
+            let targetRange = NSRange(location: location, length: length)
+
+            textView.textSelection = targetRange
+            file.editorState.selectionLocation = targetRange.location
+            file.editorState.selectionLength = targetRange.length
+            file.updateSelectionSummary(targetRange)
+
+            textView.scrollRangeToVisible(targetRange)
+            textView.centerSelectionInVisibleArea(nil)
+            textView.needsLayout = true
+
+            // 异步在下一帧 layout 沉淀后二次确认居中
+            DispatchQueue.main.async {
+                textView.scrollRangeToVisible(targetRange)
+                textView.centerSelectionInVisibleArea(nil)
+            }
         }
     }
 }

@@ -49,7 +49,7 @@ struct PaletteCommand: Identifiable {
 struct CommandPaletteView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var settings = AppSettings.shared
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     @State private var query = ""
     @State private var selection = 0
@@ -199,7 +199,7 @@ struct CommandPaletteView: View {
 
         items.append(
             PaletteCommand(id: "settings", title: L10n.t("Settings…"), systemImage: "gearshape", shortcut: "⌘,") {
-                openSettings()
+                openWindow(id: "settings")
             }
         )
         return items
