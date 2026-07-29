@@ -496,8 +496,13 @@ final class AppSettings: nonisolated ObservableObject {
     /// themes only swap Ghostty color pairs for the active project and never
     /// change this value.
     /// Called from `init` because `didSet` doesn't run during initialization.
+    ///
+    /// 同时写入 `Theme` 的偏好缓存：启动早期 `NSApp.effectiveAppearance` 可能尚未
+    /// 反映系统 Dark，终端 / 动态色用缓存判断 light·dark，避免首帧反了。
     func applyAppearance() {
-        NSApp?.appearance = theme.nsAppearance
+        Theme.setAppThemePreference(theme)
+        // 使用 shared 而非可选 NSApp，确保启动路径一定写入 appearance。
+        NSApplication.shared.appearance = theme.nsAppearance
     }
 
     func resetFont() {

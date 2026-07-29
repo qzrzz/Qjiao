@@ -57,34 +57,62 @@ enum ImageConvert {
 
     // MARK: - Private encoders
 
+    /// 将 NSImage 编码为 PNG 二进制数据。
+    /// - Note: 使用 ImageIO CGImageDestination 确保完整的 sRGB / ICC 色彩空间标注，避免 NSBitmapImageRep 丢失 sRGB 导致的 cwebp 颜色偏差。
     private static func writePNG(_ image: NSImage, to url: URL) throws {
-        guard let data = bitmapData(image, using: .png, properties: [:]) else {
+        guard let data = pngData(image) else {
             throw ImageBuildError.encodeFailed("PNG encode failed")
         }
         try data.write(to: url, options: .atomic)
     }
 
+    /// 将 NSImage 编码为 JPEG 二进制数据。
+    /// - Parameters:
+    ///   - image: 待编码图像
+    ///   - url: 输出目标 URL
+    ///   - quality: 0…1 质量压缩系数
     private static func writeJPEG(_ image: NSImage, to url: URL, quality: Double) throws {
-        let q = max(0, min(1, quality))
-        let props: [NSBitmapImageRep.PropertyKey: Any] = [
-            .compressionFactor: q
-        ]
-        guard let data = bitmapData(image, using: .jpeg, properties: props) else {
+        guard let data = jpegData(image, quality: quality) else {
             throw ImageBuildError.encodeFailed("JPEG encode failed")
         }
         try data.write(to: url, options: .atomic)
     }
 
-    private static func bitmapData(
-        _ image: NSImage,
-        using format: NSBitmapImageRep.FileType,
-        properties: [NSBitmapImageRep.PropertyKey: Any]
-    ) -> Data? {
-        if let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first {
-            return rep.representation(using: format, properties: properties)
-        }
+    /// 通过 CGImageDestination 生成 PNG Data，完整保留色彩空间与 sRGB 块。
+    private static func pngData(_ image: NSImage) -> Data? {
         guard let cg = ImageResize.cgImage(from: image) else { return nil }
-        let rep = NSBitmapImageRep(cgImage: cg)
-        return rep.representation(using: format, properties: properties)
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(
+            data as CFMutableData,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+        CGImageDestinationAddImage(dest, cg, nil)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return data as Data
+    }
+
+    /// 通过 CGImageDestination 生成 JPEG Data，保留色彩空间与质量配置。
+    private static func jpegData(_ image: NSImage, quality: Double) -> Data? {
+        guard let cg = ImageResize.cgImage(from: image) else { return nil }
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(
+            data as CFMutableData,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+        let q = max(0, min(1, quality))
+        let options: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: q
+        ]
+        CGImageDestinationAddImage(dest, cg, options as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return data as Data
     }
 }

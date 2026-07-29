@@ -2531,8 +2531,8 @@ struct ImageViewerView: View {
     /// 顶部图像控制与信息面板 (现代化高质感样式，支持极速出现的 Tooltip、悬停光泽高亮与 Accent 描边)
     private func imageControlToolbar(currentScale: CGFloat) -> some View {
         HStack(spacing: 5) {
-            // 1. 缩放倍数下拉菜单 (固定 128px 宽度)
-            ModernToolbarMenu(fixedWidth: 128, helpText: "Zoom Scale Options", shortcutText: "Menu") {
+            // 1. 缩放倍数下拉菜单 (自适应/纯百分比文本)
+            ModernToolbarMenu(fixedWidth: 88, helpText: "Zoom Scale Options", shortcutText: "Menu") {
                 Picker(L10n.t("Zoom"), selection: Binding(
                     get: { zoomOption },
                     set: { newValue in
@@ -2554,7 +2554,7 @@ struct ImageViewerView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
-                    Text("Zoom: \(currentDisplayZoomText(currentScale: currentScale))")
+                    Text(currentDisplayZoomText(currentScale: currentScale))
                         .font(.system(size: 11, weight: .regular))
                         .monospacedDigit()
                         .lineLimit(1)
@@ -2589,18 +2589,8 @@ struct ImageViewerView: View {
 
             ModernToolbarDivider()
 
-            // 4. 逆时针旋转按钮 (-90°)
-            ModernToolbarButton(helpText: "Rotate 90° Counterclockwise", shortcutText: "⌥⌘R") {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    rotationDegrees -= 90
-                }
-            } content: {
-                Image(systemName: "rotate.left")
-                    .font(.system(size: 11))
-            }
-
-            // 5. 顺时针旋转按钮 (+90°)
-            ModernToolbarButton(helpText: "Rotate 90° Clockwise", shortcutText: "⌘R") {
+            // 4. 旋转按钮 (顺时针 +90°)
+            ModernToolbarButton(helpText: "Rotate 90°", shortcutText: "⌘R") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     rotationDegrees += 90
                 }
@@ -2609,7 +2599,7 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
-            // 6. 水平镜像翻转
+            // 5. 水平镜像翻转
             ModernToolbarButton(isActive: isFlippedHorizontal, helpText: "Flip Horizontal", shortcutText: "⌥H") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isFlippedHorizontal.toggle()
@@ -2619,7 +2609,7 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
-            // 7. 垂直镜像翻转
+            // 6. 垂直镜像翻转
             ModernToolbarButton(isActive: isFlippedVertical, helpText: "Flip Vertical", shortcutText: "⌥V") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isFlippedVertical.toggle()
@@ -2631,7 +2621,7 @@ struct ImageViewerView: View {
 
             ModernToolbarDivider()
 
-            // 8. 图片对比模式开关按钮
+            // 7. 图片对比模式开关按钮
             ModernToolbarButton(isActive: isCompareMode, helpText: "Compare Mode", shortcutText: "⌘D") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isCompareMode.toggle()
@@ -2641,7 +2631,7 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
-            // 9. ImageBuild：尺寸 / 格式转换 / 压缩
+            // 8. ImageBuild：尺寸 / 格式转换 / 压缩
             ModernToolbarButton(
                 isActive: showImageBuild,
                 helpText: "Image Build & Export",
@@ -2657,7 +2647,7 @@ struct ImageViewerView: View {
             }
             .disabled(file.path.isEmpty)
 
-            // 10. 标尺与参考线控制下拉菜单
+            // 9. 标尺与参考线控制下拉菜单
             ModernToolbarMenu(isActive: isRulerEnabled, helpText: "Rulers & Guides") {
                 Toggle(L10n.t("Show Rulers"), isOn: $isRulerEnabled)
                 Toggle(L10n.t("Show Guides"), isOn: $isGuidesVisible)
@@ -2676,7 +2666,7 @@ struct ImageViewerView: View {
                     .font(.system(size: 11))
             }
 
-            // 11. 背景模式下拉菜单
+            // 10. 背景模式下拉菜单
             ModernToolbarMenu(helpText: "Background Mode") {
                 Picker(L10n.t("Background Mode"), selection: $backgroundMode) {
                     ForEach(ImageBackgroundMode.allCases) { mode in
@@ -2686,16 +2676,6 @@ struct ImageViewerView: View {
                 .pickerStyle(.inline)
             } labelContent: {
                 Image(systemName: "light.panel.fill")
-                    .font(.system(size: 11))
-            }
-
-            ModernToolbarDivider()
-
-            // 12. 在 Finder 中定位文件
-            ModernToolbarButton(helpText: "Reveal in Finder", shortcutText: "⌥⌘R") {
-                NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
-            } content: {
-                Image(systemName: "arrow.up.forward.app")
                     .font(.system(size: 11))
             }
 

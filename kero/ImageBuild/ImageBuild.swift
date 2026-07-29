@@ -274,7 +274,7 @@ enum ImageBuild {
 
     // MARK: - Format pipelines
 
-    /// JPEG：优先 cjpegli；不可用或失败时回退 ImageIO。
+    /// JPEG 编码：优先 cjpegli。若免缩放且源格式为 cjpegli 直读格式（PNG/GIF/PPM），直传源文件；否则走临时 PNG。
     private static func encodeJPEG(
         workingImage: NSImage,
         options: ImageBuildOptions
@@ -282,11 +282,31 @@ enum ImageBuild {
         let quality01 = Double(options.jpegQuality) / 100.0
 
         if VendorBinLocator.isAvailable(.cjpegli) {
-            let tempPNG = try ImageConvert.writeTemporaryPNG(workingImage)
-            defer { try? FileManager.default.removeItem(at: tempPNG) }
+            let ext = URL(fileURLWithPath: options.sourcePath).pathExtension.lowercased()
+            let cjpegliDirectFormats: Set<String> = ["png", "gif", "ppm", "pgm"]
+
+            let inputPath: String
+            var tempURL: URL?
+
+            if options.resize == .none && cjpegliDirectFormats.contains(ext) {
+                // 无需缩放且源图为 cjpegli 可直读格式：直接使用原图路径
+                inputPath = options.sourcePath
+            } else {
+                // 需要缩放或非直读格式：写出高质量临时 PNG 供 cjpegli 消费
+                let temp = try ImageConvert.writeTemporaryPNG(workingImage)
+                tempURL = temp
+                inputPath = temp.path
+            }
+
+            defer {
+                if let tempURL {
+                    try? FileManager.default.removeItem(at: tempURL)
+                }
+            }
+
             do {
                 try await ImageCompress.compressJPEG(
-                    inputPath: tempPNG.path,
+                    inputPath: inputPath,
                     outputPath: options.outputPath,
                     quality: options.jpegQuality
                 )
@@ -304,18 +324,33 @@ enum ImageBuild {
         )
     }
 
-    /// PNG：写出 → 可选 pngquant → oxipng。
+    /// PNG 编码：若免缩放且源文件即为 PNG，直接基于原图文件做 pngquant/oxipng；否则按所需尺寸/格式重写 PNG。
     private static func encodePNG(
         workingImage: NSImage,
         options: ImageBuildOptions
     ) async throws {
         let outputPath = options.outputPath
-        try ImageConvert.write(
-            image: workingImage,
-            format: .png,
-            to: outputPath,
-            lossyQuality: 1.0
-        )
+        let ext = URL(fileURLWithPath: options.sourcePath).pathExtension.lowercased()
+
+        if options.resize == .none && ext == "png" {
+            // 源文件就是 PNG 且无需缩放：若目标路径不同则先复制源文件，完整保留原始 PNG Data
+            if options.sourcePath != outputPath {
+                let outURL = URL(fileURLWithPath: outputPath)
+                try? FileManager.default.createDirectory(at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if FileManager.default.fileExists(atPath: outputPath) {
+                    try? FileManager.default.removeItem(atPath: outputPath)
+                }
+                try FileManager.default.copyItem(atPath: options.sourcePath, toPath: outputPath)
+            }
+        } else {
+            // 需要缩放或非 PNG 源文件：绘制写入新 PNG
+            try ImageConvert.write(
+                image: workingImage,
+                format: .png,
+                to: outputPath,
+                lossyQuality: 1.0
+            )
+        }
 
         var workingPath = outputPath
 
@@ -356,7 +391,7 @@ enum ImageBuild {
         }
     }
 
-    /// WebP：临时 PNG → cwebp（必须）。
+    /// WebP 编码：原图支持直读且无缩放时直接传原图；需要缩放或非直读格式时走临时 PNG。
     private static func encodeWebP(
         workingImage: NSImage,
         options: ImageBuildOptions
@@ -364,17 +399,38 @@ enum ImageBuild {
         guard VendorBinLocator.isAvailable(.cwebp) else {
             throw ImageBuildError.vendorToolMissing("cwebp")
         }
-        let tempPNG = try ImageConvert.writeTemporaryPNG(workingImage)
-        defer { try? FileManager.default.removeItem(at: tempPNG) }
+
+        let inputPath: String
+        var tempURL: URL?
+
+        let ext = URL(fileURLWithPath: options.sourcePath).pathExtension.lowercased()
+        let cwebpDirectFormats: Set<String> = ["png", "jpg", "jpeg", "tif", "tiff", "webp"]
+
+        if options.resize == .none && cwebpDirectFormats.contains(ext) {
+            // 无需缩放且源图为 cwebp 可直读格式：直接使用原图路径，零中间损耗
+            inputPath = options.sourcePath
+        } else {
+            // 需要缩放或原图为 HEIC/PSD 等格式：转为临时 PNG 供 cwebp 消费
+            let temp = try ImageConvert.writeTemporaryPNG(workingImage)
+            tempURL = temp
+            inputPath = temp.path
+        }
+
+        defer {
+            if let tempURL {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+        }
+
         try await ImageCompress.compressWebP(
-            inputPath: tempPNG.path,
+            inputPath: inputPath,
             outputPath: options.outputPath,
             quality: options.webpQuality,
             lossless: options.webpLossless
         )
     }
 
-    /// JXL：临时 PNG → cjxl（必须）。
+    /// JXL 编码：优先 cjxl。若免缩放且源格式为 cjxl 直读格式（PNG/JPEG/GIF/PPM/EXR），直传源文件；否则走临时 PNG。
     private static func encodeJXL(
         workingImage: NSImage,
         options: ImageBuildOptions
@@ -382,10 +438,31 @@ enum ImageBuild {
         guard VendorBinLocator.isAvailable(.cjxl) else {
             throw ImageBuildError.vendorToolMissing("cjxl")
         }
-        let tempPNG = try ImageConvert.writeTemporaryPNG(workingImage)
-        defer { try? FileManager.default.removeItem(at: tempPNG) }
+
+        let ext = URL(fileURLWithPath: options.sourcePath).pathExtension.lowercased()
+        let cjxlDirectFormats: Set<String> = ["png", "jpg", "jpeg", "gif", "ppm", "pgm", "exr"]
+
+        let inputPath: String
+        var tempURL: URL?
+
+        if options.resize == .none && cjxlDirectFormats.contains(ext) {
+            // 无需缩放且源图为 cjxl 可直读格式：直接使用原图路径
+            inputPath = options.sourcePath
+        } else {
+            // 需要缩放或非直读格式：写出高质量临时 PNG 供 cjxl 消费
+            let temp = try ImageConvert.writeTemporaryPNG(workingImage)
+            tempURL = temp
+            inputPath = temp.path
+        }
+
+        defer {
+            if let tempURL {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+        }
+
         try await ImageCompress.compressJXL(
-            inputPath: tempPNG.path,
+            inputPath: inputPath,
             outputPath: options.outputPath,
             quality: options.jxlQuality,
             effort: options.jxlEffort

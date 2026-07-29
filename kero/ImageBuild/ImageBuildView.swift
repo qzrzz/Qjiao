@@ -67,7 +67,7 @@ struct ImageBuildView: View {
 
     /// Asset Catalog 矢量图标（模板渲染，随 tint 变色）
     private static let iconName = "ImageBuild"
-    private static let labelWidth: CGFloat = 36
+    private static let labelWidth: CGFloat = 82
     /// 多图缩略图边长
     private static let batchThumbSize: CGFloat = 48
     /// 缩略图最多预加载数量
@@ -154,7 +154,7 @@ struct ImageBuildView: View {
             Divider()
             footer
         }
-        .frame(width: 400, height: sheetHeight)
+        .frame(width: 450, height: sheetHeight)
         .onAppear {
             applySimplePreset(qualityPreset)
             if sourcePaths.count > 1 { Task { await loadBatchThumbnails() } }
@@ -224,7 +224,7 @@ struct ImageBuildView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help("关闭")
+            .help(L10n.t("Close"))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -241,7 +241,7 @@ struct ImageBuildView: View {
                         HStack(spacing: 8) {
                             ProgressView()
                                 .controlSize(.small)
-                            Text("处理中")
+                            Text(L10n.t("Processing…"))
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                             if buildProgressTotal > 0 {
@@ -261,7 +261,7 @@ struct ImageBuildView: View {
                         HStack(alignment: .center, spacing: 8) {
                             statusBanner(resultMessage, kind: .success)
                             if lastRevealPath != nil {
-                                Button("显示") {
+                                Button(L10n.t("Reveal")) {
                                     if let path = lastRevealPath {
                                         NSWorkspace.shared.selectFile(
                                             path,
@@ -285,10 +285,10 @@ struct ImageBuildView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             Spacer(minLength: 0)
-            Button("取消") { onDismiss(nil) }
+            Button(L10n.t("Cancel")) { onDismiss(nil) }
                 .keyboardShortcut(.cancelAction)
                 .controlSize(.regular)
-            Button(isBuilding ? "处理中…" : "开始处理") {
+            Button(isBuilding ? L10n.t("Processing…") : L10n.t("Start Build")) {
                 requestStartBuild()
             }
             .keyboardShortcut(.defaultAction)
@@ -336,7 +336,7 @@ struct ImageBuildView: View {
     private var batchSourceContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text("源图")
+                Text(L10n.t("Source Images"))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Text("\(sourcePaths.count)")
@@ -513,7 +513,7 @@ struct ImageBuildView: View {
     private var settingsCard: some View {
         card {
             VStack(alignment: .leading, spacing: 10) {
-                labeledRow("格式") {
+                labeledRow(L10n.t("Format")) {
                     Picker("", selection: $format) {
                         ForEach(ImageOutputFormat.allCases) { f in
                             Text(f.title).tag(f)
@@ -524,7 +524,7 @@ struct ImageBuildView: View {
                     .controlSize(.small)
                 }
 
-                labeledRow("压缩") {
+                labeledRow(L10n.t("Compression")) {
                     Picker("", selection: $compressUIMode) {
                         ForEach(ImageBuildCompressUIMode.allCases) { m in
                             Text(m.title).tag(m)
@@ -533,7 +533,7 @@ struct ImageBuildView: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .controlSize(.small)
-                    .frame(maxWidth: 132, alignment: .leading)
+                    .frame(maxWidth: 160, alignment: .leading)
                     Spacer(minLength: 0)
                 }
 
@@ -548,7 +548,7 @@ struct ImageBuildView: View {
                     .controlSize(.small)
 
                     if format == .png {
-                        Toggle("有损压缩 PNG（量化颜色）", isOn: $lossyPNG)
+                        Toggle(L10n.t("Lossy PNG (quantize colors)"), isOn: $lossyPNG)
                             .font(.system(size: 11))
                             .toggleStyle(.checkbox)
                     }
@@ -569,30 +569,30 @@ struct ImageBuildView: View {
     private var advancedCompressBlock: some View {
         switch format {
         case .jpeg:
-            compactSlider("质量", value: $jpegQuality, range: 1...100)
+            compactSlider(L10n.t("Quality"), value: $jpegQuality, range: 1...100)
         case .webp:
-            Toggle("无损", isOn: $webpLossless)
+            Toggle(L10n.t("Lossless"), isOn: $webpLossless)
                 .font(.system(size: 11))
                 .toggleStyle(.checkbox)
             if !webpLossless {
-                compactSlider("质量", value: $webpQuality, range: 0...100)
+                compactSlider(L10n.t("Quality"), value: $webpQuality, range: 0...100)
             }
         case .jxl:
-            compactSlider("质量", value: $jxlQuality, range: 0...100)
-            compactSlider("强度", value: $jxlEffort, range: 1...10)
+            compactSlider(L10n.t("Quality"), value: $jxlQuality, range: 0...100)
+            compactSlider(L10n.t("Effort"), value: $jxlEffort, range: 1...10)
         case .png:
             Picker("", selection: $pngCompressMode) {
-                Text("无损").tag(ImagePNGCompressMode.lossless)
-                Text("量化").tag(ImagePNGCompressMode.quantizeThenLossless)
+                Text(L10n.t("Lossless")).tag(ImagePNGCompressMode.lossless)
+                Text(L10n.t("Quantize")).tag(ImagePNGCompressMode.quantizeThenLossless)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .controlSize(.small)
-            compactSlider("等级", value: $pngOptLevel, range: 0...6)
+            compactSlider(L10n.t("Level"), value: $pngOptLevel, range: 0...6)
             if pngCompressMode == .quantizeThenLossless {
-                compactSlider("颜色", value: $pngQuantColors, range: 2...256)
+                compactSlider(L10n.t("Colors"), value: $pngQuantColors, range: 2...256)
             }
-            Toggle("剥离元数据", isOn: $stripMetadata)
+            Toggle(L10n.t("Strip metadata"), isOn: $stripMetadata)
                 .font(.system(size: 11))
                 .toggleStyle(.checkbox)
         }
@@ -602,10 +602,10 @@ struct ImageBuildView: View {
         card {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Text("导出")
+                    Text(L10n.t("Export"))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
-                    Text("\(variants.count) 项")
+                    Text(L10n.format("%d items", variants.count))
                         .font(.system(size: 10).monospacedDigit())
                         .foregroundStyle(.tertiary)
                     Spacer()
@@ -623,12 +623,12 @@ struct ImageBuildView: View {
                             }
                         }
                     } label: {
-                        Label("模板", systemImage: "square.grid.2x2")
+                        Label(L10n.t("Templates"), systemImage: "square.grid.2x2")
                             .font(.system(size: 11))
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .help("用模板替换当前导出设置")
+                    .help(L10n.t("Replace current export settings with a template"))
 
                     Button {
                         variants.append(ImageExportVariant(sizeText: "1x", suffix: "_build"))
@@ -638,14 +638,14 @@ struct ImageBuildView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("添加一行导出")
+                    .help(L10n.t("Add an export row"))
                 }
 
                 // 表头
                 HStack(spacing: 6) {
-                    Text("尺寸")
+                    Text(L10n.t("Size"))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("后缀")
+                    Text(L10n.t("Suffix"))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Color.clear.frame(width: 18)
                 }
@@ -681,7 +681,7 @@ struct ImageBuildView: View {
                 }
 
                 if let name = outputFileNamePreview {
-                    Text("文件名预览:\(name)")
+                    Text(L10n.format("Filename preview: %@", name))
                         .font(.system(size: 10).monospaced())
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -690,7 +690,7 @@ struct ImageBuildView: View {
 
                 if wouldOverwriteSource {
                     Toggle(isOn: $allowOverwriteSource) {
-                        Text("覆盖原文件")
+                        Text(L10n.t("Overwrite source file"))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(overwriteNeedsAttention ? Color.yellow : Color.primary)
                     }
@@ -715,20 +715,20 @@ struct ImageBuildView: View {
                     )
                     .offset(x: overwriteShakeOffset)
                     .id(Self.overwriteToggleScrollID)
-                    .help("当前导出配置会使输出路径与源文件相同；须勾选后才能开始处理")
+                    .help(L10n.t("Export settings will overwrite source files; check this box to allow processing"))
                 }
 
                 Divider().opacity(0.5)
 
                 HStack(spacing: 6) {
-                    Text("目录")
+                    Text(L10n.t("Directory"))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .frame(width: Self.labelWidth, alignment: .leading)
                     TextField("", text: $outputDirectory)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11))
-                    Button("选择…") { chooseOutputDirectory() }
+                    Button(L10n.t("Choose…")) { chooseOutputDirectory() }
                         .controlSize(.small)
                 }
             }
@@ -784,7 +784,7 @@ struct ImageBuildView: View {
         if sourcePaths.count == 1 {
             return (sourcePaths[0] as NSString).lastPathComponent
         }
-        return "已选 \(sourcePaths.count) 张图片"
+        return L10n.format("%d selected images", sourcePaths.count)
     }
 
     private func fileSizeLabel(path: String) -> String? {
@@ -872,9 +872,9 @@ struct ImageBuildView: View {
     private var formatAvailabilityWarning: String? {
         switch format {
         case .webp where !tools.cwebp:
-            return "当前无法导出 WebP"
+            return L10n.t("Cannot export WebP currently")
         case .jxl where !tools.cjxl:
-            return "当前无法导出 JXL"
+            return L10n.t("Cannot export JXL currently")
         default:
             return nil
         }
@@ -935,7 +935,7 @@ struct ImageBuildView: View {
         buildProgressCurrent = batch.results.count
         buildProgressTotal = max(buildProgressTotal, batch.results.count)
         if batch.failureCount == batch.results.count {
-            resultError = batch.results.compactMap(\.errorMessage).first ?? "处理失败"
+            resultError = batch.results.compactMap(\.errorMessage).first ?? L10n.t("Processing failed")
             resultMessage = nil
         } else {
             resultMessage = batch.summaryMessage

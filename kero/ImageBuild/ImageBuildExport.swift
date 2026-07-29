@@ -132,7 +132,7 @@ struct ImageExportTemplate: Identifiable, Sendable {
         ImageExportTemplate(
             id: "macos-appicon",
             title: L10n.t("macOS App Icon"),
-            detail: "16w…512w、1024×1024",
+            detail: L10n.t("16w…512w, 1024×1024"),
             rows: [
                 .init(sizeText: "16w", suffix: "_16"),
                 .init(sizeText: "32w", suffix: "_32"),
@@ -145,7 +145,7 @@ struct ImageExportTemplate: Identifiable, Sendable {
         ImageExportTemplate(
             id: "macos-retina",
             title: L10n.t("macOS 1x / 2x"),
-            detail: "原图 + @2x 两倍图",
+            detail: L10n.t("Original + @2x"),
             rows: [
                 .init(sizeText: "1x", suffix: ""),
                 .init(sizeText: "2x", suffix: "@2x"),
@@ -166,7 +166,7 @@ struct ImageExportTemplate: Identifiable, Sendable {
         ImageExportTemplate(
             id: "scale-half-to-4x",
             title: "0.5x … 4x",
-            detail: "相对原图缩放",
+            detail: L10n.t("Scale relative to original"),
             rows: [
                 .init(sizeText: "0.5x", suffix: "@0.5x"),
                 .init(sizeText: "1x", suffix: ""),
@@ -260,8 +260,8 @@ struct ImageBuildBatchResult: Sendable {
 
     var summaryMessage: String {
         if failureCount == 0 {
-            return "完成 \(successCount) 个文件"
+            return L10n.format("Completed %d files", successCount)
         }
-        return "成功 \(successCount)，失败 \(failureCount)"
+        return L10n.format("%d succeeded, %d failed", successCount, failureCount)
     }
 }

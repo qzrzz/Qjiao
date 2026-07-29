@@ -112,8 +112,8 @@ enum ImageBuildCompressUIMode: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .simple: return "简单"
-        case .advanced: return "高级"
+        case .simple: return L10n.t("Simple")
+        case .advanced: return L10n.t("Advanced")
         }
     }
 }
@@ -131,17 +131,17 @@ enum ImageBuildQualityPreset: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .smallest: return "极小"
-        case .balanced: return "平衡"
-        case .highQuality: return "高画质"
+        case .smallest: return L10n.t("Smallest")
+        case .balanced: return L10n.t("Balanced")
+        case .highQuality: return L10n.t("High Quality")
         }
     }
 
     var subtitle: String {
         switch self {
-        case .smallest: return "优先体积"
-        case .balanced: return "体积与画质"
-        case .highQuality: return "优先画质"
+        case .smallest: return L10n.t("Prioritize size")
+        case .balanced: return L10n.t("Size & quality")
+        case .highQuality: return L10n.t("Prioritize quality")
         }
     }
 

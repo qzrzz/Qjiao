@@ -53,8 +53,8 @@ enum ImageCompress {
         } else {
             args.append(contentsOf: ["-q", "\(max(0, min(100, quality)))"])
         }
-        // 适度多线程；保留 alpha
-        args.append(contentsOf: ["-mt", "-o", outputPath, "--", inputPath])
+        // 包含 ICC 配置文件以保留色彩空间；适度多线程；保留 alpha
+        args.append(contentsOf: ["-metadata", "icc", "-mt", "-o", outputPath, "--", inputPath])
 
         try await runVendor(
             tool: .cwebp,

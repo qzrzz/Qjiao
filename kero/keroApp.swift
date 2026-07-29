@@ -49,16 +49,31 @@ struct keroApp: App {
 private struct WindowRootView: View {
     @StateObject private var manager = TerminalManager()
     @ObservedObject private var l10n = L10n.shared
+    @ObservedObject private var settings = AppSettings.shared
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ContentView(manager: manager)
             .focusedSceneObject(manager)
             .environment(\.l10nLanguage, l10n.language)
+            // 与 config 中的 theme 对齐：首帧即正确，不依赖 NSApp 启动时序。
+            .preferredColorScheme(settings.theme.preferredColorScheme)
             .onAppear {
+                // 再套一次 appearance：App.init 阶段偶发写入过早，窗口出现后纠正。
+                settings.applyAppearance()
+                manager.refreshAppearance()
                 TerminalManager.openRestoredWindows {
                     openWindow(id: "main")
                 }
+            }
+            .onChange(of: settings.theme) {
+                settings.applyAppearance()
+                manager.refreshAppearance()
+            }
+            .onChange(of: colorScheme) {
+                // System 模式下随 macOS 亮暗切换刷新终端配色。
+                manager.refreshAppearance()
             }
             .onDisappear {
                 manager.windowClosed()

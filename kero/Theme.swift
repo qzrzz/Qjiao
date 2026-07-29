@@ -35,6 +35,15 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .dark: return NSAppearance(named: .darkAqua)
         }
     }
+
+    /// SwiftUI 根视图用的 `preferredColorScheme`；`.system` 为 `nil` 跟随系统。
+    var preferredColorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
 }
 
 /// 项目级配色覆盖：与全局 Settings 一样分 **Light / Dark** 两套，
@@ -226,6 +235,8 @@ enum Theme {
     private static let customSnapshots = OSAllocatedUnfairLock(
         initialState: [String: CustomThemeSnapshot]()
     )
+    /// 全局 AppTheme 缓存：启动早期 / 非主线程解析 dark·light 时不依赖尚未就绪的 `NSApp.appearance`。
+    private static let appThemePreference = OSAllocatedUnfairLock(initialState: AppTheme.system)
 
     /// 按名称解析主题：自定义主题优先（窗口合成定义），其次内置 Default，再 Ghostty 目录。
     nonisolated static func definition(named name: String) -> GhosttyThemeDefinition? {
@@ -326,14 +337,63 @@ enum Theme {
         )
     }
 
+    /// 写入全局亮暗偏好（与 `AppSettings.theme` 同步）；供任意线程的 `resolvedIsDark` 读取。
+    static func setAppThemePreference(_ theme: AppTheme) {
+        appThemePreference.withLock { $0 = theme }
+    }
+
+    /// 当前缓存的 AppTheme（system / light / dark）。
+    static var appThemePreferenceValue: AppTheme {
+        appThemePreference.withLock { $0 }
+    }
+
+    /// 解析给定 `NSAppearance` 是否为 dark 系（含 high-contrast / vibrant 变体）。
+    static func isDarkAppearance(_ appearance: NSAppearance) -> Bool {
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+
+    /// 系统外观是否为 Dark（不读 `NSApp`，避免启动瞬间 effectiveAppearance 仍为默认 light）。
+    /// `AppleInterfaceStyle == "Dark"` 表示深色；键缺失表示浅色。
+    static func systemPrefersDark() -> Bool {
+        guard let style = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") else {
+            return false
+        }
+        return style.caseInsensitiveCompare("Dark") == .orderedSame
+    }
+
     /// 解析「此刻应按 dark 还是 light 配色」。
-    /// 优先视图所在 window（含 AppTheme），否则视图自身，再回落 `NSApp`。
+    ///
+    /// 优先级：
+    /// 1. 用户强制 Light / Dark（`AppTheme`，不依赖启动时尚未就绪的 NSApp）
+    /// 2. 已入窗视图的 `window.effectiveAppearance`
+    /// 3. System 模式下用 `AppleInterfaceStyle`（启动早期比 `NSApp.effectiveAppearance` 更准）
+    /// 4. 最后回落 `NSApp.effectiveAppearance`
     static func resolvedIsDark(for view: NSView? = nil) -> Bool {
-        let appearance =
-            view?.window?.effectiveAppearance
-            ?? view?.effectiveAppearance
-            ?? NSApp.effectiveAppearance
-        return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        switch appThemePreference.withLock({ $0 }) {
+        case .dark:
+            return true
+        case .light:
+            return false
+        case .system:
+            break
+        }
+
+        if let window = view?.window {
+            return isDarkAppearance(window.effectiveAppearance)
+        }
+
+        // 启动早期视图可能尚未入窗；`NSApp.effectiveAppearance` 有时仍停在默认 aqua。
+        // `AppleInterfaceStyle` 在 AppKit 完成激活前即可读：有值为 Dark，缺省为 Light。
+        if NSApp.windows.isEmpty {
+            return systemPrefersDark()
+        }
+
+        let fromApp = isDarkAppearance(NSApp.effectiveAppearance)
+        // 系统为 Dark 但 NSApp 仍报 light 时（启动竞态），以系统偏好为准。
+        if systemPrefersDark(), !fromApp {
+            return true
+        }
+        return fromApp
     }
 
     @MainActor
@@ -482,7 +542,13 @@ enum Theme {
         _ resolve: @escaping @Sendable (GhosttyThemeDefinition) -> NSColor
     ) -> NSColor {
         NSColor(name: nil) { appearance in
-            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            // 强制 Light/Dark 时以偏好为准，避免动态色在启动时按错误 appearance 取样。
+            let dark: Bool
+            switch appThemePreference.withLock({ $0 }) {
+            case .dark: dark = true
+            case .light: dark = false
+            case .system: dark = isDarkAppearance(appearance)
+            }
             return resolve(resolvedDefinition(dark: dark))
         }
     }
