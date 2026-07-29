@@ -970,7 +970,6 @@ extension L10n {
         "Invalid SVG syntax": "SVG 语法不完整",
         "Actual Size": "实际尺寸",
         "Fit Window": "适应窗口",
-        "Background Mode": "背景模式",
     ]
 }
 
