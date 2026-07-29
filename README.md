@@ -31,7 +31,7 @@
     - `ProjectMetaPrompt` → AI Name & Desc & Icon（**name / description** 遵循 Writing language；icon 除外）
   - **AI Select Icon**：基于项目 name / description / 路径末级、`package.json` name·description、`README.md` 前 20 行，以及 **Material Icon Theme** 逻辑名列表（不含 Brands），用 LocalAI 按「Material icon → SF Symbol → Emoji」优先级返回 JSON 并应用；入口为项目列表右键 **AI Select Icon** 与图标选择器 **AI Select**（未启用 provider 时禁用）。
   - **AI Name & Desc & Icon**：独立模块 `LocalAIProjectMetaSuggest` + `LocalAIProjectMetaTaskStore`；一次请求生成项目 **显示名称**、**描述** 与 **图标** 并写入配置；上下文与 Material 列表复用图标功能；入口为项目列表右键 **AI Name & Desc & Icon**（与纯选图标互斥、可取消、行内转圈）。
-  - **AI Git Commit Message**：独立模块 `LocalAIGitCommitSuggest` + `LocalAIGitCommitTaskStore`；根据 staged / unstaged diff 与未跟踪文件摘要，按 Conventional Commit 规范生成提交说明并填入 Git 面板 Message 输入框。
+  - **AI Git Commit Message**：独立模块 `LocalAIGitCommitSuggest` + `LocalAIGitCommitTaskStore`；根据已暂存 (Staged，仅已暂存存在时) 或工作区已变更 (Unstaged 与未跟踪文件，仅已暂存为空时) 的上下文，按 Conventional Commit 规范生成提交说明并填入 Git 面板 Message 输入框。
     - **入口**：Git 面板 Message 输入框右侧 **sparkles.2** 按钮；Recent Commits 行右键 **AI Commit Message**（生成中可取消）。
     - **设置**（Settings → General → AI）：**Writing language**（`ai.writing-language`，默认 English，支持英语、简体中文、繁体中文、日语、韩语、法语、德语、西班牙语、葡萄牙语、俄语、意大利语等常用语言；项目可在 `config.json` 的 `aiWritingLanguage` 覆盖）与 **Git Commit Message Emoji**（`ai.git-commit-emoji`，默认开启 Gitmoji）。
 - 左边栏开关（`sidebar.left`，⌘B）：展开时显示在左侧边栏顶栏右侧；收起后移到 Tabs 顶栏左侧（开关左右边距加大：左 16pt / 右 12pt）。
@@ -214,6 +214,7 @@
   - **Finder 启动项**：路径解析支持相对路径（如 `./`、`.` 或相对子目录）、波浪号路径（`~/`）与绝对路径，运行或选择文件夹弹窗（Choose…）时默认以项目根目录为基准定位。
   - **Webpage 启动项**：支持实时响应 URL 文本修改，在输入框地址变更时智能清理旧图标并即时重新获取加载新网址的 Favicon；当默认 `/favicon.ico` 不存在时，自动拉取网页 HTML 前 300 字符解析 `<link rel="shortcut icon"` 或 `<link rel="icon"` 标签的 `href` 路径并二次请求。
 - **macOS 访达右键服务 (Finder Context Menu)**：在 `Info.plist` 中注册系统级 `NSServices`，并在 `FinderService.swift` 中响应 `openInQjiao` 服务请求；在 Finder 中选中一个或多个文件夹右键点击“服务 -> Open in Qjiao”（在 Qjiao 中打开），即可自动拉起应用并将所选文件夹批量建立为新项目、启动对应目录的终端 Session。
+- **优化 AI 生成 Commit Message 功能**：通过 `git status --porcelain=v1` 严谨隔离 Git 变更上下文。已暂存 (Staged) 存在时，仅提取已暂存变更；已暂存为空时，才提取工作区已变更 (Unstaged diff) 与未跟踪文件 (Untracked paths)，确保生成的 Commit Message 准确反映本次提交的目标上下文。
 
 ## 上游移植记录
 

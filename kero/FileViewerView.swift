@@ -2944,6 +2944,7 @@ private struct ModernToolbarMenu<Content: View, LabelContent: View>: View {
         } label: {
             labelContent()
                 .frame(width: fixedWidth, height: 26)
+                .frame(minWidth: fixedWidth == nil ? 26 : nil)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(backgroundColor)
@@ -2956,6 +2957,8 @@ private struct ModernToolbarMenu<Content: View, LabelContent: View>: View {
                 .shadow(color: isHovered ? Color.black.opacity(0.05) : Color.clear, radius: 2, x: 0, y: 1)
         }
         .menuStyle(.borderlessButton)
+        // 图标按钮不需要系统下拉角标，否则会与 label 叠在一起。
+        .menuIndicator(.hidden)
         .frame(width: fixedWidth)
         .onHover { hover in
             withAnimation(.easeInOut(duration: 0.12)) {
@@ -3313,7 +3316,7 @@ struct SVGPreviewView: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
             .macTooltip(isFitMode ? L10n.t("Actual Size") : L10n.t("Fit Window"), position: .bottom)
 
-            // 背景模式切换菜单
+            // 背景模式切换菜单（隐藏系统下拉角标，避免与 图标按钮叠在一起）
             Menu {
                 ForEach(ImageBackgroundMode.allCases) { mode in
                     Button {
@@ -3331,8 +3334,10 @@ struct SVGPreviewView: View {
                 Image(systemName: "square.on.square.squareshape.controlhandles")
                     .font(.system(size: 11))
             }
+            .buttonStyle(.plain)
             .menuStyle(.borderlessButton)
-            .frame(width: 20, height: 20)
+            .menuIndicator(.hidden)
+            .padding(4)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
             .macTooltip(L10n.t("Background Mode"), position: .bottom)
         }
