@@ -1,0 +1,296 @@
+.hero {
+  position: relative;
+  height: 1606px;
+  overflow: hidden;
+  text-align: center;
+}
+
+.heroIcon {
+  position: absolute;
+  top: 136px;
+  left: 50%;
+  width: 248px;
+  height: 248px;
+  overflow: hidden;
+  transform: translateX(-50%);
+}
+
+.heroIconBackground {
+  width: 248px;
+  height: 248px;
+  object-fit: cover;
+}
+
+.heroIconArtwork {
+  position: absolute;
+  inset: 0;
+  width: 248px;
+  height: 248px;
+}
+
+.heroIconMaskGroup {
+  position: absolute;
+  top: 24.21875px;
+  left: 24.21875px;
+  width: 199.5625px;
+  height: 199.5625px;
+  isolation: isolate;
+  mask-mode: alpha;
+  mask-position: 0 0;
+  mask-repeat: no-repeat;
+  mask-size: 199.5625px 199.5625px;
+}
+
+.heroIconMaskSource {
+  position: absolute;
+  inset: 0;
+  width: 199.5625px;
+  height: 199.5625px;
+  pointer-events: none;
+}
+
+.heroIconBlendBackdrop {
+  position: absolute;
+  z-index: 0;
+  top: -24.21875px;
+  left: -24.21875px;
+  width: 248px;
+  height: 248px;
+  max-width: none;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.heroIconGlow {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  width: 262.352px;
+  height: 260.977px;
+  align-items: center;
+  justify-content: center;
+  mix-blend-mode: multiply;
+}
+
+.heroIconGlowRotated {
+  position: relative;
+  width: 127.633px;
+  height: 242.43px;
+  transform: rotate(45.49deg);
+}
+
+.heroIconGlowRotated img {
+  position: absolute;
+  top: -29.066px;
+  left: -29.063px;
+  width: 185.758px;
+  height: 300.555px;
+  max-width: none;
+}
+
+.heroIconGlow--top {
+  top: -111.719px;
+  left: -105.379px;
+}
+
+.heroIconGlow--bottom {
+  top: 35.359px;
+  left: 10.414px;
+}
+
+.heroIconPepperMotion {
+  position: absolute;
+  z-index: 2;
+  top: 35.359px;
+  left: 20.586px;
+  display: flex;
+  width: 238.968px;
+  height: 238.968px;
+  align-items: center;
+  justify-content: center;
+  will-change: transform;
+}
+
+.heroIconPepper {
+  width: 172.434px;
+  height: 172.434px;
+  filter: drop-shadow(-16px -7px 37px rgba(10, 46, 12, 0.62));
+  transform: rotate(-33.51deg);
+}
+
+.heroIconPepper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero h1 {
+  position: absolute;
+  top: 403px;
+  left: 50%;
+  width: 534px;
+  margin: 0;
+  color: transparent;
+  background: linear-gradient(0deg, #fff 50%, #a7f9c0 106%);
+  background-clip: text;
+  font-family: "Pally-Variable", "SF Pro Display", sans-serif;
+  font-size: 96px;
+  font-weight: 700;
+  letter-spacing: -0.06em;
+  line-height: 1;
+  transform: translateX(-50%);
+}
+
+.heroTagline {
+  position: absolute;
+  top: 672px;
+  left: 50%;
+  width: 1141px;
+  max-width: calc(100% - 48px);
+  margin: 0;
+  color: #63b06d;
+  font-size: 36px;
+  font-weight: 500;
+  transform: translateX(-50%);
+}
+
+.heroDescription {
+  position: absolute;
+  top: 767px;
+  left: 50%;
+  width: 631px;
+  max-width: calc(100% - 48px);
+  margin: 0;
+  color: rgba(219, 220, 219, 0.68);
+  font-size: 24px;
+  line-height: 1.25;
+  text-align: left;
+  transform: translateX(-50%);
+}
+
+.heroDownload {
+  position: absolute;
+  top: 578px;
+  left: 50%;
+  display: flex;
+  width: 354px;
+  height: 60px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 1px solid #404b3d;
+  border-radius: 97px;
+  background: transparent;
+  color: #959595;
+  font-size: 22px;
+  cursor: pointer;
+  transform: translateX(-50%);
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.heroDownload:hover {
+  border-color: #72f0a7;
+  background: rgba(114, 240, 167, 0.08);
+  color: #c8e9d1;
+  transform: translateX(-50%) translateY(-2px);
+}
+
+.heroDownload:focus-visible {
+  outline: 2px solid #72f0a7;
+  outline-offset: 4px;
+}
+
+.heroWorkspace {
+  position: absolute;
+  top: 858px;
+  left: 50%;
+  width: 1107px;
+  max-width: calc(100% - 112px);
+  height: auto;
+  margin: 0;
+  transform: translateX(-50%);
+}
+
+@media (max-width: 760px) {
+  .hero {
+    height: auto;
+    min-height: 920px;
+    padding: 64px 0 90px;
+  }
+
+  .heroIcon {
+    position: relative;
+    top: auto;
+    left: auto;
+    width: 152px;
+    height: 152px;
+    margin: 0 auto;
+    transform: none;
+  }
+
+  .heroIconBackground {
+    width: 152px;
+    height: 152px;
+  }
+
+  .heroIconArtwork {
+    display: block;
+    transform: scale(0.612903);
+    transform-origin: 0 0;
+  }
+
+  .hero h1 {
+    position: relative;
+    top: auto;
+    left: auto;
+    width: auto;
+    margin-top: 16px;
+    font-size: 68px;
+    transform: none;
+  }
+
+  .heroTagline {
+    position: relative;
+    top: auto;
+    left: auto;
+    width: auto;
+    margin-top: 34px;
+    padding: 0 20px;
+    font-size: 24px;
+    transform: none;
+  }
+
+  .heroDescription {
+    position: relative;
+    top: auto;
+    left: auto;
+    margin-top: 32px;
+    font-size: 17px;
+    text-align: center;
+    transform: none;
+  }
+
+  .heroDownload {
+    position: relative;
+    top: auto;
+    left: auto;
+    width: min(300px, calc(100% - 48px));
+    margin: 30px auto 0;
+    font-size: 17px;
+    transform: none;
+  }
+
+  .heroDownload:hover {
+    transform: translateY(-2px);
+  }
+
+  .heroWorkspace {
+    position: relative;
+    top: auto;
+    max-width: none;
+    width: 820px;
+    margin-top: 72px;
+    margin-left: 50%;
+    transform: translateX(-50%);
+  }
+}

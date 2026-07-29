@@ -1,0 +1,31 @@
+/* Project 直接使用 Figma 组件本体的 2× Alpha 完整切图。 */
+.projectFeature {
+  height: 810px;
+}
+
+.projectFeatureShot {
+  position: absolute;
+  top: 164px;
+  left: 27px;
+  width: 1107px;
+  height: 698px;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (max-width: 760px) {
+  .projectFeature {
+    height: auto;
+  }
+
+  .projectFeatureShot {
+    position: relative;
+    top: -58px;
+    left: 12px;
+    width: calc(100% + 22px);
+    height: auto;
+    margin-bottom: -58px;
+  }
+
+}

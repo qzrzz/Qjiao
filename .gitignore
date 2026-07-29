@@ -1,13 +1,13 @@
 # Release artifacts produced by scripts/release.ts
-/build/
+build/
 .venv/
 build_tmp/
 build_derived/
-dist
-output
+dist/
+output/
 
 # Bun / node deps
-/node_modules/
+node_modules/
 
 # macOS
 .DS_Store
@@ -27,9 +27,6 @@ xcuserdata/
 timeline.xctimeline
 playground.xcworkspace
 
-
-/node_modules
-/dist
-.DS_Store
 .env*
 *.log
+

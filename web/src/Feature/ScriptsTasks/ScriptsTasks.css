@@ -1,0 +1,8 @@
+/* Scripts & Tasks 组件使用右对齐文案与左侧溢出截图。 */
+.scriptsTasksFeature .featureInfo h3 {
+  top: 43px;
+}
+
+.scriptsTasksFeature .featureInfo p {
+  top: 107px;
+}

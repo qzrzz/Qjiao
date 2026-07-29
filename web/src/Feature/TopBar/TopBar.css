@@ -1,0 +1,111 @@
+/* 顶部栏以克制的上游来源说明为页面提供入口。 */
+.siteTopBar {
+  position: relative;
+  width: 100%;
+  height: 50px;
+}
+
+/* 底部描边向两侧渐隐，与 Footer 的收束线保持同一视觉语言。 */
+.siteTopBar::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(114, 240, 167, 0.08) 16%,
+    rgba(114, 240, 167, 0.4) 38%,
+    rgba(114, 240, 167, 0.4) 62%,
+    rgba(114, 240, 167, 0.08) 84%,
+    transparent 100%
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.siteTopBarInner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+}
+
+.siteTopBarInner > span {
+  color: rgba(184, 209, 194, 0.68);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1;
+}
+
+.siteTopBar a {
+  color: rgba(114, 240, 167, 0.68);
+  font-size: 14px;
+  font-weight: 400;
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.siteTopBarGithub {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid rgba(114, 240, 167, 0.24);
+  border-radius: 999px;
+  padding: 5px 10px;
+  line-height: 1;
+
+  span {
+    font-size: 12px;
+  }
+}
+
+.siteTopBarGithub svg {
+  width: 14px;
+  height: 14px;
+}
+
+.siteTopBar a.siteTopBarGithub:hover {
+  border-color: rgba(114, 240, 167, 0.58);
+  background: rgba(114, 240, 167, 0.06);
+  text-decoration: none;
+}
+
+.siteTopBar a:hover {
+  color: #b9efc8;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.siteTopBar a:focus-visible {
+  outline: 2px solid #72f0a7;
+  outline-offset: 5px;
+}
+
+@media (max-width: 760px) {
+  .siteTopBar {
+    height: 60px;
+  }
+
+  .siteTopBarInner > span {
+    padding: 0 20px;
+    font-size: 14px;
+  }
+
+  .siteTopBar a {
+    font-size: 14px;
+  }
+
+  .siteTopBarInner {
+    gap: 10px;
+  }
+
+  .siteTopBarGithub {
+    padding: 5px 8px;
+  }
+}

@@ -1,0 +1,304 @@
+@font-face {
+  font-family: "GeneralSans-Variable";
+  src: url("./assets/fonts/GeneralSans-Variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 200 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pally-Variable";
+  src: url("./assets/fonts/Pally-Variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+:root {
+  --feature-group-gap: 180px;
+  color: #fff;
+  background: #000;
+  font-family: "GeneralSans-Variable", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  scroll-behavior: smooth;
+  background: #000;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  overflow-x: hidden;
+  background: #000;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  font: inherit;
+}
+
+img {
+  display: block;
+}
+
+.homePage {
+  width: min(100%, 1358px);
+  min-height: 100vh;
+  margin: 0 auto;
+  overflow: hidden;
+  background: #000;
+}
+
+.featureCollection {
+  position: relative;
+}
+
+.featureCollection--web {
+  margin-top: 180px;
+  margin-bottom: 80px;
+}
+
+.pageSectionHeading {
+  width: 1134px;
+  max-width: calc(100% - 112px);
+  margin: 0 auto var(--feature-group-gap);
+}
+
+.pageSectionHeading h2 {
+  width: 641px;
+  max-width: 100%;
+  margin: 0;
+  color: #fff;
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+
+.pageSectionHeading p {
+  width: 631px;
+  max-width: 100%;
+  margin: 26px 0 0 10px;
+  color: rgba(219, 220, 219, 0.68);
+  font-size: 24px;
+  line-height: 1.35;
+}
+
+.pageSectionHeading--projects {
+  margin-top: 56px;
+  margin-bottom: 80px;
+}
+
+.pageSectionHeading--web {
+  margin-bottom: 80px;
+}
+
+.featureGroup {
+  position: relative;
+  width: 1134px;
+  height: 714px;
+  max-width: calc(100% - 112px);
+  margin: 0 auto var(--feature-group-gap);
+}
+
+.featureInfo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1045px;
+  height: 606px;
+  overflow: hidden;
+  border-radius: 58px;
+  background: linear-gradient(143.475deg, rgb(32 72 50) 16.76%, rgba(61, 118, 76, 0) 59.15%);
+}
+
+.featureInfo h3,
+.featureInfo p {
+  position: absolute;
+  left: 52px;
+  width: min(752px, calc(100% - 104px));
+  margin: 0;
+  color: #72f0a7;
+  font-weight: 400;
+  line-height: 1.22;
+}
+
+.featureInfo h3 {
+  top: 43px;
+  font-size: 36px;
+}
+
+.featureInfo p {
+  top: 102px;
+  font-size: 24px;
+}
+
+.featureShot {
+  position: absolute;
+  top: 142px;
+  left: 27px;
+  width: 1107px;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.featureGroup--right {
+  height: 651px;
+  overflow: hidden;
+  border-radius: 48px;
+  margin-bottom: var(--feature-group-gap);
+}
+
+/* 末尾功能组不参与组间间距，避免页面底部出现额外黑色留白。 */
+.imageBuildFeature {
+  margin-bottom: 0;
+}
+
+.featureGroup--right .featureInfo {
+  left: 44px;
+  height: 651px;
+  background: linear-gradient(81.25deg, rgba(61, 118, 76, 0) 26.24%, rgb(32 72 50) 85%);
+}
+
+.featureGroup--right .featureInfo h3,
+.featureGroup--right .featureInfo p {
+  right: 66px;
+  left: auto;
+  text-align: right;
+}
+
+.featureGroup--right .featureShot {
+  top: 183px;
+  left: -308px;
+}
+
+.featureGroup--bottom-copy .featureInfo {
+  background: linear-gradient(127.42deg, rgba(61, 118, 76, 0) 12.01%, rgb(32 72 50) 66.28%);
+}
+
+.featureGroup--bottom-copy .featureInfo h3 {
+  top: auto;
+  bottom: 162px;
+}
+
+.featureGroup--bottom-copy .featureInfo p {
+  top: 498px;
+}
+
+/* 这两个信息块只包裹底部文案，同时保持标题与说明的原始底部锚点。 */
+.devServerFeature .featureInfo,
+.codeFormattingFeature .featureInfo {
+    top: 0;
+    height: 651px;
+}
+
+@media (max-width: 760px) {
+  :root {
+    --feature-group-gap: 72px;
+  }
+
+  .pageSectionHeading {
+    max-width: calc(100% - 40px);
+    margin-bottom: 72px;
+  }
+
+  .pageSectionHeading h2 {
+    font-size: clamp(34px, 10vw, 48px);
+  }
+
+  .pageSectionHeading p {
+    margin-left: 0;
+    font-size: 17px;
+  }
+
+  .featureCollection--web {
+    margin-top: 180px;
+  }
+
+  .featureGroup,
+  .featureGroup--right {
+    display: flex;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    max-width: none;
+    flex-direction: column;
+    margin: 0 20px var(--feature-group-gap);
+    overflow: visible;
+    border-radius: 0;
+  }
+
+  .imageBuildFeature {
+    margin-bottom: 0;
+  }
+
+  .featureInfo,
+  .featureGroup--right .featureInfo {
+    position: relative;
+    left: 0;
+    width: 100%;
+    height: 290px;
+    flex: 0 0 290px;
+    border-radius: 34px;
+    background: linear-gradient(145deg, rgb(40, 105, 57) 0%, rgba(61, 118, 76, 0) 74%);
+  }
+
+  .devServerFeature .featureInfo,
+  .codeFormattingFeature .featureInfo {
+    top: 0;
+    height: 651px;
+  }
+
+  .featureInfo h3,
+  .featureInfo p,
+  .featureGroup--right .featureInfo h3,
+  .featureGroup--right .featureInfo p {
+    right: auto;
+    left: 26px;
+    width: calc(100% - 52px);
+    text-align: left;
+  }
+
+  .featureInfo h3,
+  .featureGroup--bottom-copy .featureInfo h3 {
+    top: 30px;
+    bottom: auto;
+    font-size: 28px;
+  }
+
+  .featureInfo p,
+  .featureGroup--bottom-copy .featureInfo p {
+    top: 82px;
+    bottom: auto;
+    font-size: 17px;
+  }
+
+  .featureShot,
+  .featureGroup--right .featureShot {
+    position: relative;
+    top: -58px;
+    left: 12px;
+    width: calc(100% + 22px);
+    max-width: none;
+    margin-bottom: -58px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

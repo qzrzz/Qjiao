@@ -1,0 +1,4 @@
+/* Agent 组件只维护自身在设计稿中的截图偏移。 */
+.agentFeature .featureShot {
+  left: 27px;
+}

@@ -1,0 +1,30 @@
+/* Image Build 组件保留比常规功能截图更高的 800px 画面。 */
+/* 提高选择器优先级，避免全局 .featureGroup 的默认高度覆盖 960px 容器。 */
+.featureGroup.imageBuildFeature {
+  height: 960px;
+  margin-bottom: 0;
+}
+
+.imageBuildFeatureShot {
+  position: absolute;
+  top: 159px;
+  left: 20px;
+  width: 1107px;
+  height: 800px;
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  .featureGroup.imageBuildFeature {
+    height: auto;
+  }
+
+  .imageBuildFeatureShot {
+    position: relative;
+    top: -58px;
+    left: 12px;
+    width: calc(100% + 22px);
+    height: auto;
+    margin-bottom: -58px;
+  }
+}

@@ -1,0 +1,21 @@
+/* Code Formatting 直接使用 Figma 组件本体的 2× Alpha 完整切图。 */
+.codeFormattingFeatureShot {
+  position: absolute;
+  top: -147px;
+  left: -264px;
+  width: 1108px;
+  height: 635px;
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (max-width: 760px) {
+  .codeFormattingFeatureShot {
+    position: relative;
+    top: -58px;
+    left: 12px;
+    width: calc(100% + 22px);
+    height: auto;
+    margin-bottom: -58px;
+  }
+}

@@ -1,0 +1,5 @@
+/* Image Viewer 组件按设计稿保留右侧偏移。 */
+.imageViewerFeature .featureShot {
+  top: 189px;
+  left: 56px;
+}

@@ -1,0 +1,30 @@
+/* Launchers 直接使用 Figma 组件本体的 2× Alpha 完整切图。 */
+.launchersFeature {
+  height: 770px;
+}
+
+.launchersFeatureShot {
+  position: absolute;
+  top: 182px;
+  left: 43px;
+  width: 1108px;
+  height: 635px;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (max-width: 760px) {
+  .launchersFeature {
+    height: auto;
+  }
+
+  .launchersFeatureShot {
+    position: relative;
+    top: -58px;
+    left: 12px;
+    width: calc(100% + 22px);
+    height: auto;
+    margin-bottom: -58px;
+  }
+}

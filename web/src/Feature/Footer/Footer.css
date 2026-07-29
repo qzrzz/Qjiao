@@ -1,0 +1,195 @@
+/* 页脚以细分隔线收束长页内容，并保持与功能组一致的黑绿层次。 */
+.siteFooter {
+  position: relative;
+  width: 100%;
+  margin: 160px auto 0;
+}
+
+.siteFooter::before {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 900px;
+  height: 380px;
+  background: radial-gradient(ellipse at top, rgba(45, 125, 72, 0.18), transparent 68%);
+  content: "";
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+/* 顶部描边从内容区向页面两侧逐渐隐去，避免硬切断长页的视觉流。 */
+.siteFooter::after {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(114, 240, 167, 0.1) 16%,
+    rgba(114, 240, 167, 0.45) 38%,
+    rgba(114, 240, 167, 0.45) 62%,
+    rgba(114, 240, 167, 0.1) 84%,
+    transparent 100%
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.siteFooterInner {
+  position: relative;
+  width: 1134px;
+  max-width: calc(100% - 112px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 38px 64px;
+  align-items: center;
+  min-height: 420px;
+  padding: 96px 0 84px;
+}
+
+.siteFooterBrand,
+.siteFooterLink {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.siteFooterBrand {
+  gap: 16px;
+  color: transparent;
+  /* 复用首屏 Qjiao 标题的白至浅绿纵向渐变。 */
+  background: linear-gradient(0deg, #fff 50%, #a7f9c0 106%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  font-family: "Pally-Variable", "SF Pro Display", sans-serif;
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.2;
+  padding: 4px 6px;
+}
+
+.siteFooterBrand img {
+  width: 76px;
+  height: 76px;
+}
+
+.siteFooterTagline,
+.siteFooterCopyright {
+  margin: 0;
+  color: rgb(184 222 184);
+  font-size: 19px;
+  line-height: 1.4;
+}
+
+.siteFooterTagline {
+  max-width: 380px;
+}
+
+.siteFooterLinks {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  gap: 14px;
+}
+
+.siteFooterLink {
+  gap: 11px;
+  border: 1px solid rgba(114, 240, 167, 0.3);
+  border-radius: 999px;
+  padding: 14px 20px;
+  color: #b9efc8;
+  font-size: 17px;
+  font-weight: 500;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.siteFooterLink svg {
+  width: 20px;
+  height: 20px;
+}
+
+.siteFooterLink:hover {
+  border-color: #72f0a7;
+  background: rgba(114, 240, 167, 0.1);
+  color: #e4ffeb;
+  transform: translateY(-2px);
+}
+
+.siteFooterBrand:focus-visible,
+.siteFooterLink:focus-visible {
+  outline: 2px solid #72f0a7;
+  outline-offset: 4px;
+}
+
+.siteFooterCopyright {
+  grid-column: 1 / -1;
+  border-top: 1px solid rgba(219, 220, 219, 0.12);
+  padding-top: 24px;
+  font-size: 15px;
+
+  a {
+    color: inherit;
+
+    text-decoration: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .siteFooter {
+    margin-top: 104px;
+  }
+
+  .siteFooter::before {
+    width: 640px;
+    height: 360px;
+  }
+
+  .siteFooterInner {
+    width: auto;
+    max-width: calc(100% - 40px);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 32px;
+    min-height: 0;
+    padding: 64px 0 56px;
+  }
+
+  .siteFooterBrand {
+    font-size: 38px;
+  }
+
+  .siteFooterBrand img {
+    width: 64px;
+    height: 64px;
+  }
+
+  .siteFooterTagline {
+    max-width: 320px;
+    font-size: 17px;
+  }
+
+  .siteFooterLinks {
+    flex-wrap: wrap;
+  }
+
+  .siteFooterLink {
+    padding: 12px 16px;
+  }
+
+  .siteFooterCopyright {
+    width: 100%;
+    margin-top: 12px;
+    padding-top: 20px;
+  }
+}

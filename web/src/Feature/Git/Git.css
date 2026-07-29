@@ -1,0 +1,13 @@
+/* Git 组件允许说明文字使用局部强调。 */
+.gitFeature .featureInfo p {
+  width: 752px;
+}
+
+.gitFeature .featureInfo strong {
+  font-weight: 650;
+}
+
+.gitFeature .featureShot {
+  top: 182px;
+  left: 43px;
+}
