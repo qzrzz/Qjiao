@@ -1350,8 +1350,7 @@ final class TerminalManager: nonisolated ObservableObject {
         typealias ProjectSnapshot = SessionSnapshot.ProjectSnapshot
         var histories: [String: String] = [:]
         let snapshot = SessionSnapshot(
-            projects: projects.compactMap { project in
-                guard !project.tabs.isEmpty else { return nil }
+            projects: projects.map { project in
                 let tabs = project.tabs.map { tab -> ProjectSnapshot.TabSnapshot in
                     let columns = tab.columns.map { column in
                         ProjectSnapshot.ColumnSnapshot(
@@ -1446,7 +1445,7 @@ final class TerminalManager: nonisolated ObservableObject {
             panelTab = tab
         }
         let targetProjectIndex = snapshot.selectedProjectIndex ?? 0
-        for (projectIndex, saved) in snapshot.projects.enumerated() where !saved.tabs.isEmpty {
+        for (projectIndex, saved) in snapshot.projects.enumerated() {
             let project = makeProject(id: saved.id, createInitialSession: false)
             let config = ProjectConfigStore.load(for: project.id)
             project.customName = config?.customName ?? saved.customName
@@ -1492,11 +1491,7 @@ final class TerminalManager: nonisolated ObservableObject {
                     for: project.id
                 )
             }
-            guard !project.tabs.isEmpty else {
-                projectObservations[project.id] = nil
-                projectThemeObservations[project.id] = nil
-                continue
-            }
+
             if let index = saved.selectedTabIndex, project.tabs.indices.contains(index) {
                 project.selectedTabID = project.tabs[index].id
             }
