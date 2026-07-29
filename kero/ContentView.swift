@@ -885,6 +885,20 @@ private struct SessionTabsView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(file.path, forType: .string)
             }
+            Button(L10n.t("Copy Relative Path")) {
+                let root = project.projectDirectory
+                let rootPrefix = root.hasSuffix("/") ? root : root + "/"
+                let relative: String
+                if file.path == root {
+                    relative = "."
+                } else if file.path.hasPrefix(rootPrefix) {
+                    relative = String(file.path.dropFirst(rootPrefix.count))
+                } else {
+                    relative = file.path
+                }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(relative, forType: .string)
+            }
             Divider()
         }
         if case .browser(let browser) = tab.focusedContent,
