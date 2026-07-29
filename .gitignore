@@ -3,6 +3,9 @@
 .venv/
 build_tmp/
 build_derived/
+dist
+output
+
 # Bun / node deps
 /node_modules/
 
@@ -23,3 +26,10 @@ xcuserdata/
 ## Playgrounds
 timeline.xctimeline
 playground.xcworkspace
+
+
+/node_modules
+/dist
+.DS_Store
+.env*
+*.log
