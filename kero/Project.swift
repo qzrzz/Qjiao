@@ -131,6 +131,43 @@ struct ProjectLaunchCommand: Codable, Identifiable, Equatable {
         let content = content.trimmingCharacters(in: .whitespacesAndNewlines)
         return content.isEmpty ? type.title : content
     }
+
+    /// 将 Launcher 配置的文件夹路径解析为实际的 Finder 绝对目录 URL。
+    ///
+    /// 支持相对路径（如 `./`、`.` 或相对子目录）、波浪号路径（`~/`）、绝对路径或空字符串。
+    /// 相对路径将以 `projectDirectory`（项目根目录）为基准进行解析；若解析出的路径在磁盘上不存在，降级退回项目根目录。
+    ///
+    /// - Parameters:
+    ///   - rawPath: 用户输入的路径字符串。
+    ///   - projectDirectory: 当前项目的根目录绝对路径。
+    /// - Returns: 解析后的绝对目录 URL。
+    static func resolveFolderURL(_ rawPath: String, projectDirectory: String) -> URL {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let projDirURL = URL(fileURLWithPath: projectDirectory, isDirectory: true)
+
+        if trimmed.isEmpty || trimmed == "." || trimmed == "./" {
+            return projDirURL
+        }
+
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        let resolvedPath: String
+        if (expanded as NSString).isAbsolutePath {
+            resolvedPath = expanded
+        } else {
+            resolvedPath = (projectDirectory as NSString).appendingPathComponent(expanded)
+        }
+
+        let targetURL = URL(fileURLWithPath: resolvedPath, isDirectory: true).standardizedFileURL
+
+        // 目标路径如果真实存在，使用 targetURL；否则降级退回项目根目录 URL
+        if FileManager.default.fileExists(atPath: targetURL.path) {
+            return targetURL
+        } else if FileManager.default.fileExists(atPath: projDirURL.path) {
+            return projDirURL
+        } else {
+            return targetURL
+        }
+    }
 }
 
 /// A project groups tabs and appears as one row in the left sidebar. Each tab

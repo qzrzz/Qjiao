@@ -3,6 +3,7 @@
 //  kero
 //
 
+import AppKit
 import SwiftUI
 
 /// Groups palette rows under a header — built-in actions vs. open sessions.
@@ -47,11 +48,17 @@ struct PaletteCommand: Identifiable {
 /// dismisses.
 struct CommandPaletteView: View {
     @ObservedObject var manager: TerminalManager
+    @ObservedObject private var settings = AppSettings.shared
     @Environment(\.openSettings) private var openSettings
 
     @State private var query = ""
     @State private var selection = 0
     @FocusState private var searchFocused: Bool
+
+    /// 窗口 / 材质半透明时，面板必须自带 within-window 模糊，否则只剩一层透色。
+    private var needsMaterialBackdrop: Bool {
+        settings.windowBackgroundOpacity < 1 || settings.visualEffectAlpha < 1
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -314,12 +321,9 @@ struct CommandPaletteView: View {
                 .pointerStyle(.default)
         }
         .frame(width: 560)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(nsColor: Theme.background))
-        )
+        .background { panelBackground }
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.12))
         )
         .shadow(color: .black.opacity(0.3), radius: 28, y: 10)
@@ -336,6 +340,28 @@ struct CommandPaletteView: View {
         .onChange(of: query) {
             selection = 0
         }
+    }
+
+    /// 面板背景：`Theme.background` 已含窗口透明度。
+    /// 半透明时若只有透色填充、没有材质，会直接透出终端且不模糊；
+    /// 因此在透色下垫一层 `withinWindow` 毛玻璃（与主窗口 chrome 策略一致）。
+    @ViewBuilder
+    private var panelBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        ZStack {
+            if needsMaterialBackdrop {
+                VisualEffectView(
+                    material: .popover,
+                    blendingMode: .withinWindow,
+                    state: .active,
+                    // 不跟主窗口 effect-alpha 一起被压暗，保证面板自身仍可读。
+                    alphaValue: 1
+                )
+            }
+            shape.fill(Color(nsColor: Theme.background))
+        }
+        .clipShape(shape)
+        .compositingGroup()
     }
 
     /// Result list, computing `filtered` once per render. Section headers only

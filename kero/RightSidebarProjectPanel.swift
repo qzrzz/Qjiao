@@ -38,7 +38,7 @@ private struct LaunchersSection: View {
                     )
                 ],
                 actionsDisabled: project.launchCommands.isEmpty
-            )
+            ).padding(.trailing, 4)
 
             if !isCollapsed {
                 if project.launchCommands.isEmpty {
@@ -80,6 +80,7 @@ private struct LaunchersSection: View {
                 LauncherItemWrapper(
                     command: command,
                     commandBinding: binding(for: command.id),
+                    projectDirectory: project.projectDirectory,
                     isExpanded: expandedCommandID == command.id,
                     isDragged: draggedCommandID == command.id,
                     run: { runCommand(command) },

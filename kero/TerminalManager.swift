@@ -675,9 +675,8 @@ final class TerminalManager: nonisolated ObservableObject {
             }
 
         case .finderFolder:
-            let path = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !path.isEmpty else { return }
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            let folderURL = ProjectLaunchCommand.resolveFolderURL(command.content, projectDirectory: project.projectDirectory)
+            NSWorkspace.shared.open(folderURL)
 
         case .web:
             let rawURL = command.content.trimmingCharacters(in: .whitespacesAndNewlines)

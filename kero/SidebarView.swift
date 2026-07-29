@@ -188,25 +188,57 @@ struct SidebarView: View {
 private struct WindowLevelReader: NSViewRepresentable {
     @Binding var isAlwaysOnTop: Bool
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isAlwaysOnTop: _isAlwaysOnTop)
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        DispatchQueue.main.async {
-            sync(from: view)
-        }
+        context.coordinator.attach(view)
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        DispatchQueue.main.async {
-            sync(from: view)
-        }
+        context.coordinator.sync(from: view)
     }
 
-    private func sync(from view: NSView) {
-        guard let window = view.window else { return }
-        let pinned = window.isAlwaysOnTop
-        if isAlwaysOnTop != pinned {
-            isAlwaysOnTop = pinned
+    final class Coordinator {
+        var isAlwaysOnTop: Binding<Bool>
+        private var observer: NSObjectProtocol?
+
+        init(isAlwaysOnTop: Binding<Bool>) {
+            self.isAlwaysOnTop = isAlwaysOnTop
+        }
+
+        func attach(_ view: NSView) {
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let view = view else { return }
+                self?.sync(from: view)
+            }
+            if observer == nil {
+                observer = NotificationCenter.default.addObserver(
+                    forName: .windowAlwaysOnTopDidChange,
+                    object: nil,
+                    queue: .main
+                ) { [weak self, weak view] _ in
+                    guard let view = view else { return }
+                    self?.sync(from: view)
+                }
+            }
+        }
+
+        func sync(from view: NSView) {
+            guard let window = view.window else { return }
+            let pinned = window.isAlwaysOnTop
+            if isAlwaysOnTop.wrappedValue != pinned {
+                isAlwaysOnTop.wrappedValue = pinned
+            }
+        }
+
+        deinit {
+            if let observer = observer {
+                NotificationCenter.default.removeObserver(observer)
+            }
         }
     }
 }

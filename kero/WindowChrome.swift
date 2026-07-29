@@ -113,7 +113,8 @@ struct WindowChromeAccessor: NSViewRepresentable {
 
 /// 原生 AppKit 窗口拖拽响应视图。
 /// 当鼠标在空白区域按下并拖动时，直接触发系统原生 `performWindowDrag(with:)`；
-/// 当双击时，触发标准 macOS 标题栏双击动作（缩放/最小化）。
+/// 当双击时，触发标准 macOS 标题栏双击动作（缩放/最小化）；
+/// 右键单击时，展现窗口控制上下文菜单（置顶、设置尺寸）。
 private class WindowDragNSView: NSView {
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
@@ -129,6 +130,108 @@ private class WindowDragNSView: NSView {
             super.mouseDown(with: event)
         }
     }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let window = self.window else { return nil }
+
+        let menu = NSMenu(title: L10n.t("Window Settings"))
+
+        // 1. 窗口置顶（勾选项）
+        let topItem = NSMenuItem(
+            title: L10n.t("Keep Window on Top"),
+            action: #selector(toggleAlwaysOnTop(_:)),
+            keyEquivalent: ""
+        )
+        topItem.target = self
+        topItem.state = window.isAlwaysOnTop ? .on : .off
+        menu.addItem(topItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // 2. 设置窗口尺寸…
+        let sizeItem = NSMenuItem(
+            title: L10n.t("Set Window Size…"),
+            action: #selector(openWindowSizeDialog(_:)),
+            keyEquivalent: ""
+        )
+        sizeItem.target = self
+        menu.addItem(sizeItem)
+
+        return menu
+    }
+
+    @objc private func toggleAlwaysOnTop(_ sender: Any) {
+        guard let window = self.window else { return }
+        window.isAlwaysOnTop.toggle()
+        NotificationCenter.default.post(name: .windowAlwaysOnTopDidChange, object: window)
+    }
+
+    @objc private func openWindowSizeDialog(_ sender: Any) {
+        guard let window = self.window else { return }
+
+        let alert = NSAlert()
+        alert.messageText = L10n.t("Set Window Size")
+        alert.informativeText = L10n.t("Enter window width and height (px):")
+        alert.addButton(withTitle: L10n.t("OK"))
+        alert.addButton(withTitle: L10n.t("Cancel"))
+
+        let currentWidth = Int(window.frame.width)
+        let currentHeight = Int(window.frame.height)
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 72))
+
+        let widthLabel = NSTextField(labelWithString: L10n.t("Width:"))
+        widthLabel.frame = NSRect(x: 0, y: 38, width: 60, height: 20)
+        widthLabel.alignment = .right
+        widthLabel.font = NSFont.systemFont(ofSize: 13)
+
+        let widthField = NSTextField(string: "\(currentWidth)")
+        widthField.frame = NSRect(x: 68, y: 36, width: 180, height: 24)
+        widthField.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        widthField.placeholderString = "1200"
+
+        let heightLabel = NSTextField(labelWithString: L10n.t("Height:"))
+        heightLabel.frame = NSRect(x: 0, y: 6, width: 60, height: 20)
+        heightLabel.alignment = .right
+        heightLabel.font = NSFont.systemFont(ofSize: 13)
+
+        let heightField = NSTextField(string: "\(currentHeight)")
+        heightField.frame = NSRect(x: 68, y: 4, width: 180, height: 24)
+        heightField.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        heightField.placeholderString = "800"
+
+        container.addSubview(widthLabel)
+        container.addSubview(widthField)
+        container.addSubview(heightLabel)
+        container.addSubview(heightField)
+
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = widthField
+
+        alert.beginSheetModal(for: window) { response in
+            guard response == .alertFirstButtonReturn else { return }
+            let wString = widthField.stringValue.trimmingCharacters(in: .whitespaces)
+            let hString = heightField.stringValue.trimmingCharacters(in: .whitespaces)
+
+            let parsedW = Int(wString) ?? currentWidth
+            let parsedH = Int(hString) ?? currentHeight
+
+            // 限制最小安全尺寸
+            let newW = max(300, parsedW)
+            let newH = max(200, parsedH)
+
+            let currentFrame = window.frame
+            let newOriginY = currentFrame.maxY - CGFloat(newH)
+            let newFrame = NSRect(
+                x: currentFrame.origin.x,
+                y: newOriginY,
+                width: CGFloat(newW),
+                height: CGFloat(newH)
+            )
+
+            window.setFrame(newFrame, display: true, animate: true)
+        }
+    }
 }
 
 /// 明确指定的窗口移动拖拽区域。
@@ -139,6 +242,10 @@ struct WindowDragArea: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+extension Notification.Name {
+    static let windowAlwaysOnTopDidChange = Notification.Name("windowAlwaysOnTopDidChange")
 }
 
 extension NSWindow {

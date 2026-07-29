@@ -191,6 +191,9 @@
 - 图片查看器会监听已打开图片的磁盘变更；图片被外部工具覆盖或重新生成后，预览自动刷新，无需关闭标签重新打开。
 - 设置 General → Appearance 新增 **Sidebar font size**：按统一层级同比缩放左、右侧栏及顶栏 Tabs 的文字、图标和行高，并适配当前 `SidebarTypography` 架构；配置写入 `sidebar.font-size`。
 - Git 面板改为事件驱动刷新：终端命令结束、应用重新激活、切换项目 / CWD / Session、Git 操作完成或手动刷新时更新状态；常规定时器不再每 2 秒执行 Git 命令，并合并刷新期间的重复请求。
+- 优化 Project 面板 Launchers 启动器：
+  - **Finder 启动项**：路径解析支持相对路径（如 `./`、`.` 或相对子目录）、波浪号路径（`~/`）与绝对路径，运行或选择文件夹弹窗（Choose…）时默认以项目根目录为基准定位。
+  - **Webpage 启动项**：支持实时响应 URL 文本修改，在输入框地址变更时智能清理旧图标并即时重新获取加载新网址的 Favicon；当默认 `/favicon.ico` 不存在时，自动拉取网页 HTML 前 300 字符解析 `<link rel="shortcut icon"` 或 `<link rel="icon"` 标签的 `href` 路径并二次请求。
 
 ## 上游移植记录
 

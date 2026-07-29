@@ -45,9 +45,9 @@ final class L10n: ObservableObject {
 
     /// Apply a language without writing settings (used from `AppSettings` load/save).
     func setLanguage(_ language: AppLanguage) {
+        Self.currentLanguage = language
         guard self.language != language else { return }
         self.language = language
-        Self.currentLanguage = language
     }
 
     /// Translate an English source string. Missing keys fall back to English.

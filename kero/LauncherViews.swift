@@ -109,6 +109,7 @@ struct StartCommandRow: View {
 
 struct StartCommandInlineEditor: View {
     @Binding var command: ProjectLaunchCommand
+    var projectDirectory: String = ""
     let delete: () -> Void
 
     var body: some View {
@@ -173,7 +174,7 @@ struct StartCommandInlineEditor: View {
 
         case .finderFolder:
             HStack {
-                TextField("Folder", text: $command.content)
+                TextField("Folder", text: $command.content, prompt: Text("./"))
                 Button(L10n.t("Choose…"), action: chooseFolder)
                     .controlSize(.small)
             }
@@ -202,10 +203,12 @@ struct StartCommandInlineEditor: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
+        if !projectDirectory.isEmpty {
+            panel.directoryURL = ProjectLaunchCommand.resolveFolderURL(command.content, projectDirectory: projectDirectory)
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         command.content = url.path
     }
-
 }
 
 /// An opaque, compact drag image avoids the translucent snapshot AppKit makes
@@ -254,8 +257,9 @@ struct StartCommandIcon: View {
                 .foregroundStyle(Color(nsColor: .systemBlue))
 
         case .web:
-            if let url = faviconURL(for: command.content) {
+            if let url = webpageURL(for: command.content) {
                 CachedFavicon(url: url)
+                    .id(url)
             } else {
                 Image(systemName: command.type.systemImage)
                     .foregroundStyle(.secondary)
@@ -263,14 +267,10 @@ struct StartCommandIcon: View {
         }
     }
 
-    private func faviconURL(for text: String) -> URL? {
+    private func webpageURL(for text: String) -> URL? {
         let rawURL = text.contains("://") ? text : "https://\(text)"
-        guard let url = URL(string: rawURL), let host = url.host else { return nil }
-        var components = URLComponents()
-        components.scheme = url.scheme ?? "https"
-        components.host = host
-        components.path = "/favicon.ico"
-        return components.url
+        guard let url = URL(string: rawURL), let host = url.host, !host.isEmpty else { return nil }
+        return url
     }
 }
 
@@ -297,6 +297,12 @@ private struct CachedFavicon: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .onAppear {
+            loader.load(url: url)
+        }
+        .onChange(of: url) { _, newURL in
+            loader.load(url: newURL)
+        }
     }
 }
 
@@ -305,26 +311,134 @@ private final class FaviconLoader: ObservableObject {
     private static let memoryCache = NSCache<NSURL, NSImage>()
 
     @Published private(set) var image: NSImage?
+    private var currentURL: URL?
 
-    init(url: URL) {
+    init(url: URL? = nil) {
+        if let url {
+            load(url: url)
+        }
+    }
+
+    /// 根据传入的网页 URL 加载 Favicon 图标。若 URL 改变则清理旧状态并重新发起加载。
+    /// - Parameter url: 目标网页图标的 URL
+    func load(url: URL) {
+        guard currentURL != url else { return }
+        currentURL = url
+
         if let cached = Self.memoryCache.object(forKey: url as NSURL) {
             image = cached
             return
         }
 
+        image = nil
+
         Task { [weak self] in
-            guard let self else { return }
+            guard let self, self.currentURL == url else { return }
             let data: Data?
             if let cached = Self.loadFromDisk(url: url) {
                 data = cached
             } else {
-                data = try? await URLSession.shared.data(from: url).0
+                data = await Self.fetchFaviconData(for: url)
                 if let data { Self.saveToDisk(data, url: url) }
             }
             guard let data, let image = NSImage(data: data) else { return }
+            guard self.currentURL == url else { return }
             Self.memoryCache.setObject(image, forKey: url as NSURL)
             self.image = image
         }
+    }
+
+    /// 尝试获取网页 Favicon 图标数据：优先请求默认 `/favicon.ico`；若未找到，读取网页 HTML 前 300 字符匹配 `<link rel="shortcut icon"` 或 `<link rel="icon"` 提取 `href` 路径二次请求。
+    /// - Parameter pageURL: 网页的目标 URL。
+    /// - Returns: 获取到的图标二进制 Data（若失败则返回 nil）。
+    private static func fetchFaviconData(for pageURL: URL) async -> Data? {
+        // 1. 优先尝试请求域名根目录下的 /favicon.ico
+        if let defaultFavURL = defaultFaviconURL(for: pageURL),
+           let (data, response) = try? await URLSession.shared.data(from: defaultFavURL),
+           let httpResponse = response as? HTTPURLResponse,
+           (200...299).contains(httpResponse.statusCode),
+           NSImage(data: data) != nil {
+            return data
+        }
+
+        // 2. 若默认 /favicon.ico 不存在，拉取网页 HTML 内容解析 <link rel="shortcut icon" 或 <link rel="icon"
+        guard let (htmlData, htmlResponse) = try? await URLSession.shared.data(from: pageURL),
+              let httpResponse = htmlResponse as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode),
+              let htmlString = String(data: htmlData, encoding: .utf8) ?? String(data: htmlData, encoding: .ascii) else {
+            return nil
+        }
+
+        // 获取网页 HTML 的前 300 个字符
+        let prefixText = String(htmlString.prefix(300))
+        guard let href = extractFaviconHref(from: prefixText) ?? extractFaviconHref(from: htmlString),
+              let resolvedURL = resolveFaviconURL(href: href, baseURL: pageURL) else {
+            return nil
+        }
+
+        // 3. 请求 HTML 中匹配到的 link icon 绝对地址
+        guard let (iconData, iconResponse) = try? await URLSession.shared.data(from: resolvedURL),
+              let iconHttpResponse = iconResponse as? HTTPURLResponse,
+              (200...299).contains(iconHttpResponse.statusCode),
+              NSImage(data: iconData) != nil else {
+            return nil
+        }
+
+        return iconData
+    }
+
+    /// 从 HTML 文本中正则匹配 `<link rel="shortcut icon"...` 或 `<link rel="icon"...` 并提取 `href` 属性。
+    /// - Parameter html: 网页 HTML 文本。
+    /// - Returns: 提取出的 href 字符串。
+    static func extractFaviconHref(from html: String) -> String? {
+        let linkPattern = #"<link[^>]+(?:rel=["']?(?:shortcut icon|icon)["']?)[^>]*>"#
+        guard let linkRegex = try? NSRegularExpression(pattern: linkPattern, options: [.caseInsensitive]),
+              let match = linkRegex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+              let range = Range(match.range, in: html) else {
+            return nil
+        }
+        let linkTag = String(html[range])
+
+        let hrefPattern = #"href=["']?([^"'\s>]+)["']?"#
+        guard let hrefRegex = try? NSRegularExpression(pattern: hrefPattern, options: [.caseInsensitive]),
+              let hrefMatch = hrefRegex.firstMatch(in: linkTag, options: [], range: NSRange(location: 0, length: linkTag.utf16.count)),
+              let hrefRange = Range(hrefMatch.range(at: 1), in: linkTag) else {
+            return nil
+        }
+
+        return String(linkTag[hrefRange])
+    }
+
+    /// 将 link 标签中相对或绝对的 href 路径转换为完整目标 URL。
+    /// - Parameters:
+    ///   - href: 从 link 标签中提取的 href 字符串。
+    ///   - baseURL: 原网页的基准 URL。
+    /// - Returns: 解析后的完整 URL。
+    static func resolveFaviconURL(href: String, baseURL: URL) -> URL? {
+        let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+            return URL(string: trimmed)
+        }
+        if trimmed.hasPrefix("//") {
+            let scheme = baseURL.scheme ?? "https"
+            return URL(string: "\(scheme):\(trimmed)")
+        }
+        if trimmed.hasPrefix("/") {
+            guard let scheme = baseURL.scheme, let host = baseURL.host else { return nil }
+            let portString = baseURL.port != nil ? ":\(baseURL.port!)" : ""
+            return URL(string: "\(scheme)://\(host)\(portString)\(trimmed)")
+        }
+        return URL(string: trimmed, relativeTo: baseURL)?.absoluteURL
+    }
+
+    /// 根据网页 URL 构造默认的 /favicon.ico 地址
+    private static func defaultFaviconURL(for pageURL: URL) -> URL? {
+        guard let host = pageURL.host else { return nil }
+        var components = URLComponents()
+        components.scheme = pageURL.scheme ?? "https"
+        components.host = host
+        components.path = "/favicon.ico"
+        return components.url
     }
 
     private static func loadFromDisk(url: URL) -> Data? {
@@ -356,6 +470,7 @@ private final class FaviconLoader: ObservableObject {
 struct LauncherItemWrapper: View {
     let command: ProjectLaunchCommand
     @Binding var commandBinding: ProjectLaunchCommand
+    var projectDirectory: String = ""
     let isExpanded: Bool
     let isDragged: Bool
     let run: () -> Void
@@ -387,6 +502,7 @@ struct LauncherItemWrapper: View {
                 if isExpanded {
                     StartCommandInlineEditor(
                         command: $commandBinding,
+                        projectDirectory: projectDirectory,
                         delete: delete
                     )
                     .transition(.opacity)
