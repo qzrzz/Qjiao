@@ -618,9 +618,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             "COLORTERM": "truecolor",
             "QJIAO_CONFIG_DIR": AppSettings.configURL.deletingLastPathComponent().path,
         ]
-        if ProcessInfo.processInfo.environment["LANG"] == nil {
-            environment["LANG"] = "en_US.UTF-8"
-        }
+        // 终端区域设置属于用户的 Shell 环境，应用界面语言不得代替用户注入 LANG/LC_*。
         if (shellPath as NSString).lastPathComponent == "zsh",
            let integrationDirectory = Bundle.main.resourceURL?
                .appendingPathComponent("TerminalShellIntegration/zsh", isDirectory: true)

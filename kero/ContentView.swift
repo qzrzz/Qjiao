@@ -632,6 +632,7 @@ private struct SessionTabsView: View {
     @State private var stripIsFull = false
     @State private var draggedTabID: UUID?
     @State private var tabFrames: [UUID: CGRect] = [:]
+    @State private var tabSizes: [UUID: CGSize] = [:]
     @State private var renamingTabID: UUID?
 
     /// Which edges have off-screen tabs, i.e. where to show a fade hint.
@@ -745,13 +746,25 @@ private struct SessionTabsView: View {
             .onChange(of: project.selectedTabID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    proxy.scrollTo(id)
+                    scrollToSelectedTab(using: proxy)
                 }
+            }
+            // 侧栏/窗口改变可视宽度、Tab 增删/排序或动态标题改变前序宽度时，
+            // 选中项都可能在未切换选择的情况下被挤出视口。
+            .onChange(of: maxStripWidth) { _, _ in
+                scrollToSelectedTab(using: proxy)
+            }
+            .onChange(of: project.tabs.map(\.id)) { _, _ in
+                scrollToSelectedTab(using: proxy)
+            }
+            .onChange(of: tabSizes) { _, _ in
+                scrollToSelectedTab(using: proxy)
             }
             .onAppear {
                 // Restored sessions may open with an off-screen active tab.
-                guard let id = project.selectedTabID else { return }
-                DispatchQueue.main.async { proxy.scrollTo(id) }
+                DispatchQueue.main.async {
+                    scrollToSelectedTab(using: proxy)
+                }
             }
             .mask {
                 HStack(spacing: 0) {
@@ -772,9 +785,23 @@ private struct SessionTabsView: View {
             // 硬宽度 = min(内容, 上限)，不参与 HStack 弹性争夺。
             .frame(width: stripWidth, alignment: .leading)
             .clipped()
+            .onPreferenceChange(TabFramePreferenceKey.self) { frames in
+                tabFrames = frames
+                let sizes = frames.mapValues(\.size)
+                if sizes != tabSizes {
+                    tabSizes = sizes
+                }
+            }
         }
         .frame(width: stripWidth, alignment: .leading)
-        .onPreferenceChange(TabFramePreferenceKey.self) { tabFrames = $0 }
+    }
+
+    /// 仅滚动到足以完整显示当前 Tab 的位置；已在视口内时保持现有偏移。
+    private func scrollToSelectedTab(using proxy: ScrollViewProxy) {
+        guard let id = project.selectedTabID,
+              project.tabs.contains(where: { $0.id == id })
+        else { return }
+        proxy.scrollTo(id)
     }
 
     /// 内容超出可视宽度 → 压缩；仅当按宽松最大宽度也一定放得下时才恢复，避免 140/220 来回抖。

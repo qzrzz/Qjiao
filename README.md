@@ -13,6 +13,7 @@
 - 新增 `web/` 产品官网：基于 Figma 的黑绿视觉实现 Qjiao 长页介绍，使用 Vite、React、TypeScript 6 与 Base UI；首屏及 AI Agent、项目、文件、脚本任务、Git、启动器、包管理、开发服务器、代码格式化、图片查看与图片构建均拆分为独立 Feature 组件，每个组件的 Figma 切图保存在自身 `assets/` 目录；功能截图遇到 Figma 组件或组件实例时直接导出顶层节点，每个功能组只保留一张带 Alpha 的 2× 组合切图，不再拆解其内部图层；网站内置 Pally 与 General Sans 可变字体，并按 `Group 2` 的整组 Mask 裁切层级、`multiply` 色彩叠加模式还原应用图标关键帧动画，Logo 动画采用 4 秒单程的往复播放并支持减少动态效果偏好；生产构建通过 Sharp 将 PNG、JPG、SVG（包括 `public/` 静态资源）无损转换为 WebP 并重写引用，`dist` 只发布 WebP 图片；Bun 管理依赖并支持独立的本地开发、预览与构建；修正 Detect Dev Server 与 Code Formatting 功能组信息块的垂直定位。
 - 官网功能组统一桌面端 `180px`、移动端 `72px` 的垂直间距节奏，Web Dev 分区上间距收敛为 `180px`，末尾 Image Build 不再额外保留底部间距。
 - 官网新增响应式 Footer：提供 Qjiao 品牌、项目 GitHub 源码与 X（@qzrz256）入口，以及开源版权信息。
+- 官网新增 80px 顶部栏，展示与上游 `egoist/kero` 的关系并提供其 GitHub 仓库入口。
 - **I18n 界面多语言**：默认英文，可在设置中切换语言；目前支持 **English** 与 **简体中文**。
   - **设置**：Settings → General → **Language** / **界面语言**。
   - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ui.language`（`en` 默认不写回；`zh-Hans` 为简体中文）。
@@ -53,6 +54,8 @@
   - 选择器内容区固定高度，切换类型不抖动；预置图标异步惰性加载 + 缩略图缓存，网格仅渲染可见项。
   - 数量徽章、当前图标预览与 Clear。
 - 增加 Tabs 选择菜单；顶栏新建标签紧挨标签条，标签总览下拉固定在右侧侧栏按钮旁；左侧栏开关 / 新建 / 下拉 / 右侧栏 / Zoom 共用 `HeaderIconButton`（26pt 热区、caption 图标不变；仅 hover 浅底，按下/激活无底色，激活仅 tint）。右侧工具用 ZStack 固定叠层 + 左侧 padding 硬预留宽度，标签再多也不会挤占下拉/侧栏。
+- 顶栏当前 Tab 在窗口 / 侧栏改变可视宽度、标签增删 / 排序或动态标题改变宽度后仍会自动保持完整可见。
+- 命令面板支持搜索并快速打开当前项目文件：Git 仓库遵守 tracked / untracked 与 ignore 规则，普通目录自动跳过隐藏目录、依赖和构建产物；文件名匹配优先于父目录匹配，结果支持模糊排序与命中高亮。筛选结果重排不再被静止鼠标误选，Escape 首次清空搜索词、再次关闭面板。
 - 终端可选启用直接点击移动光标。
 - **自定义闲时标签页名**：在「设置 -> 终端 -> 功能」与标签页右键菜单「Zsh Idle title」中新增闲时标签页名设置（$ZSH_THEME_TERM_TITLE_IDLE），提供默认（不修改）、文件夹名在前（%1~ — %n@%m）、2 层文件夹名在前（%2~ — %n@%m）、简短（%1~ — %n）、极简（%1~）等可选项。由 Zsh Prompt 原生控制与无声转义输出，不污染终端 PTY 输入。
 - 在 `kero/FilesFind` 中实现以 VS Code 为目标的全局文件与文本搜索模块：
@@ -84,6 +87,7 @@
 - 终端通过 OSC 52 读取系统剪贴板时需要确认，并对可能执行命令的粘贴内容显示安全警告。
 - 终端粘贴增强：Finder 复制的文件粘贴为 shell 安全绝对路径；纯图片剪贴板通过原生 Ctrl-V 交给支持图片的 TUI 读取。
 - 新建终端声明 `TERM_PROGRAM=ghostty`，让支持 Ghostty 的 CLI/TUI 自动启用图片等扩展能力。
+- 新建终端不再注入 `LANG` / `LC_*`，完整保留用户 Shell 自己的区域设置。
 - 终端进入 Vi / Vim / Neovim 等编辑器时自动显示上下文帮助栏，支持一键保存退出、放弃更改退出，以及切换 Insert / Normal 模式；可在 Settings → Terminal 中关闭。
 - 为终端内 CLI 增加麦克风输入权限声明，支持语音输入类命令行工具。
 - 升级 PierreDiffsSwift，修复 Git Diff 中中文等非 ASCII 字符的显示问题。
@@ -207,7 +211,9 @@
 
 ## 上游移植记录
 
-- 最近完成比对与选择性移植的上游基线：Kero `main`（`169ae95d651dad86b71515b06b82f4f6a16efc85`，包含 `v0.1.30`，2026-07-28）。
+- 最近完成比对与选择性移植的上游基线：Kero `main`（`058694c1e280237545f1cf4d6b14145b81e5b3cb`，包含 `v0.1.33`，2026-07-29）。
 - 移植上游 commit [`fe9f622b6b55c087d5d6f449b0159d3f1e227766`](https://github.com/egoist/kero/commit/fe9f622b6b55c087d5d6f449b0159d3f1e227766)：“Add Open in Kero to Finder's folder context menu”，添加 Finder 右键文件夹服务菜单功能，在 Qjiao 中重命名为 “Open in Qjiao” 并适配项目生命周期与窗口接管。
+- 移植上游 commit [`7bb18e6390ed4f883d15e6711460f88c36ea7d95`](https://github.com/egoist/kero/commit/7bb18e6390ed4f883d15e6711460f88c36ea7d95)、[`8c01a817d5fa085c9579f9569d9783ba38629bda`](https://github.com/egoist/kero/commit/8c01a817d5fa085c9579f9569d9783ba38629bda)、[`c79789b767e30901035471f8ef334b07a1666abf`](https://github.com/egoist/kero/commit/c79789b767e30901035471f8ef334b07a1666abf) 与 [`4d882462e840f4d1f5a0db1791d4165b1ebccbb5`](https://github.com/egoist/kero/commit/4d882462e840f4d1f5a0db1791d4165b1ebccbb5)：保持选中 Tab 可见、修复命令面板指针与 Escape 交互、在命令面板搜索项目文件，以及停止向终端注入 `LANG`；文件索引和文案已适配 Qjiao 的项目目录、忽略策略与 `L10n`。
+- 暂不移植上游 `v0.1.32` 的原生浏览器 Tab / Pane；该功能留作后续独立移植，且不包含可选 Alacritty 后端。
 - 本轮移植 Option/Meta 设置、隐藏渲染目标内存优化、外部图片变更刷新、侧栏字号和事件驱动 Git 刷新；不移植可选 Alacritty 后端。
 - 已采用上游 `v0.1.24` 的兼容策略，将新建终端的 `TERM_PROGRAM` 设置为 `ghostty`。
