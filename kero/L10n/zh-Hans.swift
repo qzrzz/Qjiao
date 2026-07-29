@@ -233,6 +233,7 @@ extension L10n {
         "Copy PID": "复制 PID",
         "Copy public IP address": "复制公网 IP",
         "Copy Relative Path": "复制相对路径",
+        "Copy Relative Paths": "复制相对路径",
         "Copy Repository Path": "复制仓库路径",
         "Copy URL": "复制 URL",
         "Correct Spelling Automatically": "自动纠正拼写",
@@ -965,5 +966,11 @@ extension L10n {
         "Zsh controlled tab title setting ($ZSH_THEME_TERM_TITLE_IDLE)": "Zsh 控制的标签页名称设置（$ZSH_THEME_TERM_TITLE_IDLE）",
         "Zsh Idle title": "Zsh 闲时标题",
         "选择 AI 工具": "选择 AI 工具",
+        "Invalid SVG content": "无效的 SVG 内容",
+        "Invalid SVG syntax": "SVG 语法不完整",
+        "Actual Size": "实际尺寸",
+        "Fit Window": "适应窗口",
+        "Background Mode": "背景模式",
     ]
 }
+

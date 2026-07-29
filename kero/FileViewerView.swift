@@ -350,41 +350,58 @@ struct FileViewerView: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.colorScheme) private var colorScheme
 
+    private var isSVGFile: Bool {
+        file.path.lowercased().hasSuffix(".svg")
+    }
+
     var body: some View {
         switch file.content {
         case .text:
             let themeName = colorScheme == .dark
                 ? settings.editorThemeDark
                 : settings.editorThemeLight
-            VStack(spacing: 0) {
-                if file.hasExternalConflict {
-                    externalConflictBar
-                }
-                if let error = file.saveError {
-                    saveErrorBar(error)
-                }
-                SourceTextEditor(
+            if isSVGFile {
+                SVGFileViewerView(
                     file: file,
-                    font: TerminalFont.current(),
-                    palette: .theme(
-                        themeName: themeName,
-                        dark: colorScheme == .dark
-                    ),
-                    syntaxTheme: SyntaxHighlighting.theme(
-                        themeName: themeName, dark: colorScheme == .dark
-                    ),
-                    wrapLines: settings.wrapLines,
+                    themeName: themeName,
                     isFocused: isFocused,
                     onFocused: onFocused,
                     onSplit: onSplit,
                     onNewBrowserTab: onNewBrowserTab,
                     onNewBrowserPane: onNewBrowserPane
                 )
-                if settings.showEditorStatusBar {
-                    EditorStatusBar(file: file)
-                        .zIndex(100)
+            } else {
+                VStack(spacing: 0) {
+                    if file.hasExternalConflict {
+                        externalConflictBar
+                    }
+                    if let error = file.saveError {
+                        saveErrorBar(error)
+                    }
+                    SourceTextEditor(
+                        file: file,
+                        font: TerminalFont.current(),
+                        palette: .theme(
+                            themeName: themeName,
+                            dark: colorScheme == .dark
+                        ),
+                        syntaxTheme: SyntaxHighlighting.theme(
+                            themeName: themeName, dark: colorScheme == .dark
+                        ),
+                        wrapLines: settings.wrapLines,
+                        isFocused: isFocused,
+                        onFocused: onFocused,
+                        onSplit: onSplit,
+                        onNewBrowserTab: onNewBrowserTab,
+                        onNewBrowserPane: onNewBrowserPane
+                    )
+                    if settings.showEditorStatusBar {
+                        EditorStatusBar(file: file)
+                            .zIndex(100)
+                    }
                 }
             }
+
         case .image(let image):
             ImageViewerView(
                 file: file,
@@ -2982,3 +2999,343 @@ private struct ModernToolbarDivider: View {
             .padding(.horizontal, 2)
     }
 }
+
+// MARK: - SVG 特殊优化视图 (SVG 代码编辑与上下分屏预览)
+
+/// SVG 专用文件查看与编辑视图：上下分屏布局，上方为 SVG 代码编辑器，下方为 SVG 实时预览。
+struct SVGFileViewerView: View {
+    @ObservedObject var file: FileTab
+    let themeName: String
+    var isFocused: Bool
+    var onFocused: () -> Void
+    var onSplit: (PaneDropEdge) -> Void
+    var onNewBrowserTab: (String?) -> Void
+    var onNewBrowserPane: (String?) -> Void
+
+    @ObservedObject private var settings = AppSettings.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// 上下分屏比例（0.15...0.85），默认 0.5（代码与预览各 50%）
+    @AppStorage("svgSplitFraction") private var splitFraction: Double = 0.5
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if file.hasExternalConflict {
+                externalConflictBar
+            }
+            if let error = file.saveError {
+                saveErrorBar(error)
+            }
+
+            GeometryReader { geometry in
+                let totalHeight = geometry.size.height
+                let handleHeight: CGFloat = 7
+                let availableHeight = max(10, totalHeight - handleHeight)
+                let topHeight = min(max(availableHeight * splitFraction, 60), availableHeight - 60)
+                let bottomHeight = max(60, availableHeight - topHeight)
+
+                VStack(spacing: 0) {
+                    // 上部分：代码编辑器
+                    SourceTextEditor(
+                        file: file,
+                        font: TerminalFont.current(),
+                        palette: .theme(
+                            themeName: themeName,
+                            dark: colorScheme == .dark
+                        ),
+                        syntaxTheme: SyntaxHighlighting.theme(
+                            themeName: themeName, dark: colorScheme == .dark
+                        ),
+                        wrapLines: settings.wrapLines,
+                        isFocused: isFocused,
+                        onFocused: onFocused,
+                        onSplit: onSplit,
+                        onNewBrowserTab: onNewBrowserTab,
+                        onNewBrowserPane: onNewBrowserPane
+                    )
+                    .frame(height: topHeight)
+
+                    // 中间：可拖拽分割手柄
+                    VerticalSplitHandle(
+                        fraction: $splitFraction,
+                        range: 0.15...0.85,
+                        defaultFraction: 0.5,
+                        availableHeight: availableHeight
+                    )
+
+                    // 下部分：SVG 预览组件
+                    SVGPreviewView(file: file)
+                        .frame(height: bottomHeight)
+                }
+            }
+
+            if settings.showEditorStatusBar {
+                EditorStatusBar(file: file)
+                    .zIndex(100)
+            }
+        }
+    }
+
+    private var externalConflictBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(Color(red: 0.90, green: 0.65, blue: 0.15))
+
+            Text(L10n.t("File modified externally"))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.primary)
+
+            Spacer(minLength: 0)
+
+            Button(L10n.t("Reload")) {
+                file.resolveConflictWithReload()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.mini)
+
+            Button(L10n.t("Keep Local")) {
+                file.dismissExternalConflict()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(red: 0.90, green: 0.65, blue: 0.15).opacity(0.12))
+    }
+
+    private func saveErrorBar(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10))
+            Text(L10n.format("Could not save: %@", message))
+                .font(.system(size: 11))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(Color(red: 0.82, green: 0.60, blue: 0.13))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(0.04))
+    }
+}
+
+/// SVG 实时预览视图：支持透明棋盘格/主题背景切换、显示尺寸规格、手势/滚轮缩放平移与语法错误平滑提示。
+struct SVGPreviewView: View {
+    @ObservedObject var file: FileTab
+    @AppStorage("svgPreviewBackgroundMode") private var backgroundMode: ImageBackgroundMode = .checkerboard
+
+    /// 缩放倍率 (10% ~ 1000%)
+    @State private var zoomScale: CGFloat = 1.0
+    /// 是否使用自适应模式 (Fit Window)
+    @State private var isFitMode: Bool = true
+
+    /// 平移偏移
+    @State private var offset: CGSize = .zero
+    @GestureState private var dragOffset: CGSize = .zero
+
+    /// 保存上一次成功的 NSImage，当用户临时输入无效 XML 时维持上一次渲染并给出黄色轻量警告
+    @State private var cachedImage: NSImage?
+    @State private var isSyntaxError: Bool = false
+
+    /// 规格描述文本（如 24 × 24 px）
+    @State private var svgSizeText: String = ""
+
+    var body: some View {
+        GeometryReader { geometry in
+            let containerSize = geometry.size
+
+            ZStack(alignment: .topTrailing) {
+                // 背景
+                backgroundView(size: containerSize)
+
+                // 核心 SVG 画布区域
+                canvasContent(containerSize: containerSize)
+                    .clipped()
+
+                // 顶部浮动控制与信息工具栏
+                topControlToolbar
+                    .padding(8)
+            }
+            .onAppear {
+                updateSVGImage(from: file.text)
+            }
+            .onChange(of: file.text) { _, newText in
+                updateSVGImage(from: newText)
+            }
+        }
+    }
+
+    /// 根据当前文本更新 SVG NSImage
+    private func updateSVGImage(from text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = text.data(using: .utf8), !trimmed.isEmpty else {
+            isSyntaxError = true
+            return
+        }
+
+        if let image = NSImage(data: data), image.isValid {
+            cachedImage = image
+            isSyntaxError = false
+            let w = Int(image.size.width)
+            let h = Int(image.size.height)
+            if w > 0 && h > 0 {
+                svgSizeText = "\(w) × \(h) px"
+            } else {
+                svgSizeText = "SVG Preview"
+            }
+        } else {
+            isSyntaxError = true
+        }
+    }
+
+    @ViewBuilder
+    private func backgroundView(size: CGSize) -> some View {
+        switch backgroundMode {
+        case .defaultTheme:
+            Color.clear
+        case .black:
+            Color.black
+        case .white:
+            Color.white
+        case .checkerboard:
+            CheckerboardView(squareSize: 8, lightColor: Color(white: 0.94), darkColor: Color(white: 0.82))
+        case .darkCheckerboard:
+            CheckerboardView(squareSize: 8, lightColor: Color(white: 0.22), darkColor: Color(white: 0.14))
+        }
+    }
+
+    @ViewBuilder
+    private func canvasContent(containerSize: CGSize) -> some View {
+        let totalOffset = CGSize(
+            width: offset.width + dragOffset.width,
+            height: offset.height + dragOffset.height
+        )
+
+        let dragGesture = DragGesture()
+            .updating($dragOffset) { value, state, _ in
+                state = value.translation
+            }
+            .onEnded { value in
+                offset.width += value.translation.width
+                offset.height += value.translation.height
+            }
+
+        ZStack {
+            if let image = cachedImage {
+                if isFitMode {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .padding(16)
+                        .scaleEffect(zoomScale)
+                        .offset(totalOffset)
+                } else {
+                    Image(nsImage: image)
+                        .scaleEffect(zoomScale)
+                        .offset(totalOffset)
+                }
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "photo.badge.exclamationmark")
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(.tertiary)
+                    Text(L10n.t("Invalid SVG content"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(width: containerSize.width, height: containerSize.height)
+        .background(
+            ScrollWheelListenerView { deltaY in
+                let factor: CGFloat = deltaY > 0 ? 1.08 : 0.92
+                let newScale = min(max(zoomScale * factor, 0.1), 10.0)
+                zoomScale = newScale
+            }
+        )
+        .contentShape(Rectangle())
+        .gesture(dragGesture)
+        .onTapGesture(count: 2) {
+            // 双击重置缩放与平移
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                zoomScale = 1.0
+                offset = .zero
+                isFitMode = true
+            }
+        }
+    }
+
+    private var topControlToolbar: some View {
+        HStack(spacing: 8) {
+            if isSyntaxError && cachedImage != nil {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.orange)
+                    Text(L10n.t("Invalid SVG syntax"))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+            }
+
+            if !svgSizeText.isEmpty {
+                Text(svgSizeText)
+                    .font(.system(size: 10, weight: .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+            }
+
+            Spacer()
+
+            // 适应 / 原始比例切换
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    isFitMode.toggle()
+                    if isFitMode {
+                        zoomScale = 1.0
+                        offset = .zero
+                    }
+                }
+            } label: {
+                Image(systemName: isFitMode ? "arrow.up.left.and.arrow.down.right" : "aspectratio")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .padding(4)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+            .macTooltip(isFitMode ? L10n.t("Actual Size") : L10n.t("Fit Window"), position: .bottom)
+
+            // 背景模式切换菜单
+            Menu {
+                ForEach(ImageBackgroundMode.allCases) { mode in
+                    Button {
+                        backgroundMode = mode
+                    } label: {
+                        HStack {
+                            Text(mode.title)
+                            if backgroundMode == mode {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "square.on.square.squareshape.controlhandles")
+                    .font(.system(size: 11))
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 20, height: 20)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+            .macTooltip(L10n.t("Background Mode"), position: .bottom)
+        }
+    }
+}
+
