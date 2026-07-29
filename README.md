@@ -12,6 +12,7 @@
 
 - 新增 `web/` 产品官网：基于 Figma 的黑绿视觉实现 Qjiao 长页介绍，使用 Vite、React、TypeScript 6 与 Base UI；首屏及 AI Agent、项目、文件、脚本任务、Git、启动器、包管理、开发服务器、代码格式化、图片查看与图片构建均拆分为独立 Feature 组件，每个组件的 Figma 切图保存在自身 `assets/` 目录；功能截图遇到 Figma 组件或组件实例时直接导出顶层节点，每个功能组只保留一张带 Alpha 的 2× 组合切图，不再拆解其内部图层；网站内置 Pally 与 General Sans 可变字体，并按 `Group 2` 的整组 Mask 裁切层级、`multiply` 色彩叠加模式还原应用图标关键帧动画，Logo 动画采用 4 秒单程的往复播放并支持减少动态效果偏好；生产构建通过 Sharp 将 PNG、JPG、SVG（包括 `public/` 静态资源）无损转换为 WebP 并重写引用，`dist` 只发布 WebP 图片；Bun 管理依赖并支持独立的本地开发、预览与构建；修正 Detect Dev Server 与 Code Formatting 功能组信息块的垂直定位。
 - 官网功能组统一桌面端 `180px`、移动端 `72px` 的垂直间距节奏，Web Dev 分区上间距收敛为 `180px`，末尾 Image Build 不再额外保留底部间距。
+- 官网新增响应式 Footer：提供 Qjiao 品牌、项目 GitHub 源码与 X（@qzrz256）入口，以及开源版权信息。
 - **I18n 界面多语言**：默认英文，可在设置中切换语言；目前支持 **English** 与 **简体中文**。
   - **设置**：Settings → General → **Language** / **界面语言**。
   - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ui.language`（`en` 默认不写回；`zh-Hans` 为简体中文）。
@@ -202,9 +203,11 @@
 - 优化 Project 面板 Launchers 启动器：
   - **Finder 启动项**：路径解析支持相对路径（如 `./`、`.` 或相对子目录）、波浪号路径（`~/`）与绝对路径，运行或选择文件夹弹窗（Choose…）时默认以项目根目录为基准定位。
   - **Webpage 启动项**：支持实时响应 URL 文本修改，在输入框地址变更时智能清理旧图标并即时重新获取加载新网址的 Favicon；当默认 `/favicon.ico` 不存在时，自动拉取网页 HTML 前 300 字符解析 `<link rel="shortcut icon"` 或 `<link rel="icon"` 标签的 `href` 路径并二次请求。
+- **macOS 访达右键服务 (Finder Context Menu)**：在 `Info.plist` 中注册系统级 `NSServices`，并在 `FinderService.swift` 中响应 `openInQjiao` 服务请求；在 Finder 中选中一个或多个文件夹右键点击“服务 -> Open in Qjiao”（在 Qjiao 中打开），即可自动拉起应用并将所选文件夹批量建立为新项目、启动对应目录的终端 Session。
 
 ## 上游移植记录
 
 - 最近完成比对与选择性移植的上游基线：Kero `main`（`169ae95d651dad86b71515b06b82f4f6a16efc85`，包含 `v0.1.30`，2026-07-28）。
+- 移植上游 commit [`fe9f622b6b55c087d5d6f449b0159d3f1e227766`](https://github.com/egoist/kero/commit/fe9f622b6b55c087d5d6f449b0159d3f1e227766)：“Add Open in Kero to Finder's folder context menu”，添加 Finder 右键文件夹服务菜单功能，在 Qjiao 中重命名为 “Open in Qjiao” 并适配项目生命周期与窗口接管。
 - 本轮移植 Option/Meta 设置、隐藏渲染目标内存优化、外部图片变更刷新、侧栏字号和事件驱动 Git 刷新；不移植可选 Alacritty 后端。
 - 已采用上游 `v0.1.24` 的兼容策略，将新建终端的 `TERM_PROGRAM` 设置为 `ghostty`。

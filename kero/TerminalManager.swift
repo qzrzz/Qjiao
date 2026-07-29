@@ -77,10 +77,23 @@ final class TerminalManager: nonisolated ObservableObject {
     /// SwiftUI TextField can reuse the same responder for the palette itself.
     private weak var commandPalettePreviousResponder: NSResponder?
     private weak var commandPaletteWindow: NSWindow?
+    /// Window hosting this manager, once SwiftUI has attached its content.
+    /// Finder service requests use it to target the active Qjiao window.
+    private weak var window: NSWindow?
+    /// The untouched project created before the first window appears. A Finder
+    /// request arriving during launch replaces it instead of leaving an extra
+    /// home-directory project beside the requested folder.
+    private var startupProjectID: UUID?
 
     /// Live managers in window-creation order; the persisted snapshot is
     /// one entry per registered manager.
     private static var registry: [TerminalManager] = []
+    /// Folder requests can arrive while macOS is still launching Qjiao, before
+    /// a WindowGroup has produced a manager/window to receive them.
+    private static var pendingDirectories: [String] = []
+    /// Captured from SwiftUI's openWindow environment so a Finder request can
+    /// reopen Qjiao after the user has closed its last window.
+    private static var windowOpener: (() -> Void)?
     /// Window snapshots loaded from disk that no window has claimed yet.
     /// Each new manager claims the next; extras beyond the saved count
     /// start fresh.
@@ -125,8 +138,12 @@ final class TerminalManager: nonisolated ObservableObject {
         if Self.pendingRestores.isEmpty, !Self.pendingHistories.isEmpty {
             Self.pendingHistories = [:]
         }
-        if !restored {
-            newProject()
+        let queuedDirectories = Self.takePendingDirectories()
+        if !restored, queuedDirectories.isEmpty {
+            startupProjectID = newProject().id
+        }
+        for directory in queuedDirectories {
+            newProject(directory: directory)
         }
         // Re-theme live sessions when font, appearance, or terminal theme settings change.
         // Delivery is scheduled onto the main queue because @Published emits in
@@ -204,9 +221,70 @@ final class TerminalManager: nonisolated ObservableObject {
 
     // MARK: - Projects
 
-    func newProject() {
+    @discardableResult
+    func newProject() -> Project {
         let project = makeProject()
         insert(project)
+        return project
+    }
+
+    /// Creates a project rooted at `directory`, with its first terminal
+    /// launched there. Used by Qjiao's Finder service.
+    private func newProject(directory: String) {
+        let project = makeProject(createInitialSession: false)
+        project.customName = URL(
+            fileURLWithPath: directory,
+            isDirectory: true
+        ).lastPathComponent
+        project.projectDirectory = directory
+        project.newSession(directory: directory)
+        insert(project)
+    }
+
+    /// Routes folders from the Finder service into the active Qjiao window.
+    /// If no window exists yet, the next WindowGroup manager claims them.
+    static func openDirectories(_ directories: [String]) {
+        guard !directories.isEmpty else { return }
+        let manager = registry.first { $0.window === NSApp.keyWindow }
+            ?? registry.first { $0.window === NSApp.mainWindow }
+            ?? registry.last { $0.window != nil }
+        guard let manager else {
+            pendingDirectories.append(contentsOf: directories)
+            if registry.isEmpty {
+                windowOpener?()
+            }
+            return
+        }
+
+        for directory in directories {
+            manager.newProject(directory: directory)
+        }
+        manager.window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Called as soon as SwiftUI gives this manager an AppKit window. A
+    /// launch-time Finder request may have been queued before that happened.
+    func attach(to window: NSWindow) {
+        self.window = window
+        let directories = Self.takePendingDirectories()
+        if !directories.isEmpty, let startupProjectID,
+           let startupProject = projects.first(where: { $0.id == startupProjectID }) {
+            startupProject.terminateAll()
+            remove(startupProject)
+        }
+        startupProjectID = nil
+        for directory in directories {
+            newProject(directory: directory)
+        }
+        if !directories.isEmpty {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private static func takePendingDirectories() -> [String] {
+        let directories = pendingDirectories
+        pendingDirectories = []
+        return directories
     }
 
     /// 打开文件夹为项目：若已有同目录项目则激活（归档中则先解除），否则新建并启动终端。
@@ -1036,6 +1114,7 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Deferred a runloop tick so windows the system itself restores can
     /// claim theirs first.
     static func openRestoredWindows(_ open: @escaping () -> Void) {
+        windowOpener = open
         guard !didReopenWindows else { return }
         didReopenWindows = true
         DispatchQueue.main.async {

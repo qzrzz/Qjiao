@@ -105,7 +105,7 @@ struct ContentView: View {
             TabSwitcherEventMonitor(manager: manager, controller: tabSwitcher)
                 .frame(width: 0, height: 0)
         }
-        .background(WindowChromeAccessor())
+        .background(WindowChromeAccessor { manager.attach(to: $0) })
         // 文件夹创建项目改由左侧边栏 onDrop 处理，避免整窗拦截导致终端无法接收路径 drop。
         .onChange(of: colorScheme) {
             manager.refreshAppearance()
