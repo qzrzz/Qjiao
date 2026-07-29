@@ -31,6 +31,7 @@ const SIGN_IDENTITY =
   "Developer ID Application";
 const NOTARY_PROFILE = process.env.NOTARY_PROFILE ?? "NOTARY";
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
+const SPARKLE_ACCOUNT = process.env.SPARKLE_ACCOUNT ?? "qjiao";
 
 process.chdir(join(import.meta.dir, ".."));
 if (!process.env.DEVELOPER_DIR) {
@@ -56,6 +57,17 @@ if (process.env.PUBLISH !== "0") {
 }
 if (!existsSync(EXPORT_OPTIONS_SOURCE)) {
   die(`export options not found: ${EXPORT_OPTIONS_SOURCE}`);
+}
+
+const sourceInfoPlist = "kero/Info.plist";
+const configuredSparklePublicKey = (
+  await $`plutil -extract SUPublicEDKey raw ${sourceInfoPlist}`.text()
+).trim();
+if (!isValidSparklePublicKey(configuredSparklePublicKey)) {
+  die(
+    "set Qjiao's Sparkle public key in kero/Info.plist before releasing; " +
+      "see RELEASING.md → 生成 Qjiao 的 Sparkle 密钥",
+  );
 }
 
 const configuredTeamId = (
@@ -102,10 +114,7 @@ const sparklePublicKey = (
   await $`plutil -extract SUPublicEDKey raw ${appPlist}`.text()
 ).trim();
 if (!version || !build) die("could not read the built app version");
-if (
-  sparklePublicKey === "REPLACE_WITH_QJIAO_SPARKLE_PUBLIC_KEY" ||
-  !/^[A-Za-z0-9+/]{43}=$/.test(sparklePublicKey)
-) {
+if (!isValidSparklePublicKey(sparklePublicKey)) {
   die("the built app does not contain a valid Qjiao Sparkle public key");
 }
 
@@ -184,6 +193,7 @@ const downloadUrlPrefix = `https://github.com/${GITHUB_REPOSITORY}/releases/down
 await generateAppcast(UPDATES_DIR, {
   downloadUrlPrefix,
   edKeyFile: sparklePrivateKeyFile,
+  account: SPARKLE_ACCOUNT,
 });
 
 if (process.env.PUBLISH === "0") {
@@ -270,4 +280,12 @@ async function createAndPushReleaseTag(
 
   say(`Pushing Git tag ${tag}…`);
   await $`git push origin ${tag}`;
+}
+
+/** 判断 Info.plist 中是否已经配置有效的 Sparkle EdDSA 公钥。 */
+function isValidSparklePublicKey(publicKey: string): boolean {
+  return (
+    publicKey !== "REPLACE_WITH_QJIAO_SPARKLE_PUBLIC_KEY" &&
+    /^[A-Za-z0-9+/]{43}=$/.test(publicKey)
+  );
 }

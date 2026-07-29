@@ -49,6 +49,6 @@
 	<key>SUFeedURL</key>
 	<string>https://github.com/qzrzz/Qjiao/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>REPLACE_WITH_QJIAO_SPARKLE_PUBLIC_KEY</string>
+	<string>rIu1scWZ0i+1pucGPQPhBmKpHUNjrJuiU2jDHHRAA20=</string>
 </dict>
 </plist>

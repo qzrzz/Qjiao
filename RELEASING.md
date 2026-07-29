@@ -106,8 +106,10 @@ APPLE_API_ISSUER
 执行其中的 `generate_keys`：
 
 ```sh
-SPARKLE_BIN="/path/to/Sparkle/bin"
-"$SPARKLE_BIN/generate_keys"
+SPARKLE_BIN="$HOME/Library/Developer/Xcode/DerivedData/\
+Qjiao-ctsuftcvzozzlkgyjknjbvamfnsl/SourcePackages/\
+artifacts/sparkle/Sparkle/bin"
+"$SPARKLE_BIN/generate_keys" --account qjiao
 ```
 
 该命令会把私钥保存在本机登录钥匙串，并输出公钥。把输出的公钥替换
@@ -118,10 +120,19 @@ SPARKLE_BIN="/path/to/Sparkle/bin"
 <string>REPLACE_WITH_QJIAO_SPARKLE_PUBLIC_KEY</string>
 ```
 
+可用下面的命令确认占位符已经替换：
+
+```sh
+plutil -extract SUPublicEDKey raw kero/Info.plist
+```
+
+发布脚本会在开始 Xcode archive 之前检查公钥，未配置时立即退出。
+
 务必备份私钥：
 
 ```sh
 "$SPARKLE_BIN/generate_keys" \
+  --account qjiao \
   -x qjiao-sparkle-private-key
 ```
 
@@ -210,6 +221,7 @@ PUBLISH=0 bun run release
 | `APPLE_ID`                    | —                          | Apple 公证账号          |
 | `APPLE_APP_SPECIFIC_PASSWORD` | —                          | Apple 公证专用密码      |
 | `SPARKLE_PRIVATE_KEY_FILE`    | 登录钥匙串                 | Sparkle 私钥备份        |
+| `SPARKLE_ACCOUNT`             | `qjiao`                    | Sparkle 钥匙串账户      |
 | `GITHUB_REPOSITORY`           | `qzrzz/Qjiao`              | 上传目标仓库            |
 | `PUBLISH=0`                   | —                          | 只生成本地产物          |
 | `FORCE=1`                     | —                          | 覆盖同标签 Release 资产 |
