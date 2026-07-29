@@ -65,7 +65,15 @@ security find-identity -v -p codesigning
 
 ### 3. 配置本地 Apple 公证
 
-在本机钥匙串创建名为 `NOTARY` 的公证 profile：
+如果本机已经设置以下环境变量，发布脚本可以直接使用：
+
+```sh
+export APPLE_ID="your@example.com"
+export APPLE_APP_SPECIFIC_PASSWORD="<Apple 专用密码>"
+export APPLE_TEAM_ID="<TEAM_ID>"
+```
+
+环境变量未设置时，则在本机钥匙串创建名为 `NOTARY` 的公证 profile：
 
 ```sh
 xcrun notarytool store-credentials NOTARY \
@@ -73,8 +81,8 @@ xcrun notarytool store-credentials NOTARY \
   --team-id "YOUR_TEAM_ID"
 ```
 
-命令会提示输入 Apple 专用密码。凭据只保存在本机钥匙串，不进入
-仓库或 GitHub。
+命令会提示输入 Apple 专用密码。使用 profile 时，凭据只保存在本机
+钥匙串，不进入仓库或 GitHub。
 
 如果希望使用 App Store Connect API Key，也可在发布时设置：
 
@@ -190,16 +198,19 @@ PUBLISH=0 bun run release
 
 ## 发布选项
 
-| 环境变量                   | 默认值                     | 用途                    |
-| -------------------------- | -------------------------- | ----------------------- |
-| `APPLE_TEAM_ID`            | `ExportOptions.plist`      | 临时覆盖 Team ID        |
-| `NOTARY_PROFILE`           | `NOTARY`                   | 本机公证凭据名称        |
-| `SIGN_IDENTITY`            | `Developer ID Application` | 签名证书                |
-| `SPARKLE_PRIVATE_KEY_FILE` | 登录钥匙串                 | Sparkle 私钥备份        |
-| `GITHUB_REPOSITORY`        | `qzrzz/Qjiao`              | 上传目标仓库            |
-| `PUBLISH=0`                | —                          | 只生成本地产物          |
-| `FORCE=1`                  | —                          | 覆盖同标签 Release 资产 |
-| `NO_HISTORY=1`             | —                          | 不继承旧 appcast        |
+| 环境变量                      | 默认值                     | 用途                    |
+| ----------------------------- | -------------------------- | ----------------------- |
+| `APPLE_TEAM_ID`               | `ExportOptions.plist`      | 临时覆盖 Team ID        |
+| `NOTARY_PROFILE`              | `NOTARY`                   | 本机公证凭据名称        |
+| `SIGN_IDENTITY`               | `Developer ID Application` | 签名证书                |
+| `MACOS_SIGNING_IDENTITY`      | `Developer ID Application` | 签名证书兼容变量名      |
+| `APPLE_ID`                    | —                          | Apple 公证账号          |
+| `APPLE_APP_SPECIFIC_PASSWORD` | —                          | Apple 公证专用密码      |
+| `SPARKLE_PRIVATE_KEY_FILE`    | 登录钥匙串                 | Sparkle 私钥备份        |
+| `GITHUB_REPOSITORY`           | `qzrzz/Qjiao`              | 上传目标仓库            |
+| `PUBLISH=0`                   | —                          | 只生成本地产物          |
+| `FORCE=1`                     | —                          | 覆盖同标签 Release 资产 |
+| `NO_HISTORY=1`                | —                          | 不继承旧 appcast        |
 
 默认禁止覆盖同名 Release。`FORCE=1` 只替换该 Release 的四项资产；
 不会删除标签或其他 Release。

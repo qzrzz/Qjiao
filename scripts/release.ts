@@ -25,7 +25,10 @@ const EXPORT_DIR = join(BUILD_DIR, "export");
 const EXPORT_OPTIONS_SOURCE =
   process.env.EXPORT_OPTIONS ?? "scripts/ExportOptions.plist";
 const EXPORT_OPTIONS = join(BUILD_DIR, "ExportOptions.plist");
-const SIGN_IDENTITY = process.env.SIGN_IDENTITY ?? "Developer ID Application";
+const SIGN_IDENTITY =
+  process.env.SIGN_IDENTITY ??
+  process.env.MACOS_SIGNING_IDENTITY ??
+  "Developer ID Application";
 const NOTARY_PROFILE = process.env.NOTARY_PROFILE ?? "NOTARY";
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
 
@@ -132,8 +135,24 @@ say("Notarizing and stapling release artifacts…");
 const notaryKeyPath = process.env.APPLE_API_KEY_PATH;
 const notaryKeyId = process.env.APPLE_API_KEY_ID;
 const notaryIssuer = process.env.APPLE_API_ISSUER;
+const appleId = process.env.APPLE_ID;
+const appleAppSpecificPassword = process.env.APPLE_APP_SPECIFIC_PASSWORD;
+if (
+  (appleId && !appleAppSpecificPassword) ||
+  (!appleId && appleAppSpecificPassword)
+) {
+  die("APPLE_ID and APPLE_APP_SPECIFIC_PASSWORD must be set together");
+}
 if (notaryKeyPath && notaryKeyId && notaryIssuer) {
   await $`xcrun notarytool submit ${dmgPath} --key ${notaryKeyPath} --key-id ${notaryKeyId} --issuer ${notaryIssuer} --wait`;
+} else if (appleId && appleAppSpecificPassword) {
+  // 敏感参数通过 Bun.spawn 传递，避免 ShellError 将专用密码写入日志。
+  await runNotaryWithAppleId(
+    dmgPath,
+    appleId,
+    appleAppSpecificPassword,
+    teamId,
+  );
 } else {
   await $`xcrun notarytool submit ${dmgPath} --keychain-profile ${NOTARY_PROFILE} --wait`;
 }
@@ -187,3 +206,37 @@ console.log(
 console.log(
   `  latest:  https://github.com/${GITHUB_REPOSITORY}/releases/latest`,
 );
+
+/** 使用 Apple ID 公证，并避免在失败日志中输出完整命令参数。 */
+async function runNotaryWithAppleId(
+  artifactPath: string,
+  appleId: string,
+  password: string,
+  teamId: string,
+): Promise<void> {
+  const child = Bun.spawn(
+    [
+      "xcrun",
+      "notarytool",
+      "submit",
+      artifactPath,
+      "--apple-id",
+      appleId,
+      "--password",
+      password,
+      "--team-id",
+      teamId,
+      "--wait",
+    ],
+    {
+      env: process.env,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    },
+  );
+  const exitCode = await child.exited;
+  if (exitCode !== 0) {
+    die(`notarytool failed with exit code ${exitCode}`);
+  }
+}
