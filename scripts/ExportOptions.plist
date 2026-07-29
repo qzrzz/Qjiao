@@ -2,20 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Export options for `xcodebuild -exportArchive`, used by scripts/release.ts to
-  produce a Developer ID-signed Kero.app for distribution outside the App Store.
+  produce a Developer ID-signed Qjiao.app for distribution outside the App Store.
 
-  Fill in teamID with your 10-character Apple Developer Team ID. Find it via:
-    xcrun security find-identity -v -p codesigning
-  (the ID in parentheses of your "Developer ID Application" identity), or at
-  https://developer.apple.com/account → Membership.
+  本地首次配置时将 YOUR_TEAM_ID 替换为 Apple Developer Team ID。
+  也可保留占位值，并在运行时通过 APPLE_TEAM_ID 覆盖。
 -->
 <plist version="1.0">
 <dict>
 	<key>method</key>
 	<string>developer-id</string>
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Developer ID Application</string>
 	<key>teamID</key>
-	<string>GJE9R5VE87</string>
+	<string>YOUR_TEAM_ID</string>
 </dict>
 </plist>

@@ -829,26 +829,33 @@ struct BrowserView: View {
     private var toolbar: some View {
         HStack(spacing: 10) {
             HStack(spacing: 2) {
-                toolbarButton(
-                    "chevron.left",
+                BrowserToolbarButton(
+                    systemImage: "chevron.left",
                     help: L10n.t("Back"),
-                    disabled: !browser.canGoBack,
-                    action: browser.goBack
-                )
-                toolbarButton(
-                    "chevron.right",
+                    disabled: !browser.canGoBack
+                ) {
+                    onFocused()
+                    browser.goBack()
+                }
+                BrowserToolbarButton(
+                    systemImage: "chevron.right",
                     help: L10n.t("Forward"),
-                    disabled: !browser.canGoForward,
-                    action: browser.goForward
-                )
-                toolbarButton(
-                    browser.isLoading ? "xmark" : "arrow.clockwise",
+                    disabled: !browser.canGoForward
+                ) {
+                    onFocused()
+                    browser.goForward()
+                }
+                BrowserToolbarButton(
+                    systemImage: browser.isLoading ? "xmark" : "arrow.clockwise",
                     help: browser.isLoading
                         ? L10n.t("Stop")
-                        : L10n.t("Reload Page (⌘R)"),
-                    disabled: browser.isBlank && !browser.isLoading,
-                    action: browser.reloadOrStop
-                )
+                        : L10n.t("Reload Page"),
+                    shortcut: browser.isLoading ? nil : "⌘R",
+                    disabled: browser.isBlank && !browser.isLoading
+                ) {
+                    onFocused()
+                    browser.reloadOrStop()
+                }
             }
             .frame(width: 94, alignment: .leading)
 
@@ -857,18 +864,22 @@ struct BrowserView: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 2) {
-                toolbarButton(
-                    "doc.on.doc",
+                BrowserToolbarButton(
+                    systemImage: "doc.on.doc",
                     help: L10n.t("Copy Address"),
-                    disabled: browser.urlString.isEmpty,
-                    action: browser.copyAddress
-                )
-                toolbarButton(
-                    "arrow.up.right.square",
+                    disabled: browser.urlString.isEmpty
+                ) {
+                    onFocused()
+                    browser.copyAddress()
+                }
+                BrowserToolbarButton(
+                    systemImage: "arrow.up.right.square",
                     help: L10n.t("Open in Default Browser"),
-                    disabled: browser.shareURL == nil,
-                    action: browser.openInDefaultBrowser
-                )
+                    disabled: browser.shareURL == nil
+                ) {
+                    onFocused()
+                    browser.openInDefaultBrowser()
+                }
             }
             .frame(width: 94, alignment: .trailing)
         }
@@ -946,29 +957,44 @@ struct BrowserView: View {
         }
     }
 
-    private func toolbarButton(
-        _ systemImage: String,
-        help: String,
-        disabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            onFocused()
-            action()
-        } label: {
+/// 浏览器工具栏按钮：参考右侧面板按钮规范，提供 Hover 浅底高亮、颜色平滑过渡与原生 Tooltip 浮层 (`macTooltip`)。
+private struct BrowserToolbarButton: View {
+    let systemImage: String
+    let help: String
+    var shortcut: String? = nil
+    var disabled: Bool = false
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(
+                    disabled
+                        ? Theme.secondaryColor.opacity(0.4)
+                        : (isHovering ? Theme.primaryColor : Theme.secondaryColor)
+                )
                 .frame(width: 28, height: 28)
-                .contentShape(RoundedRectangle(
-                    cornerRadius: 6,
-                    style: .continuous
-                ))
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(
+                            isHovering && !disabled
+                                ? Theme.primaryColor.opacity(0.08)
+                                : Color.clear
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-        .help(help)
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+        .macTooltip(help, shortcut: shortcut, position: .bottom)
         .accessibilityLabel(help)
     }
+}
 
     private func errorState(_ message: String) -> some View {
         VStack(spacing: 10) {

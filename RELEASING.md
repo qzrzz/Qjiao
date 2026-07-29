@@ -1,181 +1,205 @@
-# Releasing kero
+# Qjiao 本地发布流程
 
-kero auto-updates with [Sparkle](https://sparkle-project.org). Releases live in a
-**Cloudflare R2** bucket served at **`https://releases.kero.sh`**. New users
-download a notarized **`.dmg`**; existing users get smaller in-app delta updates
-via Sparkle, which reads the appcast at `https://releases.kero.sh/appcast.xml`,
-verifies each build's EdDSA signature, and installs it. One release command
-produces both.
+Qjiao 完全在本机编译、签名、公证和打包。GitHub 只用于托管 Release
+资产，不运行 GitHub Actions：
 
-Once set up, cutting a release is one command:
+```text
+本机 Xcode-beta
+  → Developer ID 签名
+  → Apple 公证并装订票据
+  → 生成 DMG、Sparkle ZIP 与 appcast
+  → 本机 gh 上传 GitHub Release
+```
+
+新用户从 GitHub Release 下载公证后的 DMG。已安装用户通过 Sparkle
+读取以下稳定地址：
+
+```text
+https://github.com/qzrzz/Qjiao/releases/latest/download/appcast.xml
+```
+
+每个 Release 包含四项资产：
+
+- `qjiao-<version>.dmg`：用户下载和拖入 Applications。
+- `qjiao-<version>.zip`：Sparkle 安装的完整更新。
+- `qjiao-<version>.md`：应用内更新说明。
+- `appcast.xml`：保留历史项目的 Sparkle 更新源。
+
+## 一次性本机配置
+
+### 1. 安装本地工具
 
 ```sh
-bun scripts/release.ts        # or: bun run release
+brew install bun gh create-dmg
+gh auth login
+gh auth status
 ```
 
-- Updater code: [`kero/Updater.swift`](kero/Updater.swift) — **Check for Updates…**
-  (app menu) and the **Updates** section in Settings.
-- Feed URL + public key: [`kero/Info.plist`](kero/Info.plist)
-  (`SUFeedURL`, `SUPublicEDKey`).
-- Release automation (Bun + TypeScript): [`scripts/release.ts`](scripts/release.ts),
-  [`scripts/generate-appcast.ts`](scripts/generate-appcast.ts),
-  [`scripts/ExportOptions.plist`](scripts/ExportOptions.plist).
+发布脚本默认使用：
 
----
+```text
+/Applications/Xcode-beta.app/Contents/Developer
+```
 
-## One-time setup
+如需临时指定其他 Xcode，可设置 `DEVELOPER_DIR`。
 
-The release script runs on [Bun](https://bun.sh) (`brew install bun`) and builds
-the disk image with [`create-dmg`](https://github.com/create-dmg/create-dmg)
-(`brew install create-dmg`). Optionally run `bun install` once for editor
-type-checking of the scripts — it isn't needed to run them.
+### 2. 配置 Developer ID 签名
 
-### 1. Sparkle signing keys
-
-Every update is signed with an ed25519 key. The **private** key stays in your
-login keychain; the **public** key ships in the app.
-
-Download the Sparkle tools (`Sparkle-<version>.tar.xz` from the
-[releases page](https://github.com/sparkle-project/Sparkle/releases)), unpack,
-then:
+在 Xcode 或“钥匙串访问”中确认本机登录钥匙串已经安装带私钥的
+`Developer ID Application` 证书：
 
 ```sh
-./bin/generate_keys
+security find-identity -v -p codesigning
 ```
 
-Copy the printed public key into [`kero/Info.plist`](kero/Info.plist), replacing
-the placeholder `SUPublicEDKey` (it decodes to `REPLACE-ME-WITH-REAL-SPARKLE-KEY`,
-so it's obvious if you forget). Back the private key up somewhere safe:
+将 Apple Developer 的 10 位 Team ID 写入
+`scripts/ExportOptions.plist`：
+
+```xml
+<key>teamID</key>
+<string>YOUR_TEAM_ID</string>
+```
+
+把 `YOUR_TEAM_ID` 替换为真实值。也可以不修改文件，在发布时设置
+`APPLE_TEAM_ID` 环境变量。
+
+### 3. 配置本地 Apple 公证
+
+在本机钥匙串创建名为 `NOTARY` 的公证 profile：
 
 ```sh
-./bin/generate_keys -x sparkle_private_key.txt   # export → password manager
-./bin/generate_keys -f sparkle_private_key.txt   # import on another machine / CI
+xcrun notarytool store-credentials NOTARY \
+  --apple-id "your@example.com" \
+  --team-id "YOUR_TEAM_ID"
 ```
 
-> ⚠️ Lose the private key and you can't ship updates to existing users. Keep it.
+命令会提示输入 Apple 专用密码。凭据只保存在本机钥匙串，不进入
+仓库或 GitHub。
 
-Put the Sparkle `bin/` on your `PATH`, or point the release at it with
-`SPARKLE_BIN=/path/to/Sparkle/bin`.
+如果希望使用 App Store Connect API Key，也可在发布时设置：
 
-### 2. Developer ID signing + notarization
-
-Sparkle needs the app signed with your **Developer ID** and **notarized**
-(Gatekeeper blocks un-notarized apps; Hardened Runtime is already enabled in the
-project).
-
-- Install your **Developer ID Application** certificate in the login keychain.
-  The script signs the `.dmg` with it too; if you have more than one such cert,
-  set `SIGN_IDENTITY` to the exact name or SHA-1.
-- Set `teamID` in [`scripts/ExportOptions.plist`](scripts/ExportOptions.plist)
-  (find it with `xcrun security find-identity -v -p codesigning`).
-- Store notarization credentials once as a keychain profile named `NOTARY`:
-  ```sh
-  xcrun notarytool store-credentials NOTARY \
-    --apple-id you@example.com --team-id XXXXXXXXXX
-  # (paste an app-specific password, or use --key for an App Store Connect API key)
-  ```
-
-### 3. Cloudflare R2 bucket + domain
-
-1. Create an R2 bucket (default name the script expects: `kero-releases` — or set
-   `R2_BUCKET`).
-2. Attach the custom domain **`releases.kero.sh`** to the bucket
-   (R2 → your bucket → Settings → Custom Domains). This serves objects publicly
-   at `https://releases.kero.sh/<file>`.
-3. Create an **R2 API token** (R2 → Manage API Tokens → Object Read & Write).
-   It only needs access to this one bucket — the script passes
-   `--s3-no-check-bucket`, so no bucket-creation permission is required.
-
-### 4. rclone remote for R2
-
-The script uses [rclone](https://rclone.org) to sync the bucket
-(`brew install rclone`). Add an R2 remote named `r2` — either run
-`rclone config` (type **S3**, provider **Cloudflare**), or drop this into
-`~/.config/rclone/rclone.conf`:
-
-```ini
-[r2]
-type = s3
-provider = Cloudflare
-access_key_id = <R2 access key id>
-secret_access_key = <R2 secret access key>
-endpoint = https://<ACCOUNT_ID>.r2.cloudflarestorage.com
-region = auto
-no_check_bucket = true
+```text
+APPLE_API_KEY_PATH
+APPLE_API_KEY_ID
+APPLE_API_ISSUER
 ```
 
-`no_check_bucket = true` stops rclone from trying to create the (already
-existing) bucket — needed for bucket-scoped tokens. The script also passes
-`--s3-no-check-bucket`, so this line is belt-and-suspenders.
+三项同时存在时，脚本会优先使用 API Key。
 
-Verify with `rclone lsf r2:kero-releases --s3-no-check-bucket`.
+### 4. 生成 Qjiao 的 Sparkle 密钥
 
----
+先构建一次项目，让 Xcode 下载 Sparkle 工具。工具通常位于：
 
-## Cutting a release
+```text
+~/Library/Developer/Xcode/DerivedData/
+  Qjiao-*/SourcePackages/artifacts/sparkle/Sparkle/bin/
+```
 
-1. **Bump the version** in the `kero` target's build settings:
-   - `MARKETING_VERSION` — user-visible, e.g. `1.1` (`CFBundleShortVersionString`).
-   - `CURRENT_PROJECT_VERSION` — build number, e.g. `2` (`CFBundleVersion`).
-     **Must increase every release** — Sparkle compares it to decide what's newer.
-2. **Write the release notes** — add a `## [1.1]` section at the top of
-   [`CHANGELOG.md`](CHANGELOG.md) (the heading must match `MARKETING_VERSION`).
-3. **Run it:**
-   ```sh
-   bun scripts/release.ts        # or: bun run release
-   ```
+执行其中的 `generate_keys`：
 
-That's it. The script archives → exports a Developer ID app → builds a
-notarized, stapled **`.dmg`** → staples the app and zips it for Sparkle →
-attaches the matching `CHANGELOG.md` section as release notes → pulls existing
-archives from R2 (so Sparkle can build deltas) → regenerates `appcast.xml` →
-uploads the DMG and the update archives to R2. When it finishes:
+```sh
+SPARKLE_BIN="/path/to/Sparkle/bin"
+"$SPARKLE_BIN/generate_keys"
+```
 
-- **Download link** (for the website): `https://releases.kero.sh/kero-<version>.dmg`
-- **In-app updates**: served from the same origin via the appcast.
+该命令会把私钥保存在本机登录钥匙串，并输出公钥。把输出的公钥替换
+到 `kero/Info.plist`：
 
-Notarizing the DMG also notarizes the app's code, so the script staples both from
-a single submission — the DMG for direct downloads, the app for the Sparkle zip.
+```xml
+<key>SUPublicEDKey</key>
+<string>REPLACE_WITH_QJIAO_SPARKLE_PUBLIC_KEY</string>
+```
 
-Test by running an **older** build and choosing **Check for Updates…**.
+务必备份私钥：
 
-### Options
+```sh
+"$SPARKLE_BIN/generate_keys" \
+  -x qjiao-sparkle-private-key
+```
 
-| Env | Default | Purpose |
-| --- | --- | --- |
-| `R2_BUCKET` | `kero-releases` | R2 bucket name |
-| `R2_REMOTE` | `r2` | rclone remote name |
-| `NOTARY_PROFILE` | `NOTARY` | `notarytool` keychain profile |
-| `SIGN_IDENTITY` | `Developer ID Application` | codesigning identity for the DMG |
-| `EXPORT_OPTIONS` | `scripts/ExportOptions.plist` | export config |
-| `DOWNLOAD_URL_PREFIX` | `https://releases.kero.sh/` | base URL in the appcast |
-| `FORCE=1` | — | re-release a version that already exists |
-| `NO_HISTORY=1` | — | skip pulling old archives (full updates, no deltas) |
+备份文件不可提交。丢失私钥后，已经安装的 Qjiao 将无法验证更新。
 
----
+发布脚本默认直接从登录钥匙串读取私钥。仅在需要使用备份文件时设置：
 
-## Notes
+```sh
+SPARKLE_PRIVATE_KEY_FILE="/path/to/qjiao-sparkle-private-key"
+```
 
-- **Two artifacts per release:** a notarized `.dmg` (what people download) and a
-  `.zip` (what Sparkle installs, with binary deltas). Only the `.zip` goes in the
-  appcast; point your website's download button at
-  `https://releases.kero.sh/kero-<version>.dmg`. Want a stable URL? Add a
-  Cloudflare redirect from e.g. `/download` to the newest `.dmg`.
-- **Automatic checks:** by default Sparkle asks the user once whether to allow
-  automatic update checks. To opt in by default (no prompt), add to
-  [`kero/Info.plist`](kero/Info.plist):
-  ```xml
-  <key>SUEnableAutomaticChecks</key>
-  <true/>
-  ```
-  The **Updates** settings toggle lets users change it either way.
-- **Release notes** live in [`CHANGELOG.md`](CHANGELOG.md). The release script
-  publishes the matching version section as `kero-<version>.md` next to the
-  archive, and `generate_appcast` links it as the update's release notes
-  (Sparkle 2.9+ renders Markdown). No matching section → the release just ships
-  without notes. Notes for older versions stay in R2, so they keep showing.
-- Until the real `SUPublicEDKey` is in place, the app runs and checks the feed
-  fine, but installing an update fails signature verification by design.
-- kero isn't sandboxed, so no Sparkle XPC services need bundling.
-- Old archives stay in R2 so users far behind still update and deltas can be
-  built. `build/` (local archives/exports) is git-ignored.
+## 发布一个版本
+
+### 1. 更新版本与说明
+
+在 Qjiao target 的 Debug 与 Release 配置中同步更新：
+
+- `MARKETING_VERSION`：用户看到的版本，例如 `0.2.0`。
+- `CURRENT_PROJECT_VERSION`：严格递增的构建号。
+
+然后在 `CHANGELOG.md` 顶部新增匹配的版本说明：
+
+```md
+## [0.2.0]
+
+- 本次更新内容
+```
+
+### 2. 提交并推送版本标签
+
+```sh
+git add \
+  Qjiao.xcodeproj/project.pbxproj \
+  CHANGELOG.md
+git commit -m "chore(release): 发布 0.2.0"
+git tag v0.2.0
+git push origin main v0.2.0
+```
+
+标签必须严格等于 `v<MARKETING_VERSION>`。发布脚本调用
+`gh release create --verify-tag`，不会为不存在的远程标签创建 Release。
+
+### 3. 在本机编译并上传
+
+```sh
+bun run release
+```
+
+一个命令会依次完成：
+
+1. 使用 Qjiao Release Scheme 创建 archive。
+2. 导出 Developer ID 签名的 `Qjiao.app`。
+3. 生成并签名 `qjiao-<version>.dmg`。
+4. 提交 Apple 公证，并给 DMG 和 App 装订票据。
+5. 生成 Sparkle ZIP 与版本更新说明。
+6. 下载上一版 `appcast.xml` 并追加当前版本。
+7. 使用本机 `gh` 创建 GitHub Release 并上传四项资产。
+
+发布完成后检查：
+
+- `https://github.com/qzrzz/Qjiao/releases/latest` 有四项资产。
+- DMG 能通过 Gatekeeper 并正常启动。
+- 使用旧版 Qjiao 执行 **Check for Updates…** 能看到新版本。
+
+## 本地试打包
+
+只生成签名、公证后的资产，不创建 GitHub Release：
+
+```sh
+PUBLISH=0 bun run release
+```
+
+产物位于 `build/`。此模式不需要 `gh`，也不会读取或修改 GitHub。
+
+## 发布选项
+
+| 环境变量                   | 默认值                     | 用途                    |
+| -------------------------- | -------------------------- | ----------------------- |
+| `APPLE_TEAM_ID`            | `ExportOptions.plist`      | 临时覆盖 Team ID        |
+| `NOTARY_PROFILE`           | `NOTARY`                   | 本机公证凭据名称        |
+| `SIGN_IDENTITY`            | `Developer ID Application` | 签名证书                |
+| `SPARKLE_PRIVATE_KEY_FILE` | 登录钥匙串                 | Sparkle 私钥备份        |
+| `GITHUB_REPOSITORY`        | `qzrzz/Qjiao`              | 上传目标仓库            |
+| `PUBLISH=0`                | —                          | 只生成本地产物          |
+| `FORCE=1`                  | —                          | 覆盖同标签 Release 资产 |
+| `NO_HISTORY=1`             | —                          | 不继承旧 appcast        |
+
+默认禁止覆盖同名 Release。`FORCE=1` 只替换该 Release 的四项资产；
+不会删除标签或其他 Release。

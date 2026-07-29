@@ -47,8 +47,8 @@
 		</dict>
 	</array>
 	<key>SUFeedURL</key>
-	<string>https://releases.kero.sh/appcast.xml</string>
+	<string>https://github.com/qzrzz/Qjiao/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>gv9GLMPjH5yMQkZMFXnoNfHOyL8/7KGzl/jzAqlzZZY=</string>
+	<string>REPLACE_WITH_QJIAO_SPARKLE_PUBLIC_KEY</string>
 </dict>
 </plist>

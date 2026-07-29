@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to kero. This file is the **source of truth for the release
+All notable changes to Qjiao. This file is the **source of truth for the release
 notes shown in the in-app updater**: [`scripts/release.ts`](scripts/release.ts)
 extracts the section whose heading matches the version being released
 (`MARKETING_VERSION`) and publishes it next to the update, so Sparkle shows it in

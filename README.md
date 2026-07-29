@@ -10,11 +10,13 @@
 
 > 相对于 Kero 原版的改动
 
+- **本地应用发布流程**：Release 构建统一使用 Qjiao 的项目名、Scheme、`com.qzrzz.qjiao` Bundle ID 与独立 Sparkle 签名密钥；在本机通过 Xcode-beta 完成 Developer ID 签名、Apple 公证、DMG/ZIP 打包和 Sparkle appcast 生成，再由本机登录的 GitHub CLI 将全部下载与自动更新资产上传到 `qzrzz/Qjiao` GitHub Releases；不使用 GitHub Actions，并移除 Cloudflare R2、rclone 与 `releases.kero.sh` 依赖。
 - 新增 `web/` 产品官网：基于 Figma 的黑绿视觉实现 Qjiao 长页介绍，使用 Vite、React、TypeScript 6 与 Base UI；首屏及 AI Agent、项目、文件、脚本任务、Git、启动器、包管理、开发服务器、代码格式化、图片查看与图片构建均拆分为独立 Feature 组件，每个组件的 Figma 切图保存在自身 `assets/` 目录；功能截图遇到 Figma 组件或组件实例时直接导出顶层节点，每个功能组只保留一张带 Alpha 的 2× 组合切图，不再拆解其内部图层；网站内置 Pally 与 General Sans 可变字体，并按 `Group 2` 的整组 Mask 裁切层级、`multiply` 色彩叠加模式还原应用图标关键帧动画，Logo 动画采用 4 秒单程的往复播放并支持减少动态效果偏好；生产构建通过 Sharp 将 PNG、JPG、SVG（包括 `public/` 静态资源）无损转换为 WebP 并重写引用，`dist` 只发布 WebP 图片；Bun 管理依赖并支持独立的本地开发、预览与构建；修正 Detect Dev Server 与 Code Formatting 功能组信息块的垂直定位。
 - 官网功能组统一桌面端 `180px`、移动端 `72px` 的垂直间距节奏，Web Dev 分区上间距收敛为 `180px`，末尾 Image Build 不再额外保留底部间距。
 - 官网新增响应式 Footer：提供 Qjiao 品牌、项目 GitHub 源码与 X（@qzrz256）入口，以及开源版权信息。
 - 官网新增 80px 顶部栏，展示与上游 `egoist/kero` 的关系并提供其 GitHub 仓库入口。
 - **I18n 界面多语言**：默认英文，可在设置中切换语言；目前支持 **English** 与 **简体中文**。
+- **浏览器工具条样式优化**：`BrowserView` 工具条按钮支持 Hover 浅底与图标高亮（`Theme.primaryColor` 过渡），全面适配项目统一的原生毛玻璃浮层 `.macTooltip` 提示框，并提供 `⌘R` 快捷键 Badge。
   - **设置**：Settings → General → **Language** / **界面语言**。
   - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ui.language`（`en` 默认不写回；`zh-Hans` 为简体中文）。
   - **实现**：`kero/L10n/`（`L10n.swift` 核心 + 各语言表如 `zh-Hans.swift`）；以英文源字符串为 key，运行时切换无需重启；菜单、设置、左右侧栏、Git/Files/Project/System/Note、命令面板、图标选择器、图片查看器、终端剪贴板确认与常用对话框等已接入简体中文，主题名称与代码预览样本保持原文。

@@ -1,25 +1,18 @@
 #!/usr/bin/env bun
-//
-// Generate/refresh the Sparkle appcast for a directory of update archives.
-//
-// Usage:
-//   bun scripts/generate-appcast.ts <updates-dir>
-//
-// <updates-dir> holds the packaged archives (e.g. kero-1.1.zip) plus any older
-// archives so Sparkle can build deltas. appcast.xml is written into that dir.
-//
-// The private signing key is read from your login keychain (see RELEASING.md).
-// Env overrides:
-//   SPARKLE_BIN          dir containing the Sparkle tools (generate_appcast)
-//   DOWNLOAD_URL_PREFIX  base URL for <enclosure> links (default releases.kero.sh)
+// 为 Qjiao 更新归档签名，并生成或增量更新 Sparkle appcast。
 import { $ } from "bun";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { die } from "./lib";
 
-/** Locate Sparkle's `generate_appcast`: SPARKLE_BIN, then PATH, then the copy
- *  Swift Package Manager caches under DerivedData. */
+/** 生成 appcast 时需要的发布参数。 */
+export interface IGenerateAppcastOptions {
+  downloadUrlPrefix: string;
+  edKeyFile?: string;
+}
+
+/** 依次从环境变量、PATH 和 Xcode DerivedData 查找 Sparkle 工具。 */
 export async function findGenerateAppcast(): Promise<string | null> {
   const fromEnv = process.env.SPARKLE_BIN;
   if (fromEnv && existsSync(join(fromEnv, "generate_appcast"))) {
@@ -37,16 +30,16 @@ export async function findGenerateAppcast(): Promise<string | null> {
       const hit = out.split("\n").filter(Boolean)[0];
       if (hit) return hit;
     } catch {
-      // no match / not searchable — fall through
+      // DerivedData 不存在匹配项时继续返回 null，由调用方输出统一错误。
     }
   }
   return null;
 }
 
-/** Sign the archives in `updatesDir` and (re)write appcast.xml. */
+/** 为归档签名并在 updatesDir 中生成或更新 appcast.xml。 */
 export async function generateAppcast(
   updatesDir: string,
-  downloadUrlPrefix: string,
+  options: IGenerateAppcastOptions,
 ): Promise<void> {
   const gen = await findGenerateAppcast();
   if (!gen) {
@@ -56,16 +49,22 @@ export async function generateAppcast(
     );
   }
   console.log(`Using: ${gen}`);
-  // Same prefix for both: archives and the kero-<version>.md release notes are
-  // served from the same origin. The notes prefix makes generate_appcast emit
-  // <sparkle:releaseNotesLink> for any notes file matching an archive name.
-  await $`${gen} --download-url-prefix ${downloadUrlPrefix} --release-notes-url-prefix ${downloadUrlPrefix} ${updatesDir}`;
+  const signingArgs = options.edKeyFile
+    ? ["--ed-key-file", options.edKeyFile]
+    : [];
+  // ZIP 与同名 Markdown 都作为当前 GitHub Release 的资产发布。
+  await $`${gen} ${signingArgs} --download-url-prefix ${options.downloadUrlPrefix} --release-notes-url-prefix ${options.downloadUrlPrefix} --maximum-versions 10 ${updatesDir}`;
   console.log(`Wrote ${join(updatesDir, "appcast.xml")}`);
 }
 
 if (import.meta.main) {
   const updatesDir = process.argv[2];
   if (!updatesDir) die("usage: bun scripts/generate-appcast.ts <updates-dir>");
-  const prefix = process.env.DOWNLOAD_URL_PREFIX ?? "https://releases.kero.sh/";
-  await generateAppcast(updatesDir, prefix);
+  const repository = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
+  const tag = process.env.RELEASE_TAG;
+  if (!tag) die("set RELEASE_TAG, for example RELEASE_TAG=v0.2.0");
+  await generateAppcast(updatesDir, {
+    downloadUrlPrefix: `https://github.com/${repository}/releases/download/${tag}/`,
+    edKeyFile: process.env.SPARKLE_PRIVATE_KEY_FILE,
+  });
 }

@@ -44,6 +44,10 @@ private func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
+extension Notification.Name {
+    static let qjiaoProjectListDidChange = Notification.Name("qjiaoProjectListDidChange")
+}
+
 /// Owns the list of projects and the current selection. Each project holds
 /// its own terminal sessions; the "selected session" is the selected
 /// project's selected session.
@@ -73,6 +77,8 @@ final class TerminalManager: nonisolated ObservableObject {
     private var zshIdleTitleObservation: AnyCancellable?
     private var autosaveObservation: AnyCancellable?
     private var terminationObservation: AnyCancellable?
+    private var projectListChangeObservation: AnyCancellable?
+    private static var isSynchronizingProjectList = false
     /// The stable terminal/editor responder displaced by the command palette's
     /// search field. AppKit field editors are deliberately excluded because a
     /// SwiftUI TextField can reuse the same responder for the palette itself.
@@ -128,6 +134,7 @@ final class TerminalManager: nonisolated ObservableObject {
             let projectCount = Self.pendingRestores.flatMap(\.projects).count
             NSLog("🚀 [Qjiao Startup] 恢复窗口数: %d, 恢复项目数: %d, 恢复终端 Session 总数: %d", Self.pendingRestores.count, projectCount, sessionCount)
         }
+        let previousManagers = Self.registry
         Self.registry.append(self)
         var restored = false
         if !Self.pendingRestores.isEmpty {
@@ -141,11 +148,29 @@ final class TerminalManager: nonisolated ObservableObject {
         }
         let queuedDirectories = Self.takePendingDirectories()
         if !restored, queuedDirectories.isEmpty {
-            startupProjectID = newProject().id
+            // 若为新开窗口，且此前已有其他活跃窗口，则继承已有窗口的项目列表
+            if let existing = previousManagers.first(where: { !$0.projects.isEmpty }) {
+                synchronizeProjectList(with: existing.projects.map(\.id))
+            } else {
+                startupProjectID = newProject().id
+            }
+        } else if !restored {
+            if let existing = previousManagers.first(where: { !$0.projects.isEmpty }) {
+                synchronizeProjectList(with: existing.projects.map(\.id))
+            }
         }
         for directory in queuedDirectories {
             newProject(directory: directory)
         }
+        projectListChangeObservation = NotificationCenter.default
+            .publisher(for: .qjiaoProjectListDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self = self else { return }
+                if (notification.object as AnyObject) === self { return }
+                guard let newIDs = notification.userInfo?["projectIDs"] as? [UUID] else { return }
+                self.synchronizeProjectList(with: newIDs)
+            }
         // Re-theme live sessions when font, appearance, or terminal theme settings change.
         // Delivery is scheduled onto the main queue because @Published emits in
         // willSet — by then `didSet` has pushed the theme onto NSApp, so
@@ -339,6 +364,76 @@ final class TerminalManager: nonisolated ObservableObject {
             projects.append(project)
         }
         selectedProjectID = project.id
+        broadcastProjectListChange()
+    }
+
+    private func broadcastProjectListChange() {
+        guard !Self.isSynchronizingProjectList else { return }
+        let projectIDs = projects.map(\.id)
+        NotificationCenter.default.post(
+            name: .qjiaoProjectListDidChange,
+            object: self,
+            userInfo: ["projectIDs": projectIDs]
+        )
+    }
+
+    /// 跨窗口同步项目列表（包含添加未有项目、清理已被删除项目、重新排序）
+    private func synchronizeProjectList(with newIDs: [UUID]) {
+        Self.isSynchronizingProjectList = true
+        defer { Self.isSynchronizingProjectList = false }
+
+        let newIDSet = Set(newIDs)
+
+        // 1. 移除已不在全局列表中的项目
+        let projectsToRemove = projects.filter { !newIDSet.contains($0.id) }
+        for project in projectsToRemove {
+            removeLocally(project)
+        }
+
+        // 2. 补全新增的项目
+        for id in newIDs {
+            if !projects.contains(where: { $0.id == id }) {
+                let project = makeProject(id: id, createInitialSession: false)
+                if let config = ProjectConfigStore.load(for: id) {
+                    project.customName = config.customName
+                    project.useAutoTitle = config.useAutoTitle ?? false
+                    project.description = config.description
+                    project.icon = config.icon
+                    project.theme = config.theme ?? .global
+                    project.projectDirectory = config.projectDirectory ?? ""
+                    project.isArchived = config.isArchived ?? false
+                    project.launchCommands = config.launchCommands ?? []
+                    if let aiLangStr = config.aiWritingLanguage {
+                        project.aiWritingLanguage = AIWritingLanguage(rawValue: aiLangStr)
+                    }
+                }
+                projects.append(project)
+            }
+        }
+
+        // 3. 按 newIDs 重新排序当前窗口的 projects 数组
+        let projectMap = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0) })
+        projects = newIDs.compactMap { projectMap[$0] }
+
+        // 4. 校正选中的项目
+        if let selectedID = selectedProjectID, !projects.contains(where: { $0.id == selectedID }) {
+            selectedProjectID = activeProjects.first?.id ?? projects.first?.id
+        }
+    }
+
+    /// 仅在当前窗口本地移除项目（响应其他窗口的项目删除广播）
+    private func removeLocally(_ project: Project) {
+        guard let index = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        projects.remove(at: index)
+        projectObservations[project.id] = nil
+        projectThemeObservations[project.id] = nil
+        if selectedProjectID == project.id {
+            let neighbor = min(index, projects.count - 1)
+            selectedProjectID = neighbor >= 0 ? projects[neighbor].id : nil
+        }
+        if projects.isEmpty {
+            isPanelVisible = false
+        }
     }
 
     private func makeProject(id: UUID? = nil, createInitialSession: Bool = true) -> Project {
@@ -385,6 +480,7 @@ final class TerminalManager: nonisolated ObservableObject {
         if projects.isEmpty {
             isPanelVisible = false
         }
+        broadcastProjectListChange()
     }
 
     /// Moves a dragged project across `targetID`: after it when moving down,
@@ -399,6 +495,7 @@ final class TerminalManager: nonisolated ObservableObject {
         let draggedProject = reorderedProjects.remove(at: draggedIndex)
         reorderedProjects.insert(draggedProject, at: targetIndex)
         projects = reorderedProjects
+        broadcastProjectListChange()
     }
 
     /// 当前所有未归档的正常项目列表。
@@ -423,6 +520,7 @@ final class TerminalManager: nonisolated ObservableObject {
             }
         }
         objectWillChange.send()
+        broadcastProjectListChange()
     }
 
     /// 将指定项目解除归档，并将其设为当前选中项目。
@@ -432,6 +530,7 @@ final class TerminalManager: nonisolated ObservableObject {
         project.isArchived = false
         selectedProjectID = project.id
         objectWillChange.send()
+        broadcastProjectListChange()
     }
 
     /// 按索引选中未归档项目（对应快捷键 ⌘1 ~ ⌘9）。

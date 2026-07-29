@@ -172,6 +172,12 @@ struct ProjectLaunchCommand: Codable, Identifiable, Equatable {
 
 /// A project groups tabs and appears as one row in the left sidebar. Each tab
 /// is a niri-style layout of panes (terminal sessions and open files); see
+extension Notification.Name {
+    static let qjiaoProjectConfigDidChange = Notification.Name("qjiaoProjectConfigDidChange")
+}
+
+/// A project groups tabs and appears as one row in the left sidebar. Each tab
+/// is a niri-style layout of panes (terminal sessions and open files); see
 /// `PaneTab`. It always starts with one session; closing the last tab leaves
 /// the project open but empty — only the explicit "Close Project" action (see
 /// `TerminalManager.close(_:)`) removes it from the manager.
@@ -226,6 +232,10 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     @Published var tabs: [PaneTab] = []
     @Published var selectedTabID: UUID?
 
+    /// 标识当前是否正在从存储层回刷配置，防止递归触发 saveConfig()
+    private var isUpdatingFromStorage = false
+    private var configChangeObservation: AnyCancellable?
+
     /// 解析本项目实际使用的 AI 写作语言（项目覆盖优先，否则全局）。
     var resolvedAIWritingLanguage: AIWritingLanguage {
         aiWritingLanguage ?? AppSettings.shared.aiWritingLanguage
@@ -233,6 +243,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
 
     /// 将项目配置（名称、描述、图标、主题、导航路径等）立即持久化保存到磁盘配置文件。
     func saveConfig() {
+        guard !isUpdatingFromStorage else { return }
         ProjectConfigStore.save(
             ProjectConfig(
                 customName: customName,
@@ -247,7 +258,31 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             ),
             for: id
         )
+        NotificationCenter.default.post(
+            name: .qjiaoProjectConfigDidChange,
+            object: self,
+            userInfo: ["id": id]
+        )
     }
+
+    /// 从磁盘配置文件中更新本项目的各项配置属性（用于多窗口改动同步）。
+    func reloadConfig() {
+        guard let config = ProjectConfigStore.load(for: id) else { return }
+        isUpdatingFromStorage = true
+        defer { isUpdatingFromStorage = false }
+
+        if customName != config.customName { customName = config.customName }
+        if useAutoTitle != (config.useAutoTitle ?? false) { useAutoTitle = config.useAutoTitle ?? false }
+        if description != config.description { description = config.description }
+        if let dir = config.projectDirectory, projectDirectory != dir { projectDirectory = dir }
+        if icon != config.icon { icon = config.icon }
+        if theme != (config.theme ?? .global) { theme = config.theme ?? .global }
+        if isArchived != (config.isArchived ?? false) { isArchived = config.isArchived ?? false }
+        if launchCommands != (config.launchCommands ?? []) { launchCommands = config.launchCommands ?? [] }
+        let aiLang = config.aiWritingLanguage.flatMap(AIWritingLanguage.init(rawValue:))
+        if aiWritingLanguage != aiLang { aiWritingLanguage = aiLang }
+    }
+
     /// 历史回调：曾用于「终端 drop 文件夹 → 创建项目」。
     /// 现已改为左侧边栏 drop；保留字段以免会话层配置代码失效，默认不接线。
     var onOpenProjectDirectory: ((URL) -> Bool)? {
@@ -277,6 +312,15 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             newSession()
             projectDirectory = selectedSession?.currentDirectoryPath ?? ""
         }
+        configChangeObservation = NotificationCenter.default
+            .publisher(for: .qjiaoProjectConfigDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self = self else { return }
+                if (notification.object as AnyObject) === self { return }
+                guard let targetID = notification.userInfo?["id"] as? UUID, targetID == self.id else { return }
+                self.reloadConfig()
+            }
     }
 
     var name: String {
