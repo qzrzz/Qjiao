@@ -303,7 +303,7 @@ struct RightSidebarView: View {
         // next refreshTimer tick, which is what made the panel lag the change.
         .onChange(of: manager.selectedSession?.workingDirectory) { syncModels() }
         .onChange(of: commandCompletionSequences) { refreshGitForExternalEvent() }
-        .onChange(of: manager.selectedProject?.id) {
+        .onChange(of: manager.selectedProjectID) {
             syncModels()
             syncNoteBinding()
         }
@@ -810,9 +810,15 @@ struct RightSidebarView: View {
         guard let project = manager.selectedProject, manager.isPanelVisible else { return }
         let session = manager.selectedSession
 
-        // 无论当前 panelTab 是什么，只要侧边栏可见且 refreshGit 为 true，都更新 git 状态以实时保持 Git 角标数量精准
-        if refreshGit, let session {
-            git.sync(root: session.currentDirectoryPath)
+        // 无论当前 panelTab 是什么，只要侧边栏可见且 refreshGit 为 true，都更新 git 状态以实时保持 Git 角标数量精准。
+        // 优先使用当前 terminal session 的 cwd，若无 session 或 cwd 为空则回退到项目根目录，确保切换项目时即时同步 Git 状态。
+        if refreshGit {
+            let root = session?.currentDirectoryPath.isEmpty == false
+                ? session!.currentDirectoryPath
+                : projectRoot(for: project, fallback: session)
+            if !root.isEmpty {
+                git.sync(root: root)
+            }
         }
 
         let cwdVisible = showsCWD
