@@ -46,7 +46,14 @@ need("xcrun");
 need("plutil");
 need("create-dmg");
 need("codesign");
-if (process.env.PUBLISH !== "0") need("gh");
+if (process.env.PUBLISH !== "0") {
+  need("git");
+  need("gh");
+  const changes = (await $`git status --porcelain`.text()).trim();
+  if (changes) {
+    die("the Git worktree must be clean before publishing a release");
+  }
+}
 if (!existsSync(EXPORT_OPTIONS_SOURCE)) {
   die(`export options not found: ${EXPORT_OPTIONS_SOURCE}`);
 }
@@ -185,14 +192,15 @@ if (process.env.PUBLISH === "0") {
 }
 
 const appcastPath = join(UPDATES_DIR, "appcast.xml");
-say(`Publishing ${tag} to GitHub Releases…`);
 const existingRelease =
   (await $`gh release view ${tag} --repo ${GITHUB_REPOSITORY}`.nothrow())
     .exitCode === 0;
+if (existingRelease && process.env.FORCE !== "1") {
+  die(`${tag} already exists; set FORCE=1 to replace its assets`);
+}
+await createAndPushReleaseTag(tag, version);
+say(`Publishing ${tag} to GitHub Releases…`);
 if (existingRelease) {
-  if (process.env.FORCE !== "1") {
-    die(`${tag} already exists; set FORCE=1 to replace its assets`);
-  }
   await $`gh release upload ${tag} ${dmgPath} ${zipPath} ${notesPath} ${appcastPath} --repo ${GITHUB_REPOSITORY} --clobber`;
   await $`gh release edit ${tag} --repo ${GITHUB_REPOSITORY} --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
 } else {
@@ -239,4 +247,27 @@ async function runNotaryWithAppleId(
   if (exitCode !== 0) {
     die(`notarytool failed with exit code ${exitCode}`);
   }
+}
+
+/** 创建指向当前提交的版本标签，并将标签推送到 origin。 */
+async function createAndPushReleaseTag(
+  tag: string,
+  version: string,
+): Promise<void> {
+  const head = (await $`git rev-parse HEAD`.text()).trim();
+  const localTag = await $`git rev-parse --verify ${`refs/tags/${tag}`}`
+    .quiet()
+    .nothrow();
+  if (localTag.exitCode === 0) {
+    const taggedCommit = (await $`git rev-list -n 1 ${tag}`.text()).trim();
+    if (taggedCommit !== head) {
+      die(`${tag} already points to a different commit`);
+    }
+  } else {
+    say(`Creating Git tag ${tag}…`);
+    await $`git tag --annotate ${tag} --message ${`Qjiao ${version}`}`;
+  }
+
+  say(`Pushing Git tag ${tag}…`);
+  await $`git push origin ${tag}`;
 }

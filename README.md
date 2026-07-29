@@ -10,7 +10,7 @@
 
 > 相对于 Kero 原版的改动
 
-- **本地应用发布流程**：Release 构建统一使用 Qjiao 的项目名、Scheme、`com.qzrzz.qjiao` Bundle ID 与独立 Sparkle 签名密钥；在本机通过 Xcode-beta 完成 Developer ID 签名、Apple 公证、DMG/ZIP 打包和 Sparkle appcast 生成，再由本机登录的 GitHub CLI 将全部下载与自动更新资产上传到 `qzrzz/Qjiao` GitHub Releases；不使用 GitHub Actions，并移除 Cloudflare R2、rclone 与 `releases.kero.sh` 依赖。
+- **本地应用发布流程**：Release 构建统一使用 Qjiao 的项目名、Scheme、`com.qzrzz.qjiao` Bundle ID 与独立 Sparkle 签名密钥；在本机通过 Xcode-beta 完成 Developer ID 签名、Apple 公证、DMG/ZIP 打包和 Sparkle appcast 生成，成功后自动创建并推送版本标签，再由本机登录的 GitHub CLI 将全部下载与自动更新资产上传到 `qzrzz/Qjiao` GitHub Releases；不使用 GitHub Actions，并移除 Cloudflare R2、rclone 与 `releases.kero.sh` 依赖。
 - 新增 `web/` 产品官网：基于 Figma 的黑绿视觉实现 Qjiao 长页介绍，使用 Vite、React、TypeScript 6 与 Base UI；首屏及 AI Agent、项目、文件、脚本任务、Git、启动器、包管理、开发服务器、代码格式化、图片查看与图片构建均拆分为独立 Feature 组件，每个组件的 Figma 切图保存在自身 `assets/` 目录；功能截图遇到 Figma 组件或组件实例时直接导出顶层节点，每个功能组只保留一张带 Alpha 的 2× 组合切图，不再拆解其内部图层；网站内置 Pally 与 General Sans 可变字体，并按 `Group 2` 的整组 Mask 裁切层级、`multiply` 色彩叠加模式还原应用图标关键帧动画，Logo 动画采用 4 秒单程的往复播放并支持减少动态效果偏好；生产构建通过 Sharp 将 PNG、JPG、SVG（包括 `public/` 静态资源）无损转换为 WebP 并重写引用，`dist` 只发布 WebP 图片；Bun 管理依赖并支持独立的本地开发、预览与构建；修正 Detect Dev Server 与 Code Formatting 功能组信息块的垂直定位。
 - 官网功能组统一桌面端 `180px`、移动端 `72px` 的垂直间距节奏，Web Dev 分区上间距收敛为 `180px`，末尾 Image Build 不再额外保留底部间距。
 - 官网新增响应式 Footer：提供 Qjiao 品牌、项目 GitHub 源码与 X（@qzrz256）入口，以及开源版权信息。
@@ -111,7 +111,7 @@
 - Default Dark 主题的左侧项目面板改用更深的 `underWindowBackground` 材质，避免系统侧栏材质提亮背景。
 - 修复开启终端不透明度时切换 Tab 后未选中的 Git Diff 对比器透出显示的问题，并将终端背景不透明度设置应用于 Git Diff 对比器。
 - 终端 Tab 宽度展示：未挤满时最小 150、最大 220；标签条已满（需要横向滚动）时最小 130、最大 140，空间足够再恢复；标题变长立即扩张，变短延迟收缩并带过渡动画，减少抖动。
-- 优化文件查看器（FileViewer）工具栏：提取可复用原生 macOS 风格 Tooltip 系统 ([MacTooltip.swift](file:///Users/yarna/Project/Qzrzz/Code/Qjiao/kero/MacTooltip.swift))，支持极速悬停弹出、快捷键 Badge 格式与自适应多方位 (.top / .bottom 等) 定位；移除工具栏按钮悬停放大动画，恢复沉稳平整的原生 macOS 操作手感，并增强图像旋转、镜像翻转与双图对比视图。
+- 优化文件查看器（FileViewer）工具栏：提取可复用原生 macOS 风格 Tooltip 系统 ([MacTooltip.swift](kero/MacTooltip.swift))，支持极速悬停弹出、快捷键 Badge 格式与自适应多方位 (.top / .bottom 等) 定位；移除工具栏按钮悬停放大动画，恢复沉稳平整的原生 macOS 操作手感，并增强图像旋转、镜像翻转与双图对比视图。
 - 设置面板采用**左侧分类导航 + 右侧表单**布局（General / Terminal / Editor / Files / Project / About）；更新设置归入 General，并在 About 中展示项目和上游 Kero 信息。
 - 设置 Editor 分组支持分别选择 Light / Dark 编辑器配色；两种外观都可独立跟随全局与当前项目主题或设置专用主题，不改变终端和窗口主题；编辑器专用主题内置 VS Code 风格的 Dark+、Light+、GitHub Dark、GitHub Light、One Dark、One Light、Monokai Pro、Xcode、Ayu、Solarized，并直接使用其语法 token 配色即时重绘。
 - 源码文本编辑器增加可开关的英文底部状态栏：显示保存状态、当前文件大小、选区行数/字符数、文件格式，以及项目本地 `oxfmt`（优先）或 `prettier` 的格式化入口；格式化会先保存并以 `--write` 改写当前文件后重新载入。
@@ -185,6 +185,7 @@
 - 重构右侧栏代码结构：`RightSidebarView` 只保留侧栏框架与面板调度，Files、Git、Project、Info 及公共视图按职责拆分；Gradle / Just / Cargo / CMake / Makefile 任务分组统一复用同一组件与交互逻辑。
 - 优化 Project / Info 信息刷新机制：共用脚本目录采集器并并行解析各类任务；项目配置改为文件事件监听，面板每次显示、切换到对应标签或手动点击刷新时强制重新载入，不再通过 2 秒轮询读取文件（定时器仅刷新进程与端口）；切换项目、CWD 或 Session 时立即清理旧列表并取消过期任务；`ps` / `lsof` 支持取消与 3 秒超时。脚本状态使用「项目 + 工具 + 目录 + 名称」唯一键，端口按所属 Shell 精确绑定并在采集完成后即时更新；刷新按钮支持 hover 高亮，刷新期间图标旋转并禁止重复点击。修复 Info 端口按钮不更新、`Cargo.toml` 修改后任务列表不刷新，以及 Project 刷新时版本输入框旧草稿覆盖并阻止重新加载 `package.json` 版本号的问题；版本输入框仅在内容实际改变后于 Enter 或失焦时写盘。
 - 优化 Git 面板：展开收起的分组控件（MERGE CHANGES、STAGED CHANGES、CHANGES、RECENT COMMITS），展开内容添加与 Project 面板一致的左边距（`SidebarPanelMetrics.expandedContentLeading`）；Header 按钮统一添加 Hover 悬浮底色高亮，刷新按钮使用与 Project/Info 面板一致的 `SidebarRefreshButton` 带来平滑 360° 转圈动画；统一分组 Header (`SidebarSectionHeader`) 与文件变更行 (`GitEntryRow`) 右侧操作按钮 (`↰` 撤销 / `+` 暂存) 的 18x18 尺寸、4pt 间距与 8pt 右边距，实现两条操作按钮列点对点的精准垂直对齐。
+- **右侧栏 Git Tab 变更数角标**：在右侧边栏 Git 标签页右侧新增自定义角标，使用 `monospacedDigit` 字体显示当前仓库未提交变更总数（包含冲突、暂存与未暂存变更）；右侧边栏展开时持续保持 Git 状态更新，即使处于 Project/Files/CWD/Info 等其他标签页也能即时感知与查看变更状态；角标无变更时自动隐藏，超过 99 时显示 `99+`。
 - 优化 Git Commit 编辑功能：核心实现封装于独立文件 `GitCommitEditor.swift`，支持编辑任意历史 Commit Message (Reword)、修改作者/邮箱 (Author)、修补合并暂存改动 (Fixup/Amend) 以及丢弃提交 (Drop)；可在 Git 面板 Recent Commits 的右键菜单与极简编辑弹窗中直接交互并自动刷新状态；`Recent Commits` 行增加 Hover 悬浮圆角背景高亮，并开启 `.textSelection(.enabled)` 允许选中文本。
 - 优化 FilesTree 面板：
   - 顶栏图标按钮（Filter / Sort / Reveal in Finder）采用统一的 `SidebarIconButton` 与 `SidebarMenuIconButton` 视图（标准 22x22 尺寸、5pt 圆角、平滑 hover 悬浮高亮与 active 激活态），保持整个右侧边栏 Header 按钮语言高度统一。

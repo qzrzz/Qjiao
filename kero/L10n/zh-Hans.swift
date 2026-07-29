@@ -407,7 +407,7 @@ extension L10n {
         "Original + @2x": "原图 + @2x 两倍图",
         "Overwrite": "覆盖",
         "Overwrite source file": "覆盖原文件",
-        "PACKAGE": "包信息",
+        "PACKAGE": "Package",
         "Package Manager": "包管理器",
         "Package manager": "包管理器",
         "package.json": "package.json",

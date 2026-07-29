@@ -35,6 +35,15 @@ private struct TopTabItem {
     let systemImage: String
     let title: String
     let help: String
+    let badgeCount: Int
+
+    init(panel: RightPanel, systemImage: String, title: String, help: String, badgeCount: Int = 0) {
+        self.panel = panel
+        self.systemImage = systemImage
+        self.title = title
+        self.help = help
+        self.badgeCount = badgeCount
+    }
 }
 
 /// 右侧 Tabs 按内容测宽的自适应布局：能完整展示标题时全部展示，
@@ -79,12 +88,12 @@ private enum SidebarTabLayout {
 
     /// 根据实际文案宽度决定展缩模式与 tab 间距。
     static func resolve(
-        titles: [String],
+        items: [TopTabItem],
         activeIndex: Int,
         availableWidth: CGFloat,
         trailingReserve: CGFloat = 0
     ) -> Result {
-        let count = titles.count
+        let count = items.count
         guard count > 0, availableWidth > 0 else {
             return Result(mode: .iconsOnly, spacing: interTabSpacingNarrow, activeIndex: 0)
         }
@@ -93,9 +102,9 @@ private enum SidebarTabLayout {
 
         func totalWidth(mode: TitleMode, spacing: CGFloat) -> CGFloat {
             var sum: CGFloat = 0
-            for (index, title) in titles.enumerated() {
+            for (index, item) in items.enumerated() {
                 let showTitle = mode == .all || (mode == .activeOnly && index == safeActive)
-                sum += chipWidth(title: showTitle ? title : nil)
+                sum += chipWidth(title: showTitle ? item.title : nil, badgeCount: item.badgeCount)
             }
             sum += spacing * CGFloat(max(0, count - 1))
             return sum + barInsets + measureSlack
@@ -117,16 +126,43 @@ private enum SidebarTabLayout {
         return Result(mode: .iconsOnly, spacing: interTabSpacingNarrow, activeIndex: safeActive)
     }
 
-    /// 单个 chip 宽度：图标固定 14，有标题时再加字距与文案测宽。
-    private static func chipWidth(title: String?) -> CGFloat {
+    /// 根据实际文案宽度决定展缩模式与 tab 间距（底栏字符串回退版本）。
+    static func resolve(
+        titles: [String],
+        activeIndex: Int,
+        availableWidth: CGFloat,
+        trailingReserve: CGFloat = 0
+    ) -> Result {
+        let items = titles.map { TopTabItem(panel: .project, systemImage: "", title: $0, help: "", badgeCount: 0) }
+        return resolve(items: items, activeIndex: activeIndex, availableWidth: availableWidth, trailingReserve: trailingReserve)
+    }
+
+    /// 单个 chip 宽度：图标固定 14，有标题时再加字距与文案测宽；若有角标则加上角标宽度。
+    private static func chipWidth(title: String?, badgeCount: Int = 0) -> CGFloat {
+        var base: CGFloat = 0
         if let title {
-            return horizontalPaddingWithTitle * 2
+            base = horizontalPaddingWithTitle * 2
                 + trailingPaddingExtra
                 + iconSide
                 + iconTitleSpacing
                 + titleWidth(title)
+        } else {
+            base = horizontalPaddingIconOnly * 2 + trailingPaddingExtra + iconSide
         }
-        return horizontalPaddingIconOnly * 2 + trailingPaddingExtra + iconSide
+        if badgeCount > 0 {
+            base += iconTitleSpacing + badgeWidth(count: badgeCount)
+        }
+        return base
+    }
+
+    private static func badgeWidth(count: Int) -> CGFloat {
+        let text = count > 99 ? "99+" : "\(count)"
+        let font = NSFont.monospacedDigitSystemFont(
+            ofSize: 10,
+            weight: .semibold
+        )
+        let textWidth = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        return max(16, textWidth + 8)
     }
 
     private static func titleWidth(_ title: String) -> CGFloat {
@@ -243,8 +279,8 @@ struct RightSidebarView: View {
             syncSystemPolling()
             syncNoteBinding()
         }
-        // 进程、端口与文件信息继续按需轮询；Git 改由命令完成和激活事件刷新。
-        .onReceive(refreshTimer) { _ in syncModels(refreshGit: false) }
+        // 进程、端口与文件信息继续按需轮询；Git 在侧栏打开时持续保持状态更新以精确显示角标。
+        .onReceive(refreshTimer) { _ in syncModels(refreshGit: true) }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification
         )) { _ in refreshGitForExternalEvent() }
@@ -320,7 +356,6 @@ struct RightSidebarView: View {
     /// Git 事件处理从庞大的 SwiftUI modifier 表达式中拆出，降低 Swift 6 类型推断负担。
     private func refreshGitForExternalEvent() {
         guard manager.isPanelVisible else { return }
-        guard manager.panelTab == .git else { return }
         syncModels()
     }
 
@@ -593,10 +628,9 @@ struct RightSidebarView: View {
     private var tabBar: some View {
         GeometryReader { geo in
             let items = topTabItems
-            let titles = items.map(\.title)
             let activeIndex = items.firstIndex { $0.panel == manager.panelTab } ?? 0
             let layout = SidebarTabLayout.resolve(
-                titles: titles,
+                items: items,
                 activeIndex: activeIndex,
                 availableWidth: geo.size.width
             )
@@ -611,7 +645,8 @@ struct RightSidebarView: View {
                             systemImage: item.systemImage,
                             title: item.title,
                             help: item.help,
-                            showTitle: layout.showsTitle(at: index)
+                            showTitle: layout.showsTitle(at: index),
+                            badgeCount: item.badgeCount
                         )
                     }
                     Spacer(minLength: 0)
@@ -663,7 +698,8 @@ struct RightSidebarView: View {
                 panel: .git,
                 systemImage: "arrow.triangle.branch",
                 title: L10n.t("Git"),
-                help: L10n.t("Git (⇧⌘G)")
+                help: L10n.t("Git (⇧⌘G)"),
+                badgeCount: git.isRepo ? git.totalChangeCount : 0
             )
         )
         return items
@@ -674,7 +710,8 @@ struct RightSidebarView: View {
         systemImage: String,
         title: String,
         help: String,
-        showTitle: Bool
+        showTitle: Bool,
+        badgeCount: Int = 0
     ) -> some View {
         let isActive = manager.panelTab == panel
         return Button {
@@ -684,7 +721,8 @@ struct RightSidebarView: View {
                 systemImage: systemImage,
                 title: title,
                 isActive: isActive,
-                showTitle: showTitle
+                showTitle: showTitle,
+                badgeCount: badgeCount
             )
         }
         .buttonStyle(.plain)
@@ -699,7 +737,8 @@ struct RightSidebarView: View {
         systemImage: String,
         title: String,
         isActive: Bool,
-        showTitle: Bool
+        showTitle: Bool,
+        badgeCount: Int = 0
     ) -> some View {
         HStack(alignment: .center, spacing: SidebarTabLayout.iconTitleSpacing) {
             Image(systemName: systemImage)
@@ -714,7 +753,25 @@ struct RightSidebarView: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
+            if badgeCount > 0 {
+                let badgeText = badgeCount > 99 ? "99+" : "\(badgeCount)"
+                Text(badgeText)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(isActive ? Color.primary : Color.primary.opacity(0.85))
+                    .padding(.horizontal, 4)
+                    .frame(minWidth: 16, minHeight: 15)
+                    .background(
+                        Capsule()
+                            .fill(isActive ? Color.primary.opacity(0.14) : Color.primary.opacity(0.09))
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    )
+                    .transition(.scale.combined(with: .opacity))
+            }
         }
+        .animation(.smooth(duration: 0.2), value: badgeCount)
         .foregroundStyle(isActive ? .primary : .secondary)
         .padding(
             .leading,
@@ -752,6 +809,12 @@ struct RightSidebarView: View {
 
         guard let project = manager.selectedProject, manager.isPanelVisible else { return }
         let session = manager.selectedSession
+
+        // 无论当前 panelTab 是什么，只要侧边栏可见且 refreshGit 为 true，都更新 git 状态以实时保持 Git 角标数量精准
+        if refreshGit, let session {
+            git.sync(root: session.currentDirectoryPath)
+        }
+
         let cwdVisible = showsCWD
         if manager.panelTab == .files, cwdVisible, !wasCWDVisible {
             manager.panelTab = .cwd
@@ -787,9 +850,7 @@ struct RightSidebarView: View {
             guard let session else { return }
             fileTree.sync(root: session.currentDirectoryPath)
         case .git:
-            guard refreshGit else { return }
-            guard let session else { return }
-            git.sync(root: session.currentDirectoryPath)
+            break
         }
     }
 

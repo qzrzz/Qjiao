@@ -150,19 +150,17 @@ SPARKLE_PRIVATE_KEY_FILE="/path/to/qjiao-sparkle-private-key"
 - 本次更新内容
 ```
 
-### 2. 提交并推送版本标签
+### 2. 提交并推送代码
 
 ```sh
 git add \
   Qjiao.xcodeproj/project.pbxproj \
   CHANGELOG.md
 git commit -m "chore(release): 发布 0.2.0"
-git tag v0.2.0
-git push origin main v0.2.0
+git push origin main
 ```
 
-标签必须严格等于 `v<MARKETING_VERSION>`。发布脚本调用
-`gh release create --verify-tag`，不会为不存在的远程标签创建 Release。
+发布时工作区必须保持干净，确保标签准确指向已经提交的发布源码。
 
 ### 3. 在本机编译并上传
 
@@ -178,7 +176,11 @@ bun run release
 4. 提交 Apple 公证，并给 DMG 和 App 装订票据。
 5. 生成 Sparkle ZIP 与版本更新说明。
 6. 下载上一版 `appcast.xml` 并追加当前版本。
-7. 使用本机 `gh` 创建 GitHub Release 并上传四项资产。
+7. 自动创建并推送 `v<MARKETING_VERSION>` Git 标签。
+8. 使用本机 `gh` 创建 GitHub Release 并上传四项资产。
+
+如果同名本地标签已经指向当前提交，脚本会直接复用并推送；如果标签
+指向其他提交，则立即终止，不会移动或覆盖已有标签。
 
 发布完成后检查：
 
@@ -194,7 +196,8 @@ bun run release
 PUBLISH=0 bun run release
 ```
 
-产物位于 `build/`。此模式不需要 `gh`，也不会读取或修改 GitHub。
+产物位于 `build/`。此模式不需要 `git` 或 `gh`，不会创建标签，也
+不会读取或修改 GitHub。
 
 ## 发布选项
 
