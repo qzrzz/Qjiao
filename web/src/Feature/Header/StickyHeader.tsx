@@ -57,7 +57,7 @@ export function StickyHeader() {
           onClick={handleScrollToTop}
           title="返回顶部"
         >
-          <img src="/qjiao-icon.png" width="32" height="32" alt="Qjiao Logo" />
+          <img src="./qjiao-icon.png" width="32" height="32" alt="Qjiao Logo" />
           <span>Qjiao</span>
         </a>
 
