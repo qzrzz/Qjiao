@@ -136,6 +136,7 @@ struct ImageExportTemplate: Identifiable, Sendable {
             rows: [
                 .init(sizeText: "16w", suffix: "_16"),
                 .init(sizeText: "32w", suffix: "_32"),
+                .init(sizeText: "64w", suffix: "_64"),
                 .init(sizeText: "128w", suffix: "_128"),
                 .init(sizeText: "256w", suffix: "_256"),
                 .init(sizeText: "512w", suffix: "_512"),
