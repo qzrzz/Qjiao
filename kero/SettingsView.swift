@@ -479,7 +479,7 @@ struct SettingsView: View {
             Section(L10n.t("Preview")) {
                 Group {
                     FontThickenPreview(font: previewFont, thicken: settings.fontThicken)
-                        .frame(height: 110)
+                        .frame(height: 155)
                         .padding(.vertical, 4)
                         .animation(.easeInOut(duration: 0.12), value: settings.fontThicken)
                 }
@@ -1798,6 +1798,8 @@ private final class FontThickenPreviewNSView: NSView {
     private var font: NSFont = .systemFont(ofSize: 13)
     private var thicken = false
 
+    override var isFlipped: Bool { true }
+
     func update(font: NSFont, thicken: Bool) {
         if self.font != font || self.thicken != thicken {
             self.font = font
@@ -1811,33 +1813,40 @@ private final class FontThickenPreviewNSView: NSView {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.setShouldSmoothFonts(thicken)
 
-        let lines = [
+        let boldFont = TerminalFont.resolve(
+            family: font.familyName ?? "",
+            size: font.pointSize,
+            useBundledChineseFallback: true,
+            thicken: true
+        )
+
+        let lineItems: [(String, NSFont)] = [
             ("Qjiao ❯ echo \"the quick brown fox\" 0O 1lI", font),
-            ("\u{E0A0} main \u{E0B0} ~/dev/qjiao \u{E711} \u{F024B} \u{F0A7D}", font),
-            ("bold — permission denied (os error 13)", TerminalFont.resolve(family: font.familyName ?? "", size: font.pointSize, useBundledChineseFallback: true, thicken: true)),
-            ("""
-            ┌────┬──────────────┬──────────┬────────────┐
-            │ ID │ Name         │ 状态     │ Description│
-            ├────┼──────────────┼──────────┼────────────┤
-            │ 06 │ 青椒         │ 测试中   │ Testing    │
-            └────┴──────────────┴──────────┴────────────┘
-            """, font)
+            ("❯ main ❯ ~/dev/qjiao ⚡ 📦 ⌘", font),
+            ("bold — permission denied (os error 13)", boldFont),
+            ("┌────┬──────────────┬──────────┬────────────┐", font),
+            ("│ ID │ Name         │ 状态     │ Description│", font),
+            ("├────┼──────────────┼──────────┼────────────┤", font),
+            ("│ 06 │ 青椒         │ 测试中   │ Testing    │", font),
+            ("└────┴──────────────┴──────────┴────────────┘", font)
         ]
 
-        var y = bounds.height - 18
-        for (text, lineFont) in lines {
+        let lineHeight = max(font.pointSize * 1.35, 16)
+        var y: CGFloat = 8
+
+        for (text, lineFont) in lineItems {
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: lineFont,
                 .foregroundColor: NSColor.labelColor
             ]
             let str = NSAttributedString(string: text, attributes: attrs)
-            str.draw(at: NSPoint(x: 0, y: y))
-            y -= lineFont.pointSize * 1.4
+            str.draw(at: NSPoint(x: 8, y: y))
+            y += lineHeight
         }
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: 110)
+        NSSize(width: NSView.noIntrinsicMetric, height: 155)
     }
 }
 
