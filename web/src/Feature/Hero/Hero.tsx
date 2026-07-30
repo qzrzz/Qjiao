@@ -1,4 +1,5 @@
 import { motion, useReducedMotion } from "motion/react";
+import { getCurrentLang, uiDictMap, type SupportedLang } from "../../i18n/dict";
 import iconBackground from "./assets/icon-background.png";
 import iconGlowBottom from "./assets/icon-glow-bottom.svg";
 import iconGlowTop from "./assets/icon-glow-top.svg";
@@ -8,11 +9,17 @@ import workspace from "./assets/workspace.png";
 import "./Hero.css";
 import { useLatestRelease } from "./useLatestRelease";
 
-/** Figma 首屏，包含应用图标关键帧动画与产品主界面。 */
-export function Hero() {
+interface HeroProps {
+  lang?: SupportedLang;
+}
+
+/** Hero 首屏组件，支持多语言标语与说明。 */
+export function Hero({ lang }: HeroProps) {
   const reduceMotion = useReducedMotion();
   const restingPosition = { x: 12.109, y: -5.328 };
-  const { downloadUrl, versionText, tagName } = useLatestRelease("qzrzz", "Qjiao");
+  const { downloadUrl, tagName } = useLatestRelease("qzrzz", "Qjiao");
+  const currentLang = lang || getCurrentLang();
+  const dict = uiDictMap[currentLang] || uiDictMap.en;
 
   return (
     <section className="hero" aria-labelledby="hero-title">
@@ -102,20 +109,17 @@ export function Hero() {
       </div>
 
       <h1 id="hero-title">Qjiao</h1>
-      <p className="heroTagline">Beginner-Friendly Terminal Workspace</p>
-      <p className="heroDescription">
-        Bringing TUI and GUI together — enjoy the power of TUI without the
-        barriers of a traditional terminal.
-      </p>
+      <p className="heroTagline">{dict.heroTagline}</p>
+      <p className="heroDescription">{dict.heroDesc}</p>
       <a
         id="hero-download"
         className="heroDownload"
         href={downloadUrl}
         target="_blank"
         rel="noreferrer"
-        title={tagName ? `下载 Qjiao ${tagName}` : "从 GitHub 获取最新 Release"}
+        title={tagName ? `${dict.download} Qjiao ${tagName}` : dict.downloadTitle}
       >
-        Download <span className="sub">{versionText}</span>
+        {dict.download} <span className="sub">{dict.downloadSubText}</span>
       </a>
       <img className="heroWorkspace" src={workspace} alt="Qjiao terminal workspace interface" />
     </section>

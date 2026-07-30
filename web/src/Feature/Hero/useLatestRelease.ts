@@ -92,7 +92,7 @@ export function useLatestRelease(
           isLoading: false,
         });
       })
-      .catch((err) => {
+      .catch(() => {
         // 请求 API 失败时（如限流或离线），静默退回到默认 Releases 地址
         if (isMounted) {
           setInfo({

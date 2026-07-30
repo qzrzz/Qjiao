@@ -256,7 +256,8 @@ bun run release
 
 如果 DMG 已创建，但 Apple timestamp 服务不可用，下一次执行只会
 验证并复用该 DMG，然后重新请求 secure timestamp，不会重新创建
-磁盘映像。单次执行默认也会重试 timestamp 签名 3 次。
+磁盘映像。单次执行默认会对 Xcode 归档中的瞬时 CodeSign 失败和 DMG
+timestamp 签名各重试 3 次；归档重试会保留 DerivedData，复用已经完成的编译。
 
 升级到断点脚本前没有状态文件时，脚本允许接管版本号和构建号完全
 匹配、App 签名有效且磁盘映像完整的现有产物。后续运行同时要求 Git
@@ -289,6 +290,7 @@ RESET_RELEASE=1 bun run release
 | `NO_HISTORY=1`                | —                          | 不继承旧 appcast       |
 | `REUSE_BUILD=1`               | —                          | 复用已导出的 Qjiao.app |
 | `RESET_RELEASE=1`             | —                          | 清除断点并完整重建     |
+| `ARCHIVE_RETRIES`             | `3`                        | 归档签名失败尝试次数   |
 | `TIMESTAMP_RETRIES`           | `3`                        | 时间戳签名尝试次数     |
 
 默认允许用当前提交重复发布相同版本：

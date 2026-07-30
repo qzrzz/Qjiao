@@ -18,7 +18,13 @@
   --feature-group-gap: 180px;
   color: #fff;
   background: #000;
-  font-family: "GeneralSans-Variable", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    "GeneralSans-Variable",
+    "SF Pro Display",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -60,6 +66,10 @@ img {
   overflow: hidden;
   background: #000;
 }
+
+/* ==========================================================================
+   Section 分区 Heading 样式
+   ========================================================================== */
 
 .featureCollection {
   position: relative;
@@ -105,7 +115,13 @@ img {
   margin-bottom: 80px;
 }
 
-.featureGroup {
+/* ==========================================================================
+   FeatureCard 模块 (规范化 BEM 结构)
+   按高清屏 (Retina @2x 逻辑像素) 标准显示，防拉伸变形
+   ========================================================================== */
+
+/* 1. 基础卡片框架 */
+.featureCard {
   position: relative;
   width: 1134px;
   height: 714px;
@@ -113,7 +129,7 @@ img {
   margin: 0 auto var(--feature-group-gap);
 }
 
-.featureInfo {
+.featureCard__info {
   position: absolute;
   top: 0;
   left: 0;
@@ -124,8 +140,8 @@ img {
   background: linear-gradient(143.475deg, rgb(32 72 50) 16.76%, rgba(61, 118, 76, 0) 59.15%);
 }
 
-.featureInfo h3,
-.featureInfo p {
+.featureCard__info h3,
+.featureCard__info p {
   position: absolute;
   left: 52px;
   width: min(752px, calc(100% - 104px));
@@ -135,76 +151,160 @@ img {
   line-height: 1.22;
 }
 
-.featureInfo h3 {
+.featureCard__info h3 {
   top: 43px;
   font-size: 36px;
 }
 
-.featureInfo p {
-  top: 102px;
+.featureCard__info p {
+  top: 98px;
   font-size: 24px;
+  line-height: 1.6;
 }
 
-.featureShot {
+/* 基础截图样式：采用高清屏真实逻辑尺寸与 object-fit 防拉伸 */
+.featureCard__shot {
   position: absolute;
   top: 142px;
   left: 27px;
   width: 1107px;
-  height: auto;
+  height: 634px;
+  object-fit: contain;
   pointer-events: none;
   user-select: none;
 }
 
-.featureGroup--right {
+/* 2. Left 风格卡片（文案在左，图片在下） */
+.featureCard--left .featureCard__shot {
+  width: 1107px;
+  height: 634px;
+}
+
+/* 3. Right 风格卡片（文案在右，图片在左下） */
+.featureCard--right {
   height: 651px;
   overflow: hidden;
   border-radius: 48px;
-  margin-bottom: var(--feature-group-gap);
 }
 
-/* 末尾功能组不参与组间间距，避免页面底部出现额外黑色留白。 */
-.imageBuildFeature {
-  margin-bottom: 0;
-}
-
-.featureGroup--right .featureInfo {
+.featureCard--right .featureCard__info {
   left: auto;
   right: 44px;
   height: 651px;
   background: linear-gradient(81.25deg, rgba(61, 118, 76, 0) 26.24%, rgb(32 72 50) 85%);
 }
 
-.featureGroup--right .featureInfo h3,
-.featureGroup--right .featureInfo p {
+.featureCard--right .featureCard__info h3,
+.featureCard--right .featureCard__info p {
   right: 66px;
   left: auto;
   text-align: right;
 }
 
-.featureGroup--right .featureShot {
+.featureCard--right .featureCard__shot {
   top: 183px;
   left: -308px;
+  width: 1107px;
+  height: 634px;
 }
 
-.featureGroup--bottom-copy .featureInfo {
+/* 4. Bottom 风格卡片（文案在右侧底部，图片在左侧上部） */
+.featureCard--bottom {
+  height: 651px;
+  overflow: hidden;
+  border-radius: 48px;
+}
+
+.featureCard--bottom .featureCard__info {
+  top: 0;
+  left: auto;
+  right: 44px;
+  height: 651px;
   background: linear-gradient(127.42deg, rgba(61, 118, 76, 0) 12.01%, rgb(32 72 50) 66.28%);
 }
 
-.featureGroup--bottom-copy .featureInfo h3 {
+.featureCard--bottom .featureCard__info h3,
+.featureCard--bottom .featureCard__info p {
+  right: 66px;
+  left: auto;
+  text-align: right;
+}
+
+.featureCard--bottom .featureCard__info h3 {
   top: auto;
-  bottom: 162px;
+  bottom: 120px;
 }
 
-.featureGroup--bottom-copy .featureInfo p {
-  top: 498px;
+.featureCard--bottom .featureCard__info p {
+  top: 540px;
 }
 
-/* 这两个信息块只包裹底部文案，同时保持标题与说明的原始底部锚点。 */
-.devServerFeature .featureInfo,
-.codeFormattingFeature .featureInfo {
-    top: 0;
-    height: 651px;
+/* ==========================================================================
+   特定卡片的高清屏真实逻辑尺寸微调 (Retina @2x 物理像素 ÷ 2)
+   ========================================================================== */
+
+/* Project 卡片 (2214x1396 -> 1107x698) */
+.featureCard--project {
+  height: 810px;
 }
+.featureCard--project .featureCard__shot {
+  top: 164px;
+  left: 27px;
+  width: 1107px;
+  height: 698px;
+}
+
+/* DevServer (2216x1270 -> 1108x635) */
+.featureCard--dev-server .featureCard__shot {
+  top: -156px;
+  left: -313px;
+  width: 1108px;
+  height: 635px;
+}
+
+/* CodeFormatting (2216x1270 -> 1108x635) */
+.featureCard--code-formatting .featureCard__shot {
+  top: -147px;
+  left: -264px;
+  width: 1108px;
+  height: 635px;
+}
+
+/* ImageBuild 卡片 (2214x1600 -> 1107x800) */
+.featureCard--image-build {
+  height: 960px;
+  margin-bottom: 0;
+}
+.featureCard--image-build .featureCard__shot {
+  top: 159px;
+  left: 20px;
+  width: 1107px;
+  height: 800px;
+}
+
+/* Launchers 卡片 (2216x1270 -> 1108x635) */
+.featureCard--launchers .featureCard__shot {
+  top: 183px;
+  left: 27px;
+  width: 1108px;
+  height: 635px;
+}
+
+/* Script Runner 卡片 (2216x1404 -> 1108x702) */
+.featureCard--script-runner .featureCard__shot {
+  top: 159px;
+  left: 20px;
+  width: 1108px;
+  height: 702px;
+}
+
+.featureCard--git .featureCard__shot {
+  top: 162px;
+}
+
+/* ==========================================================================
+   移动端响应式 (Media Query <= 760px)
+   ========================================================================== */
 
 @media (max-width: 760px) {
   :root {
@@ -229,8 +329,12 @@ img {
     margin-top: 180px;
   }
 
-  .featureGroup,
-  .featureGroup--right {
+  .featureCard,
+  .featureCard--left,
+  .featureCard--right,
+  .featureCard--bottom,
+  .featureCard--project,
+  .featureCard--image-build {
     display: flex;
     width: auto;
     height: auto;
@@ -242,12 +346,9 @@ img {
     border-radius: 0;
   }
 
-  .imageBuildFeature {
-    margin-bottom: 0;
-  }
-
-  .featureInfo,
-  .featureGroup--right .featureInfo {
+  .featureCard__info,
+  .featureCard--right .featureCard__info,
+  .featureCard--bottom .featureCard__info {
     position: relative;
     left: 0;
     width: 100%;
@@ -257,43 +358,55 @@ img {
     background: linear-gradient(145deg, rgb(40, 105, 57) 0%, rgba(61, 118, 76, 0) 74%);
   }
 
-  .devServerFeature .featureInfo,
-  .codeFormattingFeature .featureInfo {
+  .featureCard--dev-server .featureCard__info,
+  .featureCard--code-formatting .featureCard__info {
     top: 0;
     height: 651px;
   }
 
-  .featureInfo h3,
-  .featureInfo p,
-  .featureGroup--right .featureInfo h3,
-  .featureGroup--right .featureInfo p {
+  .featureCard__info h3,
+  .featureCard__info p,
+  .featureCard--right .featureCard__info h3,
+  .featureCard--right .featureCard__info p,
+  .featureCard--bottom .featureCard__info h3,
+  .featureCard--bottom .featureCard__info p {
     right: auto;
     left: 26px;
     width: calc(100% - 52px);
     text-align: left;
   }
 
-  .featureInfo h3,
-  .featureGroup--bottom-copy .featureInfo h3 {
+  .featureCard__info h3,
+  .featureCard--bottom .featureCard__info h3 {
     top: 30px;
     bottom: auto;
     font-size: 28px;
   }
 
-  .featureInfo p,
-  .featureGroup--bottom-copy .featureInfo p {
+  .featureCard__info p,
+  .featureCard--bottom .featureCard__info p {
     top: 82px;
     bottom: auto;
     font-size: 17px;
   }
 
-  .featureShot,
-  .featureGroup--right .featureShot {
+  .featureCard__shot,
+  .featureCard--left .featureCard__shot,
+  .featureCard--right .featureCard__shot,
+  .featureCard--bottom .featureCard__shot,
+  .featureCard--project .featureCard__shot,
+  .featureCard--dev-server .featureCard__shot,
+  .featureCard--code-formatting .featureCard__shot,
+  .featureCard--image-build .featureCard__shot,
+  .featureCard--launchers .featureCard__shot,
+  .featureCard--script-runner .featureCard__shot {
     position: relative;
     top: -58px;
     left: 12px;
     width: calc(100% + 22px);
+    height: auto;
     max-width: none;
+    object-fit: contain;
     margin-bottom: -58px;
   }
 }

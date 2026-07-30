@@ -9,7 +9,7 @@
   background: rgba(0, 0, 0, 0.6);
   -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(158, 241, 193, 0.2);
+  border-bottom: 1px solid rgba(128, 180, 155, 0.2);
   transform: translateY(-100%);
   opacity: 0;
   pointer-events: none;
@@ -44,19 +44,21 @@
   font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.03em;
-  background: linear-gradient(180deg, #a7f9c0 0%, #ffffff 70%);
+  background: linear-gradient(180deg, #b8e2cd 0%, #ffffff 70%);
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
+  transform: translateY(0) translateZ(0);
+  backface-visibility: hidden;
   transition:
-    transform 160ms ease,
-    opacity 160ms ease;
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 200ms ease;
   padding: 0 4px;
 }
 
 .stickyHeaderBrand:hover {
   opacity: 0.9;
-  transform: scale(1.02);
+  transform: scale(1.02) translateY(0);
 }
 
 .stickyHeaderBrand img {
@@ -68,7 +70,7 @@
 .stickyHeaderActions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .stickyHeaderBtn {
@@ -77,48 +79,67 @@
   justify-content: center;
   gap: 6px;
   text-decoration: none;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1;
   border-radius: 999px;
-  padding: 8px 18px;
+  height: 32px;
+  padding: 0 14px;
+  backdrop-filter: blur(12px);
+  transform: translateY(0) translateZ(0);
+  backface-visibility: hidden;
   transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    transform 160ms ease;
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .stickyHeaderBtn--download {
-  border: 1px solid rgba(114, 240, 167, 0.45);
-  background: rgba(114, 240, 167, 0.12);
-  color: #72f0a7;
+  border: 1px solid rgba(128, 180, 155, 0.5);
+  background: rgba(128, 180, 155, 0.15);
+  color: #80b49b;
   font-weight: 600;
 }
 
 .stickyHeaderBtn--download:hover {
-  border-color: #72f0a7;
-  background: rgba(114, 240, 167, 0.25);
-  color: #e4ffeb;
-  transform: translateY(-1px);
+  border-color: #80b49b;
+  background: rgba(128, 180, 155, 0.28);
+  color: #ffffff;
+  transform: translateY(-2px) translateZ(0);
 }
 
+/* 统一次要胶囊按钮规范：统一平移 */
 .stickyHeaderBtn--github {
-  border: 1px solid rgba(114, 240, 167, 0.25);
-  background: rgba(255, 255, 255, 0.03);
-  color: #b9efc8;
+  border: 1px solid rgba(128, 180, 155, 0.3);
+  background: rgba(128, 180, 155, 0.06);
+  color: #b8e2cd;
 }
 
 .stickyHeaderBtn--github:hover {
-  border-color: rgba(114, 240, 167, 0.5);
-  background: rgba(114, 240, 167, 0.08);
+  border-color: rgba(128, 180, 155, 0.65);
+  background: rgba(128, 180, 155, 0.15);
   color: #ffffff;
-  transform: translateY(-1px);
+  transform: translateY(-2px) translateZ(0);
 }
 
-.stickyHeaderBtn svg {
-  width: 15px;
-  height: 15px;
+.stickyHeaderBtn--github svg {
+  width: 14px;
+  height: 14px;
+  color: #80b49b;
+  fill: currentColor;
+  transition: color 200ms cubic-bezier(0.16, 1, 0.3, 1), fill 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.stickyHeaderBtn--github svg path {
+  fill: currentColor;
+  transition: fill 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.stickyHeaderBtn--github:hover svg,
+.stickyHeaderBtn--github:hover svg path {
+  color: #ffffff;
+  fill: #ffffff;
 }
 
 @media (max-width: 760px) {
@@ -140,11 +161,12 @@
   }
 
   .stickyHeaderActions {
-    gap: 8px;
+    gap: 6px;
   }
 
   .stickyHeaderBtn {
-    font-size: 13px;
-    padding: 6px 12px;
+    height: 28px;
+    font-size: 12px;
+    padding: 0 10px;
   }
 }
