@@ -410,11 +410,15 @@ if (
     die(`${tag} already exists and FORCE=0 prevents replacing its assets`);
   }
   say(`Publishing ${tag} to GitHub Releases…`);
+  if (!existingRelease) {
+    await $`gh release create ${tag} --repo ${GITHUB_REPOSITORY} --verify-tag --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
+  }
+  const releaseAssets = [dmgPath, zipPath, notesPath, appcastPath];
+  for (const [index, assetPath] of releaseAssets.entries()) {
+    await uploadReleaseAsset(tag, assetPath, index + 1, releaseAssets.length);
+  }
   if (existingRelease) {
-    await $`gh release upload ${tag} ${dmgPath} ${zipPath} ${notesPath} ${appcastPath} --repo ${GITHUB_REPOSITORY} --clobber`;
     await $`gh release edit ${tag} --repo ${GITHUB_REPOSITORY} --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
-  } else {
-    await $`gh release create ${tag} ${dmgPath} ${zipPath} ${notesPath} ${appcastPath} --repo ${GITHUB_REPOSITORY} --verify-tag --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
   }
   if (!(await validatePublishedRelease(tag, releaseAssetNames))) {
     die(`GitHub Release ${tag} is missing one or more required assets`);
@@ -507,6 +511,44 @@ async function archiveWithCodeSignRetry(signingArgs: string[]): Promise<void> {
     );
     await Bun.sleep(delay);
   }
+}
+
+/** 逐个上传 Release 资产，并定期报告等待时间。 */
+async function uploadReleaseAsset(
+  tag: string,
+  assetPath: string,
+  index: number,
+  total: number,
+): Promise<void> {
+  const name = assetPath.split("/").at(-1) ?? assetPath;
+  const size = formatByteSize(Bun.file(assetPath).size);
+  const startedAt = Date.now();
+  say(`Uploading asset ${index}/${total}: ${name} (${size})…`);
+  const heartbeat = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startedAt) / 1_000);
+    console.log(`  ${name}: upload still running (${elapsed}s elapsed)`);
+  }, 15_000);
+
+  try {
+    await $`gh release upload ${tag} ${assetPath} --repo ${GITHUB_REPOSITORY} --clobber`;
+  } finally {
+    clearInterval(heartbeat);
+  }
+  const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1_000));
+  say(`Uploaded ${name} in ${elapsed}s.`);
+}
+
+/** 将字节数格式化为适合发布日志的二进制单位。 */
+function formatByteSize(bytes: number): string {
+  if (bytes < 1_024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB"];
+  let value = bytes / 1_024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && value >= 1_024; index += 1) {
+    value /= 1_024;
+    unit = units[index];
+  }
+  return `${value.toFixed(1)} ${unit}`;
 }
 
 /** 计算真正影响 macOS App 构建和签名的输入指纹。 */
