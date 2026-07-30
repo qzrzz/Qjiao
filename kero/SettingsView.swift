@@ -866,7 +866,7 @@ struct SettingsView: View {
             && settings.filesFontFamily.isEmpty
             && settings.filesFontSize == AppSettings.defaultFilesFontSize
             && !settings.restoreTerminalHistory
-            && !settings.directClickMovesCursor
+            && settings.directClickMovesCursor
             && settings.packageManagerCommand == .auto
             && settings.localAIHeadlessProvider == .disabled
             && settings.aiWritingLanguage == .english

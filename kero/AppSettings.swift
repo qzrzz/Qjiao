@@ -304,8 +304,7 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
-    /// Replace an unmodified primary click with the terminal's cursor-move
-    /// gesture. Disabled by default so normal selection behavior is retained.
+    /// 允许 libghostty 在 Prompt 输入区域中通过普通单击移动光标；默认开启。
     @Published var directClickMovesCursor: Bool {
         didSet { save() }
     }
@@ -495,7 +494,7 @@ final class AppSettings: nonisolated ObservableObject {
         let filesSize = toml["files.font-size"]?.double ?? Self.defaultFilesFontSize
         filesFontSize = Self.filesFontSizeRange.contains(filesSize) ? filesSize : Self.defaultFilesFontSize
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
-        directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? false
+        directClickMovesCursor = toml["terminal.direct-click-moves-cursor"]?.bool ?? true
         zshIdleTitleStyle = toml["terminal.zsh-idle-title-style"]?.string
             .flatMap(ZshIdleTitleStyle.init(rawValue:))
             ?? toml["terminal.zsh-idle-title"]?.string
@@ -626,7 +625,7 @@ final class AppSettings: nonisolated ObservableObject {
         filesFontFamily = ""
         filesFontSize = Self.defaultFilesFontSize
         restoreTerminalHistory = false
-        directClickMovesCursor = false
+        directClickMovesCursor = true
         macosOptionAsAlt = false
         showPaneHeaders = false
         tabSwitcherSortByRecency = false
@@ -730,8 +729,8 @@ final class AppSettings: nonisolated ObservableObject {
         if restoreTerminalHistory {
             lines.append("terminal.restore-history = true")
         }
-        if directClickMovesCursor {
-            lines.append("terminal.direct-click-moves-cursor = true")
+        if !directClickMovesCursor {
+            lines.append("terminal.direct-click-moves-cursor = false")
         }
 
         if zshIdleTitleStyle != .defaultStyle {
