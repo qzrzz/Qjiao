@@ -229,6 +229,7 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         guard processGeneration == generation, shellPids == expectedPids else { return }
         if processes != newProcesses { processes = newProcesses }
         if ports != newPorts { ports = newPorts }
+        NotificationCenter.default.post(name: .qjiaoSidebarPortsDidProbe, object: nil)
         finishManualProcessesRefresh()
     }
 
@@ -249,4 +250,8 @@ final class ProjectPanelModel: nonisolated ObservableObject {
             isRefreshing = false
         }
     }
+}
+
+extension Notification.Name {
+    static let qjiaoSidebarPortsDidProbe = Notification.Name("qjiaoSidebarPortsDidProbe")
 }

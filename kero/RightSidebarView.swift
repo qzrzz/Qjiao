@@ -320,6 +320,24 @@ struct RightSidebarView: View {
                 shellPids: [manager.selectedSession?.shellPid].compactMap { $0 }
             )
         }
+        .onReceive(NotificationCenter.default.publisher(for: .qjiaoSidebarPortsDidProbe)) { _ in
+            switch manager.panelTab {
+            case .start, .project:
+                manager.updatePackageScriptPorts(
+                    with: projectInfo.ports,
+                    shellPids: manager.selectedProject?.sessions.compactMap(\.shellPid) ?? []
+                )
+            case .info:
+                if let session = manager.selectedSession {
+                    manager.updatePackageScriptPorts(
+                        with: sessionInfo.ports,
+                        shellPids: [session.shellPid].compactMap { $0 }
+                    )
+                }
+            default:
+                break
+            }
+        }
         .onChange(of: bottomTabRaw) {
             syncSystemPolling()
             // 离开 Note tab 时立即写盘。

@@ -216,6 +216,7 @@ final class SessionInfoModel: nonisolated ObservableObject {
         guard processGeneration == generation, shellPid == expectedPid else { return }
         if processes != newProcesses { processes = newProcesses }
         if ports != newPorts { ports = newPorts }
+        NotificationCenter.default.post(name: .qjiaoSidebarPortsDidProbe, object: nil)
         finishManualProcessesRefresh()
     }
 
