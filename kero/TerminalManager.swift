@@ -94,7 +94,7 @@ final class TerminalManager: nonisolated ObservableObject {
 
     /// Live managers in window-creation order; the persisted snapshot is
     /// one entry per registered manager.
-    private static var registry: [TerminalManager] = []
+    private(set) static var registry: [TerminalManager] = []
     /// Folder requests can arrive while macOS is still launching Qjiao, before
     /// a WindowGroup has produced a manager/window to receive them.
     private static var pendingDirectories: [String] = []

@@ -67,7 +67,12 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private var cachedShellPid: pid_t?
     private var lastScrollbar: TerminalScrollbar?
     private var lastHistorySnapshot: String?
-    private var isTerminating = false
+    private(set) var isTerminating = false
+
+    /// 会话是否处于可用状态（既未退出也未在销毁过程中）
+    var isUsable: Bool {
+        !hasExited && !isTerminating
+    }
 
     init(initialDirectory: String? = nil, restoredHistory: String? = nil, isLazy: Bool = false) {
         let shellPath = Self.loginShell()

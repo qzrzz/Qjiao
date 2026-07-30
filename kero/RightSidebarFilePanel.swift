@@ -1042,6 +1042,63 @@ private struct FileTreeRow: View {
             Label(L10n.t("Open in Terminal"), systemImage: "terminal")
         }
 
+        if let only = onlyItem, !only.isDirectory, ScriptRunner.shared.canRun(filePath: only.path) {
+            let supported = ScriptRunner.shared.supportedModifiers(filePath: only.path)
+            Divider()
+            Button {
+                selectForContextAction()
+                do {
+                    try ScriptRunner.shared.run(filePath: only.path, modifier: .none, manager: manager)
+                } catch {
+                    NSAlert(error: error).runModal()
+                }
+            } label: {
+                Label(L10n.t("Run"), systemImage: "play.fill")
+            }
+
+            Menu(L10n.t("Run with...")) {
+                Button(L10n.t("Run with time")) {
+                    selectForContextAction()
+                    do {
+                        try ScriptRunner.shared.run(filePath: only.path, modifier: .time, manager: manager)
+                    } catch {
+                        NSAlert(error: error).runModal()
+                    }
+                }
+                .disabled(!supported.contains(.time))
+
+                Button(L10n.t("Run with --inspect")) {
+                    selectForContextAction()
+                    do {
+                        try ScriptRunner.shared.run(filePath: only.path, modifier: .inspect, manager: manager)
+                    } catch {
+                        NSAlert(error: error).runModal()
+                    }
+                }
+                .disabled(!supported.contains(.inspect))
+
+                Button(L10n.t("Run with --inspect-brk")) {
+                    selectForContextAction()
+                    do {
+                        try ScriptRunner.shared.run(filePath: only.path, modifier: .inspectBrk, manager: manager)
+                    } catch {
+                        NSAlert(error: error).runModal()
+                    }
+                }
+                .disabled(!supported.contains(.inspectBrk))
+
+                Button(L10n.t("Run with --prof")) {
+                    selectForContextAction()
+                    do {
+                        try ScriptRunner.shared.run(filePath: only.path, modifier: .prof, manager: manager)
+                    } catch {
+                        NSAlert(error: error).runModal()
+                    }
+                }
+                .disabled(!supported.contains(.prof))
+            }
+        }
+
         // 选中的图片 → ImageBuild（单张为 1→多，多张为多→多）
         let imagePaths = targets
             .filter { !$0.isDirectory }

@@ -363,6 +363,26 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// Script Runner 配置: JavaScript / TypeScript
+    @Published var scriptRunnerJS: ScriptRunnerJSSetting {
+        didSet { save() }
+    }
+
+    /// Script Runner 配置: Python
+    @Published var scriptRunnerPython: ScriptRunnerPythonSetting {
+        didSet { save() }
+    }
+
+    /// Script Runner 配置: Go
+    @Published var scriptRunnerGo: ScriptRunnerGoSetting {
+        didSet { save() }
+    }
+
+    /// Script Runner 配置: Rust
+    @Published var scriptRunnerRust: ScriptRunnerRustSetting {
+        didSet { save() }
+    }
+
     /// 毛玻璃 4 核心属性定制选项：Material 材质
     @Published var visualEffectMaterial: String {
         didSet { save() }
@@ -486,6 +506,27 @@ final class AppSettings: nonisolated ObservableObject {
         customCLITools = toml["ai.custom-cli-tools"]?.array?.compactMap(\.string) ?? []
         packageManagerCommand = toml["terminal.package-manager"]?.string
             .flatMap(PackageManagerCommand.init(rawValue:)) ?? .auto
+
+        scriptRunnerJS = toml["files.script-runner.javascript"]?.string
+            .flatMap(ScriptRunnerJSSetting.init(rawValue:))
+            ?? toml["files.script-runner-js"]?.string
+            .flatMap(ScriptRunnerJSSetting.init(rawValue:))
+            ?? .auto
+        scriptRunnerPython = toml["files.script-runner.python"]?.string
+            .flatMap(ScriptRunnerPythonSetting.init(rawValue:))
+            ?? toml["files.script-runner-python"]?.string
+            .flatMap(ScriptRunnerPythonSetting.init(rawValue:))
+            ?? .auto
+        scriptRunnerGo = toml["files.script-runner.go"]?.string
+            .flatMap(ScriptRunnerGoSetting.init(rawValue:))
+            ?? toml["files.script-runner-go"]?.string
+            .flatMap(ScriptRunnerGoSetting.init(rawValue:))
+            ?? .auto
+        scriptRunnerRust = toml["files.script-runner.rust"]?.string
+            .flatMap(ScriptRunnerRustSetting.init(rawValue:))
+            ?? toml["files.script-runner-rust"]?.string
+            .flatMap(ScriptRunnerRustSetting.init(rawValue:))
+            ?? .auto
         // 优先 config.toml；无则迁移旧 UserDefaults，最后回落默认 30s。
         var needsSave = existing == nil
         if let raw = toml["system.reachability-interval"]?.string,
@@ -586,6 +627,10 @@ final class AppSettings: nonisolated ObservableObject {
         gitCommitMessageEmoji = true
         customCodeEditorPaths = []
         customCLITools = []
+        scriptRunnerJS = .auto
+        scriptRunnerPython = .auto
+        scriptRunnerGo = .auto
+        scriptRunnerRust = .auto
         // 同步 LocalAI 注册表选择，避免设置页仍显示旧 provider
         LocalAIRegistry.shared.syncFromSettings()
     }
@@ -677,6 +722,18 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if packageManagerCommand != .auto {
             lines.append("terminal.package-manager = \(TOML.quote(packageManagerCommand.rawValue))")
+        }
+        if scriptRunnerJS != .auto {
+            lines.append("files.script-runner.javascript = \(TOML.quote(scriptRunnerJS.rawValue))")
+        }
+        if scriptRunnerPython != .auto {
+            lines.append("files.script-runner.python = \(TOML.quote(scriptRunnerPython.rawValue))")
+        }
+        if scriptRunnerGo != .auto {
+            lines.append("files.script-runner.go = \(TOML.quote(scriptRunnerGo.rawValue))")
+        }
+        if scriptRunnerRust != .auto {
+            lines.append("files.script-runner.rust = \(TOML.quote(scriptRunnerRust.rawValue))")
         }
         if !preferredCodeEditorBundleId.isEmpty {
             lines.append("editor.preferred-code-editor = \(TOML.quote(preferredCodeEditorBundleId))")

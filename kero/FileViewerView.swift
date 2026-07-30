@@ -473,6 +473,7 @@ struct FileViewerView: View {
 private struct EditorStatusBar: View {
     @ObservedObject var file: FileTab
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var scriptRunner = ScriptRunner.shared
     @State private var formatters: [EditorFormatter] = []
     @State private var formattingID: String?
     @State private var formatterError: String?
@@ -503,6 +504,38 @@ private struct EditorStatusBar: View {
 
             Text(file.languageLabel)
                 .macTooltip(L10n.t("Language Mode"), position: .top)
+
+            if scriptRunner.canRun(filePath: file.path) {
+                let isRunning = scriptRunner.isRunning(filePath: file.path)
+                if isRunning {
+                    Button {
+                        scriptRunner.stop(filePath: file.path)
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.red)
+                    .macTooltip(L10n.t("Stop Execution"), position: .top)
+                    .accessibilityLabel(L10n.t("Stop Execution"))
+                } else {
+                    Button {
+                        if file.isDirty { file.save() }
+                        do {
+                            try scriptRunner.runInSplitPane(filePath: file.path)
+                        } catch {
+                            NSAlert(error: error).runModal()
+                        }
+                    } label: {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .macTooltip(L10n.t("Run File (Split Bottom)"), shortcut: "⌥R", position: .top)
+                    .accessibilityLabel(L10n.t("Run File (Split Bottom)"))
+                }
+            }
 
             ForEach(formatters) { formatter in
                 if formatter.id == formatters.first?.id {

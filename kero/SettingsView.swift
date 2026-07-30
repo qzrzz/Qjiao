@@ -636,6 +636,35 @@ struct SettingsView: View {
                 }
                 .settingsRowPadding()
             }
+
+            Section(L10n.t("Script Runner")) {
+                Group {
+                    Picker(L10n.t("JavaScript / TypeScript"), selection: $settings.scriptRunnerJS) {
+                        ForEach(ScriptRunnerJSSetting.allCases) { opt in
+                            Text(opt.displayName).tag(opt)
+                        }
+                    }
+
+                    Picker(L10n.t("Python"), selection: $settings.scriptRunnerPython) {
+                        ForEach(ScriptRunnerPythonSetting.allCases) { opt in
+                            Text(opt.displayName).tag(opt)
+                        }
+                    }
+
+                    Picker(L10n.t("Go"), selection: $settings.scriptRunnerGo) {
+                        ForEach(ScriptRunnerGoSetting.allCases) { opt in
+                            Text(opt.displayName).tag(opt)
+                        }
+                    }
+
+                    Picker(L10n.t("Rust"), selection: $settings.scriptRunnerRust) {
+                        ForEach(ScriptRunnerRustSetting.allCases) { opt in
+                            Text(opt.displayName).tag(opt)
+                        }
+                    }
+                }
+                .settingsRowPadding()
+            }
             }
 
             if selectedSection == .project {
