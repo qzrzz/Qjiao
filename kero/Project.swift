@@ -230,9 +230,104 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// User-configured actions displayed in the right sidebar's Start panel.
     @Published var launchCommands: [ProjectLaunchCommand] = []
     @Published var tabs: [PaneTab] = []
-    @Published var selectedTabID: UUID?
+    @Published var selectedTabID: UUID? {
+        didSet {
+            guard selectedTabID != oldValue, let selectedTabID else { return }
+            recentTabIDs.removeAll { $0 == selectedTabID }
+            recentTabIDs.insert(selectedTabID, at: 0)
+        }
+    }
 
-    /// 标识当前是否正在从存储层回刷配置，防止递归触发 saveConfig()
+    /// 按使用时间从新到旧记录的 Tab ID 列表。
+    private var recentTabIDs: [UUID] = []
+
+    /// 按最近使用顺序排序的标签页列表（最近使用的在最前面）。
+    /// 未在本会话中选中的标签页保留物理顺序接在末尾。
+    var tabsByRecency: [PaneTab] {
+        var seen = Set<UUID>()
+        var ordered: [PaneTab] = []
+        func add(_ tab: PaneTab) {
+            guard seen.insert(tab.id).inserted else { return }
+            ordered.append(tab)
+        }
+        for id in recentTabIDs {
+            if let tab = tabs.first(where: { $0.id == id }) {
+                add(tab)
+            }
+        }
+        for tab in tabs {
+            add(tab)
+        }
+        return ordered
+    }
+
+    /// 重置 Recency 历史（在恢复会话 snapshot 后调用）
+    func resetRecency() {
+        recentTabIDs.removeAll()
+        if let selectedTabID {
+            recentTabIDs.append(selectedTabID)
+        }
+    }
+
+    /// 描述 Files/Git 面板根目录产生的判决规则。
+    enum PanelRootSource: Equatable {
+        /// 用户在项目菜单中手动固定的目录。
+        case pinned
+        /// Shell 自身所在 Git 仓库或工作目录。
+        case shell
+        /// 终端前台作业 (如 Agent) 切换到的 Worktree / 仓库。
+        case foreground(isWorktree: Bool)
+    }
+
+    struct PanelRootResult {
+        let root: String
+        let source: PanelRootSource
+    }
+
+    /// 计算 Files 与 Git 面板应锚定的根目录路径及其来源。
+    func panelRoot(
+        followingSessionAt cwd: String,
+        foregroundAt foregroundCwd: String? = nil
+    ) -> PanelRootResult {
+        if !projectDirectory.isEmpty,
+           FileManager.default.fileExists(atPath: projectDirectory) {
+            return PanelRootResult(root: projectDirectory, source: .pinned)
+        }
+
+        let shellRepo = Self.closestGitRepository(for: cwd)
+        if let foregroundCwd, !foregroundCwd.isEmpty {
+            if let fgRepo = Self.closestGitRepository(for: foregroundCwd),
+               fgRepo != shellRepo {
+                let gitPath = (fgRepo as NSString).appendingPathComponent(".git")
+                var isDir: ObjCBool = false
+                let exists = FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDir)
+                let isWorktree = exists && !isDir.boolValue
+                return PanelRootResult(root: fgRepo, source: .foreground(isWorktree: isWorktree))
+            }
+        }
+
+        if let shellRepo {
+            return PanelRootResult(root: shellRepo, source: .shell)
+        }
+
+        return PanelRootResult(root: cwd, source: .shell)
+    }
+
+    /// 查找包含指定路径的最近 Git 仓库根目录（向上寻找包含 .git 的目录）。
+    private static func closestGitRepository(for path: String) -> String? {
+        guard !path.isEmpty else { return nil }
+        var currentURL = URL(fileURLWithPath: path).standardizedFileURL
+        while currentURL.pathComponents.count > 1 {
+            let gitPath = currentURL.appendingPathComponent(".git").path
+            if FileManager.default.fileExists(atPath: gitPath) {
+                return currentURL.path
+            }
+            let parent = currentURL.deletingLastPathComponent()
+            if parent.path == currentURL.path { break }
+            currentURL = parent
+        }
+        return nil
+    }
     private var isUpdatingFromStorage = false
     private var configChangeObservation: AnyCancellable?
 

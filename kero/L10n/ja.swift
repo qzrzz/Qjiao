@@ -801,6 +801,7 @@ extension L10n {
         "Show Git Output": "Git出力を表示",
         "Show Guides": "Show Guides",
         "Show in Finder": "Show in Finder",
+        "Show Pane Headers": "分割ペインのヘッダーを表示",
         "Show Rulers": "Show Rulers",
         "Show Spelling and Grammar": "Show Spelling and Grammar",
         "Show Substitutions": "Show Substitutions",

@@ -11,6 +11,7 @@ import {
   renameSync,
   rmSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { extractReleaseNotes } from "./changelog";
 import { generateAppcast } from "./generate-appcast";
@@ -27,7 +28,8 @@ type IReleaseStep =
   | "archive-created"
   | "app-exported"
   | "app-prepared"
-  | "dmg-created"
+  | "dmg-packaged"
+  | "dmg-signed"
   | "notarized"
   | "updates-generated"
   | "tag-pushed"
@@ -39,11 +41,13 @@ interface IReleaseIdentity {
   build: string;
   commit: string;
   configuration: string;
+  appSourceFingerprint: string;
+  releaseNotesFingerprint: string;
 }
 
 /** 持久化在 build 目录内的发布断点。 */
 interface IReleaseState extends IReleaseIdentity {
-  schemaVersion: 1;
+  schemaVersion: 2;
   completedSteps: IReleaseStep[];
 }
 
@@ -51,7 +55,8 @@ const RELEASE_STEPS: IReleaseStep[] = [
   "archive-created",
   "app-exported",
   "app-prepared",
-  "dmg-created",
+  "dmg-packaged",
+  "dmg-signed",
   "notarized",
   "updates-generated",
   "tag-pushed",
@@ -82,6 +87,7 @@ const NOTARY_PROFILE = process.env.NOTARY_PROFILE ?? "NOTARY";
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
 const SPARKLE_ACCOUNT = process.env.SPARKLE_ACCOUNT ?? "qjiao";
 const FORCE_RELEASE = process.env.FORCE !== "0";
+const TIMESTAMP_RETRIES = readPositiveInteger(process.env.TIMESTAMP_RETRIES, 3);
 let allowExistingArtifactAdoption = false;
 
 process.chdir(join(import.meta.dir, ".."));
@@ -99,12 +105,15 @@ need("plutil");
 need("create-dmg");
 need("codesign");
 need("file");
+need("hdiutil");
 need("lipo");
 need("xattr");
 if (process.env.PUBLISH !== "0") {
   need("git");
   need("gh");
-  const changes = (await $`git status --porcelain`.text()).trim();
+  const changes = (
+    await $`git -c core.fsmonitor=false status --porcelain`.text()
+  ).trim();
   if (changes) {
     die("the Git worktree must be clean before publishing a release");
   }
@@ -188,6 +197,7 @@ if (
     ) {
       say("Resuming: Xcode archive is already complete.");
     } else {
+      allowExistingArtifactAdoption = false;
       say(`Archiving Qjiao (${CONFIGURATION})…`);
       rmSync(ARCHIVE_PATH, { recursive: true, force: true });
       rmSync(EXPORT_DIR, { recursive: true, force: true });
@@ -205,6 +215,7 @@ if (
       await completeReleaseStep(releaseState, "archive-created");
     }
 
+    allowExistingArtifactAdoption = false;
     say("Exporting Developer ID app…");
     rmSync(EXPORT_DIR, { recursive: true, force: true });
     await $`xcodebuild -exportArchive -archivePath ${ARCHIVE_PATH} -exportOptionsPlist ${EXPORT_OPTIONS} -exportPath ${EXPORT_DIR}`;
@@ -214,6 +225,7 @@ if (
     await completeReleaseStep(releaseState, "app-exported");
   }
 
+  allowExistingArtifactAdoption = false;
   say("Thinning Qjiao to arm64 and re-signing nested code…");
   await prepareAndSignExportedApp(app, SIGN_IDENTITY);
   if (!(await validatePreparedApp(app, identity))) {
@@ -223,22 +235,37 @@ if (
 }
 
 if (
-  await shouldResumeStep(releaseState, "dmg-created", () =>
+  await shouldResumeStep(releaseState, "dmg-signed", () =>
     validateSignedDmg(dmgPath),
   )
 ) {
   say("Resuming: signed DMG is already complete.");
 } else {
-  say(`Packaging Qjiao ${version} (build ${build})…`);
-  rmSync(dmgStaging, { recursive: true, force: true });
-  rmSync(dmgPath, { force: true });
-  mkdirSync(dmgStaging, { recursive: true });
-  await $`ditto ${app} ${join(dmgStaging, `${APP_NAME}.app`)}`;
-  await $`create-dmg --volname ${`${APP_NAME} ${version}`} --window-size 540 380 --icon-size 128 --icon ${`${APP_NAME}.app`} 150 195 --app-drop-link 390 195 --hide-extension ${`${APP_NAME}.app`} --no-internet-enable ${dmgPath} ${dmgStaging}`.nothrow();
-  if (!existsSync(dmgPath)) die("create-dmg did not produce a disk image");
-  await $`codesign --force --timestamp --sign ${SIGN_IDENTITY} ${dmgPath}`;
+  if (
+    await shouldResumeStep(releaseState, "dmg-packaged", () =>
+      validatePackagedDmg(dmgPath),
+    )
+  ) {
+    say("Resuming: unsigned DMG package is already complete.");
+  } else {
+    allowExistingArtifactAdoption = false;
+    say(`Packaging Qjiao ${version} (build ${build})…`);
+    rmSync(dmgStaging, { recursive: true, force: true });
+    rmSync(dmgPath, { force: true });
+    mkdirSync(dmgStaging, { recursive: true });
+    await $`ditto ${app} ${join(dmgStaging, `${APP_NAME}.app`)}`;
+    await $`create-dmg --volname ${`${APP_NAME} ${version}`} --window-size 540 380 --icon-size 128 --icon ${`${APP_NAME}.app`} 150 195 --app-drop-link 390 195 --hide-extension ${`${APP_NAME}.app`} --no-internet-enable ${dmgPath} ${dmgStaging}`.nothrow();
+    if (!(await validatePackagedDmg(dmgPath))) {
+      die("create-dmg did not produce a valid disk image");
+    }
+    await completeReleaseStep(releaseState, "dmg-packaged");
+  }
+
+  allowExistingArtifactAdoption = false;
+  say("Signing DMG with Apple secure timestamp…");
+  await signDmgWithRetry(dmgPath, SIGN_IDENTITY);
   await $`codesign --verify --strict --verbose=2 ${dmgPath}`;
-  await completeReleaseStep(releaseState, "dmg-created");
+  await completeReleaseStep(releaseState, "dmg-signed");
 }
 
 say("Notarizing and stapling release artifacts…");
@@ -282,6 +309,7 @@ if (
 ) {
   say("Resuming: Apple notarization tickets are already stapled.");
 } else {
+  allowExistingArtifactAdoption = false;
   await notarizeArtifact(dmgPath, notaryAuthArgs);
   await $`xcrun stapler staple ${dmgPath}`;
   await $`xcrun stapler staple ${app}`;
@@ -298,6 +326,7 @@ if (
 ) {
   say("Resuming: Sparkle ZIP, notes, and appcast are already complete.");
 } else {
+  allowExistingArtifactAdoption = false;
   rmSync(UPDATES_DIR, { recursive: true, force: true });
   mkdirSync(UPDATES_DIR, { recursive: true });
   if (process.env.PUBLISH !== "0" && process.env.NO_HISTORY !== "1") {
@@ -348,6 +377,7 @@ if (
 ) {
   say(`Resuming: Git tag ${tag} already points to the current commit.`);
 } else {
+  allowExistingArtifactAdoption = false;
   await createAndPushReleaseTag(tag, version);
   await completeReleaseStep(releaseState, "tag-pushed");
 }
@@ -360,6 +390,7 @@ if (
 ) {
   say(`Resuming: GitHub Release ${tag} is already complete.`);
 } else {
+  allowExistingArtifactAdoption = false;
   const existingRelease =
     (
       await $`gh release view ${tag} --repo ${GITHUB_REPOSITORY}`
@@ -406,7 +437,16 @@ async function readReleaseIdentity(): Promise<IReleaseIdentity> {
   if (!version || !build) {
     die("could not read MARKETING_VERSION or CURRENT_PROJECT_VERSION");
   }
-  return { version, build, commit, configuration: CONFIGURATION };
+  const appSourceFingerprint = await createAppSourceFingerprint();
+  const releaseNotesFingerprint = createFileFingerprint("CHANGELOG.md");
+  return {
+    version,
+    build,
+    commit,
+    configuration: CONFIGURATION,
+    appSourceFingerprint,
+    releaseNotesFingerprint,
+  };
 }
 
 /** 从 xcodebuild 的 Build Settings 输出中读取单个配置值。 */
@@ -415,7 +455,42 @@ function readBuildSetting(output: string, name: string): string {
   return match?.[1]?.trim() ?? "";
 }
 
-/** 加载匹配当前版本的断点；首次升级脚本时允许验证并接管旧产物。 */
+/** 读取正整数环境变量，非法输入立即终止发布。 */
+function readPositiveInteger(
+  value: string | undefined,
+  fallback: number,
+): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    die("TIMESTAMP_RETRIES must be a positive integer");
+  }
+  return parsed;
+}
+
+/** 计算真正影响 macOS App 构建和签名的输入指纹。 */
+async function createAppSourceFingerprint(): Promise<string> {
+  const hash = createHash("sha256");
+  for (const path of ["Qjiao.xcodeproj", "kero"]) {
+    const result = await $`git rev-parse ${`HEAD:${path}`}`.quiet().nothrow();
+    hash.update(path);
+    hash.update(
+      result.exitCode === 0 ? result.stdout.toString().trim() : "unavailable",
+    );
+  }
+  hash.update(teamId);
+  hash.update(SIGN_IDENTITY);
+  return hash.digest("hex");
+}
+
+/** 计算单个发布输入文件的内容指纹。 */
+function createFileFingerprint(path: string): string {
+  const hash = createHash("sha256");
+  hash.update(existsSync(path) ? readFileSync(path) : "missing");
+  return hash.digest("hex");
+}
+
+/** 加载断点，并仅使受当前变更影响的步骤失效。 */
 async function initializeReleaseState(
   identity: IReleaseIdentity,
 ): Promise<IReleaseState> {
@@ -424,20 +499,63 @@ async function initializeReleaseState(
   }
 
   const existingState = readReleaseState();
-  if (existingState && releaseIdentityMatches(existingState, identity)) {
+  if (
+    existingState &&
+    existingState.version === identity.version &&
+    existingState.build === identity.build &&
+    existingState.configuration === identity.configuration
+  ) {
     allowExistingArtifactAdoption = true;
+    if (
+      existingState.appSourceFingerprint &&
+      existingState.appSourceFingerprint !== identity.appSourceFingerprint
+    ) {
+      say("App source changed; archive and all later checkpoints are invalid.");
+      truncateReleaseSteps(existingState, "archive-created");
+      allowExistingArtifactAdoption = false;
+    } else if (!existingState.appSourceFingerprint) {
+      say("Migrating legacy checkpoints after validating their artifacts.");
+    }
+    if (
+      existingState.releaseNotesFingerprint &&
+      existingState.releaseNotesFingerprint !== identity.releaseNotesFingerprint
+    ) {
+      say(
+        "CHANGELOG changed; update artifacts and later checkpoints are invalid.",
+      );
+      truncateReleaseSteps(existingState, "updates-generated");
+    }
+    if (existingState.commit !== identity.commit) {
+      say(
+        "Git commit changed; keeping build artifacts and refreshing tag/release.",
+      );
+      truncateReleaseSteps(existingState, "tag-pushed");
+    }
+    Object.assign(existingState, identity, { schemaVersion: 2 as const });
+    await writeReleaseState(existingState);
     return existingState;
   }
 
   if (existingState) {
-    say("Release identity changed; previous checkpoints will not be reused.");
+    const changes = [
+      existingState.version !== identity.version
+        ? `version ${existingState.version} → ${identity.version}`
+        : null,
+      existingState.build !== identity.build
+        ? `build ${existingState.build} → ${identity.build}`
+        : null,
+      existingState.configuration !== identity.configuration
+        ? `configuration ${existingState.configuration} → ${identity.configuration}`
+        : null,
+    ].filter((change): change is string => change !== null);
+    say(`Release identity changed (${changes.join(", ")}); rebuilding.`);
   } else if (!RESET_RELEASE) {
     // 兼容升级断点脚本前已经生成的同版本 App 和 DMG。
     allowExistingArtifactAdoption = true;
   }
 
   const state: IReleaseState = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     ...identity,
     completedSteps: [],
   };
@@ -449,24 +567,83 @@ async function initializeReleaseState(
 function readReleaseState(): IReleaseState | null {
   if (!existsSync(RELEASE_STATE_PATH)) return null;
   try {
-    const value = JSON.parse(
-      readFileSync(RELEASE_STATE_PATH, "utf8"),
-    ) as Partial<IReleaseState>;
+    const value = JSON.parse(readFileSync(RELEASE_STATE_PATH, "utf8")) as {
+      schemaVersion?: unknown;
+      version?: unknown;
+      build?: unknown;
+      commit?: unknown;
+      configuration?: unknown;
+      appSourceFingerprint?: unknown;
+      releaseNotesFingerprint?: unknown;
+      completedSteps?: unknown;
+    };
     if (
-      value.schemaVersion === 1 &&
-      typeof value.version === "string" &&
-      typeof value.build === "string" &&
-      typeof value.commit === "string" &&
-      typeof value.configuration === "string" &&
-      Array.isArray(value.completedSteps) &&
-      value.completedSteps.every(
-        (step, index) => isReleaseStep(step) && step === RELEASE_STEPS[index],
-      )
+      typeof value.version !== "string" ||
+      typeof value.build !== "string" ||
+      typeof value.commit !== "string" ||
+      typeof value.configuration !== "string" ||
+      !Array.isArray(value.completedSteps)
     ) {
-      return value as IReleaseState;
+      return null;
     }
+
+    const completedSteps = normalizeStoredReleaseSteps(
+      value.schemaVersion,
+      value.completedSteps,
+    );
+    if (!completedSteps) return null;
+    return {
+      schemaVersion: 2,
+      version: value.version,
+      build: value.build,
+      commit: value.commit,
+      configuration: value.configuration,
+      appSourceFingerprint:
+        typeof value.appSourceFingerprint === "string"
+          ? value.appSourceFingerprint
+          : "",
+      releaseNotesFingerprint:
+        typeof value.releaseNotesFingerprint === "string"
+          ? value.releaseNotesFingerprint
+          : "",
+      completedSteps,
+    };
   } catch {
     // 损坏或旧格式状态不能作为跳过发布步骤的依据。
+  }
+  return null;
+}
+
+/** 迁移旧版步骤名称，并确保断点始终是连续前缀。 */
+function normalizeStoredReleaseSteps(
+  schemaVersion: unknown,
+  steps: unknown[],
+): IReleaseStep[] | null {
+  if (schemaVersion === 1) {
+    const legacySteps = [
+      "archive-created",
+      "app-exported",
+      "app-prepared",
+      "dmg-created",
+      "notarized",
+      "updates-generated",
+      "tag-pushed",
+      "release-published",
+    ];
+    if (!steps.every((step, index) => step === legacySteps[index])) return null;
+    return steps.flatMap((step) =>
+      step === "dmg-created"
+        ? (["dmg-packaged", "dmg-signed"] as IReleaseStep[])
+        : ([step] as IReleaseStep[]),
+    );
+  }
+  if (
+    schemaVersion === 2 &&
+    steps.every(
+      (step, index) => isReleaseStep(step) && step === RELEASE_STEPS[index],
+    )
+  ) {
+    return steps as IReleaseStep[];
   }
   return null;
 }
@@ -475,19 +652,6 @@ function readReleaseState(): IReleaseState | null {
 function isReleaseStep(value: unknown): value is IReleaseStep {
   return (
     typeof value === "string" && RELEASE_STEPS.includes(value as IReleaseStep)
-  );
-}
-
-/** 判断断点记录是否准确对应当前源码发布身份。 */
-function releaseIdentityMatches(
-  state: IReleaseState,
-  identity: IReleaseIdentity,
-): boolean {
-  return (
-    state.version === identity.version &&
-    state.build === identity.build &&
-    state.commit === identity.commit &&
-    state.configuration === identity.configuration
   );
 }
 
@@ -510,7 +674,6 @@ async function shouldResumeStep(
     if (!wasCompleted) await completeReleaseStep(state, step);
     return true;
   }
-  allowExistingArtifactAdoption = false;
   if (wasCompleted) await invalidateReleaseStep(state, step);
   return false;
 }
@@ -534,11 +697,16 @@ async function invalidateReleaseStep(
   state: IReleaseState,
   step: IReleaseStep,
 ): Promise<void> {
+  truncateReleaseSteps(state, step);
+  await writeReleaseState(state);
+}
+
+/** 在内存中清除指定步骤及依赖它的全部后续步骤。 */
+function truncateReleaseSteps(state: IReleaseState, step: IReleaseStep): void {
   const invalidIndex = RELEASE_STEPS.indexOf(step);
   state.completedSteps = state.completedSteps.filter(
     (completed) => RELEASE_STEPS.indexOf(completed) < invalidIndex,
   );
-  await writeReleaseState(state);
 }
 
 /** 使用临时文件替换发布状态，避免异常退出损坏断点。 */
@@ -612,6 +780,37 @@ async function validateAppIdentityAndSignature(
 async function readPlistValue(path: string, key: string): Promise<string> {
   const result = await $`plutil -extract ${key} raw ${path}`.quiet().nothrow();
   return result.exitCode === 0 ? result.stdout.toString().trim() : "";
+}
+
+/** 验证未签名或待重签的 DMG 文件系统映像完整。 */
+async function validatePackagedDmg(path: string): Promise<boolean> {
+  if (!existsSync(path) || Bun.file(path).size === 0) return false;
+  return (
+    (await $`hdiutil verify ${resolve(path)}`.quiet().nothrow()).exitCode === 0
+  );
+}
+
+/** 重试依赖 Apple 在线服务的 DMG secure timestamp 签名。 */
+async function signDmgWithRetry(path: string, identity: string): Promise<void> {
+  for (let attempt = 1; attempt <= TIMESTAMP_RETRIES; attempt += 1) {
+    const result =
+      await $`codesign --force --timestamp --sign ${identity} ${path}`
+        .quiet()
+        .nothrow();
+    if (result.exitCode === 0) return;
+
+    const message = result.stderr.toString().trim();
+    if (message) console.error(message);
+    if (attempt === TIMESTAMP_RETRIES) {
+      die(`DMG timestamp signing failed after ${TIMESTAMP_RETRIES} attempts`);
+    }
+    const delay = Math.min(attempt * 3_000, 10_000);
+    say(
+      `Timestamp service unavailable; retrying in ${delay / 1_000}s ` +
+        `(${attempt}/${TIMESTAMP_RETRIES})…`,
+    );
+    await Bun.sleep(delay);
+  }
 }
 
 /** 验证 DMG 存在且代码签名完整。 */

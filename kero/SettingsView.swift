@@ -478,33 +478,32 @@ struct SettingsView: View {
 
             Section(L10n.t("Preview")) {
                 Group {
-                    // 随 Family / Size / 中文回退 / Thicken 即时刷新。
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Qjiao ❯ echo \"the quick brown fox\" 0O 1lI")
-
-                        Text("\u{E0A0} main \u{E0B0} ~/dev/qjiao \u{E711} \u{F024B} \u{F0A7D}")
-
-                        Text("bold — permission denied (os error 13)")
-                            .font(Font(previewBoldFont))
-
-                        Text("""
-                        ┌────┬──────────────┬──────────┬────────────┐
-                        │ ID │ Name         │ 状态     │ Description│
-                        ├────┼──────────────┼──────────┼────────────┤
-                        │ 06 │ 青椒         │ 测试中   │ Testing    │
-                        └────┴──────────────┴──────────┴────────────┘
-                        """)
-                    }
-                    .font(Font(previewFont))
-                    .padding(.vertical, 4)
-                    // 切换 thicken 时略带动画，便于察觉描边变化。
-                    .animation(.easeInOut(duration: 0.12), value: settings.fontThicken)
+                    FontThickenPreview(font: previewFont, thicken: settings.fontThicken)
+                        .frame(height: 110)
+                        .padding(.vertical, 4)
+                        .animation(.easeInOut(duration: 0.12), value: settings.fontThicken)
                 }
                 .settingsRowPadding()
             }
 
             Section(L10n.t("Features")) {
                 Group {
+                settingWithDescription(
+                    L10n.t("Show pane headers in split layouts"),
+                    L10n.t("Displays live title headers and split/close controls on individual panes when split.")
+                ) {
+                    Toggle("", isOn: $settings.showPaneHeaders)
+                        .labelsHidden()
+                }
+
+                settingWithDescription(
+                    L10n.t("Tab Switcher Sort by Recently"),
+                    L10n.t("Orders the Ctrl-Tab switcher cards by most recently used tab first.")
+                ) {
+                    Toggle("", isOn: $settings.tabSwitcherSortByRecency)
+                        .labelsHidden()
+                }
+
                 settingWithDescription(
                     L10n.t("Move cursor with direct click"),
                     L10n.t("Cursor as naturally as in a text editor.")
@@ -1775,6 +1774,70 @@ private struct ProjectSettingsSectionView: View {
     private func removeCLITool(_ cmd: String) {
         settings.customCLITools.removeAll { $0 == cmd }
         AIToolRegistry.shared.refresh()
+    }
+}
+
+/// SwiftUI Text 无法表现 Ghostty 的 font-thicken（该标记仅影响 CoreText 字形栅格化），
+/// 因此通过 AppKit draw 并配合 matching toggle 的 setShouldSmoothFonts 进行精确预览。
+private struct FontThickenPreview: NSViewRepresentable {
+    let font: NSFont
+    let thicken: Bool
+
+    func makeNSView(context: Context) -> FontThickenPreviewNSView {
+        let view = FontThickenPreviewNSView()
+        view.update(font: font, thicken: thicken)
+        return view
+    }
+
+    func updateNSView(_ view: FontThickenPreviewNSView, context: Context) {
+        view.update(font: font, thicken: thicken)
+    }
+}
+
+private final class FontThickenPreviewNSView: NSView {
+    private var font: NSFont = .systemFont(ofSize: 13)
+    private var thicken = false
+
+    func update(font: NSFont, thicken: Bool) {
+        if self.font != font || self.thicken != thicken {
+            self.font = font
+            self.thicken = thicken
+            needsDisplay = true
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.setShouldSmoothFonts(thicken)
+
+        let lines = [
+            ("Qjiao ❯ echo \"the quick brown fox\" 0O 1lI", font),
+            ("\u{E0A0} main \u{E0B0} ~/dev/qjiao \u{E711} \u{F024B} \u{F0A7D}", font),
+            ("bold — permission denied (os error 13)", TerminalFont.resolve(family: font.familyName ?? "", size: font.pointSize, useBundledChineseFallback: true, thicken: true)),
+            ("""
+            ┌────┬──────────────┬──────────┬────────────┐
+            │ ID │ Name         │ 状态     │ Description│
+            ├────┼──────────────┼──────────┼────────────┤
+            │ 06 │ 青椒         │ 测试中   │ Testing    │
+            └────┴──────────────┴──────────┴────────────┘
+            """, font)
+        ]
+
+        var y = bounds.height - 18
+        for (text, lineFont) in lines {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: lineFont,
+                .foregroundColor: NSColor.labelColor
+            ]
+            let str = NSAttributedString(string: text, attributes: attrs)
+            str.draw(at: NSPoint(x: 0, y: y))
+            y -= lineFont.pointSize * 1.4
+        }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 110)
     }
 }
 

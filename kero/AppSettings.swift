@@ -241,6 +241,16 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 是否在多分屏布局中显示分屏标题栏与控制按钮（默认 false）。
+    @Published var showPaneHeaders: Bool {
+        didSet { save() }
+    }
+
+    /// Ctrl-Tab 切换器是否按最近使用时间 (MRU) 排序（默认 true）。
+    @Published var tabSwitcherSortByRecency: Bool {
+        didSet { save() }
+    }
+
     /// 是否为终端中文字符启用内置的思源黑体等宽回退字体。
     @Published var useBundledChineseTerminalFont: Bool {
         didSet { save() }
@@ -460,6 +470,8 @@ final class AppSettings: nonisolated ObservableObject {
             : Self.defaultSidebarFontSize
         fontThicken = toml["font-thicken"]?.bool ?? false
         macosOptionAsAlt = toml["terminal.macos-option-as-alt"]?.bool ?? false
+        showPaneHeaders = toml["terminal.show-pane-headers"]?.bool ?? false
+        tabSwitcherSortByRecency = toml["terminal.tab-switcher-sort-by-recency"]?.bool ?? false
         useBundledChineseTerminalFont = toml["terminal.use-bundled-chinese-font"]?.bool ?? true
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
         showEditorStatusBar = toml["editor.show-status-bar"]?.bool ?? true
@@ -616,6 +628,8 @@ final class AppSettings: nonisolated ObservableObject {
         restoreTerminalHistory = false
         directClickMovesCursor = false
         macosOptionAsAlt = false
+        showPaneHeaders = false
+        tabSwitcherSortByRecency = false
         zshIdleTitleStyle = .defaultStyle
         enableTerminalHelpBar = true
         packageManagerCommand = .auto
@@ -678,6 +692,12 @@ final class AppSettings: nonisolated ObservableObject {
         if fontThicken { lines.append("font-thicken = true") }
         if macosOptionAsAlt {
             lines.append("terminal.macos-option-as-alt = true")
+        }
+        if showPaneHeaders {
+            lines.append("terminal.show-pane-headers = true")
+        }
+        if tabSwitcherSortByRecency {
+            lines.append("terminal.tab-switcher-sort-by-recency = true")
         }
         if !useBundledChineseTerminalFont {
             lines.append("terminal.use-bundled-chinese-font = false")

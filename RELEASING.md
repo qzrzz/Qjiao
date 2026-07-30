@@ -223,19 +223,27 @@ PUBLISH=0 bun run release
 
 - `MARKETING_VERSION`
 - `CURRENT_PROJECT_VERSION`
-- 当前 Git commit
 - Release configuration
+- `kero/` 与 `Qjiao.xcodeproj` 的 Git tree 指纹
+- `CHANGELOG.md` 内容指纹
+- 当前 Git commit
 
-身份完全一致后，脚本仍会重新验证对应文件的版本、arm64 架构、代码
-签名、公证票据或远端资产，验证通过才跳过。可恢复的步骤包括：
+版本、构建号或 Release configuration 改变时完整重建。App 源码指纹
+改变时从 archive 重建；CHANGELOG 改变时只重新生成更新产物；仅 Web、
+文档或其他不参与 App 构建的 commit 改变时，保留 App、DMG 和公证
+结果，只刷新 Git 标签与 GitHub Release。
+
+脚本仍会重新验证对应文件的版本、arm64 架构、代码签名、公证票据或
+远端资产，验证通过才跳过。可恢复的步骤包括：
 
 1. Xcode archive。
 2. Developer ID App export。
 3. arm64 架构裁切与嵌套代码签名。
-4. DMG 创建与签名。
-5. Apple 公证与票据装订。
-6. Sparkle ZIP、版本说明与 appcast。
-7. Git 标签和 GitHub Release。
+4. DMG 创建。
+5. DMG secure timestamp 签名。
+6. Apple 公证与票据装订。
+7. Sparkle ZIP、版本说明与 appcast。
+8. Git 标签和 GitHub Release。
 
 例如公证连接超时后，直接重新执行：
 
@@ -246,9 +254,13 @@ bun run release
 脚本会复用已经验证的 App 和 DMG，从 Apple 公证继续。状态只在整个
 步骤成功并通过验证后写入，因此失败中的步骤一定会重新执行。
 
+如果 DMG 已创建，但 Apple timestamp 服务不可用，下一次执行只会
+验证并复用该 DMG，然后重新请求 secure timestamp，不会重新创建
+磁盘映像。单次执行默认也会重试 timestamp 签名 3 次。
+
 升级到断点脚本前没有状态文件时，脚本允许接管版本号和构建号完全
-匹配、且签名验证通过的现有 App 与 DMG。后续运行则同时要求 Git
-commit 一致。
+匹配、App 签名有效且磁盘映像完整的现有产物。后续运行同时要求 Git
+tree 指纹一致；普通 Web 或文档 commit 不会触发 App 重编译。
 
 需要忽略全部断点并完整重建时：
 
@@ -277,6 +289,7 @@ RESET_RELEASE=1 bun run release
 | `NO_HISTORY=1`                | —                          | 不继承旧 appcast       |
 | `REUSE_BUILD=1`               | —                          | 复用已导出的 Qjiao.app |
 | `RESET_RELEASE=1`             | —                          | 清除断点并完整重建     |
+| `TIMESTAMP_RETRIES`           | `3`                        | 时间戳签名尝试次数     |
 
 默认允许用当前提交重复发布相同版本：
 

@@ -5,16 +5,15 @@
 
 import AppKit
 
-/// Provides Qjiao's Finder service. The advertised menu item lives in
-/// Info.plist; AppKit forwards matching service requests to this object.
+/// 提供 Qjiao 的 Finder 扩展服务。关联菜单项配置于 Info.plist，
+/// AppKit 会将匹配的服务请求转发到此对象。
 @MainActor
 final class QjiaoApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = self
     }
 
-    /// Opens every directory Finder placed on the service pasteboard as a
-    /// project in the active Qjiao window.
+    /// 打开 Finder 拖投到服务剪贴板上的每一个文件夹，在 Qjiao 中作为项目打开。
     @objc func openInQjiao(
         _ pasteboard: NSPasteboard,
         userData: String?,
@@ -22,7 +21,7 @@ final class QjiaoApplicationDelegate: NSObject, NSApplicationDelegate {
     ) {
         let directories = Self.directories(from: pasteboard)
         guard !directories.isEmpty else {
-            error.pointee = "Select one or more folders to open in Qjiao." as NSString
+            error.pointee = L10n.t("Select one or more folders to open in Qjiao.") as NSString
             return
         }
 
@@ -42,32 +41,9 @@ final class QjiaoApplicationDelegate: NSObject, NSApplicationDelegate {
             candidates = urls.map(\.path)
         }
 
-        if candidates.isEmpty, let text = pasteboard.string(forType: .string) {
-            candidates = text.split(whereSeparator: \.isNewline).map(String.init)
-        }
-
-        let fileManager = FileManager.default
-        var seen = Set<String>()
-        return candidates.compactMap { candidate in
-            let path: String
-            if let url = URL(string: candidate), url.isFileURL {
-                path = url.path
-            } else {
-                path = (candidate as NSString).expandingTildeInPath
-            }
-
-            let standardized = URL(
-                fileURLWithPath: path,
-                isDirectory: true
-            ).standardizedFileURL.path
-            var isDirectory: ObjCBool = false
-            guard fileManager.fileExists(
-                atPath: standardized,
-                isDirectory: &isDirectory
-            ), isDirectory.boolValue, seen.insert(standardized).inserted else {
-                return nil
-            }
-            return standardized
+        var isDir: ObjCBool = false
+        return candidates.filter { path in
+            FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
         }
     }
 }

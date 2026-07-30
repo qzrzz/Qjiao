@@ -463,21 +463,34 @@ private struct PaneView: View {
         }
     }
 
+    @ObservedObject private var settings = AppSettings.shared
+
     var body: some View {
         // Single-pane tabs render exactly as before splits existed — no ring,
         // no handle — so nothing about the common case changes.
         if showFocusRing {
-            content
-                // Deliberately no SwiftUI clip: masking an AppKit view forces an
-                // offscreen recomposite that flickers on live resize. Clipping is
-                // handled natively by AppKit CALayer (TerminalContainerView).
-                .overlay { focusRing }
-                .overlay(alignment: .top) {
-                    if allowsMove { moveHandle }
+            VStack(spacing: 0) {
+                if settings.showPaneHeaders {
+                    PaneHeaderView(
+                        tab: tab,
+                        pane: pane,
+                        isFocused: isFocused,
+                        allowsMove: allowsMove,
+                        onMove: onMove,
+                        onMoveEnded: onMoveEnded,
+                        onSplit: splitFromMenu,
+                        onClosePane: onClosePane
+                    )
                 }
-                .overlay { dropHighlight }
-                .opacity(isMoveSource ? 0.55 : 1)
-                .background(frameReporter)
+                content
+            }
+            .overlay { focusRing }
+            .overlay(alignment: .top) {
+                if allowsMove && !settings.showPaneHeaders { moveHandle }
+            }
+            .overlay { dropHighlight }
+            .opacity(isMoveSource ? 0.55 : 1)
+            .background(frameReporter)
         } else {
             content
         }
@@ -665,6 +678,106 @@ private struct PaneFramePreferenceKey: PreferenceKey {
     static let defaultValue: [UUID: CGRect] = [:]
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue()) { $1 }
+    }
+}
+
+/// 分屏 Pane 顶部的实时标题栏与控制按钮。
+private struct PaneHeaderView: View {
+    @ObservedObject var tab: PaneTab
+    @ObservedObject private var themeChanges = Theme.changes
+    let pane: Pane
+    let isFocused: Bool
+    let allowsMove: Bool
+    let onMove: (CGPoint) -> Void
+    let onMoveEnded: () -> Void
+    let onSplit: (PaneDropEdge) -> Void
+    let onClosePane: ((PaneContent) -> Void)?
+
+    @State private var isDragging = false
+    @State private var isHovered = false
+
+    private var title: String {
+        switch pane.content {
+        case .session(let session):
+            let dirName = (session.currentDirectoryPath as NSString).lastPathComponent
+            return session.title.isEmpty ? dirName : session.title
+        case .file(let file):
+            return file.name
+        case .browser(let item):
+            return item.title.isEmpty ? item.urlString : item.title
+        case .diff(let item):
+            return item.title
+        }
+    }
+
+    private var icon: String {
+        pane.content.systemImage
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundColor(isFocused ? Theme.primaryColor : .secondary)
+
+            Text(title)
+                .font(.system(size: 11, weight: isFocused ? .semibold : .regular))
+                .foregroundColor(isFocused ? .primary : .secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer()
+
+            if isHovered || isFocused {
+                HStack(spacing: 4) {
+                    HeaderIconButton(
+                        systemImage: "square.split.1x2",
+                        help: L10n.t("Split Right (⌘D)")
+                    ) {
+                        onSplit(.right)
+                    }
+
+                    HeaderIconButton(
+                        systemImage: "square.split.2x1",
+                        help: L10n.t("Split Down (⇧⌘D)")
+                    ) {
+                        onSplit(.bottom)
+                    }
+
+                    if let onClosePane {
+                        HeaderIconButton(
+                            systemImage: "xmark",
+                            help: L10n.t("Close Pane")
+                        ) {
+                            onClosePane(pane.content)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(
+            isFocused
+                ? Color(nsColor: Theme.background).opacity(0.9)
+                : Color(nsColor: Theme.background).opacity(0.6)
+        )
+        .onHover { isHovered = $0 }
+        .gesture(
+            DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                .onChanged { value in
+                    if allowsMove {
+                        isDragging = true
+                        onMove(value.location)
+                    }
+                }
+                .onEnded { _ in
+                    if isDragging {
+                        isDragging = false
+                        onMoveEnded()
+                    }
+                }
+        )
     }
 }
 

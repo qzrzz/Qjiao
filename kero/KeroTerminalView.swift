@@ -397,6 +397,9 @@ final class SplitMenuTarget: NSObject {
         ]
         if onClose != nil {
             items.append(.separator())
+            let headerItem = item(L10n.t("Show Pane Headers"), #selector(toggleShowPaneHeaders))
+            headerItem.state = AppSettings.shared.showPaneHeaders ? .on : .off
+            items.append(headerItem)
             items.append(item(L10n.t("Close Pane"), #selector(closePane)))
         }
         return items
@@ -417,6 +420,11 @@ final class SplitMenuTarget: NSObject {
     }
     @objc private func newBrowserPane() {
         onNewBrowserPane?(browserInitialURL)
+    }
+    @objc private func toggleShowPaneHeaders() {
+        Task { @MainActor in
+            AppSettings.shared.showPaneHeaders.toggle()
+        }
     }
     @objc private func closePane() { onClose?() }
 }

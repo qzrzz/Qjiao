@@ -88,6 +88,27 @@ enum TerminalFont {
         return resolved
     }
 
+    /// 部分 CJK 终端字体使用双宽表意字符，因此不会设置 CoreText 的严格 fixed-pitch 标记，
+    /// 但其 ASCII 字符仍然占用一致的终端单元格。代表性 ASCII 样本在 Advance 宽度一致时予以采纳。
+    private static func isTerminalMonospaced(_ font: NSFont) -> Bool {
+        if font.isFixedPitch { return true }
+
+        let characters: [UniChar] = Array(" ilMW01@#".utf16)
+        var glyphs = Array(repeating: CGGlyph(), count: characters.count)
+        guard
+            CTFontGetGlyphsForCharacters(
+                font as CTFont, characters, &glyphs, characters.count
+            ), !glyphs.contains(0)
+        else { return false }
+
+        var advances = Array(repeating: CGSize.zero, count: glyphs.count)
+        CTFontGetAdvancesForGlyphs(
+            font as CTFont, .horizontal, glyphs, &advances, glyphs.count
+        )
+        guard let width = advances.first?.width, width > 0 else { return false }
+        return advances.dropFirst().allSatisfy { abs($0.width - width) < 0.01 }
+    }
+
     /// Fixed-pitch families available for the font picker, bundled default
     /// first. The symbols-only fallback font is not a usable primary font.
     static func selectableFamilies() -> [String] {
@@ -97,7 +118,7 @@ enum TerminalFont {
                       family != bundledFamily, !family.hasPrefix("."),
                       let font = NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: 13)
                 else { return false }
-                return font.isFixedPitch
+                return isTerminalMonospaced(font)
             }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         return [bundledFamily] + families
