@@ -2,9 +2,14 @@
   "name": "Qjiao-monorepo",
   "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "web"
+  ],
   "type": "module",
   "scripts": {
     "release": "bun run scripts/release.ts",
+    "web:build": "cd ./web && npm run build",
+    "web:preview": "cd ./docs && vite preview ",
     "appcast": "bun run scripts/generate-appcast.ts",
     "vendor:material-icons": "bun run scripts/vendor-material-icons.ts",
     "vendor:terminal-app-icons": "bun run scripts/vendor-terminal-app-icons.ts",
@@ -13,6 +18,5 @@
   "devDependencies": {
     "@types/bun": "latest",
     "woff2": "^1.0.0"
-  },
-  "workspaces": ["web"]
+  }
 }
