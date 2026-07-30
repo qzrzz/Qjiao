@@ -639,6 +639,10 @@ final class TerminalManager: nonisolated ObservableObject {
                 continue
             }
 
+            if let tab = project.tabs.first(where: { $0.sessions.contains(where: { $0.id == session.id }) }) {
+                tab.taskHasError = session.taskHasError
+            }
+
             if session.hasExited {
                 markScriptAsIdle(executionKey, endedAt: now)
             } else if now.timeIntervalSince(record.startedAt) > 0.5 && !session.isForegroundCommandRunning {
@@ -652,6 +656,10 @@ final class TerminalManager: nonisolated ObservableObject {
             else {
                 rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
                 continue
+            }
+
+            if let tab = project.tabs.first(where: { $0.sessions.contains(where: { $0.id == session.id }) }) {
+                tab.taskHasError = session.taskHasError
             }
 
             if session.hasExited {
@@ -704,8 +712,19 @@ final class TerminalManager: nonisolated ObservableObject {
         rightSidebarCommandStartedAt.removeValue(forKey: record.sessionID)
     }
 
-    /// 注册右侧栏命令对应的 Session，并在终端退出时及时清理转圈状态。
+    /// 注册右侧栏命令对应的 Session，记录 Task 运行标志，并在终端退出时及时清理状态。
     private func trackRightSidebarCommand(in session: TerminalSession) {
+        session.isTaskRunning = true
+        session.taskHasError = false
+        if let proj = project(containingSessionID: session.id) {
+            if let tab = proj.tabs.first(where: { $0.sessions.contains(where: { $0.id == session.id }) }) {
+                tab.isTaskRunning = true
+                tab.taskHasError = false
+            } else {
+                proj.selectedTab?.isTaskRunning = true
+                proj.selectedTab?.taskHasError = false
+            }
+        }
         rightSidebarCommandStartedAt[session.id] = Date()
         startScriptCheckTimerIfNeeded()
 
@@ -716,6 +735,18 @@ final class TerminalManager: nonisolated ObservableObject {
                 self?.rightSidebarCommandStartedAt.removeValue(forKey: exitedSession.id)
                 self?.stopScriptCheckTimerIfEmpty()
             }
+        }
+    }
+
+    /// 关闭该任务之前启动过的所有终端窗口/Session（无论当前是在运行中还是已运行结束）
+    func closeExistingPackageScriptTerminal(executionKey: String) {
+        guard let record = packageScriptRecords[executionKey] else { return }
+        if let project = project(containingSessionID: record.sessionID),
+           let session = project.sessions.first(where: { $0.id == record.sessionID }) {
+            project.closeContent(.session(session), terminate: true)
+        }
+        if record.status == .running || record.status == .stopping {
+            markScriptAsIdle(executionKey, endedAt: Date())
         }
     }
 
@@ -737,9 +768,8 @@ final class TerminalManager: nonisolated ObservableObject {
             scriptDescription: script.scriptDescription
         )
         let scriptKey = trackedScript.executionKey(projectID: project.id)
-        if let existing = packageScriptRecords[scriptKey], existing.status == .running {
-            stopPackageScript(scriptKey)
-        }
+        // 如果该任务之前启动过终端窗口（无论运行中还是已运行结束），再次运行时都关闭原来的窗口
+        closeExistingPackageScriptTerminal(executionKey: scriptKey)
 
         let session = project.newSession(directory: resolvedDirectory)
         let tabTitle = script.category.buildTabTitle(scriptName: script.name, directory: script.directory)

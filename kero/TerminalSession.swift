@@ -19,6 +19,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     @Published var title: String
     @Published var workingDirectory: String?
     @Published var hasExited = false
+    /// 标识该 Session 是否由右侧面板 task/脚本命令发起的终端。
+    @Published var isTaskRunning = false
+    /// 标识该 Session 运行命令结束时是否有错误（exitCode != 0）。
+    @Published var taskHasError = false
     /// 终端引擎与视图是否已完成真正的初始化。惰性 Session 在首次访问或进入前台时建联。
     @Published private(set) var isInitialized = false
     /// 每次 Ghostty 收到 OSC 133 命令完成报告时递增，供 Git 等事件消费者观察。
@@ -847,6 +851,9 @@ extension TerminalSession: TerminalSurfaceCommandFinishedDelegate {
     /// zsh 集成输出 OSC 133;D 后由 Ghostty 回调；递增序号可保留连续相同结果的事件。
     func terminalDidFinishCommand(exitCode: Int?, durationNanos: UInt64) {
         commandCompletionSequence &+= 1
+        if let exitCode {
+            taskHasError = (exitCode != 0)
+        }
     }
 }
 

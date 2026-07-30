@@ -4,11 +4,12 @@ import { $ } from "bun";
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
-  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { extractReleaseNotes } from "./changelog";
@@ -58,6 +59,7 @@ need("plutil");
 need("create-dmg");
 need("codesign");
 need("file");
+need("lipo");
 need("xattr");
 if (process.env.PUBLISH !== "0") {
   need("git");
@@ -113,6 +115,8 @@ if (REUSE_BUILD) {
     `DEVELOPMENT_TEAM=${teamId}`,
     "CODE_SIGN_STYLE=Manual",
     `CODE_SIGN_IDENTITY=${SIGN_IDENTITY}`,
+    "ARCHS=arm64",
+    "ONLY_ACTIVE_ARCH=YES",
   ];
   await $`xcodebuild -project ${PROJECT} -scheme ${SCHEME} -configuration ${CONFIGURATION} -archivePath ${ARCHIVE_PATH} ${signingArgs} archive`;
 
@@ -122,8 +126,8 @@ if (REUSE_BUILD) {
 
 const app = APP_PATH;
 if (!existsSync(app)) die(`exported app not found at ${app}`);
-say("Re-signing bundled executables with Hardened Runtime…");
-await signExportedApp(app, SIGN_IDENTITY);
+say("Thinning Qjiao to arm64 and re-signing nested code…");
+await prepareAndSignExportedApp(app, SIGN_IDENTITY);
 const appPlist = join(app, "Contents/Info.plist");
 const version = (
   await $`plutil -extract CFBundleShortVersionString raw ${appPlist}`.text()
@@ -257,29 +261,42 @@ console.log(
   `  latest:  https://github.com/${GITHUB_REPOSITORY}/releases/latest`,
 );
 
-/** 显式签署资源目录中的 Mach-O 工具，再重新签署最外层 App。 */
-async function signExportedApp(
+/** 将导出的 App 裁成纯 arm64，并按由内到外的顺序重新签名。 */
+async function prepareAndSignExportedApp(
   appPath: string,
   identity: string,
 ): Promise<void> {
-  const resourcesPath = join(appPath, "Contents", "Resources");
   // 清理 Finder/quarantine 扩展属性，避免它们污染资源封印。
   await $`xattr -cr ${appPath}`;
-  for (const path of listExecutableFiles(resourcesPath)) {
-    const description = (await $`file -b ${path}`.text()).trim();
-    if (!description.includes("Mach-O")) continue;
-    await $`codesign --force --timestamp --options runtime --sign ${identity} ${path}`;
+
+  const machOBinaries = await listMachOBinaries(appPath);
+  for (const path of machOBinaries) {
+    await thinBinaryToArm64(path);
+  }
+  for (const path of machOBinaries) {
+    await signNestedCode(path, identity);
+  }
+  for (const path of listNestedCodeBundles(appPath)) {
+    await signNestedCode(path, identity);
   }
   await $`codesign --force --timestamp --options runtime --entitlements ${"kero/kero.entitlements"} --sign ${identity} ${appPath}`;
   await $`codesign --verify --deep --strict --verbose=2 ${appPath}`;
+
+  for (const path of machOBinaries) {
+    const architectures = await readArchitectures(path);
+    if (architectures.length !== 1 || architectures[0] !== "arm64") {
+      die(`non-arm64 architecture remains in ${path}: ${architectures}`);
+    }
+  }
 }
 
-/** 递归列出目录内具有可执行权限的普通文件。 */
+/** 递归列出目录内具有可执行权限的普通文件，并跳过符号链接。 */
 function listExecutableFiles(directory: string): string[] {
   const result: string[] = [];
   for (const entry of readdirSync(directory)) {
     const path = join(directory, entry);
-    const stat = statSync(path);
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) continue;
     if (stat.isDirectory()) {
       result.push(...listExecutableFiles(path));
     } else if (stat.isFile() && (stat.mode & 0o111) !== 0) {
@@ -287,6 +304,63 @@ function listExecutableFiles(directory: string): string[] {
     }
   }
   return result;
+}
+
+/** 找出 App 中全部可执行 Mach-O 文件。 */
+async function listMachOBinaries(appPath: string): Promise<string[]> {
+  const result: string[] = [];
+  for (const path of listExecutableFiles(appPath)) {
+    const description = (await $`file -b ${path}`.text()).trim();
+    if (description.includes("Mach-O")) result.push(path);
+  }
+  return result;
+}
+
+/** 读取 Mach-O 文件包含的架构列表。 */
+async function readArchitectures(path: string): Promise<string[]> {
+  return (await $`lipo -archs ${path}`.text()).trim().split(/\s+/);
+}
+
+/** 删除 Mach-O 中除 arm64 外的架构切片。 */
+async function thinBinaryToArm64(path: string): Promise<void> {
+  const architectures = await readArchitectures(path);
+  if (!architectures.includes("arm64")) {
+    die(`embedded executable does not support arm64: ${path}`);
+  }
+  if (architectures.length === 1) return;
+
+  const temporaryPath = `${path}.qjiao-arm64`;
+  rmSync(temporaryPath, { force: true });
+  await $`lipo ${path} -thin arm64 -output ${temporaryPath}`;
+  renameSync(temporaryPath, path);
+}
+
+/** 递归列出需要独立签名的嵌套代码 Bundle，最深层优先。 */
+function listNestedCodeBundles(appPath: string): string[] {
+  const result: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory)) {
+      const path = join(directory, entry);
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+      visit(path);
+      if (/\.(?:app|framework|xpc)$/.test(entry)) result.push(path);
+    }
+  };
+  visit(appPath);
+  return result;
+}
+
+/** 给内层 Mach-O 或代码 Bundle 保留必要元数据后补签。 */
+async function signNestedCode(path: string, identity: string): Promise<void> {
+  const existingSignature = await $`codesign --display ${path}`
+    .quiet()
+    .nothrow();
+  if (existingSignature.exitCode === 0) {
+    await $`codesign --force --timestamp --options runtime --preserve-metadata=identifier,entitlements,requirements --sign ${identity} ${path}`;
+  } else {
+    await $`codesign --force --timestamp --options runtime --sign ${identity} ${path}`;
+  }
 }
 
 /** 提交公证并验证最终状态；失败时立即下载 Apple 的详细日志。 */

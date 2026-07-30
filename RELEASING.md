@@ -5,7 +5,7 @@ Qjiao 完全在本机编译、签名、公证和打包。GitHub 只用于托管 
 
 ```text
 本机 Xcode-beta
-  → Developer ID 签名
+  → arm64 Release 构建与 Developer ID 签名
   → Apple 公证并装订票据
   → 生成 DMG、Sparkle ZIP 与 appcast
   → 本机 gh 上传 GitHub Release
@@ -181,10 +181,11 @@ bun run release
 
 一个命令会依次完成：
 
-1. 使用 Qjiao Release Scheme 创建 archive。
+1. 使用 Qjiao Release Scheme 创建纯 arm64 archive。
 2. 导出 Developer ID 签名的 `Qjiao.app`。
-3. 给资源目录中的 Mach-O 工具补充 Hardened Runtime、secure
-   timestamp 和 Developer ID 签名，再重新签名并验证 App。
+3. 删除 Sparkle 和内置工具中残留的 Intel 切片，给全部 Mach-O
+   补充 Hardened Runtime、secure timestamp 和 Developer ID
+   签名，再按由内到外的顺序签名并验证 App。
 4. 生成、签名并验证 `qjiao-<version>.dmg`。
 5. 提交 Apple 公证，并给 DMG 和 App 装订票据。
 6. 生成 Sparkle ZIP 与版本更新说明。
@@ -225,8 +226,8 @@ REUSE_BUILD=1 bun run release
 ```
 
 脚本仍会重新签署 App 内所有可执行代码、重建并签署 DMG、重新公证，
-不会复用失败的 DMG。只有确认现有导出 App 对应当前发布源码和版本时
-才能使用此选项。
+不会复用失败的 DMG。已有 Universal App 会在此阶段裁成纯 arm64。
+只有确认现有导出 App 对应当前发布源码和版本时才能使用此选项。
 
 ## 发布选项
 

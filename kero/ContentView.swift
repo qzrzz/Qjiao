@@ -1165,6 +1165,8 @@ private struct SessionTabLabel: View {
                 manualTitle: customTitle,
                 paneCount: paneCount,
                 isSelected: isSelected,
+                isTaskTab: session.isTaskRunning,
+                taskHasError: session.taskHasError,
                 isTerminalRunning: showsCommandSpinner,
                 terminalAppIcon: appIcon,
                 minWidth: minWidth,
@@ -1256,6 +1258,44 @@ private struct TabStripIconView: View {
     }
 }
 
+/// 终端 Task 状态的右下角指示器（运行中为转圈动画，正常结束为蓝圈带勾，错误结束为红圈带感叹号）
+struct TaskStatusOverlayView: View {
+    let isExecuting: Bool
+    var hasError: Bool = false
+    var tint: Color = Color(nsColor: Theme.cursor)
+
+    var body: some View {
+        ZStack {
+            if isExecuting {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(tint)
+                    .scaleEffect(0.7)
+                    .frame(width: 11, height: 11)
+            } else if hasError {
+                ZStack {
+                    Circle()
+                        .fill(Color(nsColor: NSColor.systemRed))
+                        .frame(width: 11, height: 11)
+                    Image(systemName: "exclamationmark")
+                        .font(.system(size: 7, weight: .heavy))
+                        .foregroundStyle(.white)
+                }
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(Color(nsColor: NSColor.systemBlue))
+                        .frame(width: 11, height: 11)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 6.5, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .offset(x: 3.5, y: 3.5)
+    }
+}
+
 private struct TabItemChrome: View {
     /// 默认最小宽度（标签条未满）；实际下限由 `minWidth` 传入。
     private static let defaultMinWidth: CGFloat = 150
@@ -1273,6 +1313,8 @@ private struct TabItemChrome: View {
     var paneCount: Int = 1
     let isSelected: Bool
     var isDirty = false
+    var isTaskTab = false
+    var taskHasError = false
     var isTerminalRunning = false
     /// 终端前台进程匹配到的应用图标；有值时优先于转圈动画。
     var terminalAppIcon: TerminalAppIconSource? = nil
@@ -1291,30 +1333,39 @@ private struct TabItemChrome: View {
     var body: some View {
         Button(action: select) {
             HStack(spacing: 5) {
-                if let browserIcon {
-                    BrowserFaviconView(browser: browserIcon, size: 16)
-                        .opacity(isSelected ? 1 : 0.78)
-                } else if let terminalAppIcon {
-                    // 识别到 agy / codex 等应用时显示其图标，替代通用转圈。
-                    TerminalAppIconView(
-                        source: terminalAppIcon,
-                        size: 16,
-                        isSelected: isSelected
-                    )
-                    .accessibilityLabel(L10n.t("Running application"))
-                } else if isTerminalRunning {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor)
-                        .frame(width: 13, height: 13)
-                        .accessibilityLabel(L10n.t("Command running"))
-                } else {
-                    TabStripIconView(
-                        systemImage: systemImage,
-                        materialFileName: materialFileName,
-                        isSelected: isSelected
-                    )
+                let iconBase = Group {
+                    if let browserIcon {
+                        BrowserFaviconView(browser: browserIcon, size: 16)
+                            .opacity(isSelected ? 1 : 0.78)
+                    } else if let terminalAppIcon {
+                        TerminalAppIconView(
+                            source: terminalAppIcon,
+                            size: 16,
+                            isSelected: isSelected
+                        )
+                        .accessibilityLabel(L10n.t("Running application"))
+                    } else {
+                        TabStripIconView(
+                            systemImage: systemImage,
+                            materialFileName: materialFileName,
+                            isSelected: isSelected
+                        )
+                    }
                 }
+
+                if isTaskTab {
+                    iconBase.overlay(
+                        TaskStatusOverlayView(
+                            isExecuting: isTerminalRunning,
+                            hasError: taskHasError,
+                            tint: isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor
+                        ),
+                        alignment: .bottomTrailing
+                    )
+                } else {
+                    iconBase
+                }
+
                 Text(title)
                     .font(SidebarTypography.body())
                     .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
@@ -1425,7 +1476,7 @@ private struct TabItemChrome: View {
     }
 }
 
-/// Terminal: 前台已知应用 → TerminalAppIcon；右侧栏命令 → spinner；其他情况 → SF Symbol。
+/// Terminal: 前台已知应用 → TerminalAppIcon；Task 标志 → 右下角 indicator；其他情况 → SF Symbol。
 /// Open files / diffs use Material icons (same as the Files tree).
 struct TabContentIcon: View {
     let content: PaneContent?
@@ -1438,21 +1489,30 @@ struct TabContentIcon: View {
             BrowserFaviconView(browser: browser, size: Self.materialSize)
                 .foregroundStyle(tint)
         } else if case .session(let session)? = content {
-            if let appIcon = session.foregroundAppIcon {
-                TerminalAppIconView(
-                    source: appIcon,
-                    size: Self.materialSize,
-                    isSelected: true
+            let iconBase = Group {
+                if let appIcon = session.foregroundAppIcon {
+                    TerminalAppIconView(
+                        source: appIcon,
+                        size: Self.materialSize,
+                        isSelected: true
+                    )
+                } else {
+                    Image(systemName: "terminal")
+                        .font(SidebarTypography.secondary(.medium))
+                        .foregroundStyle(tint)
+                }
+            }
+            if session.isTaskRunning {
+                iconBase.overlay(
+                    TaskStatusOverlayView(
+                        isExecuting: showsCommandSpinner,
+                        hasError: session.taskHasError,
+                        tint: tint
+                    ),
+                    alignment: .bottomTrailing
                 )
-            } else if showsCommandSpinner {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(tint)
-                    .accessibilityLabel(L10n.t("Command running"))
             } else {
-                Image(systemName: "terminal")
-                    .font(SidebarTypography.secondary(.medium))
-                    .foregroundStyle(tint)
+                iconBase
             }
         } else if let fileName = content?.materialFileName {
             MaterialFileIconView(

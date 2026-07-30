@@ -106,9 +106,13 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
     /// the column structure and weights stay intact underneath, and the layout
     /// simply renders the focused pane alone while set — so zoom follows a
     /// focus change instead of hiding it. Cleared by focus navigation and by
-    /// anything structural, so those commands always land on a visible layout.
     /// Deliberately not persisted.
     @Published var isZoomed = false
+
+    /// 标识该 Tab 是否由右侧面板 task/脚本命令发起的终端 Tab。
+    @Published var isTaskRunning = false
+    /// 标识该 Tab 运行命令结束时是否有错误。
+    @Published var taskHasError = false
 
     /// The terminal whose directory this tab is oriented around when it holds
     /// no terminal of its own — captured from the focused session when a file
