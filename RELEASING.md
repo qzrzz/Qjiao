@@ -183,12 +183,17 @@ bun run release
 
 1. 使用 Qjiao Release Scheme 创建 archive。
 2. 导出 Developer ID 签名的 `Qjiao.app`。
-3. 生成并签名 `qjiao-<version>.dmg`。
-4. 提交 Apple 公证，并给 DMG 和 App 装订票据。
-5. 生成 Sparkle ZIP 与版本更新说明。
-6. 下载上一版 `appcast.xml` 并追加当前版本。
-7. 自动创建并推送 `v<MARKETING_VERSION>` Git 标签。
-8. 使用本机 `gh` 创建 GitHub Release 并上传四项资产。
+3. 给资源目录中的 Mach-O 工具补充 Hardened Runtime、secure
+   timestamp 和 Developer ID 签名，再重新签名并验证 App。
+4. 生成、签名并验证 `qjiao-<version>.dmg`。
+5. 提交 Apple 公证，并给 DMG 和 App 装订票据。
+6. 生成 Sparkle ZIP 与版本更新说明。
+7. 下载上一版 `appcast.xml` 并追加当前版本。
+8. 自动创建并推送 `v<MARKETING_VERSION>` Git 标签。
+9. 使用本机 `gh` 创建 GitHub Release 并上传四项资产。
+
+Apple 返回 `Invalid` 时，脚本会立即调用 `notarytool log` 输出具体
+文件和原因，并停止执行，不会继续 staple。
 
 如果同名本地标签已经指向当前提交，脚本会直接复用并推送；如果标签
 指向其他提交，则立即终止，不会移动或覆盖已有标签。
@@ -210,6 +215,19 @@ PUBLISH=0 bun run release
 产物位于 `build/`。此模式不需要 `git` 或 `gh`，不会创建标签，也
 不会读取或修改 GitHub。
 
+## 复用已有构建重试
+
+如果编译和导出已经成功，只是在后续签名、公证、Sparkle 或上传阶段
+失败，可复用 `build/export/Qjiao.app`，避免再次执行 Xcode archive：
+
+```sh
+REUSE_BUILD=1 bun run release
+```
+
+脚本仍会重新签署 App 内所有可执行代码、重建并签署 DMG、重新公证，
+不会复用失败的 DMG。只有确认现有导出 App 对应当前发布源码和版本时
+才能使用此选项。
+
 ## 发布选项
 
 | 环境变量                      | 默认值                     | 用途                    |
@@ -226,6 +244,7 @@ PUBLISH=0 bun run release
 | `PUBLISH=0`                   | —                          | 只生成本地产物          |
 | `FORCE=1`                     | —                          | 覆盖同标签 Release 资产 |
 | `NO_HISTORY=1`                | —                          | 不继承旧 appcast        |
+| `REUSE_BUILD=1`               | —                          | 复用已导出的 Qjiao.app  |
 
 默认禁止覆盖同名 Release。`FORCE=1` 只替换该 Release 的四项资产；
 不会删除标签或其他 Release。

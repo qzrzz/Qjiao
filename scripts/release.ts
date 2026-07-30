@@ -6,12 +6,20 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { extractReleaseNotes } from "./changelog";
 import { generateAppcast } from "./generate-appcast";
 import { die, need, say } from "./lib";
+
+/** 公证提交返回的必要字段。 */
+interface INotarySubmission {
+  id: string;
+  status: string;
+}
 
 const PROJECT = "Qjiao.xcodeproj";
 const SCHEME = "Qjiao";
@@ -22,6 +30,8 @@ const BUILD_DIR = process.env.BUILD_DIR ?? "build";
 const UPDATES_DIR = join(BUILD_DIR, "updates");
 const ARCHIVE_PATH = join(BUILD_DIR, "Qjiao.xcarchive");
 const EXPORT_DIR = join(BUILD_DIR, "export");
+const APP_PATH = join(EXPORT_DIR, `${APP_NAME}.app`);
+const REUSE_BUILD = process.env.REUSE_BUILD === "1";
 const EXPORT_OPTIONS_SOURCE =
   process.env.EXPORT_OPTIONS ?? "scripts/ExportOptions.plist";
 const EXPORT_OPTIONS = join(BUILD_DIR, "ExportOptions.plist");
@@ -47,6 +57,8 @@ need("xcrun");
 need("plutil");
 need("create-dmg");
 need("codesign");
+need("file");
+need("xattr");
 if (process.env.PUBLISH !== "0") {
   need("git");
   need("gh");
@@ -88,21 +100,30 @@ mkdirSync(BUILD_DIR, { recursive: true });
 copyFileSync(EXPORT_OPTIONS_SOURCE, EXPORT_OPTIONS);
 await $`plutil -replace teamID -string ${teamId} ${EXPORT_OPTIONS}`;
 
-say(`Archiving Qjiao (${CONFIGURATION})…`);
-rmSync(ARCHIVE_PATH, { recursive: true, force: true });
-rmSync(EXPORT_DIR, { recursive: true, force: true });
-const signingArgs = [
-  `DEVELOPMENT_TEAM=${teamId}`,
-  "CODE_SIGN_STYLE=Manual",
-  `CODE_SIGN_IDENTITY=${SIGN_IDENTITY}`,
-];
-await $`xcodebuild -project ${PROJECT} -scheme ${SCHEME} -configuration ${CONFIGURATION} -archivePath ${ARCHIVE_PATH} ${signingArgs} archive`;
+if (REUSE_BUILD) {
+  say("REUSE_BUILD=1: reusing the existing exported Qjiao.app…");
+  if (!existsSync(APP_PATH)) {
+    die(`cannot reuse build because ${APP_PATH} does not exist`);
+  }
+} else {
+  say(`Archiving Qjiao (${CONFIGURATION})…`);
+  rmSync(ARCHIVE_PATH, { recursive: true, force: true });
+  rmSync(EXPORT_DIR, { recursive: true, force: true });
+  const signingArgs = [
+    `DEVELOPMENT_TEAM=${teamId}`,
+    "CODE_SIGN_STYLE=Manual",
+    `CODE_SIGN_IDENTITY=${SIGN_IDENTITY}`,
+  ];
+  await $`xcodebuild -project ${PROJECT} -scheme ${SCHEME} -configuration ${CONFIGURATION} -archivePath ${ARCHIVE_PATH} ${signingArgs} archive`;
 
-say("Exporting Developer ID app…");
-await $`xcodebuild -exportArchive -archivePath ${ARCHIVE_PATH} -exportOptionsPlist ${EXPORT_OPTIONS} -exportPath ${EXPORT_DIR}`;
+  say("Exporting Developer ID app…");
+  await $`xcodebuild -exportArchive -archivePath ${ARCHIVE_PATH} -exportOptionsPlist ${EXPORT_OPTIONS} -exportPath ${EXPORT_DIR}`;
+}
 
-const app = join(EXPORT_DIR, `${APP_NAME}.app`);
+const app = APP_PATH;
 if (!existsSync(app)) die(`exported app not found at ${app}`);
+say("Re-signing bundled executables with Hardened Runtime…");
+await signExportedApp(app, SIGN_IDENTITY);
 const appPlist = join(app, "Contents/Info.plist");
 const version = (
   await $`plutil -extract CFBundleShortVersionString raw ${appPlist}`.text()
@@ -145,7 +166,8 @@ mkdirSync(dmgStaging, { recursive: true });
 await $`ditto ${app} ${join(dmgStaging, `${APP_NAME}.app`)}`;
 await $`create-dmg --volname ${`${APP_NAME} ${version}`} --window-size 540 380 --icon-size 128 --icon ${`${APP_NAME}.app`} 150 195 --app-drop-link 390 195 --hide-extension ${`${APP_NAME}.app`} --no-internet-enable ${dmgPath} ${dmgStaging}`.nothrow();
 if (!existsSync(dmgPath)) die("create-dmg did not produce a disk image");
-await $`codesign --force --sign ${SIGN_IDENTITY} ${dmgPath}`;
+await $`codesign --force --timestamp --sign ${SIGN_IDENTITY} ${dmgPath}`;
+await $`codesign --verify --strict --verbose=2 ${dmgPath}`;
 
 say("Notarizing and stapling release artifacts…");
 const notaryKeyPath = process.env.APPLE_API_KEY_PATH;
@@ -159,19 +181,29 @@ if (
 ) {
   die("APPLE_ID and APPLE_APP_SPECIFIC_PASSWORD must be set together");
 }
+let notaryAuthArgs: string[];
 if (notaryKeyPath && notaryKeyId && notaryIssuer) {
-  await $`xcrun notarytool submit ${dmgPath} --key ${notaryKeyPath} --key-id ${notaryKeyId} --issuer ${notaryIssuer} --wait`;
+  notaryAuthArgs = [
+    "--key",
+    notaryKeyPath,
+    "--key-id",
+    notaryKeyId,
+    "--issuer",
+    notaryIssuer,
+  ];
 } else if (appleId && appleAppSpecificPassword) {
-  // 敏感参数通过 Bun.spawn 传递，避免 ShellError 将专用密码写入日志。
-  await runNotaryWithAppleId(
-    dmgPath,
+  notaryAuthArgs = [
+    "--apple-id",
     appleId,
+    "--password",
     appleAppSpecificPassword,
+    "--team-id",
     teamId,
-  );
+  ];
 } else {
-  await $`xcrun notarytool submit ${dmgPath} --keychain-profile ${NOTARY_PROFILE} --wait`;
+  notaryAuthArgs = ["--keychain-profile", NOTARY_PROFILE];
 }
+await notarizeArtifact(dmgPath, notaryAuthArgs);
 await $`xcrun stapler staple ${dmgPath}`;
 await $`xcrun stapler staple ${app}`;
 await $`ditto -c -k --keepParent ${app} ${zipPath}`;
@@ -225,27 +257,74 @@ console.log(
   `  latest:  https://github.com/${GITHUB_REPOSITORY}/releases/latest`,
 );
 
-/** 使用 Apple ID 公证，并避免在失败日志中输出完整命令参数。 */
-async function runNotaryWithAppleId(
-  artifactPath: string,
-  appleId: string,
-  password: string,
-  teamId: string,
+/** 显式签署资源目录中的 Mach-O 工具，再重新签署最外层 App。 */
+async function signExportedApp(
+  appPath: string,
+  identity: string,
 ): Promise<void> {
+  const resourcesPath = join(appPath, "Contents", "Resources");
+  // 清理 Finder/quarantine 扩展属性，避免它们污染资源封印。
+  await $`xattr -cr ${appPath}`;
+  for (const path of listExecutableFiles(resourcesPath)) {
+    const description = (await $`file -b ${path}`.text()).trim();
+    if (!description.includes("Mach-O")) continue;
+    await $`codesign --force --timestamp --options runtime --sign ${identity} ${path}`;
+  }
+  await $`codesign --force --timestamp --options runtime --entitlements ${"kero/kero.entitlements"} --sign ${identity} ${appPath}`;
+  await $`codesign --verify --deep --strict --verbose=2 ${appPath}`;
+}
+
+/** 递归列出目录内具有可执行权限的普通文件。 */
+function listExecutableFiles(directory: string): string[] {
+  const result: string[] = [];
+  for (const entry of readdirSync(directory)) {
+    const path = join(directory, entry);
+    const stat = statSync(path);
+    if (stat.isDirectory()) {
+      result.push(...listExecutableFiles(path));
+    } else if (stat.isFile() && (stat.mode & 0o111) !== 0) {
+      result.push(path);
+    }
+  }
+  return result;
+}
+
+/** 提交公证并验证最终状态；失败时立即下载 Apple 的详细日志。 */
+async function notarizeArtifact(
+  artifactPath: string,
+  authArgs: string[],
+): Promise<void> {
+  // 敏感参数通过 Bun.spawn 传递，避免 ShellError 将凭据写入日志。
   const child = Bun.spawn(
     [
       "xcrun",
       "notarytool",
       "submit",
       artifactPath,
-      "--apple-id",
-      appleId,
-      "--password",
-      password,
-      "--team-id",
-      teamId,
+      ...authArgs,
       "--wait",
+      "--output-format",
+      "json",
     ],
+    {
+      env: process.env,
+      stdin: "inherit",
+      stdout: "pipe",
+      stderr: "inherit",
+    },
+  );
+  const output = await new Response(child.stdout).text();
+  const exitCode = await child.exited;
+  if (exitCode !== 0) {
+    die(`notarytool failed with exit code ${exitCode}`);
+  }
+  const submission = parseNotarySubmission(output);
+  console.log(output.trim());
+  if (submission.status === "Accepted") return;
+
+  console.error("\nApple notarization log:");
+  const log = Bun.spawn(
+    ["xcrun", "notarytool", "log", submission.id, ...authArgs],
     {
       env: process.env,
       stdin: "inherit",
@@ -253,10 +332,21 @@ async function runNotaryWithAppleId(
       stderr: "inherit",
     },
   );
-  const exitCode = await child.exited;
-  if (exitCode !== 0) {
-    die(`notarytool failed with exit code ${exitCode}`);
+  await log.exited;
+  die(`notarization finished with status ${submission.status}`);
+}
+
+/** 解析 notarytool JSON，并拒绝缺少必要字段的异常响应。 */
+function parseNotarySubmission(output: string): INotarySubmission {
+  try {
+    const value = JSON.parse(output) as Partial<INotarySubmission>;
+    if (typeof value.id === "string" && typeof value.status === "string") {
+      return { id: value.id, status: value.status };
+    }
+  } catch {
+    // 统一交由下方错误处理，避免输出可能包含环境信息的原始异常对象。
   }
+  die("notarytool returned an invalid JSON response");
 }
 
 /** 创建指向当前提交的版本标签，并将标签推送到 origin。 */
