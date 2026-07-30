@@ -258,6 +258,8 @@ bun run release
 验证并复用该 DMG，然后重新请求 secure timestamp，不会重新创建
 磁盘映像。单次执行默认会对 Xcode 归档中的瞬时 CodeSign 失败和 DMG
 timestamp 签名各重试 3 次；归档重试会保留 DerivedData，复用已经完成的编译。
+GitHub Release 的四个资产会逐个上传，日志显示当前文件、大小、序号和
+等待时长。GitHub CLI 本身不提供准确的字节上传百分比。
 
 升级到断点脚本前没有状态文件时，脚本允许接管版本号和构建号完全
 匹配、App 签名有效且磁盘映像完整的现有产物。后续运行同时要求 Git
