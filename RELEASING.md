@@ -247,5 +247,12 @@ REUSE_BUILD=1 bun run release
 | `NO_HISTORY=1`                | —                          | 不继承旧 appcast        |
 | `REUSE_BUILD=1`               | —                          | 复用已导出的 Qjiao.app  |
 
-默认禁止覆盖同名 Release。`FORCE=1` 只替换该 Release 的四项资产；
-不会删除标签或其他 Release。
+默认禁止覆盖同名 Release，也不会移动已经存在的版本标签。确认需要用
+当前提交重复发布相同版本时执行：
+
+```sh
+FORCE=1 REUSE_BUILD=1 bun run release
+```
+
+`FORCE=1` 会将同名本地和远端标签移动到当前提交，并覆盖该 GitHub
+Release 的四项资产与版本说明；不会删除其他标签或 Release。

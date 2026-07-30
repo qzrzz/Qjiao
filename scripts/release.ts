@@ -239,8 +239,11 @@ if (process.env.PUBLISH === "0") {
 
 const appcastPath = join(UPDATES_DIR, "appcast.xml");
 const existingRelease =
-  (await $`gh release view ${tag} --repo ${GITHUB_REPOSITORY}`.nothrow())
-    .exitCode === 0;
+  (
+    await $`gh release view ${tag} --repo ${GITHUB_REPOSITORY}`
+      .quiet()
+      .nothrow()
+  ).exitCode === 0;
 if (existingRelease && process.env.FORCE !== "1") {
   die(`${tag} already exists; set FORCE=1 to replace its assets`);
 }
@@ -435,7 +438,14 @@ async function createAndPushReleaseTag(
   if (localTag.exitCode === 0) {
     const taggedCommit = (await $`git rev-list -n 1 ${tag}`.text()).trim();
     if (taggedCommit !== head) {
-      die(`${tag} already points to a different commit`);
+      if (process.env.FORCE !== "1") {
+        die(
+          `${tag} already points to a different commit; set FORCE=1 to move it`,
+        );
+      }
+      say(`FORCE=1: moving Git tag ${tag} to the current commit…`);
+      await $`git tag --delete ${tag}`;
+      await $`git tag --annotate ${tag} --message ${`Qjiao ${version}`}`;
     }
   } else {
     say(`Creating Git tag ${tag}…`);
@@ -443,7 +453,11 @@ async function createAndPushReleaseTag(
   }
 
   say(`Pushing Git tag ${tag}…`);
-  await $`git push origin ${tag}`;
+  if (process.env.FORCE === "1") {
+    await $`git push --force origin ${tag}`;
+  } else {
+    await $`git push origin ${tag}`;
+  }
 }
 
 /** 判断 Info.plist 中是否已经配置有效的 Sparkle EdDSA 公钥。 */
