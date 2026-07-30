@@ -87,7 +87,16 @@ const NOTARY_PROFILE = process.env.NOTARY_PROFILE ?? "NOTARY";
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
 const SPARKLE_ACCOUNT = process.env.SPARKLE_ACCOUNT ?? "qjiao";
 const FORCE_RELEASE = process.env.FORCE !== "0";
-const TIMESTAMP_RETRIES = readPositiveInteger(process.env.TIMESTAMP_RETRIES, 3);
+const ARCHIVE_RETRIES = readPositiveInteger(
+  "ARCHIVE_RETRIES",
+  process.env.ARCHIVE_RETRIES,
+  3,
+);
+const TIMESTAMP_RETRIES = readPositiveInteger(
+  "TIMESTAMP_RETRIES",
+  process.env.TIMESTAMP_RETRIES,
+  3,
+);
 let allowExistingArtifactAdoption = false;
 
 process.chdir(join(import.meta.dir, ".."));
@@ -208,7 +217,7 @@ if (
         "ARCHS=arm64",
         "ONLY_ACTIVE_ARCH=YES",
       ];
-      await $`xcodebuild -project ${PROJECT} -scheme ${SCHEME} -configuration ${CONFIGURATION} -archivePath ${ARCHIVE_PATH} ${signingArgs} archive`;
+      await archiveWithCodeSignRetry(signingArgs);
       if (!(await validateArchive(identity))) {
         die("the Xcode archive failed version or signature checks");
       }
@@ -457,15 +466,47 @@ function readBuildSetting(output: string, name: string): string {
 
 /** 读取正整数环境变量，非法输入立即终止发布。 */
 function readPositiveInteger(
+  name: string,
   value: string | undefined,
   fallback: number,
 ): number {
   if (value === undefined) return fallback;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
-    die("TIMESTAMP_RETRIES must be a positive integer");
+    die(`${name} must be a positive integer`);
   }
   return parsed;
+}
+
+/**
+ * Xcode 偶尔会在并行归档资源 bundle 时留下不完整签名。
+ * 仅对明确的 CodeSign 失败增量重试，并保留 DerivedData 编译缓存。
+ */
+async function archiveWithCodeSignRetry(signingArgs: string[]): Promise<void> {
+  for (let attempt = 1; attempt <= ARCHIVE_RETRIES; attempt += 1) {
+    const result =
+      await $`xcodebuild -project ${PROJECT} -scheme ${SCHEME} -configuration ${CONFIGURATION} -archivePath ${ARCHIVE_PATH} ${signingArgs} archive`.nothrow();
+    if (result.exitCode === 0) return;
+
+    const output = `${result.stdout.toString()}\n${result.stderr.toString()}`;
+    const isCodeSignFailure = /Command CodeSign failed|^\s*CodeSign\s+/im.test(
+      output,
+    );
+    if (!isCodeSignFailure || attempt === ARCHIVE_RETRIES) {
+      die(
+        isCodeSignFailure
+          ? `Xcode archive CodeSign failed after ${ARCHIVE_RETRIES} attempts`
+          : "Xcode archive failed",
+      );
+    }
+
+    const delay = Math.min(attempt * 3_000, 10_000);
+    say(
+      `Xcode archive hit a transient CodeSign failure; retrying ` +
+        `incrementally in ${delay / 1_000}s (${attempt}/${ARCHIVE_RETRIES})…`,
+    );
+    await Bun.sleep(delay);
+  }
 }
 
 /** 计算真正影响 macOS App 构建和签名的输入指纹。 */

@@ -1,16 +1,20 @@
 import { useEffect, useState } from "react";
+import qjiaoIcon from "/qjiao-icon.png";
+import { LanguageSwitcher } from "../../components/LanguageSwitcher";
+import { getCurrentLang, uiDictMap, type SupportedLang } from "../../i18n/dict";
 import { useLatestRelease } from "../Hero/useLatestRelease";
 import "./StickyHeader.css";
 
-/**
- * 顶部固定 Header 组件
- * 
- * 当首屏 Hero 区域的 download 按钮滚动离开视口范围时自动淡入展现，
- * 包含品牌标志与导航至 Release 下载及 GitHub 仓库的便捷按钮组。
- */
-export function StickyHeader() {
+interface StickyHeaderProps {
+  lang?: SupportedLang;
+}
+
+/** 顶部固定 Header 组件，包含 Sticky 语言下拉切换器与下载入口。 */
+export function StickyHeader({ lang }: StickyHeaderProps) {
   const [isVisible, setIsVisible] = useState(false);
   const { downloadUrl } = useLatestRelease("qzrzz", "Qjiao");
+  const currentLang = lang || getCurrentLang();
+  const dict = uiDictMap[currentLang] || uiDictMap.en;
 
   useEffect(() => {
     const targetNode = document.getElementById("hero-download");
@@ -18,7 +22,6 @@ export function StickyHeader() {
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        // 当元素脱离视口 (isIntersecting 为 false)，且顶边滚动到了视口上方 (boundingClientRect.top < 0) 时显示 Header
         const isOutOfView = !entry.isIntersecting && entry.boundingClientRect.top < 0;
         setIsVisible(isOutOfView);
       },
@@ -34,9 +37,6 @@ export function StickyHeader() {
     };
   }, []);
 
-  /**
-   * 点击 Logo 平滑滚动回页面顶部
-   */
   const handleScrollToTop = (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault();
     window.scrollTo({
@@ -55,28 +55,29 @@ export function StickyHeader() {
           className="stickyHeaderBrand"
           href="#top"
           onClick={handleScrollToTop}
-          title="返回顶部"
+          title={dict.backToTop}
         >
-          <img src="./qjiao-icon.png" width="32" height="32" alt="Qjiao Logo" />
+          <img src={qjiaoIcon} width="32" height="32" alt="Qjiao Logo" />
           <span>Qjiao</span>
         </a>
 
         <div className="stickyHeaderActions">
+          <LanguageSwitcher currentLang={currentLang} />
           <a
             className="stickyHeaderBtn stickyHeaderBtn--download"
             href={downloadUrl}
             target="_blank"
             rel="noreferrer"
-            title="下载最新版本 Qjiao"
+            title={dict.downloadTitle}
           >
-            Download
+            {dict.download}
           </a>
           <a
             className="stickyHeaderBtn stickyHeaderBtn--github"
             href="https://github.com/qzrzz/Qjiao"
             target="_blank"
             rel="noreferrer"
-            title="前往 GitHub 仓库"
+            title="GitHub"
           >
             <GithubIcon />
             <span>Github</span>
@@ -87,9 +88,6 @@ export function StickyHeader() {
   );
 }
 
-/**
- * GitHub 内联矢量图标组件
- */
 function GithubIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">

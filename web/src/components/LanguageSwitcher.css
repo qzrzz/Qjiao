@@ -1,0 +1,142 @@
+.langDropdown {
+  position: relative;
+  display: inline-block;
+}
+
+/* 统一次要胶囊按钮规范：统一平移过渡与硬件加速 */
+.langDropdownTrigger {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 999px;
+  border: 1px solid rgba(128, 180, 155, 0.3);
+  background: rgba(128, 180, 155, 0.06);
+  color: #b8e2cd;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  transform: translateY(0) translateZ(0);
+  backface-visibility: hidden;
+  transition:
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.langDropdownTrigger:hover,
+.langDropdownTrigger--open {
+  border-color: rgba(128, 180, 155, 0.65);
+  background: rgba(128, 180, 155, 0.15);
+  color: #ffffff;
+  transform: translateY(-2px) translateZ(0);
+}
+
+/* 统一图标色彩及其过渡 */
+.langIcon {
+  width: 14px;
+  height: 14px;
+  color: #80b49b;
+  fill: none;
+  stroke: currentColor;
+  transition: color 200ms cubic-bezier(0.16, 1, 0.3, 1), stroke 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.langChevron {
+  width: 13px;
+  height: 13px;
+  color: #80b49b;
+  fill: none;
+  stroke: currentColor;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), color 200ms cubic-bezier(0.16, 1, 0.3, 1), stroke 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.langChevron--open {
+  transform: rotate(180deg);
+}
+
+/* 悬浮或展开时强制图标线段与颜色同步平滑过渡为纯白 */
+.langDropdownTrigger:hover .langIcon,
+.langDropdownTrigger:hover .langChevron,
+.langDropdownTrigger--open .langIcon,
+.langDropdownTrigger--open .langChevron {
+  color: #ffffff;
+  stroke: #ffffff;
+}
+
+.langDropdownMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  min-width: 140px;
+  padding: 6px;
+  background: rgba(16, 22, 19, 0.95);
+  border: 1px solid rgba(128, 180, 155, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65), 0 0 15px rgba(128, 180, 155, 0.15);
+  backdrop-filter: blur(16px);
+  animation: langFadeIn 0.15s ease-out;
+}
+
+@keyframes langFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.langDropdownItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: none;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.langDropdownItem:hover {
+  color: #80b49b;
+  background: rgba(128, 180, 155, 0.15);
+}
+
+.langDropdownItem--active {
+  color: #80b49b;
+  font-weight: 600;
+  background: rgba(128, 180, 155, 0.18);
+  border: 1px solid rgba(128, 180, 155, 0.28);
+}
+
+.langCheck {
+  width: 14px;
+  height: 14px;
+  stroke: #80b49b;
+}
+
+@media (max-width: 760px) {
+  .langDropdownTrigger {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .langIcon,
+  .langChevron {
+    width: 13px;
+    height: 13px;
+  }
+}

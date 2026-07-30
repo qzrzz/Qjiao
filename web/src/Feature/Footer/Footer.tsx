@@ -1,19 +1,27 @@
+import qjiaoIcon from "/qjiao-icon.png";
+import { getCurrentLang, uiDictMap, type SupportedLang } from "../../i18n/dict";
 import { useLatestRelease } from "../Hero/useLatestRelease";
 import "./Footer.css";
 
-/** 官网页脚，提供品牌识别、下载入口、源码入口与版权信息。 */
-export function Footer() {
+interface FooterProps {
+  lang?: SupportedLang;
+}
+
+/** 官网页脚组件，支持多语言文案与快捷入口。 */
+export function Footer({ lang }: FooterProps) {
   const { downloadUrl } = useLatestRelease("qzrzz", "Qjiao");
+  const currentLang = lang || getCurrentLang();
+  const dict = uiDictMap[currentLang] || uiDictMap.en;
 
   return (
     <footer className="siteFooter">
       <div className="siteFooterInner">
         <div className="siteFooterBrandSection">
           <a className="siteFooterBrand" href="#top" aria-label="Back to the top of Qjiao">
-            <img src="./qjiao-icon.png" width="40" height="40" alt="" />
+            <img src={qjiaoIcon} width="40" height="40" alt="" />
             <span>Qjiao</span>
           </a>
-          <p className="siteFooterTagline">A beginner-friendly terminal workspace for macOS.</p>
+          <p className="siteFooterTagline">{dict.footerTagline}</p>
         </div>
 
         <div className="siteFooterActionsSection">
@@ -22,10 +30,10 @@ export function Footer() {
             href={downloadUrl}
             target="_blank"
             rel="noreferrer"
-            title="下载最新版本 Qjiao"
+            title={dict.downloadTitle}
           >
             <DownloadIcon />
-            <span>Download</span>
+            <span>{dict.download}</span>
           </a>
           <div className="siteFooterSocialLinks">
             <a
@@ -35,7 +43,7 @@ export function Footer() {
               rel="noreferrer"
             >
               <GithubIcon />
-              <span>View on GitHub</span>
+              <span>{dict.viewOnGithub}</span>
             </a>
             <a
               className="siteFooterLink"
@@ -44,7 +52,7 @@ export function Footer() {
               rel="noreferrer"
             >
               <XIcon />
-              <span>Follow @qzrz256</span>
+              <span>{dict.followX}</span>
             </a>
           </div>
         </div>
@@ -57,7 +65,6 @@ export function Footer() {
   );
 }
 
-/** 下载标识使用内联 SVG 图标。 */
 function DownloadIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -68,7 +75,6 @@ function DownloadIcon() {
   );
 }
 
-/** GitHub 标识使用内联图标，避免为单个图标额外请求静态资源。 */
 function GithubIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
@@ -77,7 +83,6 @@ function GithubIcon() {
   );
 }
 
-/** X 标识使用内联图标，保持与 GitHub 链接一致的视觉重量。 */
 function XIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">

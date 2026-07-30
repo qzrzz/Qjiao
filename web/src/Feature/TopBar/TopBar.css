@@ -15,10 +15,10 @@
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(114, 240, 167, 0.08) 16%,
-    rgba(114, 240, 167, 0.4) 38%,
-    rgba(114, 240, 167, 0.4) 62%,
-    rgba(114, 240, 167, 0.08) 84%,
+    rgba(128, 180, 155, 0.08) 16%,
+    rgba(128, 180, 155, 0.4) 38%,
+    rgba(128, 180, 155, 0.4) 62%,
+    rgba(128, 180, 155, 0.08) 84%,
     transparent 100%
   );
   content: "";
@@ -26,16 +26,17 @@
 }
 
 .siteTopBarInner {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  width: min(100%, 1134px);
+  height: 100%;
   display: flex;
-  gap: 16px;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   margin: 0 auto;
+  padding: 0 20px;
 }
 
-.siteTopBarInner > span {
+.siteTopBarInner span {
   color: rgba(184, 209, 194, 0.68);
   font-size: 14px;
   font-weight: 400;
@@ -44,46 +45,76 @@
 }
 
 .siteTopBar a {
-  color: rgba(114, 240, 167, 0.68);
+  color: rgba(128, 180, 155, 0.85);
   font-size: 14px;
   font-weight: 400;
   text-decoration: none;
-  transition: color 160ms ease;
+  transition: color 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* 统一次要胶囊按钮规范：统一平移过渡 */
 .siteTopBarGithub {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  border: 1px solid rgba(114, 240, 167, 0.24);
-  border-radius: 999px;
-  padding: 5px 10px;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
   line-height: 1;
-
-  span {
-    font-size: 12px;
-  }
+  border-radius: 999px;
+  border: 1px solid rgba(128, 180, 155, 0.3);
+  background: rgba(128, 180, 155, 0.06);
+  color: #b8e2cd;
+  text-decoration: none;
+  backdrop-filter: blur(12px);
+  transform: translateY(0) translateZ(0);
+  backface-visibility: hidden;
+  transition:
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
 }
 
+/* 统一图标色彩及其过渡 */
 .siteTopBarGithub svg {
   width: 14px;
   height: 14px;
+  color: #80b49b;
+  fill: currentColor;
+  transition: color 200ms cubic-bezier(0.16, 1, 0.3, 1), fill 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.siteTopBarGithub svg path {
+  fill: currentColor;
+  transition: fill 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .siteTopBar a.siteTopBarGithub:hover {
-  border-color: rgba(114, 240, 167, 0.58);
-  background: rgba(114, 240, 167, 0.06);
+  border-color: rgba(128, 180, 155, 0.65);
+  background: rgba(128, 180, 155, 0.15);
+  color: #ffffff;
+  transform: translateY(-2px) translateZ(0);
   text-decoration: none;
 }
 
+.siteTopBar a.siteTopBarGithub:hover svg,
+.siteTopBar a.siteTopBarGithub:hover svg path {
+  color: #ffffff;
+  fill: #ffffff;
+}
+
 .siteTopBar a:hover {
-  color: #b9efc8;
+  color: #b8e2cd;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 
 .siteTopBar a:focus-visible {
-  outline: 2px solid #72f0a7;
+  outline: 2px solid #80b49b;
   outline-offset: 5px;
 }
 
@@ -92,20 +123,21 @@
     height: 60px;
   }
 
-  .siteTopBarInner > span {
-    padding: 0 20px;
-    font-size: 14px;
+  .siteTopBarInner span {
+    font-size: 13px;
   }
 
   .siteTopBar a {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .siteTopBarInner {
-    gap: 10px;
+    padding: 0 16px;
   }
 
   .siteTopBarGithub {
-    padding: 5px 8px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
   }
 }

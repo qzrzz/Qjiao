@@ -1,32 +1,44 @@
+import { LanguageSwitcher } from "../../components/LanguageSwitcher";
+import { getCurrentLang, uiDictMap, type SupportedLang } from "../../i18n/dict";
 import "./TopBar.css";
 
-/** 官网顶部栏，说明 Qjiao 与上游 Kero 的关系。 */
-export function TopBar() {
+interface TopBarProps {
+  lang?: SupportedLang;
+}
+
+/** 官网顶部栏，两侧对齐展示上游标识与下拉语言切换组件。 */
+export function TopBar({ lang }: TopBarProps) {
+  const currentLang = lang || getCurrentLang();
+  const dict = uiDictMap[currentLang] || uiDictMap.en;
+
   return (
     <header className="siteTopBar">
       <div className="siteTopBarInner">
-        <a
-          className="siteTopBarGithub"
-          href="https://github.com/qzrzz/Qjiao"
-          target="_blank"
-          rel="noreferrer"
-          aria-label="Qjiao on GitHub"
-        >
-          <GithubIcon />
-          <span>GitHub</span>
-        </a>
-        <span>
-          Another flavor of {" "}
-          <a href="https://github.com/egoist/kero" target="_blank" rel="noreferrer">
-            egoist/kero
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <a
+            className="siteTopBarGithub"
+            href="https://github.com/qzrzz/Qjiao"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Qjiao on GitHub"
+          >
+            <GithubIcon />
+            <span>GitHub</span>
           </a>
-        </span>
+          <span>
+            {dict.topBarFlavor}{" "}
+            <a href="https://github.com/egoist/kero" target="_blank" rel="noreferrer">
+              {dict.topBarFlavorLink}
+            </a>
+          </span>
+        </div>
+
+        <LanguageSwitcher currentLang={currentLang} />
       </div>
     </header>
   );
 }
 
-/** GitHub 标识用于官网仓库入口。 */
 function GithubIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
