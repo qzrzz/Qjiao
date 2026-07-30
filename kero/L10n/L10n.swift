@@ -15,6 +15,7 @@ import SwiftUI
 enum AppLanguage: String, CaseIterable, Identifiable {
     case english = "en"
     case chineseSimplified = "zh-Hans"
+    case japanese = "ja"
 
     var id: String { rawValue }
 
@@ -23,6 +24,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         switch self {
         case .english: return "English"
         case .chineseSimplified: return "简体中文"
+        case .japanese: return "日本語"
         }
     }
 
@@ -58,6 +60,8 @@ final class L10n: ObservableObject {
             return key
         case .chineseSimplified:
             return zhHans[key] ?? key
+        case .japanese:
+            return ja[key] ?? key
         }
     }
 
