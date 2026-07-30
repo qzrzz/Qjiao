@@ -43,6 +43,7 @@ const SIGN_IDENTITY =
 const NOTARY_PROFILE = process.env.NOTARY_PROFILE ?? "NOTARY";
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
 const SPARKLE_ACCOUNT = process.env.SPARKLE_ACCOUNT ?? "qjiao";
+const FORCE_RELEASE = process.env.FORCE !== "0";
 
 process.chdir(join(import.meta.dir, ".."));
 if (!process.env.DEVELOPER_DIR) {
@@ -244,8 +245,8 @@ const existingRelease =
       .quiet()
       .nothrow()
   ).exitCode === 0;
-if (existingRelease && process.env.FORCE !== "1") {
-  die(`${tag} already exists; set FORCE=1 to replace its assets`);
+if (existingRelease && !FORCE_RELEASE) {
+  die(`${tag} already exists and FORCE=0 prevents replacing its assets`);
 }
 await createAndPushReleaseTag(tag, version);
 say(`Publishing ${tag} to GitHub Releases…`);
@@ -438,12 +439,12 @@ async function createAndPushReleaseTag(
   if (localTag.exitCode === 0) {
     const taggedCommit = (await $`git rev-list -n 1 ${tag}`.text()).trim();
     if (taggedCommit !== head) {
-      if (process.env.FORCE !== "1") {
+      if (!FORCE_RELEASE) {
         die(
-          `${tag} already points to a different commit; set FORCE=1 to move it`,
+          `${tag} already points to a different commit and FORCE=0 prevents moving it`,
         );
       }
-      say(`FORCE=1: moving Git tag ${tag} to the current commit…`);
+      say(`Moving Git tag ${tag} to the current commit…`);
       await $`git tag --delete ${tag}`;
       await $`git tag --annotate ${tag} --message ${`Qjiao ${version}`}`;
     }
@@ -453,7 +454,7 @@ async function createAndPushReleaseTag(
   }
 
   say(`Pushing Git tag ${tag}…`);
-  if (process.env.FORCE === "1") {
+  if (FORCE_RELEASE) {
     await $`git push --force origin ${tag}`;
   } else {
     await $`git push origin ${tag}`;

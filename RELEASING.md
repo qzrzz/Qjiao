@@ -231,28 +231,32 @@ REUSE_BUILD=1 bun run release
 
 ## 发布选项
 
-| 环境变量                      | 默认值                     | 用途                    |
-| ----------------------------- | -------------------------- | ----------------------- |
-| `APPLE_TEAM_ID`               | `ExportOptions.plist`      | 临时覆盖 Team ID        |
-| `NOTARY_PROFILE`              | `NOTARY`                   | 本机公证凭据名称        |
-| `SIGN_IDENTITY`               | `Developer ID Application` | 签名证书                |
-| `MACOS_SIGNING_IDENTITY`      | `Developer ID Application` | 签名证书兼容变量名      |
-| `APPLE_ID`                    | —                          | Apple 公证账号          |
-| `APPLE_APP_SPECIFIC_PASSWORD` | —                          | Apple 公证专用密码      |
-| `SPARKLE_PRIVATE_KEY_FILE`    | 登录钥匙串                 | Sparkle 私钥备份        |
-| `SPARKLE_ACCOUNT`             | `qjiao`                    | Sparkle 钥匙串账户      |
-| `GITHUB_REPOSITORY`           | `qzrzz/Qjiao`              | 上传目标仓库            |
-| `PUBLISH=0`                   | —                          | 只生成本地产物          |
-| `FORCE=1`                     | —                          | 覆盖同标签 Release 资产 |
-| `NO_HISTORY=1`                | —                          | 不继承旧 appcast        |
-| `REUSE_BUILD=1`               | —                          | 复用已导出的 Qjiao.app  |
+| 环境变量                      | 默认值                     | 用途                   |
+| ----------------------------- | -------------------------- | ---------------------- |
+| `APPLE_TEAM_ID`               | `ExportOptions.plist`      | 临时覆盖 Team ID       |
+| `NOTARY_PROFILE`              | `NOTARY`                   | 本机公证凭据名称       |
+| `SIGN_IDENTITY`               | `Developer ID Application` | 签名证书               |
+| `MACOS_SIGNING_IDENTITY`      | `Developer ID Application` | 签名证书兼容变量名     |
+| `APPLE_ID`                    | —                          | Apple 公证账号         |
+| `APPLE_APP_SPECIFIC_PASSWORD` | —                          | Apple 公证专用密码     |
+| `SPARKLE_PRIVATE_KEY_FILE`    | 登录钥匙串                 | Sparkle 私钥备份       |
+| `SPARKLE_ACCOUNT`             | `qjiao`                    | Sparkle 钥匙串账户     |
+| `GITHUB_REPOSITORY`           | `qzrzz/Qjiao`              | 上传目标仓库           |
+| `PUBLISH=0`                   | —                          | 只生成本地产物         |
+| `FORCE=0`                     | `1`                        | 禁止覆盖同版本发布     |
+| `NO_HISTORY=1`                | —                          | 不继承旧 appcast       |
+| `REUSE_BUILD=1`               | —                          | 复用已导出的 Qjiao.app |
 
-默认禁止覆盖同名 Release，也不会移动已经存在的版本标签。确认需要用
-当前提交重复发布相同版本时执行：
+默认允许用当前提交重复发布相同版本：
 
 ```sh
-FORCE=1 REUSE_BUILD=1 bun run release
+REUSE_BUILD=1 bun run release
 ```
 
-`FORCE=1` 会将同名本地和远端标签移动到当前提交，并覆盖该 GitHub
-Release 的四项资产与版本说明；不会删除其他标签或 Release。
+脚本会将同名本地和远端标签移动到当前提交，并覆盖该 GitHub Release
+的四项资产与版本说明；不会删除其他标签或 Release。需要临时禁止
+覆盖时执行：
+
+```sh
+FORCE=0 bun run release
+```
