@@ -1284,6 +1284,9 @@ private struct FileTreeRow: View {
                 .layoutPriority(1)
             Spacer(minLength: 4)
             trailingSizeControl
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(2)
         }
         .font(FileTreeFont.body)
         .frame(minHeight: FileTreeFont.rowMinHeight, alignment: .leading)
@@ -1435,6 +1438,7 @@ private struct FileTreeRow: View {
                 } label: {
                     Text(title)
                         .font(FileTreeFont.caption.weight(.medium).monospacedDigit())
+                        .lineLimit(1)
                         .foregroundStyle(Color(nsColor: Theme.cursor))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
