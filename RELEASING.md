@@ -216,18 +216,48 @@ PUBLISH=0 bun run release
 产物位于 `build/`。此模式不需要 `git` 或 `gh`，不会创建标签，也
 不会读取或修改 GitHub。
 
-## 复用已有构建重试
+## 中断后继续发布
 
-如果编译和导出已经成功，只是在后续签名、公证、Sparkle 或上传阶段
-失败，可复用 `build/export/Qjiao.app`，避免再次执行 Xcode archive：
+脚本默认把成功步骤写入 `build/release-state.json`。再次执行
+`bun run release` 时，会核对以下发布身份：
+
+- `MARKETING_VERSION`
+- `CURRENT_PROJECT_VERSION`
+- 当前 Git commit
+- Release configuration
+
+身份完全一致后，脚本仍会重新验证对应文件的版本、arm64 架构、代码
+签名、公证票据或远端资产，验证通过才跳过。可恢复的步骤包括：
+
+1. Xcode archive。
+2. Developer ID App export。
+3. arm64 架构裁切与嵌套代码签名。
+4. DMG 创建与签名。
+5. Apple 公证与票据装订。
+6. Sparkle ZIP、版本说明与 appcast。
+7. Git 标签和 GitHub Release。
+
+例如公证连接超时后，直接重新执行：
 
 ```sh
-REUSE_BUILD=1 bun run release
+bun run release
 ```
 
-脚本仍会重新签署 App 内所有可执行代码、重建并签署 DMG、重新公证，
-不会复用失败的 DMG。已有 Universal App 会在此阶段裁成纯 arm64。
-只有确认现有导出 App 对应当前发布源码和版本时才能使用此选项。
+脚本会复用已经验证的 App 和 DMG，从 Apple 公证继续。状态只在整个
+步骤成功并通过验证后写入，因此失败中的步骤一定会重新执行。
+
+升级到断点脚本前没有状态文件时，脚本允许接管版本号和构建号完全
+匹配、且签名验证通过的现有 App 与 DMG。后续运行则同时要求 Git
+commit 一致。
+
+需要忽略全部断点并完整重建时：
+
+```sh
+RESET_RELEASE=1 bun run release
+```
+
+`REUSE_BUILD=1` 仍可显式要求复用已有的 `build/export/Qjiao.app`；
+脚本会重新裁切和签名该 App，不会在验证失败时回退到 Xcode archive。
 
 ## 发布选项
 
@@ -246,6 +276,7 @@ REUSE_BUILD=1 bun run release
 | `FORCE=0`                     | `1`                        | 禁止覆盖同版本发布     |
 | `NO_HISTORY=1`                | —                          | 不继承旧 appcast       |
 | `REUSE_BUILD=1`               | —                          | 复用已导出的 Qjiao.app |
+| `RESET_RELEASE=1`             | —                          | 清除断点并完整重建     |
 
 默认允许用当前提交重复发布相同版本：
 

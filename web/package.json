@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "bun run scripts/build.ts",
     "preview": "vite preview",
     "lint": "eslint ."
   },
@@ -24,6 +24,7 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
+    "chalk": "6.0.0",
     "eslint": "9.39.4",
     "sharp": "0.34.5",
     "typescript": "6.0.3",
