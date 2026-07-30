@@ -1,0 +1,29 @@
+ 
+.featureGroup.RunnerFeatureRunnerFeature {
+  height: 960px;
+  margin-bottom: 0;
+}
+
+.RunnerFeatureShot {
+  position: absolute;
+  top: 159px;
+  left: 20px;
+  width: 1108px;
+  height: 702px;
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  .featureGroup.RunnerFeature {
+    height: auto;
+  }
+
+  .RunnerFeatureShotShot {
+    position: relative;
+    top: -58px;
+    left: 12px;
+    width: calc(100% + 22px);
+    height: auto;
+    margin-bottom: -58px;
+  }
+}

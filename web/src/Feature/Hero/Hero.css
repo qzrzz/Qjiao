@@ -1,6 +1,6 @@
 .hero {
   position: relative;
-  height: 1606px;
+  height: 1500px;
   overflow: hidden;
   text-align: center;
 }
@@ -148,21 +148,21 @@
   width: 1141px;
   max-width: calc(100% - 48px);
   margin: 0;
-  color: #63b06d;
-  font-size: 36px;
+  color: #a0d7bc;
+  font-size: 32px;
   font-weight: 500;
   transform: translateX(-50%);
 }
 
 .heroDescription {
   position: absolute;
-  top: 767px;
+  top: 729px;
   left: 50%;
-  width: 631px;
+  width: 564px;
   max-width: calc(100% - 48px);
   margin: 0;
-  color: rgba(219, 220, 219, 0.68);
-  font-size: 24px;
+  color: #a0d7bcb1;
+  font-size: 22px;
   line-height: 1.25;
   text-align: left;
   transform: translateX(-50%);
@@ -178,21 +178,41 @@
   align-items: center;
   justify-content: center;
   margin: 0;
-  border: 1px solid #404b3d;
+  border: 1px solid #7e9b8d;
   border-radius: 97px;
   background: transparent;
-  color: #959595;
+  color: #a4ffd2;
   font-size: 22px;
+  font-weight: 500;
   cursor: pointer;
+  text-decoration: none;
   transform: translateX(-50%);
-  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+
+  .sub {
+    color: rgb(176, 216, 185);
+    margin-left: 0.6em;
+    font-size: 0.8em;
+    font-weight: normal;
+    transition: color 160ms ease;
+  }
 }
 
 .heroDownload:hover {
   border-color: #72f0a7;
-  background: rgba(114, 240, 167, 0.08);
-  color: #c8e9d1;
+  background: #72f0a7;
+  color: #06190c;
+  box-shadow: 0 0 28px rgba(114, 240, 167, 0.45);
   transform: translateX(-50%) translateY(-2px);
+
+  .sub {
+    color: #123d1d;
+  }
 }
 
 .heroDownload:focus-visible {
@@ -202,7 +222,7 @@
 
 .heroWorkspace {
   position: absolute;
-  top: 858px;
+  top: 808px;
   left: 50%;
   width: 1107px;
   max-width: calc(100% - 112px);

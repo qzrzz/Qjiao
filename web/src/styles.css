@@ -168,7 +168,8 @@ img {
 }
 
 .featureGroup--right .featureInfo {
-  left: 44px;
+  left: auto;
+  right: 44px;
   height: 651px;
   background: linear-gradient(81.25deg, rgba(61, 118, 76, 0) 26.24%, rgb(32 72 50) 85%);
 }

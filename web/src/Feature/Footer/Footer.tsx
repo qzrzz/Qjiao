@@ -1,36 +1,52 @@
+import { useLatestRelease } from "../Hero/useLatestRelease";
 import "./Footer.css";
 
-/** 官网页脚，提供品牌识别、源码入口与版权信息。 */
+/** 官网页脚，提供品牌识别、下载入口、源码入口与版权信息。 */
 export function Footer() {
+  const { downloadUrl } = useLatestRelease("qzrzz", "Qjiao");
+
   return (
     <footer className="siteFooter">
       <div className="siteFooterInner">
-        <a className="siteFooterBrand" href="#top" aria-label="Back to the top of Qjiao">
-          <img src="/qjiao-icon.png" width="40" height="40" alt="" />
-          <span>Qjiao</span>
-        </a>
+        <div className="siteFooterBrandSection">
+          <a className="siteFooterBrand" href="#top" aria-label="Back to the top of Qjiao">
+            <img src="/qjiao-icon.png" width="40" height="40" alt="" />
+            <span>Qjiao</span>
+          </a>
+          <p className="siteFooterTagline">A beginner-friendly terminal workspace for macOS.</p>
+        </div>
 
-        <p className="siteFooterTagline">A beginner-friendly terminal workspace for macOS.</p>
-
-        <div className="siteFooterLinks">
+        <div className="siteFooterActionsSection">
           <a
-            className="siteFooterLink"
-            href="https://github.com/qzrzz/Qjiao"
+            className="siteFooterDownloadBtn"
+            href={downloadUrl}
             target="_blank"
             rel="noreferrer"
+            title="下载最新版本 Qjiao"
           >
-            <GithubIcon />
-            <span>View on GitHub</span>
+            <DownloadIcon />
+            <span>Download</span>
           </a>
-          <a
-            className="siteFooterLink"
-            href="https://x.com/qzrz256"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <XIcon />
-            <span>Follow @qzrz256</span>
-          </a>
+          <div className="siteFooterSocialLinks">
+            <a
+              className="siteFooterLink"
+              href="https://github.com/qzrzz/Qjiao"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <GithubIcon />
+              <span>View on GitHub</span>
+            </a>
+            <a
+              className="siteFooterLink"
+              href="https://x.com/qzrz256"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <XIcon />
+              <span>Follow @qzrz256</span>
+            </a>
+          </div>
         </div>
 
         <p className="siteFooterCopyright">
@@ -38,6 +54,17 @@ export function Footer() {
         </p>
       </div>
     </footer>
+  );
+}
+
+/** 下载标识使用内联 SVG 图标。 */
+function DownloadIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
   );
 }
 

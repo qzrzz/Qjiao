@@ -1,4 +1,3 @@
-import { Button } from "@base-ui/react/button";
 import { motion, useReducedMotion } from "motion/react";
 import iconBackground from "./assets/icon-background.png";
 import iconGlowBottom from "./assets/icon-glow-bottom.svg";
@@ -7,11 +6,13 @@ import iconMask from "./assets/icon-mask.svg";
 import iconPepper from "./assets/icon-pepper.png";
 import workspace from "./assets/workspace.png";
 import "./Hero.css";
+import { useLatestRelease } from "./useLatestRelease";
 
 /** Figma 首屏，包含应用图标关键帧动画与产品主界面。 */
 export function Hero() {
   const reduceMotion = useReducedMotion();
   const restingPosition = { x: 12.109, y: -5.328 };
+  const { downloadUrl, versionText, tagName } = useLatestRelease("qzrzz", "Qjiao");
 
   return (
     <section className="hero" aria-labelledby="hero-title">
@@ -106,7 +107,16 @@ export function Hero() {
         Bringing TUI and GUI together — enjoy the power of TUI without the
         barriers of a traditional terminal.
       </p>
-      <Button className="heroDownload">Download 13MB Native macOS</Button>
+      <a
+        id="hero-download"
+        className="heroDownload"
+        href={downloadUrl}
+        target="_blank"
+        rel="noreferrer"
+        title={tagName ? `下载 Qjiao ${tagName}` : "从 GitHub 获取最新 Release"}
+      >
+        Download <span className="sub">{versionText}</span>
+      </a>
       <img className="heroWorkspace" src={workspace} alt="Qjiao terminal workspace interface" />
     </section>
   );
