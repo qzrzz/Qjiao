@@ -417,11 +417,9 @@ if (
   for (const [index, assetPath] of releaseAssets.entries()) {
     await uploadReleaseAsset(tag, assetPath, index + 1, releaseAssets.length);
   }
-  if (existingRelease) {
-    await $`gh release edit ${tag} --repo ${GITHUB_REPOSITORY} --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
-  }
+  await $`gh release edit ${tag} --repo ${GITHUB_REPOSITORY} --draft=false --latest --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
   if (!(await validatePublishedRelease(tag, releaseAssetNames))) {
-    die(`GitHub Release ${tag} is missing one or more required assets`);
+    die(`GitHub Release ${tag} is still a draft or missing required assets`);
   }
   await completeReleaseStep(releaseState, "release-published");
 }
@@ -952,20 +950,23 @@ async function validateReleaseTag(tag: string): Promise<boolean> {
   );
 }
 
-/** 验证 GitHub Release 中包含全部必需资产。 */
+/** 验证 GitHub Release 已正式发布并包含全部必需资产。 */
 async function validatePublishedRelease(
   tag: string,
   requiredAssetNames: string[],
 ): Promise<boolean> {
   const result =
-    await $`gh release view ${tag} --repo ${GITHUB_REPOSITORY} --json assets`
+    await $`gh release view ${tag} --repo ${GITHUB_REPOSITORY} --json assets,isDraft,tagName`
       .quiet()
       .nothrow();
   if (result.exitCode !== 0) return false;
   try {
     const value = JSON.parse(result.stdout.toString()) as {
       assets?: Array<{ name?: unknown }>;
+      isDraft?: unknown;
+      tagName?: unknown;
     };
+    if (value.isDraft !== false || value.tagName !== tag) return false;
     const assetNames = new Set(
       value.assets
         ?.map((asset) => asset.name)
