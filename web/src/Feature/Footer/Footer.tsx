@@ -10,7 +10,7 @@ export function Footer() {
       <div className="siteFooterInner">
         <div className="siteFooterBrandSection">
           <a className="siteFooterBrand" href="#top" aria-label="Back to the top of Qjiao">
-            <img src="/qjiao-icon.png" width="40" height="40" alt="" />
+            <img src="./qjiao-icon.png" width="40" height="40" alt="" />
             <span>Qjiao</span>
           </a>
           <p className="siteFooterTagline">A beginner-friendly terminal workspace for macOS.</p>
