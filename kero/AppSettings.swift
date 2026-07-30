@@ -177,7 +177,7 @@ final class AppSettings: nonisolated ObservableObject {
     static let filesFontSizeRange: ClosedRange<Double> = 10...22
     static let backgroundOpacityRange: ClosedRange<Double> = 0.1...1
 
-    /// UI language. Default is English; persisted as `ui.language`.
+    /// UI language. Default is System (`system`); persisted as `ui.language`.
     @Published var language: AppLanguage {
         didSet {
             L10n.shared.setLanguage(language)
@@ -437,7 +437,7 @@ final class AppSettings: nonisolated ObservableObject {
         _ = CustomThemeStore.shared
         let existing = TOML.parse(at: Self.configURL)
         let toml = existing ?? Self.legacyDefaults()
-        language = toml["ui.language"]?.string.flatMap(AppLanguage.init(rawValue:)) ?? .english
+        language = toml["ui.language"]?.string.flatMap(AppLanguage.init(rawValue:)) ?? .system
         theme = toml["theme"]?.string.flatMap(AppTheme.init(rawValue:)) ?? .system
         themeDark = Self.knownTheme(toml["theme-dark"]?.string, fallback: Theme.defaultDarkThemeName)
         themeLight = Self.knownTheme(toml["theme-light"]?.string, fallback: Theme.defaultLightThemeName)
@@ -595,7 +595,7 @@ final class AppSettings: nonisolated ObservableObject {
     func resetToDefaults() {
         resetFont()
         useBundledChineseTerminalFont = true
-        language = .english
+        language = .system
         theme = .system
         themeDark = Theme.defaultDarkThemeName
         themeLight = Theme.defaultLightThemeName
@@ -637,8 +637,8 @@ final class AppSettings: nonisolated ObservableObject {
 
     private func save() {
         var lines: [String] = []
-        // 默认英文：仅在非默认语言时写回，避免污染默认配置。
-        if language != .english {
+        // 默认跟随系统：仅在非默认语言时写回，避免污染默认配置。
+        if language != .system {
             lines.append("ui.language = \(TOML.quote(language.rawValue))")
         }
         if theme != .system {
