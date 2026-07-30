@@ -11,8 +11,9 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// Supported UI languages. Default is English (`en`).
+/// Supported UI languages. Default is System (`system`).
 enum AppLanguage: String, CaseIterable, Identifiable {
+    case system = "system"
     case english = "en"
     case chineseSimplified = "zh-Hans"
     case japanese = "ja"
@@ -22,13 +23,39 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     /// Name shown in the language picker (always in the language itself).
     var nativeDisplayName: String {
         switch self {
+        case .system: return L10n.t("System Default")
         case .english: return "English"
         case .chineseSimplified: return "简体中文"
         case .japanese: return "日本語"
         }
     }
 
-    var locale: Locale { Locale(identifier: rawValue) }
+    var locale: Locale {
+        switch self {
+        case .system:
+            return AppLanguage.resolveSystemLanguage().locale
+        default:
+            return Locale(identifier: rawValue)
+        }
+    }
+
+    /// Resolve system language to a concrete supported language (defaults to English if system language is unsupported).
+    static func resolveSystemLanguage() -> AppLanguage {
+        for lang in Locale.preferredLanguages {
+            let lower = lang.lowercased()
+            if lower.hasPrefix("zh") {
+                if lower.contains("hant") || lower.contains("tw") || lower.contains("hk") {
+                    continue
+                }
+                return .chineseSimplified
+            } else if lower.hasPrefix("ja") {
+                return .japanese
+            } else if lower.hasPrefix("en") {
+                return .english
+            }
+        }
+        return .english
+    }
 }
 
 /// App-wide localization store. Views observe `shared` so they refresh when
@@ -38,12 +65,23 @@ final class L10n: ObservableObject {
     static let shared = L10n()
 
     /// Published mirror for SwiftUI observation.
-    @Published private(set) var language: AppLanguage = .english
+    @Published private(set) var language: AppLanguage = .system
 
     /// Snapshot readable from any isolation (menus, models, theme titles).
-    nonisolated(unsafe) private static var currentLanguage: AppLanguage = .english
+    nonisolated(unsafe) private static var currentLanguage: AppLanguage = .system
 
-    private init() {}
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: NSLocale.currentLocaleDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, self.language == .system else { return }
+                self.objectWillChange.send()
+            }
+        }
+    }
 
     /// Apply a language without writing settings (used from `AppSettings` load/save).
     func setLanguage(_ language: AppLanguage) {
@@ -52,11 +90,21 @@ final class L10n: ObservableObject {
         self.language = language
     }
 
+    /// The effective concrete language resolved for translation lookup.
+    nonisolated static var effectiveLanguage: AppLanguage {
+        switch currentLanguage {
+        case .system:
+            return AppLanguage.resolveSystemLanguage()
+        case .english, .chineseSimplified, .japanese:
+            return currentLanguage
+        }
+    }
+
     /// Translate an English source string. Missing keys fall back to English.
     /// Safe to call from any isolation / non-UI code.
     nonisolated static func t(_ key: String) -> String {
-        switch currentLanguage {
-        case .english:
+        switch effectiveLanguage {
+        case .english, .system:
             return key
         case .chineseSimplified:
             return zhHans[key] ?? key
@@ -68,7 +116,7 @@ final class L10n: ObservableObject {
     /// Translate then apply `String(format:)` placeholders (`%@`, `%d`, …).
     nonisolated static func format(_ key: String, _ args: CVarArg...) -> String {
         let template = t(key)
-        return String(format: template, locale: currentLanguage.locale, arguments: args)
+        return String(format: template, locale: effectiveLanguage.locale, arguments: args)
     }
 
     /// Instance helper for views that already hold `@ObservedObject var l10n`.
@@ -96,7 +144,7 @@ private struct L10nObserveModifier: ViewModifier {
 }
 
 private struct L10nLanguageKey: EnvironmentKey {
-    static let defaultValue: AppLanguage = .english
+    static let defaultValue: AppLanguage = .system
 }
 
 extension EnvironmentValues {
