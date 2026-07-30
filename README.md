@@ -17,6 +17,7 @@
 - 官网新增 80px 顶部栏，展示与上游 `egoist/kero` 的关系并提供其 GitHub 仓库入口。
 - **I18n 界面多语言**：默认英文，可在设置中切换语言；目前支持 **English** 与 **简体中文**。
 - **浏览器工具条样式优化**：`BrowserView` 工具条按钮支持 Hover 浅底与图标高亮（`Theme.primaryColor` 过渡），全面适配项目统一的原生毛玻璃浮层 `.macTooltip` 提示框，并提供 `⌘R` 快捷键 Badge。
+- **主 Tabs 标签页视觉与尺寸优化**：主标签页整体高宽增加 2pt（单 Tab 最小/最大宽限调增 2pt，上下内边距增加 2pt），标签图标统一提升至 16pt；同时通过 AppKit 事件隔绝阻止窗口拖拽抢占 Tab 拖拽排序，提升可读性与交互体验。
   - **设置**：Settings → General → **Language** / **界面语言**。
   - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ui.language`（`en` 默认不写回；`zh-Hans` 为简体中文）。
   - **实现**：`kero/L10n/`（`L10n.swift` 核心 + 各语言表如 `zh-Hans.swift`）；以英文源字符串为 key，运行时切换无需重启；菜单、设置、左右侧栏、Git/Files/Project/System/Note、命令面板、图标选择器、图片查看器、终端剪贴板确认与常用对话框等已接入简体中文，主题名称与代码预览样本保持原文。

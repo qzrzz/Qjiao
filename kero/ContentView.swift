@@ -181,9 +181,13 @@ struct ContentView: View {
     }
 }
 /// Slim bar above the terminal: the selected project's sessions as
-/// horizontal tabs on the left, right-sidebar toggle on the right. Doubles as
-/// window-drag space. Left-sidebar toggle lives in `SidebarView` while open,
-/// and only appears here when the left sidebar is closed.
+/// horizontal tabs on the left, right-sidebar toggle on the right.
+///
+/// Window drag lives only on blank surfaces: 8pt strips above/below the tab
+/// row, plus leading/trailing empty space. Tabs themselves never sit under a
+/// `WindowDragArea`, so reorder gestures keep the mouse stream.
+/// Left-sidebar toggle lives in `SidebarView` while open, and only appears
+/// here when the left sidebar is closed.
 private struct MainHeaderView: View {
     @ObservedObject var manager: TerminalManager
 
@@ -197,6 +201,10 @@ private struct MainHeaderView: View {
     private static var actionSpacing: CGFloat { HeaderTabActionMetrics.spacing }
     /// 标签条与「+」间距。
     private static let tabNewSpacing: CGFloat = 4
+    /// Tabs 行上下各一条拖窗热区高度。
+    private static let tabEdgeDragHeight: CGFloat = 8
+    /// 顶栏总高：上下拖窗带 + 中间标签行。
+    private static let headerHeight: CGFloat = 42
 
     /// 左侧栏开关占用宽度（按钮 + 右侧间距）；仅在 Tabs 栏展示时计入。
     private static var leftToggleWidth: CGFloat {
@@ -250,12 +258,13 @@ private struct MainHeaderView: View {
                 leftBudget - Self.tabNewSpacing - HeaderTabActionMetrics.size
             )
 
-            ZStack(alignment: .trailing) {
-                // 顶栏未被标签和按钮占用的区域始终可拖动窗口。
-                WindowDragArea()
+            VStack(spacing: 0) {
+                // Tabs 上方 8pt：整行可拖窗口（不压在 Tab 上）。
+                HeaderWindowDragBand(height: Self.tabEdgeDragHeight)
 
-                // 左侧：收起时的左边栏开关 + 标签 + 新建。trailing 用 padding 硬预留。
                 HStack(spacing: 0) {
+                    HeaderWindowDragBand(width: leadingInset)
+
                     if showLeftToggle {
                         HeaderIconButton(
                             systemImage: "sidebar.left",
@@ -265,8 +274,9 @@ private struct MainHeaderView: View {
                         )
                         .padding(.trailing, Self.leftToggleTrailingPadding)
                     }
-                    HStack(spacing: Self.tabNewSpacing) {
-                        if let project = manager.selectedProject {
+
+                    if let project = manager.selectedProject {
+                        HStack(spacing: Self.tabNewSpacing) {
                             SessionTabsView(
                                 manager: manager,
                                 project: project,
@@ -274,45 +284,74 @@ private struct MainHeaderView: View {
                             )
                             NewTabButton(project: project)
                         }
-                        Spacer(minLength: 0)
                     }
-                }
-                .padding(.leading, leadingInset)
-                .padding(.trailing, trailingReserve)
 
-                // 右侧：固定叠在预留区；按钮间距与「+」到下拉的间距一致。
-                if let project = manager.selectedProject {
-                    HStack(spacing: Self.actionSpacing) {
-                        if manager.isPaneZoomed {
+                    // 标签与右侧工具之间的空白：拖窗口。
+                    HeaderWindowDragBand()
+
+                    if let project = manager.selectedProject {
+                        HStack(spacing: Self.actionSpacing) {
+                            if manager.isPaneZoomed {
+                                HeaderIconButton(
+                                    systemImage: "arrow.down.forward.and.arrow.up.backward",
+                                    isActive: true,
+                                    help: L10n.t("Exit Pane Zoom (⇧⌘↩)"),
+                                    helpAlignment: .trailing,
+                                    action: { manager.togglePaneZoom() }
+                                )
+                            }
+                            TabListButton(manager: manager, project: project)
                             HeaderIconButton(
-                                systemImage: "arrow.down.forward.and.arrow.up.backward",
-                                isActive: true,
-                                help: L10n.t("Exit Pane Zoom (⇧⌘↩)"),
+                                systemImage: "sidebar.right",
+                                isActive: manager.isPanelVisible,
+                                help: L10n.t("Toggle Right Sidebar (⇧⌘B)"),
                                 helpAlignment: .trailing,
-                                action: { manager.togglePaneZoom() }
+                                action: { manager.toggleSidebar() }
                             )
                         }
-                        TabListButton(manager: manager, project: project)
-                        HeaderIconButton(
-                            systemImage: "sidebar.right",
-                            isActive: manager.isPanelVisible,
-                            help: L10n.t("Toggle Right Sidebar (⇧⌘B)"),
-                            helpAlignment: .trailing,
-                            action: { manager.toggleSidebar() }
-                        )
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.trailing, HeaderTabActionMetrics.edgePadding)
+                    } else {
+                        HeaderWindowDragBand(width: HeaderTabActionMetrics.edgePadding)
                     }
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.trailing, HeaderTabActionMetrics.edgePadding)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // Tabs 下方 8pt：整行可拖窗口。
+                HeaderWindowDragBand(height: Self.tabEdgeDragHeight)
             }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .trailing)
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
         }
-        .frame(height: 42)
+        .frame(height: Self.headerHeight)
+        .clipped()
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color(nsColor: Theme.divider))
                 .frame(height: 1)
+                .allowsHitTesting(false)
         }
+    }
+}
+
+/// 顶栏拖窗热区：由 SwiftUI 固定尺寸，`WindowDragArea` 叠在上面填满。
+/// 避免纯 NSViewRepresentable 在 GeometryReader 里偶发 bounds 为空/撑破。
+private struct HeaderWindowDragBand: View {
+    var width: CGFloat? = nil
+    var height: CGFloat? = nil
+
+    var body: some View {
+        ZStack {
+            // 尺寸锚点：SwiftUI 先占位，NSView 才能稳定拿到非零 frame。
+            Color.clear
+            WindowDragArea()
+        }
+        .frame(width: width)
+        .frame(maxWidth: width == nil ? .infinity : nil)
+        .frame(height: height)
+        .frame(maxHeight: height == nil ? .infinity : nil)
+        .clipped()
+        .contentShape(Rectangle())
     }
 }
 
@@ -703,6 +742,8 @@ private struct SessionTabsView: View {
                             }
                         }
                         .opacity(draggedTabID == tab.id ? 0.65 : 1)
+                        // 占满 Tab 热区，避免透明间隙把事件漏给其它拖动手势。
+                        .contentShape(Rectangle())
                         .highPriorityGesture(
                             DragGesture(minimumDistance: 4, coordinateSpace: .global)
                                 .onChanged { value in
@@ -1088,7 +1129,8 @@ private struct TabRenameChrome: View {
                 .onChange(of: focused) { if !focused { finish(apply: true) } }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        // 与 TabItemChrome 一致：上下各 +1pt，整体高度 +2pt。
+        .padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 6).fill(Theme.primaryColor.opacity(0.09)))
         .onAppear { DispatchQueue.main.async { focused = true } }
     }
@@ -1196,7 +1238,7 @@ private struct TabStripIconView: View {
     var materialFileName: String? = nil
     var isSelected = false
     /// 顶栏 Tab 条文件图标尺寸。
-    private static let materialSize: CGFloat = 13
+    private static let materialSize: CGFloat = 16
 
     var body: some View {
         if let materialFileName {
@@ -1208,7 +1250,7 @@ private struct TabStripIconView: View {
             .opacity(isSelected ? 1 : 0.72)
         } else {
             Image(systemName: systemImage)
-                .font(SidebarTypography.micro())
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: Theme.cursor)) : AnyShapeStyle(.tertiary))
         }
     }
@@ -1250,13 +1292,13 @@ private struct TabItemChrome: View {
         Button(action: select) {
             HStack(spacing: 5) {
                 if let browserIcon {
-                    BrowserFaviconView(browser: browserIcon, size: 13)
+                    BrowserFaviconView(browser: browserIcon, size: 16)
                         .opacity(isSelected ? 1 : 0.78)
                 } else if let terminalAppIcon {
                     // 识别到 agy / codex 等应用时显示其图标，替代通用转圈。
                     TerminalAppIconView(
                         source: terminalAppIcon,
-                        size: 13,
+                        size: 16,
                         isSelected: isSelected
                     )
                     .accessibilityLabel(L10n.t("Running application"))
@@ -1264,7 +1306,7 @@ private struct TabItemChrome: View {
                     ProgressView()
                         .controlSize(.mini)
                         .tint(isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor)
-                        .frame(width: 11, height: 11)
+                        .frame(width: 13, height: 13)
                         .accessibilityLabel(L10n.t("Command running"))
                 } else {
                     TabStripIconView(
@@ -1309,7 +1351,8 @@ private struct TabItemChrome: View {
             }
             .padding(.leading, 9)
             .padding(.trailing, 5)
-            .padding(.vertical, 4)
+            // 内容页 Tabs 相对原先各边 +1pt，整体高度 +2pt。
+            .padding(.vertical, 5)
             .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)

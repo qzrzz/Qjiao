@@ -62,8 +62,13 @@ struct WindowChromeAccessor: NSViewRepresentable {
             guard self.window !== window else { return }
             self.window = window
             onAttach(window)
-            // 允许自定义标题栏和 Header 空白区域通过 WindowDragArea 拖拽移动窗口。
-            window.isMovable = true
+            // Keep the window non-movable globally. With hidden title bar +
+            // fullSizeContentView, `isMovable == true` lets AppKit claim
+            // mouse-drags in the header (including Tabs) as window moves,
+            // which steals SwiftUI tab-reorder gestures. Blank header
+            // surfaces opt in via WindowDragArea, which briefly re-enables
+            // moving only for that interaction.
+            window.isMovable = false
             window.isMovableByWindowBackground = false
             reposition()
             // The initial system layout can land after us; catch up.
@@ -92,7 +97,10 @@ struct WindowChromeAccessor: NSViewRepresentable {
 
         private func reposition() {
             guard let window else { return }
-            window.isMovable = true
+            // 拖窗进行中不要把 isMovable 打回 false，否则会中断 performWindowDrag。
+            if WindowDragSession.activeCount == 0 {
+                window.isMovable = false
+            }
             window.isMovableByWindowBackground = false
             guard !window.styleMask.contains(.fullScreen) else { return }
             let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
@@ -123,23 +131,97 @@ struct WindowChromeAccessor: NSViewRepresentable {
     }
 }
 
+/// Tracks in-flight `WindowDragArea` drags so `reposition()` does not force
+/// `isMovable = false` mid-drag and abort `performWindowDrag`.
+private enum WindowDragSession {
+    static var activeCount = 0
+}
+
 /// 原生 AppKit 窗口拖拽响应视图。
-/// 当鼠标在空白区域按下并拖动时，直接触发系统原生 `performWindowDrag(with:)`；
-/// 当双击时，触发标准 macOS 标题栏双击动作（缩放/最小化）；
-/// 右键单击时，展现窗口控制上下文菜单（置顶、设置尺寸）。
+///
+/// `hitTest` 在 bounds 内始终认领自己，避免空 NSView 在 SwiftUI 托管下偶发
+/// 打不中。拖窗优先原生 `performWindowDrag`（多桌面手感更好）；失败则按屏幕
+/// 坐标手动平移。全局 `isMovable == false`，仅在原生拖窗期间短暂打开。
 private class WindowDragNSView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
+        // layer-backed 后 SwiftUI 托管时更稳定地参与 hit-test。
+        wantsLayer = true
+        // 禁止命中/绘制溢出到标题栏以外的内容区。
+        clipsToBounds = true
+        layer?.masksToBounds = true
+    }
+
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override var isOpaque: Bool { false }
+
+    /// 无子视图时系统默认 hit-test 偶发不可靠；bounds 内一律由本视图接手。
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0.01, bounds.contains(point) else { return nil }
+        return self
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
             window?.performTitlebarDoubleClickAction()
-        } else if let window = self.window, window.isMovable {
-            let selector = Selector(("performWindowDragWithEvent:"))
-            if window.responds(to: selector) {
-                _ = window.perform(selector, with: event)
-            } else {
-                super.mouseDown(with: event)
-            }
-        } else {
+            return
+        }
+        guard let window else {
             super.mouseDown(with: event)
+            return
+        }
+
+        WindowDragSession.activeCount += 1
+        defer {
+            WindowDragSession.activeCount = max(0, WindowDragSession.activeCount - 1)
+        }
+
+        // 原生拖窗要求 isMovable；阻塞到 mouseUp 后再恢复。
+        let previousMovable = window.isMovable
+        window.isMovable = true
+        let selector = Selector(("performWindowDragWithEvent:"))
+        if window.responds(to: selector) {
+            _ = window.perform(selector, with: event)
+            window.isMovable = previousMovable
+            return
+        }
+        window.isMovable = previousMovable
+        trackWindowDragManually(window: window, startEvent: event)
+    }
+
+    /// 无原生 performWindowDrag 时的回退：按屏幕坐标差平移窗口。
+    private func trackWindowDragManually(window: NSWindow, startEvent: NSEvent) {
+        let startMouse = NSEvent.mouseLocation
+        let startOrigin = window.frame.origin
+        window.trackEvents(
+            matching: [.leftMouseDragged, .leftMouseUp],
+            timeout: .infinity,
+            mode: .eventTracking
+        ) { event, stop in
+            guard let event else { return }
+            if event.type == .leftMouseUp {
+                stop.pointee = true
+                return
+            }
+            let current = NSEvent.mouseLocation
+            window.setFrameOrigin(
+                NSPoint(
+                    x: startOrigin.x + (current.x - startMouse.x),
+                    y: startOrigin.y + (current.y - startMouse.y)
+                )
+            )
         }
     }
 
@@ -247,10 +329,11 @@ private class WindowDragNSView: NSView {
 }
 
 /// 明确指定的窗口移动拖拽区域。
-/// 前景交互控件（按钮/输入框）在其上方正常响应点击，未被占用的空白背景区域将自动接收鼠标事件并平滑拖动窗口。
+/// 仅空白背景应放置此视图；交互控件（Tabs / 按钮 / 输入框）放在其外，
+/// 以免与拖窗抢鼠标流。全局 `isMovable` 关闭时，只有本区域能移动窗口。
 struct WindowDragArea: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
-        WindowDragNSView()
+        WindowDragNSView(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
