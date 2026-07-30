@@ -144,17 +144,122 @@ enum SidebarProbe {
     }
 
     /// 读取 `<directory>/package.json` 的 `scripts`；不存在或解析失败返回空。
+    /// 顺序与 package.json 源代码中定义保持一致。
     nonisolated static func loadPackageScripts(directory: String) -> [PackageScript] {
         let url = URL(fileURLWithPath: directory).appendingPathComponent("package.json")
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data),
               let package = object as? [String: Any],
-              let scripts = package["scripts"] as? [String: String]
+              let scripts = package["scripts"] as? [String: String],
+              !scripts.isEmpty
         else { return [] }
 
-        return scripts
-            .map { PackageScript(name: $0.key, command: $0.value) }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let scriptItems = scripts.map { PackageScript(name: $0.key, command: $0.value) }
+
+        if scriptItems.count <= 1 {
+            return scriptItems
+        }
+
+        if let jsonString = String(data: data, encoding: .utf8) {
+            let keyOrder = parseScriptsKeyOrder(from: jsonString, keys: Set(scripts.keys))
+            if !keyOrder.isEmpty {
+                let orderMap = Dictionary(uniqueKeysWithValues: keyOrder.enumerated().map { ($1, $0) })
+                return scriptItems.sorted { item1, item2 in
+                    let order1 = orderMap[item1.name] ?? Int.max
+                    let order2 = orderMap[item2.name] ?? Int.max
+                    if order1 != order2 {
+                        return order1 < order2
+                    }
+                    return item1.name.localizedStandardCompare(item2.name) == .orderedAscending
+                }
+            }
+        }
+
+        return scriptItems
+    }
+
+    /// 尝试从 package.json 源码中提取 scripts 对象中键的物理出现顺序
+    private nonisolated static func parseScriptsKeyOrder(from jsonString: String, keys: Set<String>) -> [String] {
+        let scriptsKeyPattern = "\"scripts\"\\s*:\\s*\\{"
+        guard let scriptsRegex = try? NSRegularExpression(pattern: scriptsKeyPattern),
+              let nsJson = jsonString as NSString?,
+              let scriptsMatch = scriptsRegex.firstMatch(in: jsonString, range: NSRange(location: 0, length: nsJson.length))
+        else {
+            return []
+        }
+
+        let openBraceLocation = scriptsMatch.range.location + scriptsMatch.range.length - 1
+        let openBraceIndex = jsonString.index(jsonString.startIndex, offsetBy: openBraceLocation)
+
+        var depth = 0
+        var closeBraceIndex: String.Index? = nil
+        var inString = false
+        var isEscaped = false
+
+        for index in jsonString.indices[openBraceIndex...] {
+            let char = jsonString[index]
+            if inString {
+                if isEscaped {
+                    isEscaped = false
+                } else if char == "\\" {
+                    isEscaped = true
+                } else if char == "\"" {
+                    inString = false
+                }
+            } else {
+                if char == "\"" {
+                    inString = true
+                } else if char == "{" {
+                    depth += 1
+                } else if char == "}" {
+                    depth -= 1
+                    if depth == 0 {
+                        closeBraceIndex = index
+                        break
+                    }
+                }
+            }
+        }
+
+        let contentSub: Substring
+        if let closeBraceIndex = closeBraceIndex {
+            contentSub = jsonString[openBraceIndex...closeBraceIndex]
+        } else {
+            contentSub = jsonString[openBraceIndex...]
+        }
+
+        let content = String(contentSub)
+
+        let pattern = "\"([^\"\\\\]*(?:\\\\.[^\"\\\\]*)*)\"\\s*:"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return []
+        }
+
+        let nsContent = content as NSString
+        let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
+
+        var orderedKeys: [String] = []
+        var matchedSet = Set<String>()
+
+        for match in matches {
+            guard match.numberOfRanges >= 2 else { continue }
+            let rawKey = nsContent.substring(with: match.range(at: 1))
+
+            let unescapedKey: String
+            if let keyData = "\"\(rawKey)\"".data(using: .utf8),
+               let decoded = try? JSONSerialization.jsonObject(with: keyData) as? String {
+                unescapedKey = decoded
+            } else {
+                unescapedKey = rawKey
+            }
+
+            if keys.contains(unescapedKey) && !matchedSet.contains(unescapedKey) {
+                orderedKeys.append(unescapedKey)
+                matchedSet.insert(unescapedKey)
+            }
+        }
+
+        return orderedKeys
     }
 
     /// 读取 `<directory>/package.json` 的 `name`、`version` 与 `repository` 信息。

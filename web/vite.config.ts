@@ -6,6 +6,7 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 /** 构建纯 Vite React SPA，客户端只发布 WebP 图片。 */
 export default defineConfig({
+  base: "./",
   build: {
     assetsInlineLimit: 0,
   },
