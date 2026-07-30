@@ -9,6 +9,7 @@ export default defineConfig({
   base: "./",
   build: {
     assetsInlineLimit: 0,
+    cssMinify: "lightningcss",
   },
   server: isCodexSeatbeltSandbox
     ? { watch: { useFsEvents: false, usePolling: true } }
