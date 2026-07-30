@@ -13,6 +13,8 @@ final class TabSwitcherController: ObservableObject {
     @Published private(set) var isPresented = false
     @Published private(set) var highlightedTabID: UUID?
     @Published private(set) var terminalPreviews: [UUID: String] = [:]
+    /// 唤起切换手势时截取的 Tab 顺序列表（手势期间冻结，防止高亮卡片重新洗牌）。
+    @Published private(set) var orderedTabIDs: [UUID] = []
 
     private weak var activeProject: Project?
     private var originalTabID: UUID?
@@ -20,6 +22,15 @@ final class TabSwitcherController: ObservableObject {
     private var isConsumingTabKey = false
     private var isConsumingEscapeKey = false
     private var acceptsPointerHighlight = false
+
+    /// 切换器在界面中渲染的 Tab 列表（按 Recency 或默认顺序）。
+    func orderedTabs(in project: Project) -> [PaneTab] {
+        guard AppSettings.shared.tabSwitcherSortByRecency else { return project.tabs }
+        let ordered = orderedTabIDs.compactMap { id in
+            project.tabs.first { $0.id == id }
+        }
+        return ordered.isEmpty ? project.tabs : ordered
+    }
 
     /// 处理窗口级键盘事件；返回 true 表示事件应被切换器消费。
     func handle(_ event: NSEvent, manager: TerminalManager) -> Bool {
@@ -95,23 +106,33 @@ final class TabSwitcherController: ObservableObject {
             previewTask?.cancel()
             activeProject = project
             originalTabID = selectedID
-            highlightedTabID = selectedID
+            if AppSettings.shared.tabSwitcherSortByRecency {
+                orderedTabIDs = project.tabsByRecency.map(\.id)
+                let tabs = orderedTabs(in: project)
+                let initialIndex = (reverse ? (tabs.count - 1) : 1) % tabs.count
+                highlightedTabID = tabs[initialIndex].id
+            } else {
+                orderedTabIDs = project.tabs.map(\.id)
+                highlightedTabID = selectedID
+            }
             acceptsPointerHighlight = false
             let contentIDs = Set(project.tabs.flatMap(\.allContents).map(\.id))
             terminalPreviews = terminalPreviews.filter { contentIDs.contains($0.key) }
             isPresented = true
             refreshTerminalPreviews(in: project)
+            return true
         }
 
+        let tabs = orderedTabs(in: project)
         guard let currentID = highlightedTabID,
-              let currentIndex = project.tabs.firstIndex(where: { $0.id == currentID })
+              let currentIndex = tabs.firstIndex(where: { $0.id == currentID })
         else {
             cancel()
             return false
         }
         let offset = reverse ? -1 : 1
-        let nextIndex = (currentIndex + offset + project.tabs.count) % project.tabs.count
-        highlightedTabID = project.tabs[nextIndex].id
+        let nextIndex = (currentIndex + offset + tabs.count) % tabs.count
+        highlightedTabID = tabs[nextIndex].id
         return true
     }
 
@@ -292,7 +313,7 @@ struct TabSwitcherOverlay: View {
                             alignment: .leading,
                             spacing: 0
                         ) {
-                            ForEach(Array(project.tabs.enumerated()), id: \.element.id) {
+                            ForEach(Array(controller.orderedTabs(in: project).enumerated()), id: \.element.id) {
                                 index, tab in
                                 TabSwitcherCard(
                                     manager: manager,

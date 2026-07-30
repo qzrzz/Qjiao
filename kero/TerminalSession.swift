@@ -250,6 +250,16 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         return launchWorkingDirectory
     }
 
+    /// 终端前台作业的工作目录（当该作业非 shell 本身时）。
+    /// Coding Agent (如 Claude Code) 切换到其自身的 worktree 时会在进程内执行 chdir，
+    /// 而 shell 并没有移动，因此该属性可获取前台作业真实的 CWD。
+    var foregroundDirectoryPath: String? {
+        guard let foreground = terminalView.foregroundPid, foreground > 0,
+              foreground != shellPid
+        else { return nil }
+        return Self.processWorkingDirectory(pid: foreground)
+    }
+
     func sendCommand(_ text: String) {
         terminalView.sendText(text)
     }
@@ -694,9 +704,14 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         pidFileURL: URL?,
         replayFileURL: URL?
     ) -> String {
-        var commands = ["umask 077"]
+        var commands: [String] = []
         if let pidFileURL {
-            commands.append("printf '%s\\n' \"$$\" > \(shellQuote(pidFileURL.path))")
+            // PID 文件是该脚本创建的唯一文件，将加紧的 umask 限制在子 shell 内：
+            // `umask` 会超出 shim 存活到 exec 的 shell 中，使终端创建的每个文件被静默设为私有。
+            // `$$` 在子 shell 中仍展开为当前 shell 的 PID（同 exec 传递的 PID）。
+            commands.append(
+                "(umask 077; printf '%s\\n' \"$$\" > \(shellQuote(pidFileURL.path)))"
+            )
         }
         if let replayFileURL {
             let path = shellQuote(replayFileURL.path)
@@ -712,7 +727,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         commands.append("exec \(shellQuote(shellPath)) -l")
         // Ghostty's macOS launcher prepends `exec -l` to a shell command.
         // Make the compound setup one executable command so `exec -l` does
-        // not stop after the first shell builtin (`umask`).
+        // not stop after the first shell builtin.
         let script = commands.joined(separator: "; ")
         return "/bin/sh -c \(shellQuote(script))"
     }

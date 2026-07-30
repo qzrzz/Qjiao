@@ -878,14 +878,17 @@ struct RightSidebarView: View {
         }
     }
 
-    /// 项目配置尚未写入目录时，使用当前终端目录作为一次性回退值。
     private func projectRoot(
         for project: Project,
         fallback session: TerminalSession?
     ) -> String {
-        project.projectDirectory.isEmpty
-            ? (session?.currentDirectoryPath ?? "")
-            : project.projectDirectory
+        guard let session else {
+            return project.projectDirectory
+        }
+        return project.panelRoot(
+            followingSessionAt: session.currentDirectoryPath,
+            foregroundAt: session.foregroundDirectoryPath
+        ).root
     }
 
     /// 只有项目目录与当前终端目录不同时才显示 CWD 面板。
