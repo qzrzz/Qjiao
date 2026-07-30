@@ -123,8 +123,8 @@ struct SettingsView: View {
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 30, height: 30)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .frame(width: 32, height: 32)
+      
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Qjiao")
@@ -808,12 +808,14 @@ struct SettingsView: View {
                         if isOriginalColor {
                             Image(imageName)
                                 .resizable()
+                                .interpolation(.high)
                                 .scaledToFit()
                                 .padding(4)
                         } else {
                             Image(imageName)
                                 .resizable()
                                 .renderingMode(.template)
+                                .interpolation(.high)
                                 .scaledToFit()
                                 .padding(6)
                                 .foregroundStyle(.primary)
