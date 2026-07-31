@@ -499,7 +499,7 @@ final class AppSettings: nonisolated ObservableObject {
             .flatMap(ZshIdleTitleStyle.init(rawValue:))
             ?? toml["terminal.zsh-idle-title"]?.string
             .flatMap(ZshIdleTitleStyle.init(rawValue:))
-            ?? .defaultStyle
+            ?? .minimal
         enableTerminalHelpBar = toml["terminal.enable-help-bar"]?.bool ?? true
         preferredCodeEditorBundleId = toml["editor.preferred-code-editor"]?.string ?? ""
         preferredAIToolId = toml["ai.preferred-tool"]?.string ?? ""
@@ -629,7 +629,7 @@ final class AppSettings: nonisolated ObservableObject {
         macosOptionAsAlt = false
         showPaneHeaders = false
         tabSwitcherSortByRecency = false
-        zshIdleTitleStyle = .defaultStyle
+        zshIdleTitleStyle = .minimal
         enableTerminalHelpBar = true
         packageManagerCommand = .auto
         systemReachabilityInterval = .default
@@ -733,7 +733,7 @@ final class AppSettings: nonisolated ObservableObject {
             lines.append("terminal.direct-click-moves-cursor = false")
         }
 
-        if zshIdleTitleStyle != .defaultStyle {
+        if zshIdleTitleStyle != .minimal {
             lines.append("terminal.zsh-idle-title-style = \(TOML.quote(zshIdleTitleStyle.rawValue))")
         }
         if !enableTerminalHelpBar {

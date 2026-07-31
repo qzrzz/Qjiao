@@ -519,7 +519,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         // 内存以 vm_stat 为准（对齐活动监视器）；top 的 PhysMem used 含文件缓存会虚高。
         async let topResult = optionalRun(runner, ["top", "-l", "2", "-n", "0", "-s", "1"], timeout: .seconds(8))
         async let vmStatResult = optionalRun(runner, ["vm_stat"], timeout: .seconds(2))
-        async let netstatResult = optionalRun(runner, ["netstat", "-ib"], timeout: .seconds(3))
+        async let netstatResult = optionalRun(runner, ["netstat", "-ibn"], timeout: .seconds(3))
         async let dfResult = wantDisk
             ? optionalRun(runner, ["df", "-k", "/"], timeout: .seconds(4))
             : nil
@@ -858,13 +858,15 @@ final class SystemInfoModel: nonisolated ObservableObject {
         snapshot.diskWriteBytesLastMinute = Double(totalBytes - windowBaseline.totalBytes)
     }
 
-    /// 在刚打开 System 面板时优先采样一次 netstat 奠定计数基线，避免开局前几秒显示 "—"。
+    /// 在刚打开 System 面板时优先采样一次 netstat 奠定计数基线，并初始化网速为 0 B/s，避免显示破折号 "—"。
     private func initializeNetstatBaseline() async {
-        guard lastNetIn == nil, let out = await optionalRun(runner, ["netstat", "-ib"], timeout: .seconds(2)) else { return }
+        guard lastNetIn == nil, let out = await optionalRun(runner, ["netstat", "-ibn"], timeout: .seconds(2)) else { return }
         if let (inBytes, outBytes) = Self.parseNetstatTotals(out) {
             lastNetIn = inBytes
             lastNetOut = outBytes
             lastNetAt = Date()
+            snapshot.netDownloadBytesPerSec = 0
+            snapshot.netUploadBytesPerSec = 0
         }
     }
 
@@ -873,23 +875,27 @@ final class SystemInfoModel: nonisolated ObservableObject {
         let now = Date()
         if let lastIn = lastNetIn, let lastOut = lastNetOut, let lastAt = lastNetAt {
             let dt = now.timeIntervalSince(lastAt)
-            if dt > 0.2 {
-                if inBytes >= lastIn {
-                    snapshot.netDownloadBytesPerSec = Double(inBytes - lastIn) / dt
-                } else {
-                    // 网卡重连/计数重置/VPN 切换时重置为 0，防止差分为负导致网速卡死
-                    snapshot.netDownloadBytesPerSec = 0
-                }
-                if outBytes >= lastOut {
-                    snapshot.netUploadBytesPerSec = Double(outBytes - lastOut) / dt
-                } else {
-                    snapshot.netUploadBytesPerSec = 0
-                }
+            if dt > 0.1 {
+                let downRate = inBytes >= lastIn ? Double(inBytes - lastIn) / dt : 0
+                let upRate = outBytes >= lastOut ? Double(outBytes - lastOut) / dt : 0
+                snapshot.netDownloadBytesPerSec = downRate
+                snapshot.netUploadBytesPerSec = upRate
+                lastNetIn = inBytes
+                lastNetOut = outBytes
+                lastNetAt = now
+            } else {
+                // 两次采样间隔低于 100ms 时，保留当前速率状态，不重置采样基线
+                snapshot.netDownloadBytesPerSec = snapshot.netDownloadBytesPerSec ?? 0
+                snapshot.netUploadBytesPerSec = snapshot.netUploadBytesPerSec ?? 0
             }
+        } else {
+            // 首次采样（备用逻辑）：确立基线并初始化为 0 B/s，避免显示破折号 "—"
+            snapshot.netDownloadBytesPerSec = 0
+            snapshot.netUploadBytesPerSec = 0
+            lastNetIn = inBytes
+            lastNetOut = outBytes
+            lastNetAt = now
         }
-        lastNetIn = inBytes
-        lastNetOut = outBytes
-        lastNetAt = now
     }
 
     // MARK: - top / vm_stat 解析
@@ -1017,42 +1023,19 @@ final class SystemInfoModel: nonisolated ObservableObject {
     }
 
     /// 汇总 `netstat -ib` 各物理/虚拟链路的 Ibytes/Obytes。
-    /// 排除 lo* 回环与 bridge*/vmenet*/gif*/stf* 等虚拟链路；
-    /// 若存在物理网卡 (en*) 且有流量，跳过 utun* 接口以防 VPN/代理 (TUN 模式) 流量重复叠加计算。
+    /// 排除 lo* 回环与 bridge*/vmenet*/gif*/stf* 等虚拟链路。
     private nonisolated static func parseNetstatTotals(_ output: String) -> (inBytes: UInt64, outBytes: UInt64)? {
-        let lines = output.split(whereSeparator: \.isNewline)
-
-        // 检查是否存在有流量的 en* 物理网卡
-        var hasEnBytes = false
-        for line in lines {
-            let raw = String(line)
-            guard raw.contains("<Link") else { continue }
-            let cols = raw.split(whereSeparator: \.isWhitespace).map(String.init)
-            guard let name = cols.first, name.hasPrefix("en") else { continue }
-            guard cols.count >= 7,
-                  let ibytes = UInt64(cols[cols.count - 5]),
-                  let obytes = UInt64(cols[cols.count - 2]) else { continue }
-            if ibytes > 0 || obytes > 0 {
-                hasEnBytes = true
-                break
-            }
-        }
-
         var totalIn: UInt64 = 0
         var totalOut: UInt64 = 0
         var saw = false
 
-        for line in lines {
+        for line in output.split(whereSeparator: \.isNewline) {
             let raw = String(line)
             guard raw.contains("<Link") else { continue }
             let cols = raw.split(whereSeparator: \.isWhitespace).map(String.init)
             guard let name = cols.first else { continue }
-            // 回环与虚拟 bridge/vmenet/gif/stf 不计入网速
+            // 排除回环与虚拟 bridge/vmenet/gif/stf
             if name.hasPrefix("lo") || name.hasPrefix("bridge") || name.hasPrefix("vmenet") || name.hasPrefix("gif") || name.hasPrefix("stf") {
-                continue
-            }
-            // 物理网卡已在工作时，跳过 utun 虚拟接口以防 VPN/TUN 重复计算
-            if hasEnBytes && name.hasPrefix("utun") {
                 continue
             }
             // 列从右往左固定：Coll Obytes Oerrs Opkts Ibytes Ierrs Ipkts …

@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import os
 
 /// 命令执行结果；业务层只解析 stdout，与本地/SSH 传输无关。
 struct SystemCommandResult: Sendable, Equatable {
@@ -32,6 +33,20 @@ enum SystemCommandError: Error, LocalizedError {
     }
 }
 
+/// 线程安全的单次 Claim 记录器，确保 Continuation 只被 resume 一次
+private final class ExecutionTracker: @unchecked Sendable {
+    private var lock = os_unfair_lock_s()
+    private var claimed = false
+
+    func tryClaim() -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
 /// 本机 `Foundation.Process` 实现；强制 `LANG=C` 以便解析英文输出。
 struct LocalProcessRunner: SystemCommandRunner {
     func run(argv: [String], timeout: Duration) async throws -> SystemCommandResult {
@@ -41,31 +56,57 @@ struct LocalProcessRunner: SystemCommandRunner {
         let arguments = Array(argv.dropFirst())
         let path = Self.resolvedPath(executable)
 
-        let box = ProcessBox()
-        try await box.start(path: path, arguments: arguments)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+
+        var env = ProcessInfo.processInfo.environment
+        env["LANG"] = "C"
+        env["LC_ALL"] = "C"
+        process.environment = env
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+        } catch {
+            throw SystemCommandError.launchFailed(error.localizedDescription)
+        }
 
         let seconds = Double(timeout.components.seconds)
             + Double(timeout.components.attoseconds) / 1e18
 
-        return try await withThrowingTaskGroup(of: SystemCommandResult.self) { group in
-            group.addTask {
-                try await box.waitForExit()
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(max(seconds, 0.05)))
-                await box.terminate()
-                throw SystemCommandError.timedOut
-            }
+        return try await withCheckedThrowingContinuation { continuation in
+            let tracker = ExecutionTracker()
 
-            do {
-                let result = try await group.next()!
-                group.cancelAll()
-                await box.terminate()
-                return result
-            } catch {
-                group.cancelAll()
-                await box.terminate()
-                throw error
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
+            timer.schedule(deadline: .now() + max(seconds, 0.05))
+            timer.setEventHandler {
+                if tracker.tryClaim() {
+                    if process.isRunning { process.terminate() }
+                    timer.cancel()
+                    continuation.resume(throwing: SystemCommandError.timedOut)
+                }
+            }
+            timer.resume()
+
+            DispatchQueue.global().async {
+                let outData = stdout.fileHandleForReading.readDataToEndOfFile()
+                let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                timer.cancel()
+
+                if tracker.tryClaim() {
+                    let result = SystemCommandResult(
+                        stdout: String(data: outData, encoding: .utf8) ?? "",
+                        stderr: String(data: errData, encoding: .utf8) ?? "",
+                        exitCode: process.terminationStatus
+                    )
+                    continuation.resume(returning: result)
+                }
             }
         }
     }
@@ -85,77 +126,16 @@ struct LocalProcessRunner: SystemCommandRunner {
             "curl": "/usr/bin/curl",
             "which": "/usr/bin/which",
         ]
-        return known[name] ?? "/usr/bin/\(name)"
-    }
-}
-
-/// 跨 task 持有 Process：先 start，再 wait/terminate，避免 continuation 双重 resume。
-private actor ProcessBox {
-    private var process: Process?
-    private var stdout = Pipe()
-    private var stderr = Pipe()
-    private var finished: SystemCommandResult?
-    private var waiters: [CheckedContinuation<SystemCommandResult, Error>] = []
-    private var didFinish = false
-
-    func start(path: String, arguments: [String]) async throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-
-        var env = ProcessInfo.processInfo.environment
-        env["LANG"] = "C"
-        env["LC_ALL"] = "C"
-        process.environment = env
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        self.stdout = stdout
-        self.stderr = stderr
-        self.process = process
-
-        do {
-            try process.run()
-        } catch {
-            throw SystemCommandError.launchFailed(error.localizedDescription)
+        let candidate = known[name] ?? "/usr/bin/\(name)"
+        if FileManager.default.fileExists(atPath: candidate) {
+            return candidate
         }
-
-        // 后台读管道直到进程结束，只完成一次。
-        Task.detached { [weak self] in
-            let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            let result = SystemCommandResult(
-                stdout: String(data: outData, encoding: .utf8) ?? "",
-                stderr: String(data: errData, encoding: .utf8) ?? "",
-                exitCode: process.terminationStatus
-            )
-            await self?.complete(result)
+        for prefix in ["/usr/sbin/", "/sbin/", "/usr/bin/", "/bin/"] {
+            let alt = prefix + name
+            if FileManager.default.fileExists(atPath: alt) {
+                return alt
+            }
         }
-    }
-
-    func waitForExit() async throws -> SystemCommandResult {
-        if let finished { return finished }
-        return try await withCheckedThrowingContinuation { continuation in
-            waiters.append(continuation)
-        }
-    }
-
-    func terminate() {
-        guard let process, process.isRunning else { return }
-        process.terminate()
-    }
-
-    private func complete(_ result: SystemCommandResult) {
-        guard !didFinish else { return }
-        didFinish = true
-        finished = result
-        let pending = waiters
-        waiters.removeAll()
-        for waiter in pending {
-            waiter.resume(returning: result)
-        }
+        return candidate
     }
 }

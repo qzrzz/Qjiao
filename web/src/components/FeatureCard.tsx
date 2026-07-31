@@ -26,6 +26,7 @@ export function FeatureCard({ card }: FeatureCardProps) {
     title,
     desc,
     image,
+    video,
     style = "left",
     alt,
     cardClassName,
@@ -51,7 +52,21 @@ export function FeatureCard({ card }: FeatureCardProps) {
         <h3>{title}</h3>
         <p>{renderMultilineText(desc)}</p>
       </div>
-      <img className="featureCard__shot" src={image} alt={alt || title} />
+      {video ? (
+        <div className="featureCard__videoContainer">
+          <video
+            className="featureCard__video"
+            src={video}
+            autoPlay
+            loop
+            muted
+            playsInline
+            aria-label={alt || title}
+          />
+        </div>
+      ) : (
+        <img className="featureCard__shot" src={image} alt={alt || title} />
+      )}
     </article>
   );
 }

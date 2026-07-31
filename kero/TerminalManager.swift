@@ -139,6 +139,9 @@ final class TerminalManager: nonisolated ObservableObject {
         var restored = false
         if !Self.pendingRestores.isEmpty {
             restored = restore(from: Self.pendingRestores.removeFirst())
+        } else {
+            // 当会话快照为空时，以 config/projects 目录为来源扫描并恢复已有项目
+            restored = restore(from: SessionSnapshot(projects: [], selectedProjectIndex: 0))
         }
         // Only a window still claiming a snapshot reads the scrollback blobs,
         // so once the last one is claimed they are dead weight — several
@@ -250,6 +253,7 @@ final class TerminalManager: nonisolated ObservableObject {
     @discardableResult
     func newProject() -> Project {
         let project = makeProject()
+        project.saveConfig()
         insert(project)
         return project
     }
@@ -264,6 +268,7 @@ final class TerminalManager: nonisolated ObservableObject {
         ).lastPathComponent
         project.projectDirectory = directory
         project.newSession(directory: directory)
+        project.saveConfig()
         insert(project)
     }
 
@@ -339,6 +344,7 @@ final class TerminalManager: nonisolated ObservableObject {
         project.customName = directoryURL.lastPathComponent
         project.projectDirectory = path
         project.newSession(directory: path)
+        project.saveConfig()
         insert(project)
         return true
     }
@@ -1462,8 +1468,10 @@ final class TerminalManager: nonisolated ObservableObject {
         }
     }
 
-    /// Rebuilds projects and tabs from a saved window snapshot. Returns
-    /// false when the snapshot holds nothing restorable.
+    /// 从磁盘 `config/projects` 存储与会话快照重新构建项目和标签页列表。
+    ///
+    /// `config/projects` 目录作为项目列表的权威来源 (Source of truth)，扫描磁盘上所有项目配置文件；
+    /// 快照 `session.json` 则提供各个项目内部 Tab/Pane 的会话布局恢复与渲染顺位。
     private func restore(from snapshot: SessionSnapshot) -> Bool {
         if let visible = snapshot.isLeftSidebarVisible {
             isLeftSidebarVisible = visible
@@ -1474,9 +1482,23 @@ final class TerminalManager: nonisolated ObservableObject {
         if let tab = snapshot.rightPanelTab {
             panelTab = tab
         }
+
+        // 1. 获取磁盘 config/projects 目录下保存的所有有效项目 ID 集合
+        let diskProjectIDs = ProjectConfigStore.allProjectIDs()
+        let diskIDSet = Set(diskProjectIDs)
+
+        var loadedProjectIDs = Set<UUID>()
         let targetProjectIndex = snapshot.selectedProjectIndex ?? 0
+
+        // 2. 优先按快照中的顺序恢复存活在 config/projects 中的项目及其 Tab/Pane 布局
         for (projectIndex, saved) in snapshot.projects.enumerated() {
-            let project = makeProject(id: saved.id, createInitialSession: false)
+            guard let savedID = saved.id, diskIDSet.contains(savedID) else {
+                // 若快照记录的项目已被从 config/projects 中彻底删除，则跳过
+                continue
+            }
+            loadedProjectIDs.insert(savedID)
+
+            let project = makeProject(id: savedID, createInitialSession: false)
             let config = ProjectConfigStore.load(for: project.id)
             project.customName = config?.customName ?? saved.customName
             project.useAutoTitle = config?.useAutoTitle ?? saved.useAutoTitle ?? false
@@ -1503,24 +1525,8 @@ final class TerminalManager: nonisolated ObservableObject {
             if project.projectDirectory.isEmpty {
                 project.projectDirectory = project.sessions.first?.currentDirectoryPath ?? ""
             }
-            // 旧版快照中的项目配置在首次恢复时迁移到独立配置文件。
-            if config == nil || config?.useAutoTitle == nil || config?.theme == nil
-                || config?.projectDirectory == nil || config?.launchCommands == nil || config?.isArchived == nil {
-                ProjectConfigStore.save(
-                    ProjectConfig(
-                        customName: project.customName,
-                        useAutoTitle: project.useAutoTitle,
-                        description: project.description,
-                        icon: project.icon,
-                        theme: project.theme,
-                        projectDirectory: project.projectDirectory,
-                        launchCommands: project.launchCommands,
-                        isArchived: project.isArchived,
-                        aiWritingLanguage: project.aiWritingLanguage?.rawValue
-                    ),
-                    for: project.id
-                )
-            }
+            // 确保项目配置在磁盘上最新
+            project.saveConfig()
 
             if let index = saved.selectedTabIndex, project.tabs.indices.contains(index) {
                 project.selectedTabID = project.tabs[index].id
@@ -1528,6 +1534,30 @@ final class TerminalManager: nonisolated ObservableObject {
             project.resetRecency()
             projects.append(project)
         }
+
+        // 3. 读取并补全 config/projects 下存在但未在快照中列出的项目（以 config/projects 为主要来源）
+        for diskID in diskProjectIDs {
+            guard !loadedProjectIDs.contains(diskID) else { continue }
+            guard let config = ProjectConfigStore.load(for: diskID) else { continue }
+
+            let project = makeProject(id: diskID, createInitialSession: false)
+            project.customName = config.customName
+            project.useAutoTitle = config.useAutoTitle ?? false
+            project.description = config.description
+            project.icon = config.icon
+            project.theme = config.theme ?? .global
+            project.projectDirectory = config.projectDirectory ?? ""
+            project.launchCommands = config.launchCommands ?? []
+            project.isArchived = config.isArchived ?? false
+            project.aiWritingLanguage = config.aiWritingLanguage
+                .flatMap(AIWritingLanguage.init(rawValue:))
+
+            // 为补全的项目分配默认终端会话
+            project.newSession(directory: project.projectDirectory.isEmpty ? nil : project.projectDirectory)
+            project.resetRecency()
+            projects.append(project)
+        }
+
         guard !projects.isEmpty else { return false }
         if let index = snapshot.selectedProjectIndex, projects.indices.contains(index) {
             selectedProjectID = projects[index].id
