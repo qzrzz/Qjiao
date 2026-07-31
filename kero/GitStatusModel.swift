@@ -31,6 +31,9 @@ final class GitStatusModel: nonisolated ObservableObject {
             let dir = (path as NSString).deletingLastPathComponent
             return dir.isEmpty ? "" : dir
         }
+        /// porcelain `normal`（VS Code mixed）模式下，完全未跟踪目录折叠为
+        /// 单个条目且 path 带尾斜杠（`? dir/`）；其他记录不带尾斜杠。
+        var isDirectoryEntry: Bool { path.hasSuffix("/") }
         /// Intent-to-add (`git add -N`) is represented as `.A`; restoring it
         /// from the empty index blob would truncate user content, so destructive
         /// handling treats it like an untracked file and uses the Trash.
@@ -116,6 +119,9 @@ final class GitStatusModel: nonisolated ObservableObject {
     @Published private(set) var repositoryIdentity = ""
     @Published private(set) var isRepo = false
     @Published private(set) var fileDecorations: [String: FileDecoration] = [:]
+    /// 目录的聚合装饰（子项最高优先级），由 `applyRepository` 一次性预计算，
+    /// 文件树按目录查询时 O(1) 命中，避免每个目录行渲染时全量扫描 `fileDecorations`。
+    @Published private(set) var directoryDecorations: [String: FileDecoration] = [:]
     /// Relative porcelain paths. Directory records retain their trailing slash
     /// so expanded descendants can inherit the ignored state.
     @Published private(set) var ignoredPaths: Set<String> = []
@@ -205,10 +211,13 @@ final class GitStatusModel: nonisolated ObservableObject {
         statusRequestID &+= 1
         let requestID = statusRequestID
         isRefreshing = true
+        // 忽略路径数据只服务于 Files 面板的 Git 装饰（默认关闭）；
+        // 关闭时跳过 --ignored=matching，避免大仓库每 2s 全量枚举被忽略文件。
+        let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
 
         Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
-                Self.runGitStatus(in: root)
+                await GitScanner.shared.loadStatus(in: root, includeIgnoredPaths: includeIgnoredPaths)
             }.value
             guard let self, self.contextGeneration == generation,
                   self.statusRequestID == requestID,
@@ -218,7 +227,14 @@ final class GitStatusModel: nonisolated ObservableObject {
             self.hasResolvedStatus = true
             if self.refreshPending {
                 self.refreshPending = false
-                self.refresh()
+                // 扫描耗时超过 2s 轮询间隔时，完成即再扫会形成无间隙连续轮询，
+                // git 子进程持续占满 CPU / IO；延迟一小段再补扫以留出呼吸窗口。
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    guard let self, !self.isRefreshing, !self.isBusy,
+                          self.rootPath == root else { return }
+                    self.refresh()
+                }
             }
         }
     }
@@ -258,12 +274,7 @@ final class GitStatusModel: nonisolated ObservableObject {
             return .ignored
         }
         guard isDirectory, !relativePath.isEmpty else { return nil }
-
-        let descendantPrefix = relativePath + "/"
-        return fileDecorations
-            .filter { $0.key.hasPrefix(descendantPrefix) }
-            .map(\.value)
-            .max { $0.directoryPriority < $1.directoryPriority }
+        return directoryDecorations[relativePath]
     }
 
     // MARK: - File operations
@@ -630,19 +641,19 @@ final class GitStatusModel: nonisolated ObservableObject {
                 var failureMessage: String?
 
                 if let expectedRepositoryRoot {
-                    guard Self.resolveRepositoryRoot(in: validationRoot) == expectedRepositoryRoot else {
+                    guard GitScanner.resolveRepositoryRoot(in: validationRoot) == expectedRepositoryRoot else {
                         let message = "Repository changed before the Git action could run. Review the current changes and try again."
                         return CommandBatchResult(
                             output: message, failureCode: -1, failureMessage: message
                         )
                     }
                     if requiresStableHead {
-                        let liveStatus = Self.runGit(
+                        let liveStatus = GitScanner.runGit(
                             ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"],
                             in: expectedRepositoryRoot
                         )
                         let live = liveStatus.status == 0
-                            ? Self.parseStatus(liveStatus.stdout)
+                            ? GitScanner.parseStatus(liveStatus.stdout)
                             : nil
                         guard let live,
                               live.headOID == expectedHeadOID,
@@ -661,7 +672,7 @@ final class GitStatusModel: nonisolated ObservableObject {
 
                 for args in commands {
                     transcript.append("$ git " + Self.displayCommand(args))
-                    let run = Self.runGit(args, in: dir)
+                    let run = GitScanner.runGit(args, in: dir)
                     let text = [run.stdout, run.stderr]
                         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .filter { !$0.isEmpty }
@@ -761,17 +772,17 @@ final class GitStatusModel: nonisolated ObservableObject {
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
-                guard Self.resolveRepositoryRoot(in: validationRoot) == expectedRepositoryRoot else {
+                guard GitScanner.resolveRepositoryRoot(in: validationRoot) == expectedRepositoryRoot else {
                     return TrashResult(
                         moved: [],
                         failure: "Repository changed before the file action could run. Review the current changes and try again."
                     )
                 }
-                let liveStatus = Self.runGit(
+                let liveStatus = GitScanner.runGit(
                     ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"],
                     in: expectedRepositoryRoot
                 )
-                let live = liveStatus.status == 0 ? Self.parseStatus(liveStatus.stdout) : nil
+                let live = liveStatus.status == 0 ? GitScanner.parseStatus(liveStatus.stdout) : nil
                 guard let live,
                       live.headOID == expectedHeadOID,
                       live.branch == expectedBranch else {
@@ -846,10 +857,6 @@ final class GitStatusModel: nonisolated ObservableObject {
         let failure: String?
     }
 
-    private nonisolated final class PipeData: @unchecked Sendable {
-        var value = Data()
-    }
-
     private func invalidateStatusRefresh() {
         statusRequestID &+= 1
         isRefreshing = false
@@ -889,6 +896,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         stagedEntries = []
         changedEntries = []
         fileDecorations = [:]
+        directoryDecorations = [:]
         ignoredPaths = []
         branches = []
         remotes = []
@@ -938,6 +946,9 @@ final class GitStatusModel: nonisolated ObservableObject {
         }
     }
 
+    /// 扫描 / 解析 / 预处理都已在 `GitScanner` actor 内完成，
+    /// 这里只做 @Published 赋值（Swift 数组 COW，赋值 O(1)），
+    /// 主线程不再承担任何 O(n) 计算。
     private func applyRepository(_ result: StatusResult) {
         isRepo = true
         branch = result.branch
@@ -956,308 +967,19 @@ final class GitStatusModel: nonisolated ObservableObject {
             repositoryOperation = result.repositoryOperation
             stashCount = result.stashCount
         }
-
-        let entries = result.entries.map { entry in
-            var entry = entry
-            entry.repositoryRoot = result.topLevel
-            return entry
-        }
-        fileDecorations = Dictionary(
-            uniqueKeysWithValues: entries.map { ($0.path, Self.fileDecoration(for: $0)) }
-        )
+        fileDecorations = result.fileDecorations
+        directoryDecorations = result.directoryDecorations
         ignoredPaths = result.ignoredPaths
-        mergeEntries = entries.filter(\.isConflict)
-        stagedEntries = entries.filter {
-            !$0.isConflict && $0.staged != "." && $0.staged != "?"
-        }
-        changedEntries = entries.filter {
-            !$0.isConflict && $0.unstaged != "."
-        }
+        mergeEntries = result.mergeEntries
+        stagedEntries = result.stagedEntries
+        changedEntries = result.changedEntries
     }
 
-    nonisolated enum StatusLoadResult: Equatable, Sendable {
-        case repository(StatusResult)
-        case notRepository
-        case failed(String)
-    }
-
-    nonisolated struct StatusResult: Equatable, Sendable {
-        var branch: String?
-        var headOID: String?
-        var hasHead = true
-        var upstream: String?
-        var ahead = 0
-        var behind = 0
-        var topLevel = ""
-        var entries: [Entry] = []
-        var ignoredPaths: Set<String> = []
-        var branches: [String] = []
-        var remotes: [String] = []
-        var recentCommits: [RecentCommit] = []
-        var repositoryOperation: String?
-        var stashCount = 0
-        var loadedDetails = false
-    }
-
-    /// Runs Git while draining stdout and stderr concurrently. Reading either
-    /// pipe only after the process exits can deadlock when the other fills.
+    /// 兼容旧调用点（命令面板 / Diff / LocalAI 的一次性同步查询）。
+    /// 真实实现在 `GitScanner.runGit`。
     nonisolated static func runGit(
         _ args: [String], in dir: String
     ) -> (status: Int32, stdout: String, stderr: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: dir, isDirectory: true)
-        var env = ProcessInfo.processInfo.environment
-        env["GIT_OPTIONAL_LOCKS"] = "0"
-        // Fail rather than hanging on a credential prompt behind the app.
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        // Git diagnostics are parsed only to distinguish an ordinary folder
-        // from a broken repository. Pinning the locale makes that safe and
-        // also keeps relative dates stable in the compact history list.
-        env["LC_ALL"] = "C"
-        process.environment = env
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        process.standardInput = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return (-1, "", error.localizedDescription)
-        }
-        let outData = PipeData()
-        let errData = PipeData()
-        let readers = DispatchGroup()
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
-            outData.value = stdout.fileHandleForReading.readDataToEndOfFile()
-            readers.leave()
-        }
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
-            errData.value = stderr.fileHandleForReading.readDataToEndOfFile()
-            readers.leave()
-        }
-        process.waitUntilExit()
-        readers.wait()
-        return (
-            process.terminationStatus,
-            String(data: outData.value, encoding: .utf8) ?? "",
-            String(data: errData.value, encoding: .utf8) ?? ""
-        )
-    }
-
-    /// Resolves the active repository and distinguishes a normal non-repo
-    /// directory from an actual Git failure that the UI should surface.
-    private nonisolated static func runGitStatus(in root: String) -> StatusLoadResult {
-        let top = runGit(["rev-parse", "--show-toplevel"], in: root)
-        guard top.status == 0 else {
-            let failure = gitFailureMessage(top, fallback: "Unable to locate the Git repository.")
-            if top.status == 128,
-               failure.localizedCaseInsensitiveContains("not a git repository"),
-               !containsGitMetadata(atOrAbove: root) {
-                return .notRepository
-            }
-            return .failed(failure)
-        }
-        let resolvedRoot = strippingTrailingLineEnding(top.stdout)
-        guard !resolvedRoot.isEmpty else {
-            return .failed("Git returned an empty repository path.")
-        }
-        let status = runGit(
-            [
-                "status", "--porcelain=v2", "--branch", "-z",
-                "--untracked-files=all", "--ignored=matching",
-            ],
-            in: resolvedRoot
-        )
-        guard status.status == 0 else {
-            return .failed(gitFailureMessage(status, fallback: "Unable to read Git status."))
-        }
-        var result = parseStatus(status.stdout)
-        result.topLevel = resolvedRoot
-
-        result.loadedDetails = true
-        let repoRoot = resolvedRoot
-
-        let refs = runGit(
-            ["for-each-ref", "--format=%(refname:short)", "refs/heads"], in: repoRoot
-        )
-        if refs.status == 0 {
-            result.branches = refs.stdout.split(separator: "\n").map(String.init).sorted()
-        }
-
-        let remoteRun = runGit(["remote"], in: repoRoot)
-        if remoteRun.status == 0 {
-            result.remotes = remoteRun.stdout.split(separator: "\n").map(String.init).sorted()
-        }
-
-        let log = runGit(
-            ["log", "-n", "8", "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%ar%x1e"],
-            in: repoRoot
-        )
-        if log.status == 0 { result.recentCommits = parseRecentCommits(log.stdout) }
-
-        let stash = runGit(["rev-list", "--walk-reflogs", "--count", "refs/stash"], in: repoRoot)
-        if stash.status == 0 {
-            result.stashCount = Int(stash.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-        }
-
-        let gitDir = runGit(["rev-parse", "--absolute-git-dir"], in: repoRoot)
-        if gitDir.status == 0 {
-            let path = strippingTrailingLineEnding(gitDir.stdout)
-            result.repositoryOperation = detectRepositoryOperation(gitDirectory: path)
-        }
-        return .repository(result)
-    }
-
-    private nonisolated static func resolveRepositoryRoot(in root: String) -> String? {
-        let top = runGit(["rev-parse", "--show-toplevel"], in: root)
-        guard top.status == 0 else { return nil }
-        let path = strippingTrailingLineEnding(top.stdout)
-        return path.isEmpty ? nil : path
-    }
-
-    /// A malformed `.git` directory/file can produce the same rev-parse text
-    /// as a plain folder. Preserve that as an actionable status error instead
-    /// of offering to initialize a nested repository on top of broken metadata.
-    private nonisolated static func containsGitMetadata(atOrAbove root: String) -> Bool {
-        let fm = FileManager.default
-        var directory = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
-        while true {
-            if fm.fileExists(atPath: directory.appendingPathComponent(".git").path) {
-                return true
-            }
-            let parent = directory.deletingLastPathComponent()
-            if parent.path == directory.path { return false }
-            directory = parent
-        }
-    }
-
-    private nonisolated static func strippingTrailingLineEnding(_ value: String) -> String {
-        var value = value
-        if value.hasSuffix("\n") { value.removeLast() }
-        if value.hasSuffix("\r") { value.removeLast() }
-        return value
-    }
-
-    private nonisolated static func gitFailureMessage(
-        _ run: (status: Int32, stdout: String, stderr: String), fallback: String
-    ) -> String {
-        let message = [run.stderr, run.stdout]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty }
-        return message ?? fallback
-    }
-
-    /// Parses NUL-delimited porcelain v2. Unlike Git's default quoted output,
-    /// this preserves spaces, quotes, tabs, and newlines in file names.
-    nonisolated static func parseStatus(_ output: String) -> StatusResult {
-        let records = output.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
-        var result = StatusResult()
-        var index = 0
-        while index < records.count {
-            let record = records[index]
-            if record.hasPrefix("# branch.oid ") {
-                let oid = String(record.dropFirst("# branch.oid ".count))
-                result.hasHead = oid != "(initial)"
-                result.headOID = result.hasHead ? oid : nil
-            } else if record.hasPrefix("# branch.head ") {
-                let name = String(record.dropFirst("# branch.head ".count))
-                result.branch = name == "(detached)" ? "detached HEAD" : name
-            } else if record.hasPrefix("# branch.upstream ") {
-                result.upstream = String(record.dropFirst("# branch.upstream ".count))
-            } else if record.hasPrefix("# branch.ab ") {
-                let parts = record.dropFirst("# branch.ab ".count).split(separator: " ")
-                for part in parts {
-                    if part.hasPrefix("+") { result.ahead = Int(part.dropFirst()) ?? 0 }
-                    if part.hasPrefix("-") { result.behind = Int(part.dropFirst()) ?? 0 }
-                }
-            } else if record.hasPrefix("1 ") {
-                let fields = record.split(separator: " ", maxSplits: 8)
-                if fields.count == 9, fields[1].count == 2 {
-                    let xy = Array(fields[1])
-                    result.entries.append(
-                        Entry(path: String(fields[8]), staged: xy[0], unstaged: xy[1])
-                    )
-                }
-            } else if record.hasPrefix("2 ") {
-                let fields = record.split(separator: " ", maxSplits: 9)
-                if fields.count == 10, fields[1].count == 2, index + 1 < records.count {
-                    let xy = Array(fields[1])
-                    // With -z, the destination is in this record and the
-                    // original path is the following NUL-delimited token.
-                    result.entries.append(
-                        Entry(
-                            path: String(fields[9]), staged: xy[0], unstaged: xy[1],
-                            origPath: records[index + 1]
-                        )
-                    )
-                    index += 1
-                }
-            } else if record.hasPrefix("u ") {
-                let fields = record.split(separator: " ", maxSplits: 10)
-                if fields.count == 11, fields[1].count == 2 {
-                    let xy = Array(fields[1])
-                    result.entries.append(
-                        Entry(
-                            path: String(fields[10]), staged: xy[0], unstaged: xy[1],
-                            isConflict: true
-                        )
-                    )
-                }
-            } else if record.hasPrefix("? ") {
-                result.entries.append(
-                    Entry(path: String(record.dropFirst(2)), staged: "?", unstaged: "?")
-                )
-            } else if record.hasPrefix("! ") {
-                result.ignoredPaths.insert(String(record.dropFirst(2)))
-            }
-            index += 1
-        }
-        return result
-    }
-
-    private static func fileDecoration(for entry: Entry) -> FileDecoration {
-        let statuses = [entry.staged, entry.unstaged]
-        if entry.isConflict || statuses.contains("U") { return .conflict }
-        if statuses.contains("?") { return .untracked }
-        if entry.staged == "A" { return .added }
-        if statuses.contains("D") { return .deleted }
-        if statuses.contains("R") { return .renamed }
-        if statuses.contains("C") { return .copied }
-        return .modified
-    }
-
-    nonisolated static func parseRecentCommits(_ output: String) -> [RecentCommit] {
-        output.split(separator: "\u{1e}").compactMap { record in
-            let clean = record.trimmingCharacters(in: .newlines)
-            let fields = clean.split(separator: "\u{1f}", omittingEmptySubsequences: false)
-            guard fields.count == 5 else { return nil }
-            return RecentCommit(
-                hash: String(fields[0]), shortHash: String(fields[1]),
-                subject: String(fields[2]), author: String(fields[3]),
-                relativeDate: String(fields[4])
-            )
-        }
-    }
-
-    nonisolated static func detectRepositoryOperation(gitDirectory: String) -> String? {
-        let fm = FileManager.default
-        let git = URL(fileURLWithPath: gitDirectory, isDirectory: true)
-        func exists(_ name: String) -> Bool {
-            fm.fileExists(atPath: git.appendingPathComponent(name).path)
-        }
-
-        if exists("rebase-merge") || exists("rebase-apply") { return "Rebase in progress" }
-        if exists("MERGE_HEAD") { return "Merge in progress" }
-        if exists("CHERRY_PICK_HEAD") { return "Cherry-pick in progress" }
-        if exists("REVERT_HEAD") { return "Revert in progress" }
-        if exists("BISECT_LOG") { return "Bisect in progress" }
-        return nil
+        GitScanner.runGit(args, in: dir)
     }
 }
