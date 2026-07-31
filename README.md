@@ -56,7 +56,7 @@
   - **AI Select Icon**：基于项目 name / description / 路径末级、`package.json` name·description、`README.md` 前 20 行，以及 **Material Icon Theme** 逻辑名列表（不含 Brands），用 LocalAI 按「Material icon → SF Symbol → Emoji」优先级返回 JSON 并应用；入口为项目列表右键 **AI Select Icon** 与图标选择器 **AI Select**（未启用 provider 时禁用）。
   - **AI Name & Desc & Icon**：独立模块 `LocalAIProjectMetaSuggest` + `LocalAIProjectMetaTaskStore`；一次请求生成项目 **显示名称**、**描述** 与 **图标** 并写入配置；上下文与 Material 列表复用图标功能；入口为项目列表右键 **AI Name & Desc & Icon**（与纯选图标互斥、可取消、行内转圈）。
   - **AI Git Commit Message**：独立模块 `LocalAIGitCommitSuggest` + `LocalAIGitCommitTaskStore`；根据已暂存 (Staged，仅已暂存存在时) 或工作区已变更 (Unstaged 与未跟踪文件，仅已暂存为空时) 的上下文，按 Conventional Commit 规范生成提交说明并填入 Git 面板 Message 输入框。
-    - **入口**：Git 面板 Message 输入框右侧 **sparkles.2** 按钮；Recent Commits 行右键 **AI Commit Message**（生成中可取消）。
+    - **入口**：Git 面板 Message 输入框右侧 **sparkles.2** 按钮；Commit 选项菜单中的 **AI 完成变更提交**（自动暂存全部变更、生成 Commit Message 并完成提交）；Recent Commits 行右键 **AI Commit Message**（生成中可取消）。
     - **设置**（Settings → General → AI）：**Writing language**（`ai.writing-language`，默认 English，支持英语、简体中文、繁体中文、日语、韩语、法语、德语、西班牙语、葡萄牙语、俄语、意大利语等常用语言；项目可在 `config.json` 的 `aiWritingLanguage` 覆盖）与 **Git Commit Message Emoji**（`ai.git-commit-emoji`，默认开启 Gitmoji）。
 - 左边栏开关（`sidebar.left`，⌘B）：展开时显示在左侧边栏顶栏右侧；收起后移到 Tabs 顶栏左侧（开关左右边距加大：左 16pt / 右 12pt）。
 - **项目使用自动标题优化**：项目右键菜单中的「使用自动标题」改为独立布尔值开关（Toggle）；开启时项目显示终端动态标题，且不影响/清空项目已设置的自定义名称，关闭后可恢复自定义项目名称。

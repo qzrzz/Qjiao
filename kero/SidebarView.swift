@@ -102,14 +102,14 @@ struct SidebarView: View {
                 HStack(spacing: 2) {
                     SidebarFooterButton(
                         systemImage: "plus",
-                        tooltip: "New Project (⌘N)"
+                        tooltip: L10n.t("New Project (⌘N)")
                     ) { manager.newProject() }
                     SidebarMoreMenu(manager: manager)
                     Spacer()
                     SidebarThemeButton(settings: settings)
                     SidebarFooterButton(
                         systemImage: "gearshape",
-                        tooltip: "Settings (⌘,)",
+                        tooltip: L10n.t("Settings (⌘,)"),
                         tooltipAlignment: .trailing
                     ) { openWindow(id: "settings") }
                 }
@@ -342,7 +342,7 @@ private struct SidebarThemeButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .tooltip("Theme: \(settings.theme.title)", alignment: .trailing)
+        .tooltip(L10n.format("Theme: %@", settings.theme.title), alignment: .trailing)
         .contextMenu {
             ForEach(AppTheme.allCases) { theme in
                 Toggle(isOn: Binding(
