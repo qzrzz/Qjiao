@@ -48,6 +48,7 @@ struct GitPanel: View {
     @State private var showBranchCreator = false
     @State private var newBranchName = ""
     @State private var operationExpanded = false
+    @State private var isPendingAICommit = false
     @FocusState private var branchFieldFocused: Bool
 
     var body: some View {
@@ -125,6 +126,7 @@ struct GitPanel: View {
             confirmDiscardAll = false
             showBranchCreator = false
             newBranchName = ""
+            isPendingAICommit = false
         }
         .onChange(of: model.repositoryIdentity) {
             resetRepositoryDrafts()
@@ -501,6 +503,18 @@ struct GitPanel: View {
             guard let newMessage, !newMessage.isEmpty else { return }
             if let consumed = aiCommitTasks.consumeMessage(model.repoRoot) {
                 commitMessage = consumed
+                if isPendingAICommit {
+                    isPendingAICommit = false
+                    performCommit(includeAll: false)
+                }
+            }
+        }
+        .onChange(of: aiCommitTasks.states[aiCommitRepoKey]?.isRunning) { _, isRunning in
+            if isRunning == false && isPendingAICommit {
+                let state = aiCommitTasks.state(for: model.repoRoot)
+                if state.lastMessage == nil || state.lastMessage?.isEmpty == true {
+                    isPendingAICommit = false
+                }
             }
         }
     }
@@ -574,10 +588,37 @@ struct GitPanel: View {
             Button(L10n.t("Stage All & Commit")) { performCommit(includeAll: true) }
                 .disabled(!canCommit(includeAll: true))
             Divider()
+            Button(L10n.t("AI Complete Changes Commit")) { performAICompleteChangesCommit() }
+                .disabled(!canAICompleteChangesCommit)
+            Divider()
             Button(L10n.t("Amend Last Commit")) { performCommit(includeAll: false, amend: true) }
                 .disabled(!canAmend(includeAll: false))
             Button(L10n.t("Stage All & Amend")) { performCommit(includeAll: true, amend: true) }
                 .disabled(!canAmend(includeAll: true))
+        }
+    }
+
+    /// 是否可以发起 AI 完成变更提交（有仓库、未忙、开启 AI、无进行中 AI 任务、有变更且无冲突）。
+    private var canAICompleteChangesCommit: Bool {
+        model.isRepo
+            && !model.repoRoot.isEmpty
+            && !model.isBusy
+            && LocalAI.isEnabled
+            && !aiCommitTasks.isRunning(model.repoRoot)
+            && (model.totalChangeCount > 0 || !model.stagedEntries.isEmpty || !model.changedEntries.isEmpty)
+            && model.mergeEntries.isEmpty
+    }
+
+    /// 执行 AI 完成变更提交：先全部暂存，然后 AI 生成 Commit Message，成功后自动提交。
+    private func performAICompleteChangesCommit() {
+        guard canAICompleteChangesCommit else { return }
+        isPendingAICommit = true
+        model.stageAll { success in
+            guard success else {
+                isPendingAICommit = false
+                return
+            }
+            startAICommitMessage()
         }
     }
 

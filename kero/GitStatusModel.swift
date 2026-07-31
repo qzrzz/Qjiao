@@ -218,8 +218,10 @@ final class GitStatusModel: nonisolated ObservableObject {
         perform(label: "Unstage \(entry.fileName)", commands: [args])
     }
 
-    func stageAll() {
-        perform(label: "Stage all changes", commands: [["add", "-A"]])
+    /// 将工作区所有变更添加到暂存区 (`git add -A`)。
+    /// - Parameter completion: 完成后的回调，传入操作是否成功。
+    func stageAll(completion: (@MainActor (Bool) -> Void)? = nil) {
+        perform(label: "Stage all changes", commands: [["add", "-A"]], completion: completion)
     }
 
     func unstageAll() {
