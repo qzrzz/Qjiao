@@ -26,4 +26,4 @@ set in the Xcode project.
 
  ### Added
 
- - Projects Add menu 
+ - Projects Add button and menu.
