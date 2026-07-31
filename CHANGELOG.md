@@ -27,3 +27,4 @@ set in the Xcode project.
  ### Added
 
  - Projects Add button and menu.
+ - AI completed change submission》
