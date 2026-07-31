@@ -15,6 +15,12 @@
 
 ## 增加功能
 
+- **Files 面板 Git 状态装饰（可开关）**：当项目位于 Git 仓库内时，Files / CWD 文件树为变更文件显示彩色文件名与状态徽章（M / A / U / D / R / C / ! / I），目录按子项最高优先级聚合显示，Git 忽略文件变暗展示；可通过 `Settings → Files → File Tree` 中「Show Git Status Decorations」开关控制（默认关闭，配置写入 `files.git-decorations`）。
+
+- **Ctrl+1–9 直接切换标签**：主标签页快捷键由 `Ctrl+Shift+1–9` 简化为 `Ctrl+1–9`，与 `Cmd+1–9` 切换项目区分，无需再按 Shift。
+
+- **递归分屏布局重构（Refine Terminal Workspace）**：分屏布局由旧的「列 + 行」column 模型重构为递归 split 树（`PaneNode` / `PaneSplit` / `layout.geometry`）：任意方向的拆分只分割聚焦 Pane 自身矩形、保留相邻 Pane 尺寸，支持上下左右任意嵌套组合；分屏拖动分隔条、Pane 拖拽移动、键盘方向键聚焦（几何最近原则）、键盘等分 / 缩放 / 调整分隔条均按新布局树工作；会话快照改为递归 `LayoutSnapshot` 持久化，并自动迁移旧 column 快照与更早的单内容快照。
+
 - **左边栏底部更多菜单与项目批量操作**：在左边栏下方「新建项目」按钮旁新增「更多」按钮（`ellipsis`），提供快捷操作菜单：
   - **打开文件夹**（Open Folder…）：选择文件夹新建或激活对应的项目。
   - **AI 整理全部**（AI Organize All）：为所有非归档项目批量触发 AI 自动生成项目名称、描述与图标。
@@ -246,6 +252,10 @@
 
 ## 上游移植记录
 
+- 移植上游 Kero `main` commit [`e08729b`](https://github.com/egoist/kero/commit/e08729bb19dd54d9355f269851209e96f7c0905f)（Files 面板 Git 状态装饰，v0.1.35 之后 unrelease）：适配 Qjiao 的 `GitStatusModel`（`Character` 状态位）、`FileTreeRow` 定制与 `L10n` 三语词表，并按要求默认关闭、在 `Settings → Files` 新增 `files.git-decorations` 开关。
+- 移植上游 Kero `main` commit [`2163068`](https://github.com/egoist/kero/commit/216306845d24484600f3ac8e57c8191eb4f01bde)（Ctrl+1–9 切换标签）：主 Tab 快捷键由 `Ctrl+Shift+1–9` 改为 `Ctrl+1–9`；上游官网快捷键文案因 Qjiao 官网组件化重构无对应文案表，未跟随。
+- 移植上游 Kero commit [`285fb66`](https://github.com/egoist/kero/commit/285fb6655b4d1284af62bb0b647b94c83849aeff)（Refine terminal workspace behavior，v0.1.35）：递归 split 树布局重构，覆盖 `Panes.swift`、`PaneLayoutView.swift`、`SessionStore.swift`、`TabSwitcher.swift`、`TerminalManager.swift` 与 `Project.swift`；保留本地定制（`materialFileName`、`isTaskRunning` / `taskHasError`、`showPaneHeaders` 开关、`onClosePane`、`TerminalHelpBar`、`Theme.cursor` 焦点色），会话快照兼容旧 column 与单内容格式并自动迁移。
+- 本轮比对基线更新为 Kero `main` `2163068`（2026-07-31，含 `v0.1.35` 及两个 unrelease 提交）。未移植：`6b37b26`（Alacritty 渲染器修复，本地不包含该后端）；`2b9cd95` / `6dda01f` / `07f5589`（侧边栏行稳定与 Grok CLI 标题识别，本地 `SidebarView` 已重构且按要求不移植）。
 - 最近完成比对与选择性移植的上游基线：Kero `main`（`058694c1e280237545f1cf4d6b14145b81e5b3cb`，包含 `v0.1.33`，2026-07-29）。
 - 移植上游 commit [`fe9f622b6b55c087d5d6f449b0159d3f1e227766`](https://github.com/egoist/kero/commit/fe9f622b6b55c087d5d6f449b0159d3f1e227766)：“Add Open in Kero to Finder's folder context menu”，添加 Finder 右键文件夹服务菜单功能，在 Qjiao 中重命名为 “Open in Qjiao” 并适配项目生命周期与窗口接管。
 - 移植上游 commit [`7bb18e6390ed4f883d15e6711460f88c36ea7d95`](https://github.com/egoist/kero/commit/7bb18e6390ed4f883d15e6711460f88c36ea7d95)、[`8c01a817d5fa085c9579f9569d9783ba38629bda`](https://github.com/egoist/kero/commit/8c01a817d5fa085c9579f9569d9783ba38629bda)、[`c79789b767e30901035471f8ef334b07a1666abf`](https://github.com/egoist/kero/commit/c79789b767e30901035471f8ef334b07a1666abf) 与 [`4d882462e840f4d1f5a0db1791d4165b1ebccbb5`](https://github.com/egoist/kero/commit/4d882462e840f4d1f5a0db1791d4165b1ebccbb5)：保持选中 Tab 可见、修复命令面板指针与 Escape 交互、在命令面板搜索项目文件，以及停止向终端注入 `LANG`；文件索引和文案已适配 Qjiao 的项目目录、忽略策略与 `L10n`。

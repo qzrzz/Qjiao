@@ -289,6 +289,7 @@ extension L10n {
         "Delete Project": "删除项目",
         "Deleted": "已删除",
         "Deny": "拒绝",
+        "Ignored": "已忽略",
         "Descending": "降序",
         "Description": "描述",
         "Description (Optional)": "描述（可选）",
@@ -314,6 +315,8 @@ extension L10n {
         "Dismiss Match": "忽略此匹配",
         "Display ~ instead of home directory path.": "用 ~ 替代主目录路径",
         "Display File Size": "显示文件大小",
+        "Show Git Status Decorations": "显示 Git 状态装饰",
+        "Color file names and show status badges in the Files and CWD panels for repository changes.": "在 Files 与 CWD 面板中为仓库变更显示彩色文件名与状态徽章。",
         "Do you want to save the changes you made to %@?": "要保存对 %@ 的更改吗？",
         "Don't Save": "不保存",
         "Don’t Save": "不保存",
@@ -1007,4 +1010,3 @@ extension L10n {
         "Fit Window": "适应窗口",
     ]
 }
-
