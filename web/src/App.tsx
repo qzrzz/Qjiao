@@ -1,10 +1,11 @@
+import { useEffect } from "react";
 import { FeatureSection } from "./components/FeatureSection";
 import { getSectionsContent } from "./content";
 import { Footer } from "./Feature/Footer";
 import { StickyHeader } from "./Feature/Header";
 import { Hero } from "./Feature/Hero";
 import { TopBar } from "./Feature/TopBar";
-import { getCurrentLang, type SupportedLang } from "./i18n/dict";
+import { autoRedirectDefaultLanguage, getCurrentLang, type SupportedLang } from "./i18n/dict";
 
 interface AppProps {
   lang?: SupportedLang;
@@ -12,6 +13,10 @@ interface AppProps {
 
 /** Qjiao 产品官网首页，支持多语言静态输出与动态感知。 */
 export function App({ lang }: AppProps) {
+  useEffect(() => {
+    autoRedirectDefaultLanguage();
+  }, []);
+
   const currentLang = lang || getCurrentLang();
   const sections = getSectionsContent(currentLang);
 

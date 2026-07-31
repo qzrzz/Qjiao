@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getCurrentLang, getLangUrl, type SupportedLang } from "../i18n/dict";
+import { getCurrentLang, getLangUrl, setPreferredLanguage, type SupportedLang } from "../i18n/dict";
 import "./LanguageSwitcher.css";
 
 const languages: { code: SupportedLang; label: string }[] = [
@@ -59,7 +59,10 @@ export function LanguageSwitcher({ currentLang }: LanguageSwitcherProps) {
                 href={targetUrl}
                 hrefLang={lang.code}
                 role="menuitem"
-                onClick={() => setIsOpen(false)}
+                onClick={() => {
+                  setPreferredLanguage(lang.code);
+                  setIsOpen(false);
+                }}
               >
                 <span>{lang.label}</span>
                 {isActive && <CheckIcon />}
