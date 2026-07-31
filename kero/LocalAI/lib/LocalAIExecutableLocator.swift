@@ -7,7 +7,7 @@
 
 import Foundation
 
-/// 定位 grok / codex / claude / agy / opencode 等 AI CLI。
+/// 定位 grok / codex / claude / agy / opencode / pi 等 AI CLI。
 enum LocalAIExecutableLocator {
     /// 常见 PATH 与各 CLI 默认安装目录。
     private static let searchDirectories: [String] = {
@@ -23,6 +23,9 @@ enum LocalAIExecutableLocator {
         dirs.append("\(home)/.bun/bin")
         dirs.append("\(home)/.cargo/bin")
         dirs.append("\(home)/.npm-global/bin")
+        // pi：npm 全局安装（npm i -g @earendil-works/pi-coding-agent）或 curl 安装脚本
+        // （pi.dev/install.sh 同样落入 npm prefix bin；无系统 node 时自带独立 node 于 ~/.local/share/pi-node）
+        dirs.append("\(home)/.local/share/pi-node/current/bin")
         dirs.append("\(home)/.nvm/current/bin")
         dirs.append("\(home)/.grok/bin")
         dirs.append("\(home)/.opencode/bin")

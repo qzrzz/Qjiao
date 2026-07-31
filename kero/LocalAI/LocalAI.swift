@@ -4,7 +4,7 @@
 //
 //  本地 AI 统一门面：应用通过此接口调用 headless / exec 模式的 AI CLI。
 //
-//  支持：grok（--single）、codex（exec）、claude（-p）、agy（--print）、opencode（run）。
+//  支持：grok（--single）、codex（exec）、claude（-p）、agy（--print）、opencode（run）、pi（-p）。
 //  全局设置：Settings → General → AI headless provider。
 //
 

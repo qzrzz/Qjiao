@@ -262,6 +262,7 @@ enum LocalAIExecutableLocatorPathBoost {
             "\(home)/.bun/bin",
             "\(home)/.cargo/bin",
             "\(home)/.npm-global/bin",
+            "\(home)/.local/share/pi-node/current/bin",
             "\(home)/.grok/bin",
             "\(home)/.opencode/bin",
             "\(home)/.claude/bin",

@@ -120,6 +120,9 @@ final class AIToolRegistry: nonisolated ObservableObject {
         dirs.append("\(home)/.bun/bin")
         dirs.append("\(home)/.cargo/bin")
         dirs.append("\(home)/.local/bin")
+        dirs.append("\(home)/.npm-global/bin")
+        // pi：curl 安装脚本在无系统 node 时自带的独立 node
+        dirs.append("\(home)/.local/share/pi-node/current/bin")
         dirs.append("\(home)/.gemini/antigravity/bin")
         dirs.append("\(home)/.antigravity/bin")
         dirs.append("\(home)/.opencode/bin")
@@ -198,6 +201,7 @@ final class AIToolRegistry: nonisolated ObservableObject {
             cli("claude",      name: "claude",      symbol: "terminal"),
             cli("opencode",    name: "opencode",    symbol: "terminal"),
             cli("grok",        name: "grok",        symbol: "terminal"),
+            cli("pi",          name: "pi",          symbol: "terminal"),
             cli("aider",       name: "aider",       symbol: "terminal"),
             cli("ollama",      name: "ollama",      symbol: "terminal"),
             cli("copilot",     name: "copilot",     symbol: "terminal"),
