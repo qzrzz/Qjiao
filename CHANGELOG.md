@@ -20,3 +20,10 @@ set in the Xcode project.
 
 - The source of the project list relies entirely on `~/.config/qjiao/projects/`.
  
+
+ ## [1.0.5]
+
+
+ ### Added
+
+ - Projects Add menu 
