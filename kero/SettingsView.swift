@@ -632,6 +632,13 @@ struct SettingsView: View {
                         Toggle("", isOn: $settings.displayFileSize)
                             .labelsHidden()
                     }
+                    settingWithDescription(
+                        L10n.t("Show Git Status Decorations"),
+                        L10n.t("Color file names and show status badges in the Files and CWD panels for repository changes.")
+                    ) {
+                        Toggle("", isOn: $settings.filesGitDecorations)
+                            .labelsHidden()
+                    }
                 }
                 .settingsRowPadding()
             }

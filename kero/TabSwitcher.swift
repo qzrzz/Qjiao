@@ -608,7 +608,7 @@ private final class TabSwitcherPointerNSView: NSView {
     }
 }
 
-/// 按真实分栏权重绘制标签缩略图，缩放状态下仅展示当前聚焦 Pane。
+/// 按真实递归分屏几何绘制标签缩略图，缩放状态下仅展示当前聚焦 Pane。
 private struct TabSwitcherThumbnail: View {
     @ObservedObject var tab: PaneTab
     let terminalPreviews: [UUID: String]
@@ -617,56 +617,36 @@ private struct TabSwitcherThumbnail: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let columns = displayedColumns
-            let columnWidths = proportionalSizes(
-                weights: columns.map(\.weight),
-                available: geometry.size.width,
-                itemCount: columns.count
-            )
-
-            HStack(spacing: paneGap) {
-                ForEach(Array(columns.enumerated()), id: \.element.id) {
-                    columnIndex, column in
-                    let paneHeights = proportionalSizes(
-                        weights: column.panes.map(\.weight),
-                        available: geometry.size.height,
-                        itemCount: column.panes.count
-                    )
-                    VStack(spacing: paneGap) {
-                        ForEach(Array(column.panes.enumerated()), id: \.element.id) {
-                            paneIndex, pane in
-                            TabSwitcherPanePreview(
-                                content: pane.content,
-                                terminalPreview: terminalPreviews[pane.content.id]
-                            )
-                            .frame(height: paneHeights[paneIndex])
-                        }
+            if tab.isZoomed, let pane = tab.focusedPane {
+                TabSwitcherPanePreview(
+                    content: pane.content,
+                    terminalPreview: terminalPreviews[pane.content.id]
+                )
+            } else {
+                let placements = tab.layout.geometry(
+                    in: CGRect(origin: .zero, size: geometry.size), gap: paneGap
+                ).panes
+                ZStack(alignment: .topLeading) {
+                    ForEach(placements) { placement in
+                        TabSwitcherPanePreview(
+                            content: placement.pane.content,
+                            terminalPreview: terminalPreviews[
+                                placement.pane.content.id
+                            ]
+                        )
+                        .frame(
+                            width: placement.frame.width,
+                            height: placement.frame.height
+                        )
+                        .offset(
+                            x: placement.frame.minX,
+                            y: placement.frame.minY
+                        )
                     }
-                    .frame(width: columnWidths[columnIndex])
                 }
             }
         }
         .background(Color(nsColor: Theme.background))
-    }
-
-    private var displayedColumns: [PaneColumn] {
-        guard tab.isZoomed, let pane = tab.focusedPane else { return tab.columns }
-        return [PaneColumn(panes: [pane])]
-    }
-
-    private func proportionalSizes(
-        weights: [CGFloat],
-        available: CGFloat,
-        itemCount: Int
-    ) -> [CGFloat] {
-        let totalGap = paneGap * CGFloat(max(0, itemCount - 1))
-        let usable = max(0, available - totalGap)
-        let totalWeight = weights.reduce(0, +)
-        guard totalWeight > 0 else {
-            let equalSize = weights.isEmpty ? 0 : usable / CGFloat(weights.count)
-            return weights.map { _ in equalSize }
-        }
-        return weights.map { usable * $0 / totalWeight }
     }
 }
 

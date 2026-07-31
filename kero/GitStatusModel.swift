@@ -46,6 +46,35 @@ final class GitStatusModel: nonisolated ObservableObject {
         var changedRowID: String { "changed/" + path }
     }
 
+    /// Compact Explorer-style decoration for a path in the active repository.
+    /// The file tree maps these semantic states to both a color and a visible
+    /// status badge, so color is never the only indication.
+    nonisolated enum FileDecoration: Equatable, Sendable {
+        case modified
+        case added
+        case untracked
+        case deleted
+        case renamed
+        case copied
+        case conflict
+        case ignored
+
+        /// When a directory contains several changed files, bubble up the
+        /// state that most needs attention.
+        var directoryPriority: Int {
+            switch self {
+            case .conflict: 8
+            case .deleted: 7
+            case .modified: 6
+            case .added: 5
+            case .untracked: 4
+            case .renamed: 3
+            case .copied: 2
+            case .ignored: 1
+            }
+        }
+    }
+
     nonisolated struct RecentCommit: Identifiable, Equatable, Sendable {
         var id: String { hash }
         let hash: String
@@ -86,6 +115,10 @@ final class GitStatusModel: nonisolated ObservableObject {
     /// preserved while a cwd change is being resolved inside the same repo.
     @Published private(set) var repositoryIdentity = ""
     @Published private(set) var isRepo = false
+    @Published private(set) var fileDecorations: [String: FileDecoration] = [:]
+    /// Relative porcelain paths. Directory records retain their trailing slash
+    /// so expanded descendants can inherit the ignored state.
+    @Published private(set) var ignoredPaths: Set<String> = []
     @Published private(set) var branch: String?
     @Published private(set) var headOID: String?
     @Published private(set) var hasHead = true
@@ -194,6 +227,43 @@ final class GitStatusModel: nonisolated ObservableObject {
         guard operation?.isRunning != true else { return }
         operation = nil
         lastError = nil
+    }
+
+    /// Returns a Git decoration only when `absolutePath` belongs to the
+    /// currently resolved repository. Plain folders therefore keep the normal
+    /// file-tree appearance, even when their names resemble ignored paths.
+    func fileDecoration(for absolutePath: String, isDirectory: Bool) -> FileDecoration? {
+        guard isRepo, !topLevel.isEmpty else { return nil }
+        let repositoryPath = (topLevel as NSString).standardizingPath
+        let itemPath = (absolutePath as NSString).standardizingPath
+        let relativePath: String
+        if itemPath == repositoryPath {
+            relativePath = ""
+        } else {
+            let prefix = repositoryPath + "/"
+            guard itemPath.hasPrefix(prefix) else { return nil }
+            relativePath = String(itemPath.dropFirst(prefix.count))
+        }
+
+        if let decoration = fileDecorations[relativePath] {
+            return decoration
+        }
+        if ignoredPaths.contains(where: { ignoredPath in
+            if ignoredPath.hasSuffix("/") {
+                let directory = String(ignoredPath.dropLast())
+                return relativePath == directory || relativePath.hasPrefix(directory + "/")
+            }
+            return relativePath == ignoredPath
+        }) {
+            return .ignored
+        }
+        guard isDirectory, !relativePath.isEmpty else { return nil }
+
+        let descendantPrefix = relativePath + "/"
+        return fileDecorations
+            .filter { $0.key.hasPrefix(descendantPrefix) }
+            .map(\.value)
+            .max { $0.directoryPriority < $1.directoryPriority }
     }
 
     // MARK: - File operations
@@ -818,6 +888,8 @@ final class GitStatusModel: nonisolated ObservableObject {
         mergeEntries = []
         stagedEntries = []
         changedEntries = []
+        fileDecorations = [:]
+        ignoredPaths = []
         branches = []
         remotes = []
         recentCommits = []
@@ -890,6 +962,10 @@ final class GitStatusModel: nonisolated ObservableObject {
             entry.repositoryRoot = result.topLevel
             return entry
         }
+        fileDecorations = Dictionary(
+            uniqueKeysWithValues: entries.map { ($0.path, Self.fileDecoration(for: $0)) }
+        )
+        ignoredPaths = result.ignoredPaths
         mergeEntries = entries.filter(\.isConflict)
         stagedEntries = entries.filter {
             !$0.isConflict && $0.staged != "." && $0.staged != "?"
@@ -914,6 +990,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         var behind = 0
         var topLevel = ""
         var entries: [Entry] = []
+        var ignoredPaths: Set<String> = []
         var branches: [String] = []
         var remotes: [String] = []
         var recentCommits: [RecentCommit] = []
@@ -992,7 +1069,10 @@ final class GitStatusModel: nonisolated ObservableObject {
             return .failed("Git returned an empty repository path.")
         }
         let status = runGit(
-            ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
+            [
+                "status", "--porcelain=v2", "--branch", "-z",
+                "--untracked-files=all", "--ignored=matching",
+            ],
             in: resolvedRoot
         )
         guard status.status == 0 else {
@@ -1134,10 +1214,23 @@ final class GitStatusModel: nonisolated ObservableObject {
                 result.entries.append(
                     Entry(path: String(record.dropFirst(2)), staged: "?", unstaged: "?")
                 )
+            } else if record.hasPrefix("! ") {
+                result.ignoredPaths.insert(String(record.dropFirst(2)))
             }
             index += 1
         }
         return result
+    }
+
+    private static func fileDecoration(for entry: Entry) -> FileDecoration {
+        let statuses = [entry.staged, entry.unstaged]
+        if entry.isConflict || statuses.contains("U") { return .conflict }
+        if statuses.contains("?") { return .untracked }
+        if entry.staged == "A" { return .added }
+        if statuses.contains("D") { return .deleted }
+        if statuses.contains("R") { return .renamed }
+        if statuses.contains("C") { return .copied }
+        return .modified
     }
 
     nonisolated static func parseRecentCommits(_ output: String) -> [RecentCommit] {

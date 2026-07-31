@@ -985,30 +985,47 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         sessionDirectory: String? = nil,
         isLazy: Bool = false
     ) {
-        var columns: [PaneColumn] = []
-        for columnSnap in snap.columns {
-            var panes: [Pane] = []
-            for paneSnap in columnSnap.panes {
-                let restoredHistory = paneSnap.historyKey.flatMap { histories[$0] }
-                panes.append(Pane(
-                    content: makeContent(
-                        from: paneSnap.content,
-                        restoredHistory: restoredHistory,
-                        sessionDirectory: sessionDirectory,
-                        isLazy: isLazy
-                    ),
-                    weight: CGFloat(paneSnap.weight)
-                ))
-            }
-            guard !panes.isEmpty else { continue }
-            columns.append(PaneColumn(panes: panes, weight: CGFloat(columnSnap.weight)))
-        }
-        guard !columns.isEmpty else { return }
-        let col = min(max(0, snap.focusedColumn), columns.count - 1)
-        let row = min(max(0, snap.focusedRow), columns[col].panes.count - 1)
-        let tab = PaneTab(columns: columns, focusedPaneID: columns[col].panes[row].id)
+        let layout = restoreLayout(
+            from: snap.layout, histories: histories,
+            sessionDirectory: sessionDirectory, isLazy: isLazy
+        )
+        let panes = layout.allPanes
+        guard !panes.isEmpty else { return }
+        let focusedIndex = min(max(0, snap.focusedPaneIndex), panes.count - 1)
+        let tab = PaneTab(layout: layout, focusedPaneID: panes[focusedIndex].id)
         tab.customName = snap.customName
         append(tab)
+    }
+
+    private func restoreLayout(
+        from snap: SessionSnapshot.ProjectSnapshot.LayoutSnapshot,
+        histories: [String: String],
+        sessionDirectory: String?,
+        isLazy: Bool
+    ) -> PaneNode {
+        switch snap {
+        case .pane(let pane):
+            let restoredHistory = pane.historyKey.flatMap { histories[$0] }
+            return .pane(Pane(content: makeContent(
+                from: pane.content,
+                restoredHistory: restoredHistory,
+                sessionDirectory: sessionDirectory,
+                isLazy: isLazy
+            )))
+        case .split(let axis, let fraction, let first, let second):
+            return .split(PaneSplit(
+                axis: axis,
+                fraction: CGFloat(fraction),
+                first: restoreLayout(
+                    from: first, histories: histories,
+                    sessionDirectory: sessionDirectory, isLazy: isLazy
+                ),
+                second: restoreLayout(
+                    from: second, histories: histories,
+                    sessionDirectory: sessionDirectory, isLazy: isLazy
+                )
+            ))
+        }
     }
 
     private func makeContent(

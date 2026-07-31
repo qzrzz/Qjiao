@@ -282,6 +282,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// Files / CWD 文件树是否显示 Git 状态装饰（彩色文件名与状态徽章）。默认关闭。
+    @Published var filesGitDecorations: Bool {
+        didSet { save() }
+    }
+
     /// 面板中的路径显示是否将用户目录缩短为 ~。
     @Published var displayShortDirPath: Bool {
         didSet { save() }
@@ -485,6 +490,7 @@ final class AppSettings: nonisolated ObservableObject {
             dark: true
         )
         displayFileSize = toml["files.display-file-size"]?.bool ?? true
+        filesGitDecorations = toml["files.git-decorations"]?.bool ?? false
         displayShortDirPath = toml["appearance.short-directory-path"]?.bool
             ?? toml["appearance.display-short-dir-path"]?.bool
             ?? toml["appearance.display-sort-dir-path"]?.bool
@@ -621,6 +627,7 @@ final class AppSettings: nonisolated ObservableObject {
         editorThemeLight = ""
         editorThemeDark = ""
         displayFileSize = true
+        filesGitDecorations = false
         displayShortDirPath = false
         filesFontFamily = ""
         filesFontSize = Self.defaultFilesFontSize
@@ -716,6 +723,9 @@ final class AppSettings: nonisolated ObservableObject {
         // 默认 true：仅在关闭时写回，避免污染默认配置文件。
         if !displayFileSize {
             lines.append("files.display-file-size = false")
+        }
+        if filesGitDecorations {
+            lines.append("files.git-decorations = true")
         }
         if displayShortDirPath {
             lines.append("appearance.short-directory-path = true")

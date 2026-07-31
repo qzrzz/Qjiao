@@ -93,6 +93,7 @@ struct FileTreePanel: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject var model: FileTreeModel
     @ObservedObject var findModel: FilesFindModel
+    @ObservedObject var git: GitStatusModel
     let session: TerminalSession?
     let currentFilePath: String?
     let openFile: (String) -> Void
@@ -501,7 +502,7 @@ struct FileTreePanel: View {
                                     LazyVStack(spacing: 1) {
                                         ForEach(itemsToDisplay) { item in
                                             FileTreeRow(
-                                                model: model, item: item, session: session,
+                                                model: model, git: git, item: item, session: session,
                                                 manager: manager,
                                                 currentFilePath: currentFilePath,
                                                 openFile: openFile, openToSide: openToSide, onRename: onRename,
@@ -870,6 +871,7 @@ struct FileTreePanel: View {
 private struct FileTreeRow: View {
     @ObservedObject var model: FileTreeModel
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject var git: GitStatusModel
     let item: FileTreeModel.Item
     let session: TerminalSession?
     var manager: TerminalManager? = nil
@@ -893,6 +895,12 @@ private struct FileTreeRow: View {
 
     /// 当前编辑器打开的文件（与选择态可并存，选择优先高亮）。
     private var isCurrent: Bool { !item.isDirectory && item.path == currentFilePath }
+
+    /// Git 状态装饰；设置关闭或路径不在仓库内时为 nil。
+    private var gitDecoration: GitStatusModel.FileDecoration? {
+        guard settings.filesGitDecorations else { return nil }
+        return git.fileDecoration(for: item.path, isDirectory: item.isDirectory)
+    }
 
     /// 普通文件：设置开启时显示字节大小。
     private var fileSizeLabel: String? {
@@ -956,6 +964,10 @@ private struct FileTreeRow: View {
     private var titleForeground: Color {
         if isSelected {
             return .primary
+        }
+        // Git 状态装饰优先于点文件弱化，保证变更状态一眼可辨。
+        if let gitDecoration {
+            return gitDecoration.color
         }
         // 点文件保持更弱一层。
         return item.name.hasPrefix(".")
@@ -1227,6 +1239,7 @@ private struct FileTreeRow: View {
         ) {
             selectForContextAction()
             model.moveToTrash(paths: Set(menuActionTargets.map(\.path)))
+            git.refresh()
         }
     }
 
@@ -1243,6 +1256,7 @@ private struct FileTreeRow: View {
         let oldPath = item.path
         if let newPath = model.rename(item, to: editingName) {
             onRename(oldPath, newPath)
+            git.refresh()
         }
     }
 
@@ -1252,6 +1266,7 @@ private struct FileTreeRow: View {
         guard item.isDraft, model.draft != nil else { return }
         if let created = model.commitDraft(name: editingName) {
             openFile(created)
+            git.refresh()
         }
     }
 
@@ -1262,6 +1277,11 @@ private struct FileTreeRow: View {
         } else {
             selectableRow
         }
+    }
+
+    private var fileAccessibilityLabel: String {
+        guard let gitDecoration else { return item.name }
+        return item.name + ", " + gitDecoration.accessibilityName
     }
 
     /// 单击选择（含 ⌘ / ⇧），双击打开文件或展开目录；chevron 单独切换展开。
@@ -1282,6 +1302,14 @@ private struct FileTreeRow: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .layoutPriority(1)
+            if let gitDecoration, gitDecoration != .ignored {
+                Text(gitDecoration.badge)
+                    .font(FileTreeFont.caption)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                    .foregroundStyle(gitDecoration.color)
+                    .accessibilityHidden(true)
+            }
             Spacer(minLength: 4)
             trailingSizeControl
                 .lineLimit(1)
@@ -1294,6 +1322,7 @@ private struct FileTreeRow: View {
         .padding(.trailing, 6)
         .padding(.vertical, 2)
         .contentShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityLabel(fileAccessibilityLabel)
         .background(
             FileRowAnchorRepresentable(
                 item: item,
@@ -2043,5 +2072,44 @@ fileprivate func extractURLs(from providers: [NSItemProvider], completion: @esca
 
     group.notify(queue: .main) {
         completion(urls)
+    }
+}
+
+private extension GitStatusModel.FileDecoration {
+    var badge: String {
+        switch self {
+        case .modified: "M"
+        case .added: "A"
+        case .untracked: "U"
+        case .deleted: "D"
+        case .renamed: "R"
+        case .copied: "C"
+        case .conflict: "!"
+        case .ignored: "I"
+        }
+    }
+
+    var accessibilityName: String {
+        switch self {
+        case .modified: L10n.t("Modified")
+        case .added: L10n.t("Added")
+        case .untracked: L10n.t("Untracked")
+        case .deleted: L10n.t("Deleted")
+        case .renamed: L10n.t("Renamed")
+        case .copied: L10n.t("Copied")
+        case .conflict: L10n.t("Conflict")
+        case .ignored: L10n.t("Ignored")
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .modified: Color(red: 0.82, green: 0.60, blue: 0.13)
+        case .added, .untracked: Color(red: 0.25, green: 0.73, blue: 0.31)
+        case .deleted: Color(red: 1.0, green: 0.48, blue: 0.45)
+        case .renamed, .copied: Color(red: 0.35, green: 0.65, blue: 1.0)
+        case .conflict: Color(red: 0.74, green: 0.55, blue: 1.0)
+        case .ignored: Color.secondary.opacity(0.55)
+        }
     }
 }

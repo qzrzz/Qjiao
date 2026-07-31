@@ -125,9 +125,7 @@ final class TerminalManager: nonisolated ObservableObject {
             let sessionCount = Self.pendingRestores.reduce(0) { winSum, win in
                 winSum + win.projects.reduce(0) { projSum, proj in
                     projSum + proj.tabs.reduce(0) { tabSum, tab in
-                        tabSum + tab.columns.reduce(0) { colSum, col in
-                            colSum + col.panes.filter { if case .session = $0.content { return true }; return false }.count
-                        }
+                        tabSum + Self.countSessions(in: tab.layout)
                     }
                 }
             }
@@ -1404,30 +1402,16 @@ final class TerminalManager: nonisolated ObservableObject {
         let snapshot = SessionSnapshot(
             projects: projects.map { project in
                 let tabs = project.tabs.map { tab -> ProjectSnapshot.TabSnapshot in
-                    let columns = tab.columns.map { column in
-                        ProjectSnapshot.ColumnSnapshot(
-                            panes: column.panes.map { pane in
-                                var historyKey: String?
-                                if case .session(let session) = pane.content,
-                                   let history = session.serializedHistory(
-                                       captureLive: captureTerminalHistory
-                                   ), !history.isEmpty {
-                                    let key = UUID().uuidString
-                                    histories[key] = history
-                                    historyKey = key
-                                }
-                                return ProjectSnapshot.PaneSnapshot(
-                                    content: Self.contentSnapshot(pane.content),
-                                    weight: Double(pane.weight),
-                                    historyKey: historyKey
-                                )
-                            },
-                            weight: Double(column.weight)
-                        )
-                    }
-                    let (col, row) = tab.focusedLocation() ?? (0, 0)
+                    let layout = Self.layoutSnapshot(
+                        tab.layout,
+                        captureTerminalHistory: captureTerminalHistory,
+                        histories: &histories
+                    )
+                    let focusedPaneIndex = tab.allPanes.firstIndex {
+                        $0.id == tab.focusedPaneID
+                    } ?? 0
                     return ProjectSnapshot.TabSnapshot(
-                        columns: columns, focusedColumn: col, focusedRow: row,
+                        layout: layout, focusedPaneIndex: focusedPaneIndex,
                         customName: tab.customName
                     )
                 }
@@ -1464,6 +1448,59 @@ final class TerminalManager: nonisolated ObservableObject {
             rightPanelTab: panelTab
         )
         return (snapshot, histories)
+    }
+
+    private static func layoutSnapshot(
+        _ layout: PaneNode,
+        captureTerminalHistory: Bool,
+        histories: inout [String: String]
+    ) -> SessionSnapshot.ProjectSnapshot.LayoutSnapshot {
+        typealias ProjectSnapshot = SessionSnapshot.ProjectSnapshot
+        switch layout {
+        case .pane(let pane):
+            var historyKey: String?
+            if case .session(let session) = pane.content,
+               let history = session.serializedHistory(
+                   captureLive: captureTerminalHistory
+               ), !history.isEmpty {
+                let key = UUID().uuidString
+                histories[key] = history
+                historyKey = key
+            }
+            return .pane(ProjectSnapshot.PaneSnapshot(
+                content: contentSnapshot(pane.content),
+                weight: 1,
+                historyKey: historyKey
+            ))
+        case .split(let split):
+            return .split(
+                axis: split.axis,
+                fraction: Double(split.fraction),
+                first: layoutSnapshot(
+                    split.first,
+                    captureTerminalHistory: captureTerminalHistory,
+                    histories: &histories
+                ),
+                second: layoutSnapshot(
+                    split.second,
+                    captureTerminalHistory: captureTerminalHistory,
+                    histories: &histories
+                )
+            )
+        }
+    }
+
+    /// 统计递归布局快照中终端 Session 的数量（用于启动日志）。
+    private static func countSessions(
+        in layout: SessionSnapshot.ProjectSnapshot.LayoutSnapshot
+    ) -> Int {
+        switch layout {
+        case .pane(let pane):
+            if case .session = pane.content { return 1 }
+            return 0
+        case .split(_, _, let first, let second):
+            return countSessions(in: first) + countSessions(in: second)
+        }
     }
 
     private static func contentSnapshot(

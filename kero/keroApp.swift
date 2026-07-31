@@ -440,7 +440,7 @@ private struct KeroCommands: Commands {
                 Button(tab.displayTitle ?? L10n.format("Tab %d", index + 1)) {
                     manager?.selectTab(index: index)
                 }
-                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.control, .shift])
+                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control)
             }
         }
     }

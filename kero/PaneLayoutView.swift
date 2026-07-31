@@ -6,10 +6,9 @@
 import AppKit
 import SwiftUI
 
-/// Tiles a tab's panes niri-style: columns laid out left-to-right, each a
-/// vertical stack of panes. Column widths and pane heights come from their
-/// relative `weight`s; draggable dividers between tiles shift weight between
-/// neighbors. Only the selected tab's layout is ever mounted.
+/// Tiles a tab's recursive split tree. Every divider belongs to the pane
+/// rectangle that was split, so nested horizontal and vertical layouts can be
+/// combined freely. Only the selected tab's layout is ever mounted.
 struct PaneLayoutView: View {
     @ObservedObject var tab: PaneTab
     /// Splits the focused pane on the given edge — from a pane's context menu.
@@ -32,11 +31,11 @@ struct PaneLayoutView: View {
     private let thumbnailMaxSize = CGSize(width: 220, height: 160)
 
     @State private var drag: DragState?
-    /// While a divider drag is in flight the new weights live here — local
-    /// @State that re-renders only this grid — instead of in `tab.columns`,
+    /// While a divider drag is in flight the new split fraction lives here —
+    /// local @State that re-renders only this grid — instead of in `tab.layout`,
     /// whose @Published change would re-render the whole window every frame.
     /// Committed back to the model once, on release.
-    @State private var dragColumns: [PaneColumn]?
+    @State private var dragLayout: PaneNode?
 
     /// Global-space frame of every pane, so a pane-move drag can tell which
     /// pane the cursor is over.
@@ -48,13 +47,8 @@ struct PaneLayoutView: View {
     @State private var dragThumbnail: NSImage?
 
     private struct DragState {
-        enum Kind: Equatable {
-            case columns
-            case rows(columnID: UUID)
-        }
-        var kind: Kind
-        var index: Int
-        var weights: [CGFloat]
+        var splitID: UUID
+        var fraction: CGFloat
     }
 
     private struct PaneMove {
@@ -99,7 +93,7 @@ struct PaneLayoutView: View {
         // stale snapshot never sticks around.
         .onChange(of: tab.isZoomed) {
             drag = nil
-            dragColumns = nil
+            dragLayout = nil
             paneDrag = nil
             dragThumbnail = nil
         }
@@ -107,31 +101,54 @@ struct PaneLayoutView: View {
 
     private var grid: some View {
         GeometryReader { geo in
-            let columns = dragColumns ?? tab.columns
-            let availableWidth = max(0, geo.size.width - gap * CGFloat(max(0, columns.count - 1)))
-            let widths = sizes(for: columns.map(\.weight), available: availableWidth)
+            let layout = dragLayout ?? tab.layout
+            let geometry = layout.geometry(
+                in: CGRect(origin: .zero, size: geo.size), gap: gap
+            )
 
             ZStack(alignment: .topLeading) {
-                HStack(spacing: 0) {
-                    ForEach(Array(columns.enumerated()), id: \.element.id) { columnIndex, column in
-                        columnView(
-                            column,
-                            columnIndex: columnIndex,
-                            width: widths[columnIndex],
-                            height: geo.size.height
+                ForEach(geometry.panes) { placement in
+                    PaneView(
+                        tab: tab,
+                        pane: placement.pane,
+                        showFocusRing: tab.hasMultiplePanes,
+                        allowsMove: true,
+                        isMoveSource: paneDrag?.sourceID == placement.pane.id,
+                        dropEdge: paneDrag?.targetID == placement.pane.id
+                            ? paneDrag?.edge : nil,
+                        onMove: {
+                            updateDropTarget(
+                                source: placement.pane.id, location: $0
+                            )
+                        },
+                        onMoveEnded: { commitPaneMove() },
+                        onSplit: onSplit,
+                        onClosePane: tab.hasMultiplePanes ? onClosePane : nil,
+                        onNewBrowserTab: onNewBrowserTab,
+                        onNewBrowserPane: onNewBrowserPane
+                    )
+                    .frame(
+                        width: placement.frame.width,
+                        height: placement.frame.height
+                    )
+                    .offset(x: placement.frame.minX, y: placement.frame.minY)
+                }
+
+                ForEach(geometry.dividers) { divider in
+                    ResizableDivider(axis: divider.axis) { translation in
+                        resizeSplit(
+                            divider.id,
+                            translation: translation,
+                            available: divider.availableLength
                         )
-                        if columnIndex < columns.count - 1 {
-                            ResizableDivider(orientation: .columns, thickness: gap) { translation in
-                                resizeColumns(
-                                    dividerAt: columnIndex,
-                                    translation: translation,
-                                    availableWidth: availableWidth
-                                )
-                            } onEnded: {
-                                commitDrag()
-                            }
-                        }
+                    } onEnded: {
+                        commitDrag()
                     }
+                    .frame(
+                        width: divider.frame.width,
+                        height: divider.frame.height
+                    )
+                    .offset(x: divider.frame.minX, y: divider.frame.minY)
                 }
 
                 // The carried pane's thumbnail, trailing the cursor. Positioned
@@ -152,96 +169,34 @@ struct PaneLayoutView: View {
         }
     }
 
-    @ViewBuilder
-    private func columnView(
-        _ column: PaneColumn, columnIndex: Int, width: CGFloat, height: CGFloat
-    ) -> some View {
-        let availableHeight = max(0, height - gap * CGFloat(max(0, column.panes.count - 1)))
-        let heights = sizes(for: column.panes.map(\.weight), available: availableHeight)
-
-        VStack(spacing: 0) {
-            ForEach(Array(column.panes.enumerated()), id: \.element.id) { paneIndex, pane in
-                PaneView(
-                    tab: tab,
-                    pane: pane,
-                    showFocusRing: tab.hasMultiplePanes,
-                    allowsMove: true,
-                    isMoveSource: paneDrag?.sourceID == pane.id,
-                    dropEdge: paneDrag?.targetID == pane.id ? paneDrag?.edge : nil,
-                    onMove: { updateDropTarget(source: pane.id, location: $0) },
-                    onMoveEnded: { commitPaneMove() },
-                    onSplit: onSplit,
-                    onClosePane: tab.hasMultiplePanes ? onClosePane : nil,
-                    onNewBrowserTab: onNewBrowserTab,
-                    onNewBrowserPane: onNewBrowserPane
-                )
-                .frame(width: width, height: heights[paneIndex])
-                if paneIndex < column.panes.count - 1 {
-                    ResizableDivider(orientation: .rows, thickness: gap) { translation in
-                        resizePanes(
-                            columnIndex: columnIndex,
-                            dividerAt: paneIndex,
-                            translation: translation,
-                            availableHeight: availableHeight
-                        )
-                    } onEnded: {
-                        commitDrag()
-                    }
-                    .frame(width: width)
-                }
-            }
-        }
-        .frame(width: width, height: height)
-    }
-
-    /// Distributes `available` across items in proportion to their weights.
-    private func sizes(for weights: [CGFloat], available: CGFloat) -> [CGFloat] {
-        let total = weights.reduce(0, +)
-        guard total > 0, !weights.isEmpty else {
-            let each = weights.isEmpty ? 0 : available / CGFloat(weights.count)
-            return weights.map { _ in each }
-        }
-        return weights.map { $0 / total * available }
-    }
-
     // MARK: - Resizing
 
-    private func resizeColumns(dividerAt index: Int, translation: CGFloat, availableWidth: CGFloat) {
-        let baseline = baselineWeights(for: .columns, index: index) { tab.columns.map(\.weight) }
-        guard availableWidth > 0, baseline.indices.contains(index + 1) else { return }
-        let (left, right) = adjusted(baseline: baseline, at: index, translation: translation, available: availableWidth)
-        var columns = tab.columns
-        guard columns.indices.contains(index + 1) else { return }
-        columns[index].weight = left
-        columns[index + 1].weight = right
-        dragColumns = columns
-    }
-
-    private func resizePanes(
-        columnIndex: Int, dividerAt index: Int, translation: CGFloat, availableHeight: CGFloat
+    private func resizeSplit(
+        _ splitID: UUID, translation: CGFloat, available: CGFloat
     ) {
-        guard tab.columns.indices.contains(columnIndex) else { return }
-        let columnID = tab.columns[columnIndex].id
-        let baseline = baselineWeights(for: .rows(columnID: columnID), index: index) {
-            tab.columns[columnIndex].panes.map(\.weight)
+        guard available > 0 else { return }
+        let baseline: CGFloat
+        if let drag, drag.splitID == splitID {
+            baseline = drag.fraction
+        } else {
+            guard let fraction = tab.layout.fraction(of: splitID) else { return }
+            baseline = fraction
+            drag = DragState(splitID: splitID, fraction: fraction)
         }
-        guard availableHeight > 0, baseline.indices.contains(index + 1) else { return }
-        let (top, bottom) = adjusted(baseline: baseline, at: index, translation: translation, available: availableHeight)
-        var columns = tab.columns
-        guard columns.indices.contains(columnIndex),
-              columns[columnIndex].panes.indices.contains(index + 1) else { return }
-        columns[columnIndex].panes[index].weight = top
-        columns[columnIndex].panes[index + 1].weight = bottom
-        dragColumns = columns
+        let fraction = min(
+            max(baseline + translation / available, minFraction),
+            1 - minFraction
+        )
+        dragLayout = tab.layout.settingFraction(of: splitID, to: fraction)
     }
 
-    /// Writes the in-flight weights back to the model once the drag ends —
+    /// Writes the in-flight split tree back to the model once the drag ends —
     /// a single @Published update instead of one per frame.
     private func commitDrag() {
-        if let dragColumns {
-            tab.columns = dragColumns
+        if let dragLayout {
+            tab.layout = dragLayout
         }
-        dragColumns = nil
+        dragLayout = nil
         drag = nil
     }
 
@@ -350,61 +305,23 @@ struct PaneLayoutView: View {
         }
     }
 
-    /// Baseline weights captured at the start of a drag, so the cumulative
-    /// gesture translation is always applied against a fixed starting point.
-    private func baselineWeights(
-        for kind: DragState.Kind, index: Int, current: () -> [CGFloat]
-    ) -> [CGFloat] {
-        if let drag, drag.kind == kind, drag.index == index {
-            return drag.weights
-        }
-        let weights = current()
-        drag = DragState(kind: kind, index: index, weights: weights)
-        return weights
-    }
-
-    /// Splits `translation` (points) into new weights for the two tiles either
-    /// side of the divider, keeping each at or above `minFraction`.
-    private func adjusted(
-        baseline: [CGFloat], at index: Int, translation: CGFloat, available: CGFloat
-    ) -> (CGFloat, CGFloat) {
-        let total = baseline.reduce(0, +)
-        let minWeight = total * minFraction
-        let delta = translation / available * total
-        var first = baseline[index] + delta
-        var second = baseline[index + 1] - delta
-        if first < minWeight { second -= (minWeight - first); first = minWeight }
-        if second < minWeight { first -= (minWeight - second); second = minWeight }
-        return (first, second)
-    }
 }
 
 /// Invisible drag strip in the gap between two tiles. Dragging shifts weight
 /// between the neighbors; the cursor hints at the resize direction.
 private struct ResizableDivider: View {
-    enum Orientation { case columns, rows }
-
-    let orientation: Orientation
-    let thickness: CGFloat
+    let axis: PaneSplitAxis
     let onChanged: (CGFloat) -> Void
     let onEnded: () -> Void
 
     var body: some View {
         Rectangle()
             .fill(Color.clear)
-            .frame(
-                width: orientation == .columns ? thickness : nil,
-                height: orientation == .rows ? thickness : nil
-            )
-            .frame(
-                maxWidth: orientation == .rows ? .infinity : nil,
-                maxHeight: orientation == .columns ? .infinity : nil
-            )
             .contentShape(Rectangle())
             // System pointer resolution rather than pushing onto the cursor
             // stack by hand — see SidebarResizeHandle for why the manual push
             // never showed up next to a file editor.
-            .pointerStyle(orientation == .columns ? .columnResize : .rowResize)
+            .pointerStyle(axis == .horizontal ? .columnResize : .rowResize)
             // Global coordinate space is essential: the divider itself shifts
             // as the panes resize, so a local-space translation would be
             // measured against a moving reference frame and oscillate (the
@@ -413,7 +330,11 @@ private struct ResizableDivider: View {
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
-                        onChanged(orientation == .columns ? value.translation.width : value.translation.height)
+                        onChanged(
+                            axis == .horizontal
+                                ? value.translation.width
+                                : value.translation.height
+                        )
                     }
                     .onEnded { _ in onEnded() }
             )
