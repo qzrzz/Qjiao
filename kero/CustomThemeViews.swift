@@ -17,14 +17,14 @@ struct CustomThemesSettingsSection: View {
     @ObservedObject private var l10n = L10n.shared
     @State private var editor: EditorPresentation?
 
-    private enum EditorPresentation: Identifiable {
-        case create(isDark: Bool)
-        case edit(CustomTheme)
+    private enum EditorPresentation: Identifiable, Equatable {
+        case create(isDark: Bool, token: UUID = UUID())
+        case edit(CustomTheme, token: UUID = UUID())
 
         var id: String {
             switch self {
-            case .create(let isDark): return "create-\(isDark)"
-            case .edit(let theme): return theme.id.uuidString
+            case .create(let isDark, let token): return "create-\(isDark)-\(token.uuidString)"
+            case .edit(let theme, let token): return "edit-\(theme.id.uuidString)-\(token.uuidString)"
             }
         }
     }
@@ -60,15 +60,17 @@ struct CustomThemesSettingsSection: View {
             }
             .settingsRowPadding()
         }
-        .sheet(item: $editor) { item in
+        .sheet(item: $editor, onDismiss: {
+            editor = nil
+        }) { item in
             switch item {
-            case .create(let isDark):
+            case .create(let isDark, _):
                 CustomThemeEditorSheet(
                     draft: CustomTheme.makeDraft(isDark: isDark),
                     isNew: true,
                     onDismiss: { editor = nil }
                 )
-            case .edit(let theme):
+            case .edit(let theme, _):
                 CustomThemeEditorSheet(
                     draft: theme,
                     isNew: false,
@@ -98,7 +100,8 @@ struct CustomThemesSettingsSection: View {
             Button(L10n.t("Edit")) {
                 editor = .edit(theme)
             }
-            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help(L10n.t("Edit"))
             Button(role: .destructive) {
                 try? CustomThemeStore.shared.delete(id: theme.id)
             } label: {
@@ -107,12 +110,27 @@ struct CustomThemesSettingsSection: View {
             .buttonStyle(.borderless)
             .help(L10n.t("Delete"))
         }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            editor = .edit(theme)
+        }
+        .contextMenu {
+            Button(L10n.t("Edit")) {
+                editor = .edit(theme)
+            }
+            Button(role: .destructive) {
+                try? CustomThemeStore.shared.delete(id: theme.id)
+            } label: {
+                Label(L10n.t("Delete"), systemImage: "trash")
+            }
+        }
     }
 }
 
 // MARK: - Editor sheet
 
 struct CustomThemeEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var draft: CustomTheme
     let isNew: Bool
     let onDismiss: () -> Void
@@ -130,6 +148,11 @@ struct CustomThemeEditorSheet: View {
         self._backgroundColor = State(initialValue: Color(nsColor: draft.backgroundNSColor))
         self._foregroundColor = State(initialValue: Color(nsColor: draft.foregroundNSColor))
         self._accentColor = State(initialValue: Color(nsColor: draft.accentNSColor))
+    }
+
+    private func closeSheet() {
+        dismiss()
+        onDismiss()
     }
 
     var body: some View {
@@ -223,11 +246,11 @@ struct CustomThemeEditorSheet: View {
             if !isNew {
                 Button(L10n.t("Delete"), role: .destructive) {
                     try? CustomThemeStore.shared.delete(id: draft.id)
-                    onDismiss()
+                    closeSheet()
                 }
             }
             Spacer()
-            Button(L10n.t("Cancel")) { onDismiss() }
+            Button(L10n.t("Cancel")) { closeSheet() }
                 .keyboardShortcut(.cancelAction)
             Button(L10n.t("Save")) { save() }
                 .keyboardShortcut(.defaultAction)
@@ -327,7 +350,7 @@ struct CustomThemeEditorSheet: View {
         do {
             try CustomThemeStore.shared.save(theme)
             nameError = nil
-            onDismiss()
+            closeSheet()
         } catch {
             nameError = error.localizedDescription
         }

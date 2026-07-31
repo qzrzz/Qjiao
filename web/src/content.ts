@@ -11,6 +11,7 @@ import codeFormattingImg from "./Feature/CodeFormatting/assets/code-formatting-c
 import runnerImg from "./Feature/Runner/Runner.png";
 import imageViewerImg from "./Feature/ImageViewer/assets/image-viewer.png";
 import imageBuildImg from "./Feature/ImageBuild/assets/image-build.png";
+import VideoFreeCur from "./shots/free-cur.mp4";
 
 import type { SupportedLang } from "./i18n/dict";
 
@@ -26,14 +27,16 @@ export interface FeatureCardConfig {
   /** 功能描述（支持用 \n 表示换行） */
   desc: string;
   /** 功能截图图片 */
-  image: string;
+  image?: string;
+  /** 功能演示视频（支持视频像图片一样自动循环播放展示） */
+  video?: string;
   /** 布局样式：left (默认) | right | bottom */
   style?: CardStyle;
-  /** 图片 alt 替代文本 */
+  /** 图片 / 视频 alt 替代文本 */
   alt?: string;
   /** 可选覆盖：自定义卡片容器 className */
   cardClassName?: string;
-  /** 可选覆盖：自定义截图图片 className */
+  /** 可选覆盖：自定义截图图片/视频 className */
   shotClassName?: string;
   /** 可选覆盖：设计稿节点 ID */
   dataNodeId?: string;
@@ -56,6 +59,22 @@ export interface SectionConfig {
 /** 多语言全量内容配置映射 */
 export const sectionsContentMap: Record<SupportedLang, SectionConfig[]> = {
   en: [
+    {
+      id: "future",
+      title: "Beginner-Friendly ",
+      description: "Terminal without the steep learning curve.",
+      cards: [
+        {
+          id: "free-cur",
+          title: "Freely move the cursor",
+          desc: "Edit as naturally as in a text editor.",
+          video: VideoFreeCur,
+          style: "left",
+          alt: "move the cursor",
+        },
+      ],
+    },
+
     {
       id: "projects",
       title: "Work Around Projects",
@@ -167,19 +186,27 @@ export const sectionsContentMap: Record<SupportedLang, SectionConfig[]> = {
         },
       ],
     },
-    {
-      id: "future",
-      title: "More Coming Soon",
-      description: "Stay tuned for more upcoming features.",
-      cards: [],
-    },
   ],
   "zh-Hans": [
     {
+      id: "future",
+      title: "新手友好",
+      description: "零陡峭学习曲线的终端工作区。",
+      cards: [
+        {
+          id: "free-cur",
+          title: "光标自由移动",
+          desc: "像在文本编辑器中一样自然地移动与编辑。",
+          video: VideoFreeCur,
+          style: "left",
+          alt: "光标自由移动",
+        },
+      ],
+    },
+    {
       id: "projects",
       title: "围绕项目高效协作",
-      description:
-        "无需离开终端工作区即可完成一切工作 — CLI、AI Agent、文件管理与 Git 交互。",
+      description: "无需离开终端工作区即可完成一切工作 — CLI、AI Agent、文件管理与 Git 交互。",
       cards: [
         {
           id: "agent",
@@ -286,14 +313,23 @@ export const sectionsContentMap: Record<SupportedLang, SectionConfig[]> = {
         },
       ],
     },
-    {
-      id: "future",
-      title: "更多功能陆续推出",
-      description: "敬请期待更多即将到来的强大特性。",
-      cards: [],
-    },
   ],
   ja: [
+    {
+      id: "future",
+      title: "初心者にも易しい",
+      description: "急な学習曲線のないターミナルワークスペース。",
+      cards: [
+        {
+          id: "free-cur",
+          title: "カーソルの自由な移動",
+          desc: "テキストエディタのように自然に編集できます。",
+          video: VideoFreeCur,
+          style: "left",
+          alt: "カーソルの移動",
+        },
+      ],
+    },
     {
       id: "projects",
       title: "プロジェクト中心の効率的なワークフロー",
@@ -404,12 +440,6 @@ export const sectionsContentMap: Record<SupportedLang, SectionConfig[]> = {
           alt: "Qjiaoの画像エクスポート＆圧縮コントロール",
         },
       ],
-    },
-    {
-      id: "future",
-      title: "今後も続々機能追加予定",
-      description: "さらなる強力な新機能のアップデートにご期待ください。",
-      cards: [],
     },
   ],
 };

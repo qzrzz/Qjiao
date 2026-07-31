@@ -15,7 +15,7 @@
 }
 
 :root {
-  --feature-group-gap: 180px;
+  --feature-group-gap: 160px;
   color: #fff;
   background: #000;
   font-family:
@@ -83,7 +83,7 @@ img {
 .pageSectionHeading {
   width: 1134px;
   max-width: calc(100% - 112px);
-  margin: 0 auto var(--feature-group-gap);
+  margin: 0 auto 68px;
 }
 
 .pageSectionHeading h2 {
@@ -172,6 +172,33 @@ img {
   object-fit: contain;
   pointer-events: none;
   user-select: none;
+}
+
+/* 视频裁剪容器与视频呈现样  */
+.featureCard__videoContainer {
+  position: absolute;
+  top: 174px;
+  left: 99px;
+  width: 996px;
+  height: 547px;
+  overflow: hidden;
+  border-radius: 16px;
+  pointer-events: none;
+  user-select: none;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.featureCard__video {
+  margin-left: -55px;
+  margin-top: -37px;
+  height: auto;
+  width: 962px;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  outline: none;
+  border: none;
 }
 
 /* 2. Left 风格卡片（文案在左，图片在下） */
@@ -302,6 +329,11 @@ img {
   top: 162px;
 }
 
+
+.featureCard--files .featureCard__shot {
+  top: 198px;
+}
+
 /* ==========================================================================
    移动端响应式 (Media Query <= 760px)
    ========================================================================== */
@@ -408,6 +440,17 @@ img {
     max-width: none;
     object-fit: contain;
     margin-bottom: -58px;
+  }
+
+  .featureCard__videoContainer {
+    position: relative;
+    top: -24px;
+    left: 0;
+    width: calc(100% - 24px);
+    height: auto;
+    aspect-ratio: 996 / 536;
+    margin: 0 auto -24px;
+    border-radius: 12px;
   }
 }
 

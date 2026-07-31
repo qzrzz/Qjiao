@@ -87,7 +87,7 @@
 - 项目支持添加描述，并显示在项目列表中。
 - 项目右键菜单支持在 Finder 中打开项目目录和配置文件夹。
 - 项目名称、图标和描述改为保存在配置文件夹的独立项目配置文件中。
-- 项目配置数据集中到 `~/.config/qjiao/projects/{projectId}/`（Debug 为 `qjiao-dev`）：`config.json`（名称 / 图标 / 描述 / 主题 / 目录 / Launchers / 归档）、`icon.*`（自定义图标）、`note.txt`（笔记）；关闭项目时删除整个目录；首次读写自动从旧路径（`projects/{id}.json`、`projects/icons/`、`notes/`）迁移。
+- 项目配置数据集中到 `~/.config/qjiao/projects/{projectId}/`（Debug 为 `qjiao-dev`）：`config.json`（名称 / 图标 / 描述 / 主题 / 目录 / Launchers / 归档）、`icon.*`（自定义图标）、`note.txt`（笔记）；会话与窗口快照存储到 `~/.config/qjiao/session.json`（Debug 为 `qjiao-dev`，解决了正式版与 Dev 版因 Bundle ID 相同在 UserDefaults 中互相覆盖 `sessionSnapshot` 导致项目列表丢失的问题）；关闭项目时删除整个项目配置目录；首次读写自动从旧路径（`projects/{id}.json`、`projects/icons/`、`notes/` 及 UserDefaults）无缝迁移。
 - 项目关闭按钮支持普通点击确认和 ⌘ 点击直接关闭。
 - 右侧面板区分项目目录 Files 和终端当前目录 CWD，相同时自动隐藏 CWD。
 - 分栏终端的右键菜单支持直接关闭当前面板。

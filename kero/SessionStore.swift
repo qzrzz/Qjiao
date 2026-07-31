@@ -83,6 +83,37 @@ enum ProjectConfigStore {
         return try? JSONDecoder().decode(ProjectConfig.self, from: data)
     }
 
+    /// 扫描 `config/projects/` 目录，获取磁盘上存储的所有有效项目 ID 列表（作为项目列表数据来源）
+    /// - Returns: 磁盘上已存在配置的项目 UUID 数组
+    static func allProjectIDs() -> [UUID] {
+        let fm = FileManager.default
+        let root = projectsRootURL
+        guard let items = try? fm.contentsOfDirectory(atPath: root.path) else { return [] }
+        var ids: [UUID] = []
+        for item in items {
+            let itemURL = root.appendingPathComponent(item)
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: itemURL.path, isDirectory: &isDir) {
+                if isDir.boolValue {
+                    // 文件夹格式：projects/{uuid}/config.json
+                    if let uuid = UUID(uuidString: item) {
+                        let configURL = itemURL.appendingPathComponent("config.json")
+                        if fm.fileExists(atPath: configURL.path) {
+                            ids.append(uuid)
+                        }
+                    }
+                } else if item.hasSuffix(".json") {
+                    // 旧版扁平文件格式：projects/{uuid}.json
+                    let uuidStr = (item as NSString).deletingPathExtension
+                    if let uuid = UUID(uuidString: uuidStr) {
+                        ids.append(uuid)
+                    }
+                }
+            }
+        }
+        return ids
+    }
+
     /// 将项目配置原子写入 `projects/{id}/config.json`。
     static func save(_ config: ProjectConfig, for id: UUID) {
         do {
@@ -452,16 +483,51 @@ private struct AppSnapshot: Codable {
     var windows: [SessionSnapshot]
 }
 
+/// 持久化多窗口与项目/标签页布局快照。
+///
+/// 以前写在 `UserDefaults.standard` 中，因 `qjiao` 与 `qjiao-dev` 共享相同的 Bundle ID（`com.qzrzz.qjiao`），
+/// 同时启动 Release 和 Debug 构建时会互相覆盖 `sessionSnapshot` 导致项目列表丢失。
+///
+/// 现统一改为按环境写入 `~/.config/qjiao/session.json`（Debug 构建为 `~/.config/qjiao-dev/session.json`）。
+@MainActor
 enum SessionStore {
     private static let key = "sessionSnapshot"
 
-    static func save(_ windows: [SessionSnapshot]) {
-        guard let data = try? JSONEncoder().encode(AppSnapshot(windows: windows)) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+    /// 会话快照持久化文件路径：`~/.config/qjiao/session.json`（Debug 为 `qjiao-dev`）。
+    private static var sessionFileURL: URL {
+        AppSettings.configURL.deletingLastPathComponent().appendingPathComponent("session.json")
     }
 
+    /// 将当前窗口快照数组保存到 `session.json`
+    /// - Parameter windows: 待保存的窗口快照数组
+    static func save(_ windows: [SessionSnapshot]) {
+        guard let data = try? JSONEncoder().encode(AppSnapshot(windows: windows)) else { return }
+        let url = sessionFileURL
+        do {
+            let dir = url.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            // 首次成功保存到 session.json 后，清理旧 UserDefaults 遗留键
+            UserDefaults.standard.removeObject(forKey: key)
+        } catch {
+            NSLog("qjiao: failed to save session.json \(url.path): \(error)")
+        }
+    }
+
+    /// 从 `session.json`（或旧 `UserDefaults` 降级回退）加载窗口快照数组
+    /// - Returns: 窗口快照数组
     static func load() -> [SessionSnapshot] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        let url = sessionFileURL
+        let data: Data?
+        if FileManager.default.fileExists(atPath: url.path),
+           let fileData = try? Data(contentsOf: url) {
+            data = fileData
+        } else {
+            // 首次升级迁移：若 `session.json` 尚不存在，则尝试从旧 UserDefaults 读取
+            data = UserDefaults.standard.data(forKey: key)
+        }
+
+        guard let data else { return [] }
         if let app = try? JSONDecoder().decode(AppSnapshot.self, from: data) {
             return app.windows
         }
@@ -472,3 +538,4 @@ enum SessionStore {
         return []
     }
 }
+
