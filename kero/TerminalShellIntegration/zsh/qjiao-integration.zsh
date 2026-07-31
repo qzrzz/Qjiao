@@ -7,7 +7,8 @@ if [[ -o interactive && -z "${_qjiao_semantic_prompt_loaded-}" ]]; then
     _qjiao_get_idle_title_pattern() {
         builtin local config_file="${QJIAO_CONFIG_DIR:-$HOME/.config/qjiao}/idle_title"
         if [[ -r "$config_file" ]]; then
-            builtin cat "$config_file" 2>/dev/null
+            # cat 不是 zsh 内建命令；用 command 绕过用户别名/函数，执行真正的 cat。
+            command cat "$config_file" 2>/dev/null
         else
             builtin print -rn -- "${ZSH_THEME_TERM_TITLE_IDLE-}"
         fi

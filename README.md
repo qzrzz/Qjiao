@@ -15,6 +15,8 @@
 
 ## 增加功能
 
+- **终端 zsh 集成 idle title 报错修复**：修复 `_qjiao_get_idle_title_pattern` 误将 `cat` 当作 zsh 内建命令调用（`builtin cat`），导致终端每次出现提示符时输出 `no such builtin: cat` 的问题；改为通过 `command cat` 读取 `~/.config/qjiao/idle_title`，可正常绕过用户自定义的别名与函数。
+
 - **Files 面板 Git 状态装饰（可开关）**：当项目位于 Git 仓库内时，Files / CWD 文件树为变更文件显示彩色文件名与状态徽章（M / A / U / D / R / C / ! / I），目录按子项最高优先级聚合显示，Git 忽略文件变暗展示；可通过 `Settings → Files → File Tree` 中「Show Git Status Decorations」开关控制（默认关闭，配置写入 `files.git-decorations`）。
 
 - **Ctrl+1–9 直接切换标签**：主标签页快捷键由 `Ctrl+Shift+1–9` 简化为 `Ctrl+1–9`，与 `Cmd+1–9` 切换项目区分，无需再按 Shift。
