@@ -1122,50 +1122,80 @@ private struct SidebarArchiveSection: View {
 /// - 清理空项目
 private struct SidebarMoreMenu: View {
     @ObservedObject var manager: TerminalManager
-    @State private var isHovering = false
 
     var body: some View {
-        Menu {
-            Button {
-                openFolderPanel()
-            } label: {
-                Label(L10n.t("Open Folder…"), systemImage: "folder")
-            }
-
-            Divider()
-
-            Button {
-                aiOrganizeAll()
-            } label: {
-                Label(L10n.t("AI Organize All"), systemImage: "wand.and.stars")
-            }
-            .disabled(!LocalAI.isEnabled)
-
-            Divider()
-
-            Button {
-                manager.archiveAllProjects()
-            } label: {
-                Label(L10n.t("Archive All"), systemImage: "archivebox")
-            }
-
-            Button {
-                cleanEmptyProjects()
-            } label: {
-                Label(L10n.t("Clean Empty Projects"), systemImage: "trash")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(SidebarTypography.secondary(.medium))
-                .foregroundStyle(isHovering ? Theme.primaryColor : Theme.secondaryColor)
-                .frame(width: 24, height: 24)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+        SidebarFooterButton(
+            systemImage: "ellipsis",
+            tooltip: L10n.t("More Options")
+        ) {
+            showMenu()
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .tooltip(L10n.t("More Options"))
+    }
+
+    private func showMenu() {
+        let menu = NSMenu()
+
+        let itemOpen = NSMenuItem(
+            title: L10n.t("Open Folder…"),
+            action: #selector(SidebarMenuActionTarget.performAction),
+            keyEquivalent: ""
+        )
+        if let img = NSImage(systemSymbolName: "folder", accessibilityDescription: nil) {
+            itemOpen.image = img
+        }
+        let tOpen = SidebarMenuActionTarget { openFolderPanel() }
+        itemOpen.target = tOpen
+        menu.addItem(itemOpen)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let itemAI = NSMenuItem(
+            title: L10n.t("AI Organize All"),
+            action: #selector(SidebarMenuActionTarget.performAction),
+            keyEquivalent: ""
+        )
+        if let img = NSImage(systemSymbolName: "wand.and.stars", accessibilityDescription: nil) {
+            itemAI.image = img
+        }
+        let tAI = SidebarMenuActionTarget { aiOrganizeAll() }
+        itemAI.target = tAI
+        if !LocalAI.isEnabled {
+            itemAI.isEnabled = false
+        }
+        menu.addItem(itemAI)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let itemArchive = NSMenuItem(
+            title: L10n.t("Archive All"),
+            action: #selector(SidebarMenuActionTarget.performAction),
+            keyEquivalent: ""
+        )
+        if let img = NSImage(systemSymbolName: "archivebox", accessibilityDescription: nil) {
+            itemArchive.image = img
+        }
+        let tArchive = SidebarMenuActionTarget { manager.archiveAllProjects() }
+        itemArchive.target = tArchive
+        menu.addItem(itemArchive)
+
+        let itemClean = NSMenuItem(
+            title: L10n.t("Clean Empty Projects"),
+            action: #selector(SidebarMenuActionTarget.performAction),
+            keyEquivalent: ""
+        )
+        if let img = NSImage(systemSymbolName: "trash", accessibilityDescription: nil) {
+            itemClean.image = img
+        }
+        let tClean = SidebarMenuActionTarget { cleanEmptyProjects() }
+        itemClean.target = tClean
+        menu.addItem(itemClean)
+
+        let targets = [tOpen, tAI, tArchive, tClean]
+        objc_setAssociatedObject(menu, "targets", targets, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+        if let event = NSApp.currentEvent, let window = event.window, let contentView = window.contentView {
+            NSMenu.popUpContextMenu(menu, with: event, for: contentView)
+        }
     }
 
     private func openFolderPanel() {
@@ -1223,4 +1253,16 @@ private struct SidebarMoreMenu: View {
         }
     }
 }
+
+@MainActor
+private final class SidebarMenuActionTarget: NSObject {
+    let closure: () -> Void
+    init(_ closure: @escaping () -> Void) {
+        self.closure = closure
+    }
+    @objc func performAction() {
+        closure()
+    }
+}
+
 
