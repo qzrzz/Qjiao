@@ -72,7 +72,7 @@ struct GitPanel: View {
                 branchCreator
                 commitBox
                 filterBar
-                changeList
+                changeList()
             }
         }
         .confirmationDialog(
@@ -741,38 +741,45 @@ struct GitPanel: View {
 
     // MARK: Change list
 
-    private var changeList: some View {
-        GeometryReader { geo in
+    /// 变更列表。过滤结果与行渲染均在本次 body 求值内一次性计算：
+    /// 行必须作为外层 `LazyVStack` 的**直接子视图**（而非再包一层非懒加载的
+    /// `VStack`），否则所有行会被一次性创建布局，数万条变更时主线程直接冻结。
+    private func changeList() -> some View {
+        let merge = filteredMergeEntries
+        let staged = filteredStagedEntries
+        let changed = filteredChangedEntries
+        let hasChanges = model.totalChangeCount > 0
+        let visibleCount = merge.count + staged.count + changed.count
+
+        return GeometryReader { geo in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     LazyVStack(alignment: .leading, spacing: 1) {
-                        if model.totalChangeCount == 0 {
+                        if !hasChanges {
                             cleanState
-                        } else if visibleChangeCount == 0 {
+                        } else if visibleCount == 0 {
                             inlinePlaceholder(icon: "line.3.horizontal.decrease", text: L10n.format("No changed files match “%@”", filterText))
                         }
-                        if !filteredMergeEntries.isEmpty {
+                        if !merge.isEmpty {
                             SidebarSectionHeader(
                                 title: L10n.t("MERGE CHANGES"),
-                                count: filteredMergeEntries.count,
+                                count: merge.count,
                                 isCollapsed: $mergeCollapsed,
                                 actions: [],
                                 actionsDisabled: model.isBusy
                             )
                             if !mergeCollapsed {
-                                // 展开分组内容添加统一的 12pt 左边距
-                                VStack(alignment: .leading, spacing: 1) {
-                                    ForEach(filteredMergeEntries, id: \.mergeRowID) { entry in
-                                        row(entry, status: "U", kind: .merge)
-                                    }
+                                // 行直接挂在 LazyVStack 下，惰性渲染；左边距逐行施加
+                                ForEach(merge, id: \.mergeRowID) { entry in
+                                    row(entry, status: "U", kind: .merge)
+                                        .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                                 }
-                                .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                             }
                         }
-                        if !filteredStagedEntries.isEmpty {
+                        if !staged.isEmpty {
                             SidebarSectionHeader(
                                 title: L10n.t("STAGED CHANGES"),
-                                count: filteredStagedEntries.count,
+                                count: staged.count,
                                 isCollapsed: $stagedCollapsed,
                                 actions: filterText.isEmpty ? [
                                     .init(systemImage: "minus", help: L10n.t("Unstage All Changes")) {
@@ -782,19 +789,16 @@ struct GitPanel: View {
                                 actionsDisabled: model.isBusy
                             )
                             if !stagedCollapsed {
-                                // 展开分组内容添加统一的 12pt 左边距
-                                VStack(alignment: .leading, spacing: 1) {
-                                    ForEach(filteredStagedEntries, id: \.stagedRowID) { entry in
-                                        row(entry, status: entry.staged, kind: .staged)
-                                    }
+                                ForEach(staged, id: \.stagedRowID) { entry in
+                                    row(entry, status: entry.staged, kind: .staged)
+                                        .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                                 }
-                                .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                             }
                         }
-                        if !filteredChangedEntries.isEmpty {
+                        if !changed.isEmpty {
                             SidebarSectionHeader(
                                 title: L10n.t("CHANGES"),
-                                count: filteredChangedEntries.count,
+                                count: changed.count,
                                 isCollapsed: $changesCollapsed,
                                 actions: filterText.isEmpty ? [
                                     .init(systemImage: "arrow.uturn.backward", help: L10n.t("Discard All Changes")) {
@@ -807,13 +811,10 @@ struct GitPanel: View {
                                 actionsDisabled: model.isBusy
                             )
                             if !changesCollapsed {
-                                // 展开分组内容添加统一的 12pt 左边距
-                                VStack(alignment: .leading, spacing: 1) {
-                                    ForEach(filteredChangedEntries, id: \.changedRowID) { entry in
-                                        row(entry, status: entry.unstaged, kind: .unstaged)
-                                    }
+                                ForEach(changed, id: \.changedRowID) { entry in
+                                    row(entry, status: entry.unstaged, kind: .unstaged)
+                                        .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                                 }
-                                .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                             }
                         }
                         if filterText.isEmpty, !model.recentCommits.isEmpty {
@@ -825,31 +826,28 @@ struct GitPanel: View {
                                 actionsDisabled: model.isBusy
                             )
                             if !historyCollapsed {
-                                // 展开分组内容添加统一的 12pt 左边距
-                                VStack(alignment: .leading, spacing: 1) {
-                                    ForEach(model.recentCommits) { commit in
-                                        GitCommitRow(
-                                            commit: commit,
-                                            isHead: commit.hash == model.recentCommits.first?.hash,
-                                            repoRoot: model.repoRoot,
-                                            disabled: model.isBusy,
-                                            hasStagedChanges: !model.stagedEntries.isEmpty,
-                                            canAICommitMessage: LocalAI.isEnabled
-                                                && canGenerateAICommitMessage,
-                                            isAICommitRunning: aiCommitTasks.isRunning(model.repoRoot),
-                                            onAICommitMessage: {
-                                                startAICommitMessage()
-                                            },
-                                            onCancelAICommitMessage: {
-                                                aiCommitTasks.cancel(model.repoRoot, clearError: true)
-                                            },
-                                            onRefreshNeeded: {
-                                                model.refresh()
-                                            }
-                                        )
-                                    }
+                                ForEach(model.recentCommits) { commit in
+                                    GitCommitRow(
+                                        commit: commit,
+                                        isHead: commit.hash == model.recentCommits.first?.hash,
+                                        repoRoot: model.repoRoot,
+                                        disabled: model.isBusy,
+                                        hasStagedChanges: !model.stagedEntries.isEmpty,
+                                        canAICommitMessage: LocalAI.isEnabled
+                                            && canGenerateAICommitMessage,
+                                        isAICommitRunning: aiCommitTasks.isRunning(model.repoRoot),
+                                        onAICommitMessage: {
+                                            startAICommitMessage()
+                                        },
+                                        onCancelAICommitMessage: {
+                                            aiCommitTasks.cancel(model.repoRoot, clearError: true)
+                                        },
+                                        onRefreshNeeded: {
+                                            model.refresh()
+                                        }
+                                    )
+                                    .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                                 }
-                                .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                             }
                         }
                     }
@@ -878,10 +876,6 @@ struct GitPanel: View {
         model.changedEntries.filter(matchesFilter)
     }
 
-    private var visibleChangeCount: Int {
-        filteredMergeEntries.count + filteredStagedEntries.count + filteredChangedEntries.count
-    }
-
     private func matchesFilter(_ entry: GitStatusModel.Entry) -> Bool {
         let query = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
         return query.isEmpty || entry.path.localizedCaseInsensitiveContains(query)
@@ -904,6 +898,11 @@ struct GitPanel: View {
             disabled: model.isBusy,
             openDiff: {
                 guard model.isCurrent(entry) else { return }
+                if entry.isDirectoryEntry {
+                    // 未跟踪目录条目没有 diff，VS Code 风格改为打开目录。
+                    openDirectory(entry)
+                    return
+                }
                 var diffEntry = entry
                 if kind == .unstaged && (entry.staged == "R" || entry.staged == "C") {
                     // A staged rename/copy's unstaged side compares the
@@ -912,8 +911,22 @@ struct GitPanel: View {
                 }
                 openDiff(diffEntry, kind == .staged)
             },
-            openFile: { openIfPossible(entry) },
-            openToSide: { openIfPossible(entry, toSide: true) },
+            openFile: {
+                guard model.isCurrent(entry) else { return }
+                if entry.isDirectoryEntry {
+                    openDirectory(entry)
+                    return
+                }
+                openIfPossible(entry)
+            },
+            openToSide: {
+                guard model.isCurrent(entry) else { return }
+                if entry.isDirectoryEntry {
+                    openDirectory(entry)
+                    return
+                }
+                openIfPossible(entry, toSide: true)
+            },
             stage: { model.stage(entry) },
             unstage: { model.unstage(entry) },
             discard: { pendingDiscard = makePendingDiscard(entry) },
@@ -934,6 +947,13 @@ struct GitPanel: View {
         } else {
             openFile(path)
         }
+    }
+
+    /// 打开未跟踪目录条目（VS Code 中未跟踪目录折叠为目录条目，无 diff）。
+    private func openDirectory(_ entry: GitStatusModel.Entry) {
+        let path = model.absolutePath(for: entry)
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: path, isDirectory: true))
     }
 
     private func discardTitle(for entry: GitStatusModel.Entry?) -> String {
@@ -1454,10 +1474,10 @@ private struct GitEntryRow: View {
                         .font(SidebarTypography.caption(.bold, design: .monospaced))
                         .foregroundStyle(statusColor)
                         .frame(width: 12)
-                    // Git 变更行：按文件名匹配 Material 图标（目录变更极少，按文件处理）。
+                    // Git 变更行：未跟踪目录条目（尾斜杠）按目录显示文件夹图标。
                     MaterialFileIconView(
                         fileName: entry.fileName,
-                        isDirectory: false,
+                        isDirectory: entry.isDirectoryEntry,
                         size: 14
                     )
                     Text(entry.fileName)
