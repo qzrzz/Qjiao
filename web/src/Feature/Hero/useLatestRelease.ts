@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getCurrentLang, getRootRelativePath, type SupportedLang } from "../../i18n/dict";
 
 /** GitHub Release 资源文件结构定义 */
 interface GitHubAsset {
@@ -35,12 +36,15 @@ export interface ReleaseInfo {
  *
  * @param owner GitHub 仓库拥有者名称，默认为 "qzrzz"
  * @param repo GitHub 仓库名称，默认为 "Qjiao"
+ * @param lang 当前页面语言（若不传自动从 location 获取）
  * @returns {ReleaseInfo} 最新 Release 的下载链接、版本显示文本以及加载状态
  */
 export function useLatestRelease(
   owner: string = "qzrzz",
-  repo: string = "Qjiao"
+  repo: string = "Qjiao",
+  lang?: SupportedLang
 ): ReleaseInfo {
+  const currentLang = lang || getCurrentLang();
   const defaultReleaseUrl = `https://github.com/${owner}/${repo}/releases/latest`;
 
   const [info, setInfo] = useState<ReleaseInfo>({
@@ -52,8 +56,7 @@ export function useLatestRelease(
 
   useEffect(() => {
     let isMounted = true;
-    const baseUrl = import.meta.env?.BASE_URL || "./";
-    const jsonUrl = `${baseUrl.endsWith("/") ? baseUrl : baseUrl + "/"}latest.json`;
+    const jsonUrl = getRootRelativePath("latest.json", currentLang);
 
     fetch(jsonUrl)
       .then((res) => {
@@ -108,7 +111,7 @@ export function useLatestRelease(
     return () => {
       isMounted = false;
     };
-  }, [owner, repo]);
+  }, [owner, repo, currentLang]);
 
   return info;
 }

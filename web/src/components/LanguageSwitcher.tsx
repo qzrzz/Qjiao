@@ -50,7 +50,7 @@ export function LanguageSwitcher({ currentLang }: LanguageSwitcherProps) {
         <div className="langDropdownMenu" role="menu">
           {languages.map((lang) => {
             const isActive = lang.code === activeLang;
-            const targetUrl = getLangUrl(lang.code);
+            const targetUrl = getLangUrl(lang.code, activeLang);
 
             return (
               <a

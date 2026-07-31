@@ -86,13 +86,53 @@ export function getCurrentLang(): SupportedLang {
   return "en";
 }
 
-/** 获取多语言页面的目标 URL 路径 */
-export function getLangUrl(targetLang: SupportedLang): string {
-  const baseUrl = import.meta.env.BASE_URL || "/";
-  const cleanBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+/**
+ * 根据当前语言与目标语言，获取多语言页面的目标 URL 相对路径
+ * 解决在非英文子目录下点击语言切换跳转路径叠加导致的 404 问题
+ *
+ * @param targetLang 目标语言
+ * @param currentLang 当前页面语言（若未提供则自动匹配当前环境）
+ * @returns {string} 正确的目标相对 URL 路径
+ */
+export function getLangUrl(
+  targetLang: SupportedLang,
+  currentLang?: SupportedLang
+): string {
+  const cur = currentLang || getCurrentLang();
 
-  if (targetLang === "en") {
-    return cleanBase;
+  // 当前处于英文根目录
+  if (cur === "en") {
+    if (targetLang === "en") return "./";
+    return `./${targetLang}/`;
   }
-  return `${cleanBase}${targetLang}/`;
+
+  // 当前处于非英文子目录（如 /zh-Hans/ 或 /ja/）
+  if (targetLang === "en") {
+    return "../";
+  }
+  if (targetLang === cur) {
+    return "./";
+  }
+  return `../${targetLang}/`;
+}
+
+/**
+ * 获取相对于根目录的静态文件相对路径
+ * 例如在 /zh-Hans/ 子目录下获取根目录的 latest.json 需返回 ../latest.json
+ *
+ * @param filename 文件相对名（如 "latest.json"）
+ * @param currentLang 当前页面语言（若未提供则自动匹配当前环境）
+ * @returns {string} 正确的根路径相对文件 URL
+ */
+export function getRootRelativePath(
+  filename: string,
+  currentLang?: SupportedLang
+): string {
+  const cur = currentLang || getCurrentLang();
+  const cleanFilename = filename.startsWith("/") ? filename.slice(1) : filename;
+
+  if (cur === "en") {
+    return `./${cleanFilename}`;
+  }
+  return `../${cleanFilename}`;
 }

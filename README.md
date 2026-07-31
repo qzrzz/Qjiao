@@ -15,6 +15,12 @@
 
 ## 增加功能
 
+- **左边栏底部更多菜单与项目批量操作**：在左边栏下方「新建项目」按钮旁新增「更多」按钮（`ellipsis`），提供快捷操作菜单：
+  - **打开文件夹**（Open Folder…）：选择文件夹新建或激活对应的项目。
+  - **AI 整理全部**（AI Organize All）：为所有非归档项目批量触发 AI 自动生成项目名称、描述与图标。
+  - **归档全部**（Archive All）：将当前项目列表中所有未归档的项目进行归档。
+  - **清理空项目**（Clean Empty Projects）：查找没有任何终端会话且未设置自定义项目名称的项目，弹出确认对话框提示符合条件的项目数并完成清理。
+
 - **上游功能移植 (Baseline: v0.1.35)**：已同步上游 `egoist/kero` 自 v0.1.19 至 v0.1.35 的核心功能与修复：
   - **分屏实时标题与控制按钮 (Live Pane Headers & Split Controls)**：支持在分屏布局中为每个 Pane 提供实时标题栏与独立分屏/关闭控制按钮（可在 `Settings → Terminal → Features` 中通过「分屏显示标题栏」开启/关闭，默认关闭）。
   - **Ctrl-Tab 按最近使用排序 (MRU Tab Switcher)**：Ctrl-Tab 切换卡片支持按最近使用时间 (MRU) 排序并优先选中上一个使用的标签页（可在 `Settings → Terminal → Features` 中通过「Tab Switcher Sort by Recently」开启/关闭，默认关闭）。
