@@ -104,6 +104,7 @@ struct SidebarView: View {
                         systemImage: "plus",
                         tooltip: "New Project (⌘N)"
                     ) { manager.newProject() }
+                    SidebarMoreMenu(manager: manager)
                     Spacer()
                     SidebarThemeButton(settings: settings)
                     SidebarFooterButton(
@@ -1115,3 +1116,112 @@ private struct SidebarArchiveSection: View {
         }
     }
 }
+
+/// 侧边栏底部更多按钮及弹出菜单：
+/// - 打开文件夹…
+/// - AI 整理全部
+/// - 归档全部
+/// - 清理空项目
+private struct SidebarMoreMenu: View {
+    @ObservedObject var manager: TerminalManager
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            Button {
+                openFolderPanel()
+            } label: {
+                Label(L10n.t("Open Folder…"), systemImage: "folder")
+            }
+
+            Divider()
+
+            Button {
+                aiOrganizeAll()
+            } label: {
+                Label(L10n.t("AI Organize All"), systemImage: "wand.and.stars")
+            }
+            .disabled(!LocalAI.isEnabled)
+
+            Divider()
+
+            Button {
+                manager.archiveAllProjects()
+            } label: {
+                Label(L10n.t("Archive All"), systemImage: "archivebox")
+            }
+
+            Button {
+                cleanEmptyProjects()
+            } label: {
+                Label(L10n.t("Clean Empty Projects"), systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(SidebarTypography.secondary(.medium))
+                .foregroundStyle(isHovering ? Theme.primaryColor : Theme.secondaryColor)
+                .frame(width: 24, height: 24)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .onHover { isHovering = $0 }
+        .tooltip(L10n.t("More Options"))
+    }
+
+    private func openFolderPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        if panel.runModal() == .OK {
+            for url in panel.urls {
+                manager.addProject(at: url)
+            }
+        }
+    }
+
+    private func aiOrganizeAll() {
+        for project in manager.activeProjects {
+            LocalAIProjectMetaTaskStore.shared.start(for: project)
+        }
+    }
+
+    private func cleanEmptyProjects() {
+        let emptyProjects = manager.projects.filter { project in
+            project.sessions.isEmpty && (project.customName == nil || project.customName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true)
+        }
+
+        if emptyProjects.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = L10n.t("No Empty Projects Found")
+            alert.informativeText = L10n.t("There are no projects without terminals and without custom names.")
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: L10n.t("OK"))
+            alert.runModal()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = L10n.t("Clean Empty Projects?")
+        alert.informativeText = L10n.format("Found %lld projects matching cleanup conditions, clean up?", emptyProjects.count)
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.t("Clean Up"))
+        alert.addButton(withTitle: L10n.t("Cancel"))
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            let count = emptyProjects.count
+            for project in emptyProjects {
+                manager.close(project)
+            }
+
+            let resultAlert = NSAlert()
+            resultAlert.messageText = L10n.t("Cleanup Complete")
+            resultAlert.informativeText = L10n.format("Cleaned up %lld projects.", count)
+            resultAlert.alertStyle = .informational
+            resultAlert.addButton(withTitle: L10n.t("OK"))
+            resultAlert.runModal()
+        }
+    }
+}
+

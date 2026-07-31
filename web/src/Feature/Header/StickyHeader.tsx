@@ -12,8 +12,8 @@ interface StickyHeaderProps {
 /** 顶部固定 Header 组件，包含 Sticky 语言下拉切换器与下载入口。 */
 export function StickyHeader({ lang }: StickyHeaderProps) {
   const [isVisible, setIsVisible] = useState(false);
-  const { downloadUrl } = useLatestRelease("qzrzz", "Qjiao");
   const currentLang = lang || getCurrentLang();
+  const { downloadUrl } = useLatestRelease("qzrzz", "Qjiao", currentLang);
   const dict = uiDictMap[currentLang] || uiDictMap.en;
 
   useEffect(() => {

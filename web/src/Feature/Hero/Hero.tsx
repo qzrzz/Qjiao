@@ -17,8 +17,8 @@ interface HeroProps {
 export function Hero({ lang }: HeroProps) {
   const reduceMotion = useReducedMotion();
   const restingPosition = { x: 12.109, y: -5.328 };
-  const { downloadUrl, tagName } = useLatestRelease("qzrzz", "Qjiao");
   const currentLang = lang || getCurrentLang();
+  const { downloadUrl, tagName } = useLatestRelease("qzrzz", "Qjiao", currentLang);
   const dict = uiDictMap[currentLang] || uiDictMap.en;
 
   return (

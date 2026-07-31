@@ -539,6 +539,22 @@ final class TerminalManager: nonisolated ObservableObject {
         broadcastProjectListChange()
     }
 
+    /// 将所有未归档的项目归档。
+    func archiveAllProjects() {
+        let toArchive = activeProjects
+        guard !toArchive.isEmpty else { return }
+        for project in toArchive {
+            project.isArchived = true
+            project.saveConfig()
+        }
+        if let next = activeProjects.first {
+            selectedProjectID = next.id
+        }
+        objectWillChange.send()
+        broadcastProjectListChange()
+    }
+
+
     /// 按索引选中未归档项目（对应快捷键 ⌘1 ~ ⌘9）。
     /// - Parameter index: 未归档项目列表中的索引
     func selectProject(index: Int) {

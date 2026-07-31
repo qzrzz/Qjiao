@@ -9,8 +9,8 @@ interface FooterProps {
 
 /** 官网页脚组件，支持多语言文案与快捷入口。 */
 export function Footer({ lang }: FooterProps) {
-  const { downloadUrl } = useLatestRelease("qzrzz", "Qjiao");
   const currentLang = lang || getCurrentLang();
+  const { downloadUrl } = useLatestRelease("qzrzz", "Qjiao", currentLang);
   const dict = uiDictMap[currentLang] || uiDictMap.en;
 
   return (
