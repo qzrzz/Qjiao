@@ -37,6 +37,8 @@ enum LocalAICommandBuilder {
             return buildAgy(executable: executable, request: request, prompt: prompt)
         case .opencode:
             return buildOpenCode(executable: executable, request: request, prompt: prompt)
+        case .pi:
+            return buildPi(executable: executable, request: request, prompt: prompt)
         }
     }
 
@@ -211,6 +213,41 @@ enum LocalAICommandBuilder {
             args.append("--auto")
         }
         // message 为位置参数；长 prompt 拆成单个 argv 更稳妥
+        args.append(prompt)
+        return LocalAICommand(
+            executable: executable,
+            arguments: args,
+            workingDirectory: request.workingDirectory
+        )
+    }
+
+    // MARK: - pi
+
+    /// `pi --print <prompt>` 非交互输出（`pi -p`）。
+    ///
+    /// 与其余 CLI 一样通过命令行参数传递 prompt；默认 `--no-session` 避免每次
+    /// AI 整理 / 提交信息等轻量调用都落盘会话文件。
+    private static func buildPi(
+        executable: String,
+        request: LocalAIRequest,
+        prompt: String
+    ) -> LocalAICommand {
+        var args: [String] = [
+            "--print",
+            "--no-session",
+        ]
+        if request.disableTools {
+            // 纯文本生成：关闭全部工具（内置与扩展），只做问答
+            args.append("--no-tools")
+        }
+        if let model = request.model, !model.isEmpty {
+            args += ["--model", model]
+        }
+        if request.autoApprove {
+            // pi 无危险 flag；--approve 信任项目本地资源（AGENTS.md / CLAUDE.md 等）
+            args.append("--approve")
+        }
+        // prompt 作为尾部位置参数（pi [options] [@files...] [messages...]）
         args.append(prompt)
         return LocalAICommand(
             executable: executable,

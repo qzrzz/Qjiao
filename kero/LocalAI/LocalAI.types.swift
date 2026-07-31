@@ -91,6 +91,7 @@ enum AIWritingLanguage: String, CaseIterable, Identifiable, Codable, Sendable, H
 /// - `claude`：`claude -p` / `--print`
 /// - `agy`：`agy --print` / `-p`
 /// - `opencode`：`opencode run`
+/// - `pi`：`pi -p` / `--print`
 /// - `disabled`：关闭本地 AI 能力
 enum LocalAIProviderID: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
     case disabled
@@ -99,6 +100,7 @@ enum LocalAIProviderID: String, CaseIterable, Identifiable, Codable, Sendable, H
     case claude
     case agy
     case opencode
+    case pi
 
     var id: String { rawValue }
 
@@ -114,6 +116,7 @@ enum LocalAIProviderID: String, CaseIterable, Identifiable, Codable, Sendable, H
         case .claude: return "claude"
         case .agy: return "agy"
         case .opencode: return "opencode"
+        case .pi: return "pi"
         }
     }
 
@@ -121,7 +124,7 @@ enum LocalAIProviderID: String, CaseIterable, Identifiable, Codable, Sendable, H
     var cliCommand: String? {
         switch self {
         case .disabled: return nil
-        case .grok, .codex, .claude, .agy, .opencode: return rawValue
+        case .grok, .codex, .claude, .agy, .opencode, .pi: return rawValue
         }
     }
 
@@ -139,6 +142,7 @@ enum LocalAIProviderID: String, CaseIterable, Identifiable, Codable, Sendable, H
         case .claude: return "claude --print"
         case .agy: return "agy --print"
         case .opencode: return "opencode run"
+        case .pi: return "pi --print"
         }
     }
 }

@@ -15,6 +15,7 @@
 
 ## 增加功能
 
+- **AI headless provider 新增 pi（`pi -p`）支持**：`LocalAI` 统一模块新增 `pi` 提供器，通过 `pi -p` / `--print` 非交互模式调用 pi 编码助手；安装探测覆盖 npm 全局安装（`~/.npm-global/bin`、`~/.bun/bin` 等）与 curl 安装脚本（无系统 node 时自带独立 node 于 `~/.local/share/pi-node/current/bin`，已并入 PATH 增强）；默认带 `--no-session` 不落盘会话，`disableTools` 映射为 `--no-tools`，`model` 透传 `--model`，`autoApprove` 映射为 `--approve`（信任项目本地 AGENTS.md / CLAUDE.md 等资源）；AI 工具列表（Agent 交接用 `AIToolRegistry`）同步加入 `pi` CLI 项。
 - **终端 zsh 集成 idle title 报错修复**：修复 `_qjiao_get_idle_title_pattern` 误将 `cat` 当作 zsh 内建命令调用（`builtin cat`），导致终端每次出现提示符时输出 `no such builtin: cat` 的问题；改为通过 `command cat` 读取 `~/.config/qjiao/idle_title`，可正常绕过用户自定义的别名与函数。
 
 - **Files 面板 Git 状态装饰（可开关）**：当项目位于 Git 仓库内时，Files / CWD 文件树为变更文件显示彩色文件名与状态徽章（M / A / U / D / R / C / ! / I），目录按子项最高优先级聚合显示，Git 忽略文件变暗展示；可通过 `Settings → Files → File Tree` 中「Show Git Status Decorations」开关控制（默认关闭，配置写入 `files.git-decorations`）。
@@ -56,7 +57,7 @@
   - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ui.language`（`system` 默认不写回；`en` 为 English；`zh-Hans` 为简体中文；`ja` 为日本語）。
   - **实现**：`kero/L10n/`（`L10n.swift` 核心 + 各语言表如 `zh-Hans.swift`、`ja.swift`）；以英文源字符串为 key，运行时切换无需重启；菜单、设置、左右侧栏、Git/Files/Project/System/Note、命令面板、图标选择器、图片查看器、终端剪贴板确认与常用对话框等已接入简体中文与日本語，主题名称与代码预览样本保持原文。
 - 新增本地 AI 统一模块 `kero/LocalAI`：通过各 AI CLI 的 headless / exec 非交互模式调用本地智能体，应用侧只依赖 `LocalAI.prompt` 统一接口。
-  - **支持 Provider**：`grok`（`grok --single`）、`codex`（`codex exec`）、`claude`（`claude -p` / `--print`）、`agy`（`agy --print`）、`opencode`（`opencode run`），以及 **Disabled**。
+  - **支持 Provider**：`grok`（`grok --single`）、`codex`（`codex exec`）、`claude`（`claude -p` / `--print`）、`agy`（`agy --print`）、`opencode`（`opencode run`）、`pi`（`pi -p` / `--print`），以及 **Disabled**。
   - **设置**：Settings → General → **AI headless provider**；列出全部支持的 CLI，未安装项显示 “Not installed” 且不可选；可 Refresh 重新探测 PATH / 常见安装目录。
   - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ai.headless-provider`（默认 disabled，不写回）。
   - **能力**：单轮 prompt、可选工作目录 / model / 超时 / autoApprove；`LocalAIRegistry` 负责安装探测与当前选择。
