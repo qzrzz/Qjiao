@@ -2,6 +2,7 @@
 // 构建、签名、公证 Qjiao，并将全部发布资产上传到 GitHub Releases。
 import { $ } from "bun";
 import {
+  constants as fsConstants,
   copyFileSync,
   existsSync,
   lstatSync,
@@ -12,7 +13,7 @@ import {
   rmSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { extractReleaseNotes } from "./changelog";
 import { generateAppcast } from "./generate-appcast";
 import { die, need, say } from "./lib";
@@ -51,6 +52,23 @@ interface IReleaseState extends IReleaseIdentity {
   completedSteps: IReleaseStep[];
 }
 
+/** release/ 中一个经过校验的完整更新归档。 */
+interface IReleaseCacheEntry {
+  version: string;
+  build: string;
+  tag: string;
+  archiveName: string;
+  sha256: string;
+  size: number;
+  publishedAt: string;
+}
+
+/** release/ 中的本地 Sparkle 历史清单。 */
+interface IReleaseCacheManifest {
+  schemaVersion: 1;
+  entries: IReleaseCacheEntry[];
+}
+
 const RELEASE_STEPS: IReleaseStep[] = [
   "archive-created",
   "app-exported",
@@ -70,6 +88,11 @@ const ARTIFACT_PREFIX = "qjiao";
 const CONFIGURATION = process.env.CONFIGURATION ?? "Release";
 const BUILD_DIR = process.env.BUILD_DIR ?? "build";
 const UPDATES_DIR = join(BUILD_DIR, "updates");
+const RELEASE_CACHE_DIR = process.env.RELEASE_CACHE_DIR ?? "release";
+const RELEASE_CACHE_ARCHIVES_DIR = join(RELEASE_CACHE_DIR, "archives");
+const RELEASE_CACHE_APPCAST_PATH = join(RELEASE_CACHE_DIR, "appcast.xml");
+const RELEASE_CACHE_MANIFEST_PATH = join(RELEASE_CACHE_DIR, "manifest.json");
+const MAX_DELTA_BASELINES = 3;
 const ARCHIVE_PATH = join(BUILD_DIR, "Qjiao.xcarchive");
 const EXPORT_DIR = join(BUILD_DIR, "export");
 const APP_PATH = join(EXPORT_DIR, `${APP_NAME}.app`);
@@ -86,6 +109,7 @@ const SIGN_IDENTITY =
 const NOTARY_PROFILE = process.env.NOTARY_PROFILE ?? "NOTARY";
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
 const SPARKLE_ACCOUNT = process.env.SPARKLE_ACCOUNT ?? "qjiao";
+const UPDATE_PIPELINE_VERSION = "3";
 const FORCE_RELEASE = process.env.FORCE !== "0";
 const ARCHIVE_RETRIES = readPositiveInteger(
   "ARCHIVE_RETRIES",
@@ -338,12 +362,8 @@ if (
   allowExistingArtifactAdoption = false;
   rmSync(UPDATES_DIR, { recursive: true, force: true });
   mkdirSync(UPDATES_DIR, { recursive: true });
-  if (process.env.PUBLISH !== "0" && process.env.NO_HISTORY !== "1") {
-    say("Downloading the previous appcast from GitHub Releases…");
-    // 第一次发布没有历史 appcast，允许下载失败后生成新文件。
-    await $`gh release download --repo ${GITHUB_REPOSITORY} --pattern appcast.xml --dir ${UPDATES_DIR} --clobber`
-      .quiet()
-      .nothrow();
+  if (process.env.NO_HISTORY !== "1") {
+    await prepareLocalDeltaBaselines(build);
   }
 
   await $`ditto -c -k --keepParent ${app} ${zipPath}`;
@@ -391,7 +411,14 @@ if (
   await completeReleaseStep(releaseState, "tag-pushed");
 }
 
-const releaseAssetNames = [dmgName, zipName, notesName, "appcast.xml"];
+const releaseAssetPaths = [
+  dmgPath,
+  zipPath,
+  notesPath,
+  appcastPath,
+  ...listGeneratedDeltaPaths(),
+];
+const releaseAssetNames = releaseAssetPaths.map((path) => basename(path));
 if (
   await shouldResumeStep(releaseState, "release-published", () =>
     validatePublishedRelease(tag, releaseAssetNames),
@@ -413,9 +440,13 @@ if (
   if (!existingRelease) {
     await $`gh release create ${tag} --repo ${GITHUB_REPOSITORY} --verify-tag --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
   }
-  const releaseAssets = [dmgPath, zipPath, notesPath, appcastPath];
-  for (const [index, assetPath] of releaseAssets.entries()) {
-    await uploadReleaseAsset(tag, assetPath, index + 1, releaseAssets.length);
+  for (const [index, assetPath] of releaseAssetPaths.entries()) {
+    await uploadReleaseAsset(
+      tag,
+      assetPath,
+      index + 1,
+      releaseAssetPaths.length,
+    );
   }
   await $`gh release edit ${tag} --repo ${GITHUB_REPOSITORY} --draft=false --latest --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
   if (!(await validatePublishedRelease(tag, releaseAssetNames))) {
@@ -423,6 +454,8 @@ if (
   }
   await completeReleaseStep(releaseState, "release-published");
 }
+
+await persistReleaseCache(identity, tag, zipPath, appcastPath);
 
 say(`Qjiao ${version} is live on GitHub:`);
 console.log(
@@ -449,7 +482,7 @@ async function readReleaseIdentity(): Promise<IReleaseIdentity> {
     die("could not read MARKETING_VERSION or CURRENT_PROJECT_VERSION");
   }
   const appSourceFingerprint = await createAppSourceFingerprint();
-  const releaseNotesFingerprint = createFileFingerprint("CHANGELOG.md");
+  const releaseNotesFingerprint = createUpdateArtifactsFingerprint();
   return {
     version,
     build,
@@ -549,6 +582,225 @@ function formatByteSize(bytes: number): string {
   return `${value.toFixed(1)} ${unit}`;
 }
 
+/** 将本地 release/ 历史复制到临时更新目录，作为 delta 生成基线。 */
+async function prepareLocalDeltaBaselines(currentBuild: string): Promise<void> {
+  const manifest = readReleaseCacheManifest();
+  if (
+    existsSync(RELEASE_CACHE_APPCAST_PATH) &&
+    Bun.file(RELEASE_CACHE_APPCAST_PATH).size > 0
+  ) {
+    copyFileAtomically(RELEASE_CACHE_APPCAST_PATH, appcastPath);
+    say(`Using local Sparkle history: ${RELEASE_CACHE_APPCAST_PATH}`);
+  }
+
+  const candidates = manifest.entries
+    .filter((entry) => entry.build !== currentBuild)
+    .sort(
+      (left, right) =>
+        Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
+    )
+    .slice(0, MAX_DELTA_BASELINES);
+  let copied = 0;
+  for (const entry of candidates) {
+    if (!(await validateReleaseCacheEntry(entry))) {
+      console.warn(
+        `warning: ignoring invalid delta baseline ${entry.archiveName}`,
+      );
+      continue;
+    }
+    copyFileAtomically(
+      join(RELEASE_CACHE_ARCHIVES_DIR, entry.archiveName),
+      join(UPDATES_DIR, entry.archiveName),
+    );
+    copied += 1;
+    say(
+      `Using delta baseline ${copied}/${MAX_DELTA_BASELINES}: ` +
+        `${entry.archiveName} (build ${entry.build})`,
+    );
+  }
+  if (copied === 0) {
+    say("No valid local delta baseline; generating a full update only.");
+  }
+}
+
+/** 正式发布成功后，把当前完整 ZIP 和 appcast 原子写入 release/。 */
+async function persistReleaseCache(
+  identity: IReleaseIdentity,
+  tag: string,
+  zipPath: string,
+  appcastPath: string,
+): Promise<void> {
+  if (
+    !existsSync(zipPath) ||
+    Bun.file(zipPath).size === 0 ||
+    !existsSync(appcastPath) ||
+    Bun.file(appcastPath).size === 0
+  ) {
+    die("cannot persist incomplete Sparkle release cache");
+  }
+
+  mkdirSync(RELEASE_CACHE_ARCHIVES_DIR, { recursive: true });
+  const archiveName = basename(zipPath);
+  const cachedArchivePath = join(RELEASE_CACHE_ARCHIVES_DIR, archiveName);
+  const entry: IReleaseCacheEntry = {
+    version: identity.version,
+    build: identity.build,
+    tag,
+    archiveName,
+    sha256: await createFileSha256(zipPath),
+    size: Bun.file(zipPath).size,
+    publishedAt: new Date().toISOString(),
+  };
+
+  copyFileAtomically(zipPath, cachedArchivePath);
+  if (!(await validateReleaseCacheEntry(entry))) {
+    die(`cached update archive failed validation: ${archiveName}`);
+  }
+  copyFileAtomically(appcastPath, RELEASE_CACHE_APPCAST_PATH);
+
+  const previousManifest = readReleaseCacheManifest();
+  const entries = [
+    entry,
+    ...previousManifest.entries.filter(
+      (cached) =>
+        cached.build !== entry.build &&
+        cached.archiveName !== entry.archiveName,
+    ),
+  ]
+    .sort(
+      (left, right) =>
+        Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
+    )
+    .slice(0, MAX_DELTA_BASELINES);
+  await writeReleaseCacheManifest({ schemaVersion: 1, entries });
+
+  const keptNames = new Set(entries.map((cached) => cached.archiveName));
+  for (const name of readdirSync(RELEASE_CACHE_ARCHIVES_DIR)) {
+    if (
+      name.startsWith(`${ARTIFACT_PREFIX}-`) &&
+      name.endsWith(".zip") &&
+      !keptNames.has(name)
+    ) {
+      rmSync(join(RELEASE_CACHE_ARCHIVES_DIR, name), {
+        force: true,
+      });
+    }
+  }
+  say(
+    `Stored local Sparkle history in ${RELEASE_CACHE_DIR} ` +
+      `(${entries.length}/${MAX_DELTA_BASELINES} versions).`,
+  );
+}
+
+/** 读取 release/manifest.json；损坏清单不会用于生成差分。 */
+function readReleaseCacheManifest(): IReleaseCacheManifest {
+  if (!existsSync(RELEASE_CACHE_MANIFEST_PATH)) {
+    return { schemaVersion: 1, entries: [] };
+  }
+  try {
+    const value = JSON.parse(
+      readFileSync(RELEASE_CACHE_MANIFEST_PATH, "utf8"),
+    ) as {
+      schemaVersion?: unknown;
+      entries?: unknown;
+    };
+    if (value.schemaVersion !== 1 || !Array.isArray(value.entries)) {
+      throw new Error("unsupported manifest schema");
+    }
+    const entries = value.entries.filter(isReleaseCacheEntry);
+    if (entries.length !== value.entries.length) {
+      throw new Error("invalid manifest entry");
+    }
+    return { schemaVersion: 1, entries };
+  } catch {
+    console.warn(
+      `warning: ignoring invalid release cache manifest: ` +
+        RELEASE_CACHE_MANIFEST_PATH,
+    );
+    return { schemaVersion: 1, entries: [] };
+  }
+}
+
+/** 校验来自 JSON 的 release 缓存条目，避免路径越界和伪造摘要。 */
+function isReleaseCacheEntry(value: unknown): value is IReleaseCacheEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<IReleaseCacheEntry>;
+  return (
+    typeof entry.version === "string" &&
+    entry.version.length > 0 &&
+    typeof entry.build === "string" &&
+    entry.build.length > 0 &&
+    typeof entry.tag === "string" &&
+    entry.tag.length > 0 &&
+    typeof entry.archiveName === "string" &&
+    basename(entry.archiveName) === entry.archiveName &&
+    entry.archiveName.endsWith(".zip") &&
+    typeof entry.sha256 === "string" &&
+    /^[a-f0-9]{64}$/.test(entry.sha256) &&
+    typeof entry.size === "number" &&
+    Number.isSafeInteger(entry.size) &&
+    entry.size > 0 &&
+    typeof entry.publishedAt === "string" &&
+    Number.isFinite(Date.parse(entry.publishedAt))
+  );
+}
+
+/** 复验缓存 ZIP 的文件大小和 SHA-256。 */
+async function validateReleaseCacheEntry(
+  entry: IReleaseCacheEntry,
+): Promise<boolean> {
+  const path = join(RELEASE_CACHE_ARCHIVES_DIR, entry.archiveName);
+  return (
+    existsSync(path) &&
+    Bun.file(path).size === entry.size &&
+    (await createFileSha256(path)) === entry.sha256
+  );
+}
+
+/** 流式计算大文件 SHA-256，避免一次把 ZIP 全部读入内存。 */
+async function createFileSha256(path: string): Promise<string> {
+  const hash = new Bun.CryptoHasher("sha256");
+  for await (const chunk of Bun.file(path).stream()) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
+}
+
+/** 通过同目录临时文件原子复制；APFS 上优先使用写时复制。 */
+function copyFileAtomically(source: string, destination: string): void {
+  const temporaryPath = `${destination}.${process.pid}.tmp`;
+  rmSync(temporaryPath, { force: true });
+  try {
+    copyFileSync(source, temporaryPath, fsConstants.COPYFILE_FICLONE);
+    renameSync(temporaryPath, destination);
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
+}
+
+/** 原子保存 release/manifest.json。 */
+async function writeReleaseCacheManifest(
+  manifest: IReleaseCacheManifest,
+): Promise<void> {
+  mkdirSync(RELEASE_CACHE_DIR, { recursive: true });
+  const temporaryPath = `${RELEASE_CACHE_MANIFEST_PATH}.${process.pid}.tmp`;
+  try {
+    await Bun.write(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    renameSync(temporaryPath, RELEASE_CACHE_MANIFEST_PATH);
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
+}
+
+/** 列出 generate_appcast 在本次更新目录生成的 delta 资产。 */
+function listGeneratedDeltaPaths(): string[] {
+  if (!existsSync(UPDATES_DIR)) return [];
+  return readdirSync(UPDATES_DIR)
+    .filter((name) => name.endsWith(".delta"))
+    .sort()
+    .map((name) => join(UPDATES_DIR, name));
+}
+
 /** 计算真正影响 macOS App 构建和签名的输入指纹。 */
 async function createAppSourceFingerprint(): Promise<string> {
   const hash = createHash("sha256");
@@ -568,6 +820,14 @@ async function createAppSourceFingerprint(): Promise<string> {
 function createFileFingerprint(path: string): string {
   const hash = createHash("sha256");
   hash.update(existsSync(path) ? readFileSync(path) : "missing");
+  return hash.digest("hex");
+}
+
+/** 让更新产物生成方式升级时仅使更新及后续断点失效。 */
+function createUpdateArtifactsFingerprint(): string {
+  const hash = createHash("sha256");
+  hash.update(createFileFingerprint("CHANGELOG.md"));
+  hash.update(UPDATE_PIPELINE_VERSION);
   return hash.digest("hex");
 }
 
@@ -930,7 +1190,32 @@ async function validateUpdateArtifacts(
   for (const path of [zipPath, notesPath, appcastPath]) {
     if (!existsSync(path) || Bun.file(path).size === 0) return false;
   }
-  return readFileSync(appcastPath, "utf8").includes(version);
+  const appcast = readFileSync(appcastPath, "utf8");
+  if (!appcast.includes(version)) return false;
+  for (const name of listReferencedDeltaNames(appcast)) {
+    const path = join(UPDATES_DIR, name);
+    if (!existsSync(path) || Bun.file(path).size === 0) return false;
+  }
+  return true;
+}
+
+/** 提取 appcast 当前托管地址引用的 delta 文件名。 */
+function listReferencedDeltaNames(appcast: string): string[] {
+  const names = new Set<string>();
+  for (const match of appcast.matchAll(/\burl="([^"]+\.delta)"/g)) {
+    try {
+      const url = new URL(match[1].replaceAll("&amp;", "&"));
+      if (
+        url.hostname === "github.com" &&
+        url.pathname.includes(`/${GITHUB_REPOSITORY}/releases/download/`)
+      ) {
+        names.add(basename(decodeURIComponent(url.pathname)));
+      }
+    } catch {
+      // 非法 URL 会在 Sparkle 实际读取前由其他 appcast 验证发现。
+    }
+  }
+  return [...names];
 }
 
 /** 验证本地及远端标签都指向当前提交。 */

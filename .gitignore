@@ -5,6 +5,7 @@ build_tmp/
 build_derived/
 dist/
 output/
+release/
 
 # Bun / node deps
 node_modules/

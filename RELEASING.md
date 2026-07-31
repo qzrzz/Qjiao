@@ -18,12 +18,14 @@ Qjiao 完全在本机编译、签名、公证和打包。GitHub 只用于托管 
 https://github.com/qzrzz/Qjiao/releases/latest/download/appcast.xml
 ```
 
-每个 Release 包含四项资产：
+每个 Release 至少包含四项基础资产：
 
 - `qjiao-<version>.dmg`：用户下载和拖入 Applications。
 - `qjiao-<version>.zip`：Sparkle 安装的完整更新。
 - `qjiao-<version>.md`：应用内更新说明。
 - `appcast.xml`：保留历史项目的 Sparkle 更新源。
+- `qjiao-<version>_from_<build>.delta`：从缓存旧版本升级时使用的
+  Sparkle 差分更新；有可用基线时才生成。
 
 ## 一次性本机配置
 
@@ -189,19 +191,23 @@ bun run release
 4. 生成、签名并验证 `qjiao-<version>.dmg`。
 5. 提交 Apple 公证，并给 DMG 和 App 装订票据。
 6. 生成 Sparkle ZIP 与版本更新说明。
-7. 下载上一版 `appcast.xml` 并追加当前版本。
+7. 从本机 `release/` 读取最多三个旧版 ZIP，生成并签名 Sparkle
+   delta，再追加当前版本到本地 appcast。
 8. 自动创建并推送 `v<MARKETING_VERSION>` Git 标签。
-9. 使用本机 `gh` 创建 GitHub Release 并上传四项资产。
+9. 使用本机 `gh` 创建 GitHub Release，上传基础资产和 delta。
+10. 正式发布验证成功后，将当前 ZIP、appcast 和 SHA-256 清单原子保存
+    到 `release/`，并淘汰最旧缓存。
 
 Apple 返回 `Invalid` 时，脚本会立即调用 `notarytool log` 输出具体
 文件和原因，并停止执行，不会继续 staple。
 
-如果同名本地标签已经指向当前提交，脚本会直接复用并推送；如果标签
-指向其他提交，则立即终止，不会移动或覆盖已有标签。
+如果同名标签已指向当前提交，脚本会直接复用；默认允许重复发布同一
+版本并把本地、远端标签移动到当前提交，`FORCE=0` 可以禁止覆盖。
 
 发布完成后检查：
 
-- `https://github.com/qzrzz/Qjiao/releases/latest` 有四项资产。
+- `https://github.com/qzrzz/Qjiao/releases/latest` 有四项基础资产，
+  有旧版本基线时还包含 `.delta`。
 - DMG 能通过 Gatekeeper 并正常启动。
 - 使用旧版 Qjiao 执行 **Check for Updates…** 能看到新版本。
 
@@ -214,7 +220,7 @@ PUBLISH=0 bun run release
 ```
 
 产物位于 `build/`。此模式不需要 `git` 或 `gh`，不会创建标签，也
-不会读取或修改 GitHub。
+不会读取或修改 GitHub；未正式发布的 ZIP 不会进入 `release/` 缓存。
 
 ## 中断后继续发布
 
@@ -258,9 +264,29 @@ bun run release
 验证并复用该 DMG，然后重新请求 secure timestamp，不会重新创建
 磁盘映像。单次执行默认会对 Xcode 归档中的瞬时 CodeSign 失败和 DMG
 timestamp 签名各重试 3 次；归档重试会保留 DerivedData，复用已经完成的编译。
-GitHub Release 的四个资产会逐个上传，日志显示当前文件、大小、序号和
-等待时长。GitHub CLI 本身不提供准确的字节上传百分比。全部上传完成后，
-脚本会显式退出 Draft 状态，并在写入发布断点前复验正式发布状态。
+GitHub Release 的基础资产及差分包会逐个上传，日志显示当前文件、
+大小、序号和等待时长。GitHub CLI 本身不提供准确的字节上传百分比。
+全部上传完成后，脚本会显式退出 Draft 状态，并在写入发布断点前复验
+正式发布状态。
+
+生成 Sparkle 更新时，脚本只读取本机 `release/`，不从 GitHub 下载
+旧 appcast 或 ZIP。缓存保留最近三个成功发布版本，以 build、文件大小
+和 SHA-256 校验；`generate_appcast` 最多生成三个 delta，并将它们与
+完整 ZIP 一起上传。发布成功后才更新缓存，缓存损坏、丢失或没有对应
+旧版本时，Sparkle 会安全回退下载完整 ZIP。
+
+```text
+release/
+├── appcast.xml
+├── manifest.json
+└── archives/
+    ├── qjiao-1.0.3.zip
+    ├── qjiao-1.0.4.zip
+    └── qjiao-1.0.5.zip
+```
+
+`release/` 已由 `.gitignore` 排除。换机或清空此目录后不会自动联网
+恢复历史，需要重新积累成功发布的版本。
 
 升级到断点脚本前没有状态文件时，脚本允许接管版本号和构建号完全
 匹配、App 签名有效且磁盘映像完整的现有产物。后续运行同时要求 Git
@@ -288,9 +314,10 @@ RESET_RELEASE=1 bun run release
 | `SPARKLE_PRIVATE_KEY_FILE`    | 登录钥匙串                 | Sparkle 私钥备份       |
 | `SPARKLE_ACCOUNT`             | `qjiao`                    | Sparkle 钥匙串账户     |
 | `GITHUB_REPOSITORY`           | `qzrzz/Qjiao`              | 上传目标仓库           |
+| `RELEASE_CACHE_DIR`           | `release`                  | 本地 Sparkle 历史目录  |
 | `PUBLISH=0`                   | —                          | 只生成本地产物         |
 | `FORCE=0`                     | `1`                        | 禁止覆盖同版本发布     |
-| `NO_HISTORY=1`                | —                          | 不继承旧 appcast       |
+| `NO_HISTORY=1`                | —                          | 不读取本地更新历史     |
 | `REUSE_BUILD=1`               | —                          | 复用已导出的 Qjiao.app |
 | `RESET_RELEASE=1`             | —                          | 清除断点并完整重建     |
 | `ARCHIVE_RETRIES`             | `3`                        | 归档签名失败尝试次数   |
@@ -303,7 +330,7 @@ REUSE_BUILD=1 bun run release
 ```
 
 脚本会将同名本地和远端标签移动到当前提交，并覆盖该 GitHub Release
-的四项资产与版本说明；不会删除其他标签或 Release。需要临时禁止
+的基础资产、差分包与版本说明；不会删除其他标签或 Release。需要临时禁止
 覆盖时执行：
 
 ```sh

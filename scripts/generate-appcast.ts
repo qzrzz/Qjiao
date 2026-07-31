@@ -55,7 +55,7 @@ export async function generateAppcast(
     : [];
   const accountArgs = options.account ? ["--account", options.account] : [];
   // ZIP 与同名 Markdown 都作为当前 GitHub Release 的资产发布。
-  await $`${gen} ${signingArgs} ${accountArgs} --download-url-prefix ${options.downloadUrlPrefix} --release-notes-url-prefix ${options.downloadUrlPrefix} --maximum-versions 10 ${updatesDir}`;
+  await $`${gen} ${signingArgs} ${accountArgs} --download-url-prefix ${options.downloadUrlPrefix} --release-notes-url-prefix ${options.downloadUrlPrefix} --maximum-versions 10 --maximum-deltas 3 ${updatesDir}`;
   console.log(`Wrote ${join(updatesDir, "appcast.xml")}`);
 }
 
