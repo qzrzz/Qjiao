@@ -9,6 +9,7 @@
   "scripts": {
     "release": "bun run scripts/release.ts",
     "web:build": "cd ./web && npm run build",
+    "web:update-latest": "cd ./web && bun run update-latest",
     "web:preview": "cd ./docs && vite preview ",
     "appcast": "bun run scripts/generate-appcast.ts",
     "vendor:material-icons": "bun run scripts/vendor-material-icons.ts",
