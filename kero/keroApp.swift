@@ -16,6 +16,7 @@ struct keroApp: App {
     @ObservedObject private var l10n = L10n.shared
 
     init() {
+        DisplayCycleLayoutProtection.install()
         TerminalFont.registerBundledFonts()
         TerminalNotificationService.shared.configure()
         // 确保启动时已从 config 同步语言（AppSettings.shared 会触发加载）。
