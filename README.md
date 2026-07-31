@@ -21,6 +21,8 @@
   - **归档全部**（Archive All）：将当前项目列表中所有未归档的项目进行归档。
   - **清理空项目**（Clean Empty Projects）：查找没有任何终端会话且未设置自定义项目名称的项目，弹出确认对话框提示符合条件的项目数并完成清理。
 
+- **AppKit Display Cycle 崩溃防护 (DisplayCycleLayoutProtection)**：拦截并防范在 macOS AppKit `NSDisplayCycleFlush` / hit-testing 期间由 SwiftUI（如 `ScrollViewCommitMutation`）触发 `setNeedsLayout:` -> `_postWindowNeedsLayout` 时抛出 `NSException` 导致 SIGABRT 崩溃的问题。当检测到处于 Display Cycle 或 hitTest 刷帧流程中时，自动将窗口布局请求安全延迟至下一个 RunLoop 循环执行，确保界面与 ScrollView 交互的稳定性。
+
 - **上游功能移植 (Baseline: v0.1.35)**：已同步上游 `egoist/kero` 自 v0.1.19 至 v0.1.35 的核心功能与修复：
   - **分屏实时标题与控制按钮 (Live Pane Headers & Split Controls)**：支持在分屏布局中为每个 Pane 提供实时标题栏与独立分屏/关闭控制按钮（可在 `Settings → Terminal → Features` 中通过「分屏显示标题栏」开启/关闭，默认关闭）。
   - **Ctrl-Tab 按最近使用排序 (MRU Tab Switcher)**：Ctrl-Tab 切换卡片支持按最近使用时间 (MRU) 排序并优先选中上一个使用的标签页（可在 `Settings → Terminal → Features` 中通过「Tab Switcher Sort by Recently」开启/关闭，默认关闭）。
