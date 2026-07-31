@@ -109,7 +109,7 @@ const SIGN_IDENTITY =
 const NOTARY_PROFILE = process.env.NOTARY_PROFILE ?? "NOTARY";
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
 const SPARKLE_ACCOUNT = process.env.SPARKLE_ACCOUNT ?? "qjiao";
-const UPDATE_PIPELINE_VERSION = "3";
+const UPDATE_PIPELINE_VERSION = "4";
 const FORCE_RELEASE = process.env.FORCE !== "0";
 const ARCHIVE_RETRIES = readPositiveInteger(
   "ARCHIVE_RETRIES",
@@ -354,7 +354,14 @@ if (
 
 if (
   await shouldResumeStep(releaseState, "updates-generated", () =>
-    validateUpdateArtifacts(zipPath, notesPath, appcastPath, version),
+    validateUpdateArtifacts(
+      zipPath,
+      notesPath,
+      appcastPath,
+      version,
+      build,
+      tag,
+    ),
   )
 ) {
   say("Resuming: Sparkle ZIP, notes, and appcast are already complete.");
@@ -385,9 +392,17 @@ if (
     downloadUrlPrefix,
     edKeyFile: sparklePrivateKeyFile,
     account: SPARKLE_ACCOUNT,
+    versions: [build],
   });
   if (
-    !(await validateUpdateArtifacts(zipPath, notesPath, appcastPath, version))
+    !(await validateUpdateArtifacts(
+      zipPath,
+      notesPath,
+      appcastPath,
+      version,
+      build,
+      tag,
+    ))
   ) {
     die("generated Sparkle update artifacts failed validation");
   }
@@ -590,6 +605,7 @@ async function prepareLocalDeltaBaselines(currentBuild: string): Promise<void> {
     Bun.file(RELEASE_CACHE_APPCAST_PATH).size > 0
   ) {
     copyFileAtomically(RELEASE_CACHE_APPCAST_PATH, appcastPath);
+    await normalizeCachedAppcastHistory(appcastPath, manifest);
     say(`Using local Sparkle history: ${RELEASE_CACHE_APPCAST_PATH}`);
   }
 
@@ -620,6 +636,41 @@ async function prepareLocalDeltaBaselines(currentBuild: string): Promise<void> {
   }
   if (copied === 0) {
     say("No valid local delta baseline; generating a full update only.");
+  }
+}
+
+/** 修复 GitHub 按 tag 托管时被 generate_appcast 改写的历史条目。 */
+async function normalizeCachedAppcastHistory(
+  path: string,
+  manifest: IReleaseCacheManifest,
+): Promise<void> {
+  const entriesByBuild = new Map(
+    manifest.entries.map((entry) => [entry.build, entry]),
+  );
+  const original = readFileSync(path, "utf8");
+  const normalized = original.replace(
+    /<item>[\s\S]*?<\/item>/g,
+    (item): string => {
+      const build = item.match(
+        /<sparkle:version>([^<]+)<\/sparkle:version>/,
+      )?.[1];
+      const entry = build ? entriesByBuild.get(build) : undefined;
+      if (!entry) return item;
+
+      const archiveUrl =
+        `https://github.com/${GITHUB_REPOSITORY}/releases/download/` +
+        `${encodeURIComponent(entry.tag)}/${encodeURIComponent(entry.archiveName)}`;
+      return item
+        .replace(/<title>[^<]*<\/title>/, `<title>${entry.version}</title>`)
+        .replace(
+          /<sparkle:shortVersionString>[^<]*<\/sparkle:shortVersionString>/,
+          `<sparkle:shortVersionString>${entry.version}</sparkle:shortVersionString>`,
+        )
+        .replace(/(<enclosure\s+url=")[^"]+\.zip(")/, `$1${archiveUrl}$2`);
+    },
+  );
+  if (normalized !== original) {
+    await Bun.write(path, normalized);
   }
 }
 
@@ -1186,13 +1237,22 @@ async function validateUpdateArtifacts(
   notesPath: string,
   appcastPath: string,
   version: string,
+  build: string,
+  tag: string,
 ): Promise<boolean> {
   for (const path of [zipPath, notesPath, appcastPath]) {
     if (!existsSync(path) || Bun.file(path).size === 0) return false;
   }
   const appcast = readFileSync(appcastPath, "utf8");
-  if (!appcast.includes(version)) return false;
-  for (const name of listReferencedDeltaNames(appcast)) {
+  if (
+    !appcast.includes(`<sparkle:version>${build}</sparkle:version>`) ||
+    !appcast.includes(
+      `<sparkle:shortVersionString>${version}</sparkle:shortVersionString>`,
+    )
+  ) {
+    return false;
+  }
+  for (const name of listReferencedDeltaNames(appcast, tag)) {
     const path = join(UPDATES_DIR, name);
     if (!existsSync(path) || Bun.file(path).size === 0) return false;
   }
@@ -1200,16 +1260,25 @@ async function validateUpdateArtifacts(
 }
 
 /** 提取 appcast 当前托管地址引用的 delta 文件名。 */
-function listReferencedDeltaNames(appcast: string): string[] {
+function listReferencedDeltaNames(appcast: string, tag: string): string[] {
   const names = new Set<string>();
   for (const match of appcast.matchAll(/\burl="([^"]+\.delta)"/g)) {
     try {
       const url = new URL(match[1].replaceAll("&amp;", "&"));
+      const parts = url.pathname
+        .split("/")
+        .filter(Boolean)
+        .map(decodeURIComponent);
       if (
         url.hostname === "github.com" &&
-        url.pathname.includes(`/${GITHUB_REPOSITORY}/releases/download/`)
+        parts.length === 6 &&
+        `${parts[0]}/${parts[1]}`.toLowerCase() ===
+          GITHUB_REPOSITORY.toLowerCase() &&
+        parts[2] === "releases" &&
+        parts[3] === "download" &&
+        parts[4] === tag
       ) {
-        names.add(basename(decodeURIComponent(url.pathname)));
+        names.add(parts[5]);
       }
     } catch {
       // 非法 URL 会在 Sparkle 实际读取前由其他 appcast 验证发现。

@@ -11,6 +11,7 @@ export interface IGenerateAppcastOptions {
   downloadUrlPrefix: string;
   edKeyFile?: string;
   account?: string;
+  versions?: string[];
 }
 
 /** 依次从环境变量、PATH 和 Xcode DerivedData 查找 Sparkle 工具。 */
@@ -54,8 +55,12 @@ export async function generateAppcast(
     ? ["--ed-key-file", options.edKeyFile]
     : [];
   const accountArgs = options.account ? ["--account", options.account] : [];
+  const versionArgs =
+    options.versions && options.versions.length > 0
+      ? ["--versions", options.versions.join(",")]
+      : [];
   // ZIP 与同名 Markdown 都作为当前 GitHub Release 的资产发布。
-  await $`${gen} ${signingArgs} ${accountArgs} --download-url-prefix ${options.downloadUrlPrefix} --release-notes-url-prefix ${options.downloadUrlPrefix} --maximum-versions 10 --maximum-deltas 3 ${updatesDir}`;
+  await $`${gen} ${signingArgs} ${accountArgs} ${versionArgs} --download-url-prefix ${options.downloadUrlPrefix} --release-notes-url-prefix ${options.downloadUrlPrefix} --maximum-versions 10 --maximum-deltas 3 ${updatesDir}`;
   console.log(`Wrote ${join(updatesDir, "appcast.xml")}`);
 }
 
