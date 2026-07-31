@@ -155,49 +155,17 @@ struct SystemSnapshot: Equatable {
     var updatedAt: Date?
 }
 
-/// `top` 解析出的瞬时字段（CPU 为主；内存仅作 vm_stat 失败时的回退）。
-private struct TopSample: Equatable {
-    var cpuUsagePercent: Double?
-    var memoryUsedBytes: UInt64?
-    var memoryUnusedBytes: UInt64?
-    var memoryWiredBytes: UInt64?
-    var memoryCompressedBytes: UInt64?
-}
-
-/// `vm_stat` 解析结果：对齐活动监视器的内存分类。
-private struct VmStatSample: Equatable {
-    var pageSize: UInt64
-    var freePages: UInt64
-    var wiredPages: UInt64
-    var purgeablePages: UInt64
-    var anonymousPages: UInt64
-    var fileBackedPages: UInt64
-    /// Pages occupied by compressor（物理占用，非 stored）。
-    var compressorOccupiedPages: UInt64
-
-    /// App 内存 ≈ 匿名页 − 可清除页。
-    var appBytes: UInt64 {
-        let appPages = anonymousPages > purgeablePages
-            ? anonymousPages - purgeablePages
-            : 0
-        return appPages * pageSize
-    }
-
-    var wiredBytes: UInt64 { wiredPages * pageSize }
-    var compressedBytes: UInt64 { compressorOccupiedPages * pageSize }
-    var cachedBytes: UInt64 { fileBackedPages * pageSize }
-    var freeBytes: UInt64 { freePages * pageSize }
-    /// 活动监视器「已使用内存」= App + Wired + Compressed。
-    var usedBytes: UInt64 { appBytes + wiredBytes + compressedBytes }
-}
-
 /// `iostat -Id` 累计字节采样点（约每 30s 一拍）。
 private struct DiskIOCumulativeSample: Equatable {
     var at: Date
     var totalBytes: UInt64
 }
 
-/// 通过命令行采集本机系统信息；不调用 Darwin/IOKit API，便于日后 SSH 复用命令表。
+/// 采集本机系统信息。
+///
+/// CPU / 内存 / 网络 / 磁盘容量 / 代理 / 本机 IP 走原生 Darwin / SystemConfiguration API
+/// （见 `SystemNative`，无子进程、开销极低）；仅 `iostat -Id`（磁盘写入量，30s 一拍）与
+/// `curl`（出口 IP、可达性探测）保留命令执行，便于日后 SSH 复用命令表。
 @MainActor
 final class SystemInfoModel: nonisolated ObservableObject {
     @Published private(set) var snapshot = SystemSnapshot()
@@ -251,12 +219,10 @@ final class SystemInfoModel: nonisolated ObservableObject {
     /// 采样保留略长于窗口，便于取窗口起点基线。
     private static let diskIOSampleRetain: TimeInterval = 120
 
-    private var lastDiskCapacityAt: Date?
-    private var lastProxyAt: Date?
-    private var lastLocalIPAt: Date?
     private var lastPublicIPAt: Date?
-    private var lastMemTotalAt: Date?
     private var cachedMemTotal: UInt64?
+    /// 上一次 CPU 累计 tick（host_statistics），用于两拍差分。
+    private var lastCpuTicks: (user: UInt64, system: UInt64, idle: UInt64, nice: UInt64)?
     /// 各站点历史采样（按 id）。
     private var reachHistory: [UUID: [ReachabilitySample]] = [:]
     /// 各站点最近一次失败原因（成功后仍保留，直到下次失败覆盖）。
@@ -295,7 +261,9 @@ final class SystemInfoModel: nonisolated ObservableObject {
             return
         }
         pollTask = Task { [weak self] in
-            await self?.initializeNetstatBaseline()
+            self?.initializeBaselines()
+            // 首拍留 1s 采样窗口，让 CPU 差分立即有值（原 top -l 2 首显约 1.8s）。
+            try? await Task.sleep(for: .seconds(1))
             await self?.refresh(forceSlow: true)
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
@@ -447,25 +415,20 @@ final class SystemInfoModel: nonisolated ObservableObject {
         defer { isRefreshingIP = false }
 
         let runner = self.runner
-        async let routeResult = optionalRun(runner, ["route", "-n", "get", "default"], timeout: .seconds(2))
-        async let nwiResult = optionalRun(runner, ["scutil", "--nwi"], timeout: .seconds(3))
         async let publicIPResult = optionalRun(runner, ["curl", "-sS", "--connect-timeout", "3", "--max-time", "5", "https://cloudflare.com/cdn-cgi/trace"], timeout: .seconds(6))
-
-        let routeOut = await routeResult
-        let nwiOut = await nwiResult
         let publicIPOut = await publicIPResult
 
         var next = snapshot
 
-        let preferredIF = routeOut.flatMap(Self.parseDefaultRouteInterface)
-        if let nwiOut, let local = Self.parseLocalIPv4(fromNWI: nwiOut, preferredInterface: preferredIF) {
+        // 本机局域网 IP：原生读路由表 + getifaddrs，瞬时完成。
+        let preferredIF = SystemNative.primaryInterface()
+        if let local = SystemNative.localIPv4(preferredInterface: preferredIF) {
             next.localIPv4Address = local.address
             next.localIPv4Interface = local.interface
         } else {
             next.localIPv4Address = nil
             next.localIPv4Interface = nil
         }
-        lastLocalIPAt = Date()
 
         if let publicIPOut, let parsed = Self.parseCloudflareTrace(publicIPOut) {
             next.publicIPv4Address = parsed.ip
@@ -491,13 +454,12 @@ final class SystemInfoModel: nonisolated ObservableObject {
             return
         }
         isRefreshing = true
-        let wantLocalIP = forceSlow || lastLocalIPAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
+        // 出口 IP 仍需联网 curl（15s 节流）；本地 IP 走原生 API，瞬时完成无需节流。
         let wantPublicIP = forceSlow || lastPublicIPAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
-        let refreshingIPThisCycle = wantLocalIP || wantPublicIP
-        if refreshingIPThisCycle { isRefreshingIP = true }
+        if wantPublicIP { isRefreshingIP = true }
 
         defer {
-            if refreshingIPThisCycle { isRefreshingIP = false }
+            if wantPublicIP { isRefreshingIP = false }
             isRefreshing = false
             if pendingForceRefresh {
                 pendingForceRefresh = false
@@ -506,94 +468,65 @@ final class SystemInfoModel: nonisolated ObservableObject {
         }
 
         let runner = self.runner
-        let wantDisk = forceSlow || lastDiskCapacityAt.map { Date().timeIntervalSince($0) >= 10 } ?? true
-        let wantProxy = forceSlow || lastProxyAt.map { Date().timeIntervalSince($0) >= 15 } ?? true
-        let wantMemTotal = cachedMemTotal == nil
-            || lastMemTotalAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
-        // 磁盘写入量：每 30s 一拍（手动/force 可立刻采）。
+        // 磁盘写入量：iostat -Id 每 30s 一拍（手动/force 可立刻采）。
         let wantDiskIO = forceSlow || manual
             || lastDiskIOSampleAt.map { Date().timeIntervalSince($0) >= Self.diskIOSampleInterval } ?? true
 
-        // 并行跑互不依赖的命令，缩短整轮刷新时间。
-        // 网络速率不用 top（累计字节只精确到 G，短间隔差分为 0），改用 netstat -ib。
-        // 内存以 vm_stat 为准（对齐活动监视器）；top 的 PhysMem used 含文件缓存会虚高。
-        async let topResult = optionalRun(runner, ["top", "-l", "2", "-n", "0", "-s", "1"], timeout: .seconds(8))
-        async let vmStatResult = optionalRun(runner, ["vm_stat"], timeout: .seconds(2))
-        async let netstatResult = optionalRun(runner, ["netstat", "-ibn"], timeout: .seconds(3))
-        async let dfResult = wantDisk
-            ? optionalRun(runner, ["df", "-k", "/"], timeout: .seconds(4))
-            : nil
-        // -I：设备累计 MB（瞬时返回）；每 30s 采样一次。
-        async let iostatResult = wantDiskIO
-            ? optionalRun(runner, ["iostat", "-Id"], timeout: .seconds(3))
-            : nil
-        async let proxyResult = wantProxy
-            ? optionalRun(runner, ["scutil", "--proxy"], timeout: .seconds(3))
-            : nil
-        // 本机局域网 IP：默认路由网卡 + scutil --nwi 地址表。
-        async let routeResult = wantLocalIP
-            ? optionalRun(runner, ["route", "-n", "get", "default"], timeout: .seconds(2))
-            : nil
-        async let nwiResult = wantLocalIP
-            ? optionalRun(runner, ["scutil", "--nwi"], timeout: .seconds(3))
-            : nil
-        // 本机出口 IP：请求 Cloudflare trace 获取 ip 与 loc。
+        // 仅剩两个联网 / 低频命令走子进程：Cloudflare trace（出口 IP，15s）与
+        // iostat（磁盘写入量，30s）。其余指标全部由原生 API 采集（SystemNative）。
         async let publicIPResult = wantPublicIP
             ? optionalRun(runner, ["curl", "-sS", "--connect-timeout", "3", "--max-time", "5", "https://cloudflare.com/cdn-cgi/trace"], timeout: .seconds(6))
             : nil
-        async let memTotalResult = wantMemTotal
-            ? optionalRun(runner, ["sysctl", "-n", "hw.memsize"], timeout: .seconds(2))
+        async let iostatResult = wantDiskIO
+            ? optionalRun(runner, ["iostat", "-Id"], timeout: .seconds(3))
             : nil
-        // Swap 用量：与 top 同频；输出形如 total = 1024.00M used = 85.31M …
-        async let swapResult = optionalRun(runner, ["sysctl", "-n", "vm.swapusage"], timeout: .seconds(2))
 
-        let vmStatOut = await vmStatResult
-        let netstatOut = await netstatResult
-        let dfOut = await dfResult
-        let iostatOut = await iostatResult
-        let proxyOut = await proxyResult
-        let routeOut = await routeResult
-        let nwiOut = await nwiResult
         let publicIPOut = await publicIPResult
-        let memTotalOut = await memTotalResult
-        let swapOut = await swapResult
-        let topOut = await topResult
+        let iostatOut = await iostatResult
 
         var next = snapshot
 
-        if let memTotalOut, let total = UInt64(memTotalOut.trimmingCharacters(in: .whitespacesAndNewlines)) {
+        // CPU：host_statistics 两次累计 tick 差分，得到窗口内平均占用率。
+        if let ticks = SystemNative.cpuLoadInfo() {
+            if let previous = lastCpuTicks {
+                let deltaUser = Self.deltaTick(ticks.user, previous.user)
+                let deltaSystem = Self.deltaTick(ticks.system, previous.system)
+                let deltaIdle = Self.deltaTick(ticks.idle, previous.idle)
+                let deltaNice = Self.deltaTick(ticks.nice, previous.nice)
+                let total = deltaUser + deltaSystem + deltaIdle + deltaNice
+                if total > 0 {
+                    let busy = deltaUser + deltaSystem + deltaNice
+                    next.cpuUsagePercent = min(max(Double(busy) / Double(total) * 100, 0), 100)
+                }
+            }
+            lastCpuTicks = ticks
+        }
+
+        // 内存：host_statistics64 → 与活动监视器一致的 Used / App / Wired / Compressed / Cached。
+        if let vm = SystemNative.vmStatistics() {
+            applyVmStatSample(vm, to: &next)
+        }
+
+        if let (used, total) = SystemNative.swapUsage() {
+            next.memorySwapUsedBytes = used
+            next.memorySwapTotalBytes = total
+        }
+
+        if let total = SystemNative.hardwareMemory() {
             cachedMemTotal = total
-            lastMemTotalAt = Date()
             next.memoryTotalBytes = total
         } else if let cached = cachedMemTotal {
             next.memoryTotalBytes = cached
         }
 
-        if let topOut {
-            let sample = Self.parseTop(topOut)
-            applyTopSample(sample, to: &next)
+        if let (total, free) = SystemNative.diskCapacity() {
+            next.diskTotalBytes = total
+            next.diskFreeBytes = free
         }
 
-        // vm_stat 覆盖 top 的 PhysMem used（后者把 Cached Files 算进 used）。
-        if let vmStatOut, let vm = Self.parseVmStat(vmStatOut) {
-            applyVmStatSample(vm, to: &next)
-        }
-
-        if let swapOut, let (used, total) = Self.parseSwapUsage(swapOut) {
-            next.memorySwapUsedBytes = used
-            next.memorySwapTotalBytes = total
-        }
-
-        if let netstatOut, let (inBytes, outBytes) = Self.parseNetstatTotals(netstatOut) {
+        // 网络速率：getifaddrs 网卡累计字节差分（原 netstat -ib）。
+        if let (inBytes, outBytes) = SystemNative.networkCounters() {
             applyNetworkCounters(inBytes: inBytes, outBytes: outBytes, to: &next)
-        }
-
-        if let dfOut {
-            if let (total, free) = Self.parseDf(dfOut) {
-                next.diskTotalBytes = total
-                next.diskFreeBytes = free
-            }
-            lastDiskCapacityAt = Date()
         }
 
         // 累计 MB → 最近 1 分钟量 + 会话累计 + 累计时长；并追加折线点。
@@ -608,25 +541,17 @@ final class SystemInfoModel: nonisolated ObservableObject {
             next.diskWriteElapsedSeconds = snapshot.diskWriteElapsedSeconds
         }
 
-        if let proxyOut {
-            next.proxy = Self.parseProxy(proxyOut)
-            lastProxyAt = Date()
-        }
+        next.proxy = SystemNative.proxyInfo()
 
-        if wantLocalIP {
-            let preferredIF = routeOut.flatMap(Self.parseDefaultRouteInterface)
-            if let nwiOut, let local = Self.parseLocalIPv4(fromNWI: nwiOut, preferredInterface: preferredIF) {
-                next.localIPv4Address = local.address
-                next.localIPv4Interface = local.interface
-            } else {
-                // 无有效局域网 IPv4：清空，避免残留离线地址。
-                next.localIPv4Address = nil
-                next.localIPv4Interface = nil
-            }
-            lastLocalIPAt = Date()
+        // 本机局域网 IP：默认路由网卡（路由表）+ getifaddrs 地址表。
+        let preferredIF = SystemNative.primaryInterface()
+        if let local = SystemNative.localIPv4(preferredInterface: preferredIF) {
+            next.localIPv4Address = local.address
+            next.localIPv4Interface = local.interface
         } else {
-            next.localIPv4Address = snapshot.localIPv4Address
-            next.localIPv4Interface = snapshot.localIPv4Interface
+            // 无有效局域网 IPv4：清空，避免残留离线地址。
+            next.localIPv4Address = nil
+            next.localIPv4Interface = nil
         }
 
         if wantPublicIP {
@@ -686,10 +611,8 @@ final class SystemInfoModel: nonisolated ObservableObject {
         let proxy: SystemProxyInfo
         if let existing = snapshot.proxy {
             proxy = existing
-        } else if let out = await optionalRun(runner, ["scutil", "--proxy"], timeout: .seconds(3)) {
-            proxy = Self.parseProxy(out)
         } else {
-            proxy = Self.directProxyInfo
+            proxy = SystemNative.proxyInfo()
         }
         let targets = sites.filter { pending.contains($0.id) }
         let runner = self.runner
@@ -782,33 +705,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         return result.stdout
     }
 
-    private func applyTopSample(_ sample: TopSample, to snapshot: inout SystemSnapshot) {
-        if let cpu = sample.cpuUsagePercent {
-            snapshot.cpuUsagePercent = cpu
-        }
-        // 内存字段仅作 vm_stat 失败时的回退；成功后会被 applyVmStatSample 覆盖。
-        // 注意：top 的 PhysMem used ≈ 活动监视器 Used + Cached Files，会虚高。
-        if let used = sample.memoryUsedBytes {
-            snapshot.memoryUsedBytes = used
-        }
-        if let wired = sample.memoryWiredBytes {
-            snapshot.memoryWiredBytes = wired
-        }
-        if let compressed = sample.memoryCompressedBytes {
-            snapshot.memoryCompressedBytes = compressed
-        }
-        // 优先 sysctl 总量；否则 used+unused 回退。
-        if snapshot.memoryTotalBytes == nil,
-           let used = sample.memoryUsedBytes,
-           let unused = sample.memoryUnusedBytes {
-            snapshot.memoryTotalBytes = used + unused
-        }
-
-        // 网络速率改由 netstat 累计字节差分，见 applyNetworkCounters。
-        // 磁盘写入量改由 iostat -Id 每 30s 采样，见 applyDiskIOSample。
-    }
-
-    /// 用 vm_stat 写入与活动监视器一致的 Used / App / Wired / Compressed / Cached。
+    /// 用 host_statistics64 写入与活动监视器一致的 Used / App / Wired / Compressed / Cached。
     private func applyVmStatSample(_ sample: VmStatSample, to snapshot: inout SystemSnapshot) {
         snapshot.memoryUsedBytes = sample.usedBytes
         snapshot.memoryAppBytes = sample.appBytes
@@ -858,16 +755,26 @@ final class SystemInfoModel: nonisolated ObservableObject {
         snapshot.diskWriteBytesLastMinute = Double(totalBytes - windowBaseline.totalBytes)
     }
 
-    /// 在刚打开 System 面板时优先采样一次 netstat 奠定计数基线，并初始化网速为 0 B/s，避免显示破折号 "—"。
-    private func initializeNetstatBaseline() async {
-        guard lastNetIn == nil, let out = await optionalRun(runner, ["netstat", "-ibn"], timeout: .seconds(2)) else { return }
-        if let (inBytes, outBytes) = Self.parseNetstatTotals(out) {
+    /// 在刚打开 System 面板时奠定原生采样基线：网卡累计字节 + CPU tick，
+    /// 让首轮刷新即可差分出速率 / 占用率，而不是显示破折号 "—"。
+    private func initializeBaselines() {
+        if lastNetIn == nil, let (inBytes, outBytes) = SystemNative.networkCounters() {
             lastNetIn = inBytes
             lastNetOut = outBytes
             lastNetAt = Date()
             snapshot.netDownloadBytesPerSec = 0
             snapshot.netUploadBytesPerSec = 0
         }
+        if lastCpuTicks == nil {
+            lastCpuTicks = SystemNative.cpuLoadInfo()
+        }
+    }
+
+    /// UInt32 tick 差分包回绕（host_cpu_load_info 的 tick 为 natural_t）。
+    private nonisolated static func deltaTick(_ current: UInt64, _ previous: UInt64) -> UInt64 {
+        current >= previous
+            ? current - previous
+            : current + (UInt64(UInt32.max) + 1) - previous
     }
 
     /// 用 netstat 精确字节计数做差分；in→下载，out→上传。
@@ -898,176 +805,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         }
     }
 
-    // MARK: - top / vm_stat 解析
-
-    private nonisolated static func parseTop(_ output: String) -> TopSample {
-        let sample = lastTopSample(in: output)
-        var result = TopSample()
-
-        if let idle = firstMatch(
-            #"CPU usage:\s*[\d.]+%\s*user,\s*[\d.]+%\s*sys,\s*([\d.]+)%\s*idle"#,
-            in: sample
-        ).flatMap(Double.init) {
-            result.cpuUsagePercent = min(max(100 - idle, 0), 100)
-        }
-
-        // PhysMem: 35G used (4653M wired, 16G compressor), 104M unused.
-        // 仅作 vm_stat 不可用时的回退；used 含文件缓存，偏高于活动监视器。
-        if let used = parseByteQuantity(
-            firstMatch(#"PhysMem:\s*([\d.]+[KMGT]?)\s*used"#, in: sample)
-        ) {
-            result.memoryUsedBytes = used
-        }
-        if let unused = parseByteQuantity(
-            firstMatch(#"PhysMem:.*?,\s*([\d.]+[KMGT]?)\s*unused"#, in: sample)
-        ) {
-            result.memoryUnusedBytes = unused
-        }
-        if let wired = parseByteQuantity(
-            firstMatch(#"\(([\d.]+[KMGT]?)\s*wired"#, in: sample)
-        ) {
-            result.memoryWiredBytes = wired
-        }
-        if let compressed = parseByteQuantity(
-            firstMatch(#"wired,\s*([\d.]+[KMGT]?)\s*compressor"#, in: sample)
-        ) {
-            result.memoryCompressedBytes = compressed
-        }
-
-        return result
-    }
-
-    /// 解析 `vm_stat`，按活动监视器口径计算 App / Wired / Compressed / Used。
-    private nonisolated static func parseVmStat(_ output: String) -> VmStatSample? {
-        // 首行：Mach Virtual Memory Statistics: (page size of 16384 bytes)
-        let pageSize = firstMatch(
-            #"page size of (\d+)"#,
-            in: output
-        ).flatMap(UInt64.init) ?? 16_384
-
-        func pages(_ label: String) -> UInt64? {
-            // 标签可能带引号，如 "Translation faults"；页数后常有句点。
-            firstMatch(
-                #"\#(label):\s+(\d+)"#,
-                in: output
-            ).flatMap(UInt64.init)
-        }
-
-        guard let free = pages("Pages free"),
-              let wired = pages("Pages wired down"),
-              let purgeable = pages("Pages purgeable"),
-              let anonymous = pages("Anonymous pages"),
-              let fileBacked = pages("File-backed pages"),
-              let compressor = pages("Pages occupied by compressor")
-        else {
-            return nil
-        }
-
-        return VmStatSample(
-            pageSize: pageSize,
-            freePages: free,
-            wiredPages: wired,
-            purgeablePages: purgeable,
-            anonymousPages: anonymous,
-            fileBackedPages: fileBacked,
-            compressorOccupiedPages: compressor
-        )
-    }
-
-    /// 解析 `sysctl -n vm.swapusage`：`total = 1024.00M  used = 85.31M  free = …`
-    private nonisolated static func parseSwapUsage(_ output: String) -> (used: UInt64, total: UInt64)? {
-        let total = parseByteQuantity(
-            firstMatch(#"total\s*=\s*([\d.]+[KMGT]?)"#, in: output)
-        )
-        let used = parseByteQuantity(
-            firstMatch(#"used\s*=\s*([\d.]+[KMGT]?)"#, in: output)
-        )
-        guard let used, let total else { return nil }
-        return (used, total)
-    }
-
-    /// `route -n get default` → `interface: en0`
-    private nonisolated static func parseDefaultRouteInterface(_ output: String) -> String? {
-        firstMatch(#"interface:\s*(\S+)"#, in: output)
-    }
-
-    /// 从 `scutil --nwi` 取局域网 IPv4；优先默认路由网卡，否则取表中第一项。
-    private nonisolated static func parseLocalIPv4(
-        fromNWI output: String,
-        preferredInterface: String?
-    ) -> (interface: String, address: String)? {
-        // 形如：
-        //      en6 : flags …
-        //            address    : 192.168.50.203
-        var pairs: [(iface: String, address: String)] = []
-        var currentIF: String?
-        for line in output.split(whereSeparator: \.isNewline).map(String.init) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if let iface = firstMatch(#"^([A-Za-z0-9]+)\s*:\s*flags"#, in: trimmed) {
-                currentIF = iface
-                continue
-            }
-            if let iface = currentIF,
-               let addr = firstMatch(#"^address\s*:\s*([0-9.]+)"#, in: trimmed),
-               !addr.hasPrefix("127.") {
-                pairs.append((iface, addr))
-                currentIF = nil
-            }
-        }
-        guard !pairs.isEmpty else { return nil }
-        if let preferred = preferredInterface,
-           let match = pairs.first(where: { $0.iface == preferred }) {
-            return (match.iface, match.address)
-        }
-        return (pairs[0].iface, pairs[0].address)
-    }
-
-    /// 汇总 `netstat -ib` 各物理/虚拟链路的 Ibytes/Obytes。
-    /// 排除 lo* 回环与 bridge*/vmenet*/gif*/stf* 等虚拟链路。
-    private nonisolated static func parseNetstatTotals(_ output: String) -> (inBytes: UInt64, outBytes: UInt64)? {
-        var totalIn: UInt64 = 0
-        var totalOut: UInt64 = 0
-        var saw = false
-
-        for line in output.split(whereSeparator: \.isNewline) {
-            let raw = String(line)
-            guard raw.contains("<Link") else { continue }
-            let cols = raw.split(whereSeparator: \.isWhitespace).map(String.init)
-            guard let name = cols.first else { continue }
-            // 排除回环与虚拟 bridge/vmenet/gif/stf
-            if name.hasPrefix("lo") || name.hasPrefix("bridge") || name.hasPrefix("vmenet") || name.hasPrefix("gif") || name.hasPrefix("stf") {
-                continue
-            }
-            // 列从右往左固定：Coll Obytes Oerrs Opkts Ibytes Ierrs Ipkts …
-            guard cols.count >= 7,
-                  let ibytes = UInt64(cols[cols.count - 5]),
-                  let obytes = UInt64(cols[cols.count - 2]) else { continue }
-            totalIn += ibytes
-            totalOut += obytes
-            saw = true
-        }
-        return saw ? (totalIn, totalOut) : nil
-    }
-
-    private nonisolated static func lastTopSample(in output: String) -> String {
-        let parts = output.components(separatedBy: "Processes:")
-        guard parts.count > 1 else { return output }
-        return "Processes:" + parts[parts.count - 1]
-    }
-
-    // MARK: - df / iostat / proxy / curl
-
-    private nonisolated static func parseDf(_ output: String) -> (total: UInt64, free: UInt64)? {
-        let lines = output.split(whereSeparator: \.isNewline).map(String.init)
-        guard lines.count >= 2 else { return nil }
-        // df 路径过长时第二行可能折行，合并空白列。
-        let body = lines.dropFirst().joined(separator: " ")
-        let cols = body.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard cols.count >= 4,
-              let totalK = UInt64(cols[1]),
-              let availK = UInt64(cols[3]) else { return nil }
-        return (totalK * 1024, availK * 1024)
-    }
+    // MARK: - iostat / curl 解析
 
     /// 解析 `iostat -Id`：各盘累计 MB 之和 → 字节。
     /// 格式示例：`KB/t  xfrs  MB` 三列一组；首行数据为启动以来累计。
@@ -1091,93 +829,6 @@ final class SystemInfoModel: nonisolated ObservableObject {
         }
         guard sumMB >= 0 else { return nil }
         return UInt64((sumMB * 1_024 * 1_024).rounded())
-    }
-
-    private nonisolated static func parseProxy(_ output: String) -> SystemProxyInfo {
-        func intValue(_ key: String) -> Int? {
-            firstMatch(#"\#(key)\s*:\s*(\d+)"#, in: output).flatMap(Int.init)
-        }
-        func stringValue(_ key: String) -> String? {
-            firstMatch(#"\#(key)\s*:\s*(.+)"#, in: output)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        func proxyURL(_ enableKey: String, _ hostKey: String, _ portKey: String, scheme: String) -> String? {
-            guard intValue(enableKey) == 1,
-                  let host = stringValue(hostKey),
-                  let port = intValue(portKey),
-                  !host.isEmpty else { return nil }
-            return "\(scheme)://\(host):\(port)"
-        }
-
-        let http = proxyURL("HTTPEnable", "HTTPProxy", "HTTPPort", scheme: "http")
-        let https = proxyURL("HTTPSEnable", "HTTPSProxy", "HTTPSPort", scheme: "http")
-        let socks = proxyURL("SOCKSEnable", "SOCKSProxy", "SOCKSPort", scheme: "socks5h")
-        let pacCandidate = stringValue("ProxyAutoConfigURLString")
-        let pac = intValue("ProxyAutoConfigEnable") == 1 && pacCandidate?.isEmpty == false
-            ? pacCandidate
-            : nil
-        let wpad = intValue("ProxyAutoDiscoveryEnable") == 1
-        let bypassHosts = Self.proxyExceptions(in: output)
-        let excludeSimple = intValue("ExcludeSimpleHostnames") == 1
-        let enabled = http != nil || https != nil || socks != nil || pac != nil || wpad
-
-        let summary: String
-        if let pac {
-            summary = "PAC \(pac)"
-        } else if wpad {
-            summary = "WPAD"
-        } else if let endpoint = https {
-            summary = "HTTPS \(Self.proxyEndpoint(endpoint))"
-        } else if let endpoint = http {
-            summary = "HTTP \(Self.proxyEndpoint(endpoint))"
-        } else if let endpoint = socks {
-            summary = "SOCKS \(Self.proxyEndpoint(endpoint))"
-        } else {
-            summary = "Off"
-        }
-        return SystemProxyInfo(
-            enabled: enabled,
-            summary: summary,
-            httpProxyURL: http,
-            httpsProxyURL: https,
-            socksProxyURL: socks,
-            pacURL: pac,
-            wpadEnabled: wpad,
-            bypassHosts: bypassHosts,
-            excludeSimpleHostnames: excludeSimple
-        )
-    }
-
-    private nonisolated static var directProxyInfo: SystemProxyInfo {
-        SystemProxyInfo(
-            enabled: false,
-            summary: "Off",
-            httpProxyURL: nil,
-            httpsProxyURL: nil,
-            socksProxyURL: nil,
-            pacURL: nil,
-            wpadEnabled: false,
-            bypassHosts: [],
-            excludeSimpleHostnames: false
-        )
-    }
-
-    private nonisolated static func proxyEndpoint(_ url: String) -> String {
-        url.range(of: "://").map { String(url[$0.upperBound...]) } ?? url
-    }
-
-    /// 从 scutil 的 ExceptionsList 中提取常见的域名绕过规则。
-    private nonisolated static func proxyExceptions(in output: String) -> [String] {
-        guard let start = output.range(of: "ExceptionsList : <array> {") else { return [] }
-        let tail = output[start.upperBound...]
-        guard let end = tail.range(of: "}") else { return [] }
-        return tail[..<end.lowerBound]
-            .split(whereSeparator: \.isNewline)
-            .compactMap { line in
-                firstMatch(#"^\s*\d+\s*:\s*(.+?)\s*$"#, in: String(line))?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
     }
 
     private nonisolated static func probeOne(
@@ -1278,36 +929,7 @@ final class SystemInfoModel: nonisolated ObservableObject {
         )
     }
 
-    // MARK: - 单位解析
-
-    private nonisolated static func firstMatch(_ pattern: String, in text: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return nil
-        }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        guard let match = regex.firstMatch(in: text, options: [], range: range),
-              match.numberOfRanges > 1,
-              let r = Range(match.range(at: 1), in: text) else { return nil }
-        return String(text[r])
-    }
-
-    private nonisolated static func parseByteQuantity(_ raw: String?) -> UInt64? {
-        guard let raw else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let last = trimmed.last else { return nil }
-        let multipliers: [Character: Double] = [
-            "K": 1_024,
-            "M": 1_024 * 1_024,
-            "G": 1_024 * 1_024 * 1_024,
-            "T": 1_024 * 1_024 * 1_024 * 1_024,
-        ]
-        if let mult = multipliers[Character(String(last).uppercased())] {
-            let numPart = trimmed.dropLast()
-            guard let value = Double(numPart) else { return nil }
-            return UInt64(value * mult)
-        }
-        return UInt64(trimmed)
-    }
+    // MARK: - Cloudflare trace / 国旗解析
 
     /// 解析 `cloudflare.com/cdn-cgi/trace` 输出，提取出口 `ip` 与位置代码 `loc`，并将 `loc` 转换为 Emoji 国旗图标。
     /// - Parameter text: cloudflare trace 返回的 Key-Value 文本
