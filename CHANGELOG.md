@@ -33,7 +33,12 @@ set in the Xcode project.
 
 ## [1.0.7]
 
+### Added
+
+- Add pi as ai provider.
+
 ### Fixed
 
 - Fix startup crash possible.
 - Fix zsh integration `builtin cat` error (`no such builtin: cat`) shown on every prompt when an idle title file exists.
+
