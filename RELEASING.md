@@ -275,6 +275,11 @@ GitHub Release 的基础资产及差分包会逐个上传，日志显示当前�
 完整 ZIP 一起上传。发布成功后才更新缓存，缓存损坏、丢失或没有对应
 旧版本时，Sparkle 会安全回退下载完整 ZIP。
 
+由于 GitHub 按 tag 分目录托管 Release 资产，脚本只让
+`generate_appcast` 新增当前 build，并在生成前按缓存清单复原历史
+版本的 ZIP URL；历史条目不会被改写到当前 tag。产物复验只要求当前
+tag 新生成的 delta 位于 `build/updates`，历史 delta 继续使用原 Release。
+
 ```text
 release/
 ├── appcast.xml
