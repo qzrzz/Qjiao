@@ -27,4 +27,13 @@ set in the Xcode project.
  ### Added
 
  - Projects Add button and menu.
- - AI completed change submission》
+ - AI completed change submission
+
+
+
+## [1.0.7]
+
+### Fixed
+
+- Fix startup crash possible.
+
