@@ -15,6 +15,7 @@
 
 ## 增加功能
 
+- **System 面板原生 API 采集（消除 CLI 高 CPU）**：System 面板的 CPU / 内存 / 网络速率 / 磁盘容量 / Swap / 系统代理 / 本机 IP 由「每 2s spawn 10+ 子进程解析 CLI 输出」改为直接调用原生 Darwin / SystemConfiguration API（`host_statistics`、`host_statistics64`、`sysctlbyname`、`statfs`、`NET_RT_IFLIST2`、`NET_RT_DUMP`、`getifaddrs`、`SCDynamicStoreCopyProxies`），不创建子进程、开销低 2–3 个数量级。原先每 2s 一拍的 `top -l 2`（单次约 0.75s CPU、约占单核 37%）已移除，CPU 占用率改为 host_statistics 累计 tick 差分（与活动监视器同口径）；网络计数改用 `NET_RT_IFLIST2` 64 位计数，规避 `getifaddrs` 的 `if_data` 计数超过 2^32 后被截断的问题（与 `netstat -ib` 完全一致）；系统代理直接读 `SCDynamicStoreCopyProxies`；本机 IP 读路由表 `NET_RT_DUMP`（`SCDynamicStoreCopyPrimaryInterface` 已从新版 SDK 移除）。仅保留 `iostat -Id`（磁盘写入量，30s 一拍）与 `curl`（出口 IP、可达性探测）两个低频命令，SSH 命令表复用能力保留。新增 `kero/SystemNative.swift`。
 - **AI headless provider 新增 pi（`pi -p`）支持**：`LocalAI` 统一模块新增 `pi` 提供器，通过 `pi -p` / `--print` 非交互模式调用 pi 编码助手；安装探测覆盖 npm 全局安装（`~/.npm-global/bin`、`~/.bun/bin` 等）与 curl 安装脚本（无系统 node 时自带独立 node 于 `~/.local/share/pi-node/current/bin`，已并入 PATH 增强）；默认带 `--no-session` 不落盘会话，`disableTools` 映射为 `--no-tools`，`model` 透传 `--model`，`autoApprove` 映射为 `--approve`（信任项目本地 AGENTS.md / CLAUDE.md 等资源）；AI 工具列表（Agent 交接用 `AIToolRegistry`）同步加入 `pi` CLI 项。
 - **终端 zsh 集成 idle title 报错修复**：修复 `_qjiao_get_idle_title_pattern` 误将 `cat` 当作 zsh 内建命令调用（`builtin cat`），导致终端每次出现提示符时输出 `no such builtin: cat` 的问题；改为通过 `command cat` 读取 `~/.config/qjiao/idle_title`，可正常绕过用户自定义的别名与函数。
 

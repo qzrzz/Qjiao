@@ -281,9 +281,19 @@ struct RightSidebarView: View {
         }
         // 进程、端口与文件信息继续按需轮询；Git 在侧栏打开时持续保持状态更新以精确显示角标。
         .onReceive(refreshTimer) { _ in syncModels(refreshGit: true) }
+        // 回到前台：恢复 System 轮询（面板可见时）并刷新 Git 角标。
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification
-        )) { _ in refreshGitForExternalEvent() }
+        )) { _ in
+            syncSystemPolling()
+            refreshGitForExternalEvent()
+        }
+        // 退到后台：立即停止 System 轮询，消除 top 时代的后台空转（原生采集同样无需后台运行）。
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didResignActiveNotification
+        )) { _ in
+            systemInfo.setActive(false)
+        }
         .onChange(of: manager.isPanelVisible) {
             syncModels(reloadActivePanel: manager.isPanelVisible)
             syncSystemPolling()
@@ -377,9 +387,10 @@ struct RightSidebarView: View {
         syncModels()
     }
 
-    /// 仅在右侧栏可见、下半区展开且选中 System 时轮询 CLI 指标。
+    /// 仅在右侧栏可见、下半区展开、选中 System 且 App 处于前台时轮询 CLI 指标。
     private func syncSystemPolling() {
-        let active = manager.isPanelVisible
+        let active = NSApplication.shared.isActive
+            && manager.isPanelVisible
             && !bottomCollapsed
             && bottomTab == .system
         systemInfo.setActive(active)
