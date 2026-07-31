@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "bun run scripts/build.ts",
+    "update-latest": "bun run scripts/update-latest-json.ts",
     "preview": "vite preview",
     "lint": "eslint ."
   },

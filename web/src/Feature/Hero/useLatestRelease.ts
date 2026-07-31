@@ -52,12 +52,13 @@ export function useLatestRelease(
 
   useEffect(() => {
     let isMounted = true;
-    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
+    const baseUrl = import.meta.env?.BASE_URL || "./";
+    const jsonUrl = `${baseUrl.endsWith("/") ? baseUrl : baseUrl + "/"}latest.json`;
 
-    fetch(apiUrl)
+    fetch(jsonUrl)
       .then((res) => {
         if (!res.ok) {
-          throw new Error(`请求 GitHub API 失败: ${res.status}`);
+          throw new Error(`读取静态 latest.json 失败: ${res.status}`);
         }
         return res.json() as Promise<GitHubReleaseResponse>;
       })
@@ -93,7 +94,7 @@ export function useLatestRelease(
         });
       })
       .catch(() => {
-        // 请求 API 失败时（如限流或离线），静默退回到默认 Releases 地址
+        // 请求静态文件失败时（如离线或环境配置异常），静默退回到默认 Releases 地址
         if (isMounted) {
           setInfo({
             downloadUrl: defaultReleaseUrl,

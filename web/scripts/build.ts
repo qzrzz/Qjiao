@@ -122,9 +122,24 @@ export async function buildAndPublishDocs(): Promise<void> {
   }
 
   // 5. 创建 .nojekyll 解决 GitHub Pages Jekyll 校验限制
-  console.log(chalk.blue("\n⚙️  步骤 5/5: 创建 GitHub Pages .nojekyll 文件..."));
+  console.log(chalk.blue("\n⚙️  步骤 5/6: 创建 GitHub Pages .nojekyll 文件..."));
   writeFileSync(resolve(DOCS_DIR, ".nojekyll"), "");
   console.log(chalk.green("✔ 已生成 .nojekyll 文件\n"));
+
+  // 6. 确保 latest.json 静态数据文件存在
+  console.log(chalk.blue("📄 步骤 6/6: 检查静态 latest.json 发布文件..."));
+  const docsLatestJsonPath = resolve(DOCS_DIR, "latest.json");
+  if (!existsSync(docsLatestJsonPath)) {
+    const fallbackLatestJson = {
+      tag_name: "",
+      html_url: "https://github.com/qzrzz/Qjiao/releases/latest",
+      assets: [],
+    };
+    writeFileSync(docsLatestJsonPath, JSON.stringify(fallbackLatestJson, null, 2) + "\n");
+    console.log(chalk.yellow(`⚠️ 未找到现存 latest.json，已写入默认保底静态页数据: ${chalk.gray("docs/latest.json")}`));
+  } else {
+    console.log(chalk.green(`✔ 静态 Release 数据页构建就绪: ${chalk.gray("docs/latest.json")}`));
+  }
 
   console.log(
     chalk.bold.bgGreen.black(
