@@ -532,10 +532,8 @@ private struct SidebarProjectRow: View {
         Button(L10n.t("Change Icon…")) {
             isIconPickerPresented = true
         }
-
-        Divider()
         Toggle(L10n.t("Use Automatic Title"), isOn: $project.useAutoTitle)
-       
+        Divider()
         // ── AI：名称 + 描述 + 图标
         if aiMetaTasks.isRunning(project.id) {
             Button {
@@ -1165,6 +1163,7 @@ private struct SidebarMoreMenu: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .tooltip(L10n.t("More Options"))
     }
