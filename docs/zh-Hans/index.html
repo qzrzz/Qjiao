@@ -18,7 +18,34 @@
     <link rel="icon" href="../qjiao-icon.webp" />
     <link rel="apple-touch-icon" href="../qjiao-icon.webp" />
     <title>Qjiao - 面向新手的终端工作区</title>
-    <script type="module" crossorigin src="../assets/index-DOJ5TmMY.js"></script>
+    <script>
+      (function () {
+        try {
+          var path = window.location.pathname;
+          var isExplicitSubpath = path.indexOf("/zh-Hans") !== -1 || path.indexOf("/ja") !== -1;
+          if (isExplicitSubpath) {
+            var currentLang = path.indexOf("/zh-Hans") !== -1 ? "zh-Hans" : "ja";
+            localStorage.setItem("qjiao_lang", currentLang);
+            return;
+          }
+          var saved = localStorage.getItem("qjiao_lang");
+          var targetLang = saved;
+          if (!targetLang) {
+            var langs = navigator.languages || (navigator.language ? [navigator.language] : []);
+            for (var i = 0; i < langs.length; i++) {
+              var l = (langs[i] || "").toLowerCase();
+              if (l.indexOf("zh") === 0) { targetLang = "zh-Hans"; break; }
+              if (l.indexOf("ja") === 0) { targetLang = "ja"; break; }
+              if (l.indexOf("en") === 0) { targetLang = "en"; break; }
+            }
+          }
+          if (targetLang && targetLang !== "en" && (targetLang === "zh-Hans" || targetLang === "ja")) {
+            window.location.replace("./" + targetLang + "/" + window.location.search + window.location.hash);
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="../assets/index-OmTO3heI.js"></script>
     <link rel="stylesheet" crossorigin href="../assets/index-BPpDD1B0.css">
   
     <meta name="description" content="结合 TUI 与 GUI 的优势 — 享受 TUI 的强大功能，摒弃传统终端的门槛。原生、免费、开源。">
