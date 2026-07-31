@@ -191,7 +191,7 @@ export const sectionsContentMap: Record<SupportedLang, SectionConfig[]> = {
     {
       id: "future",
       title: "新手友好",
-      description: "零陡峭学习曲线的终端工作区。",
+      description: "不用畏惧终端的复杂性",
       cards: [
         {
           id: "free-cur",
