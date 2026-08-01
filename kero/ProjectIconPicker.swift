@@ -139,13 +139,14 @@ enum ProjectIconThumbnailCache {
         templates.removeAllObjects()
     }
 
-    static func key(for preset: ProjectPresetIcon, pointSize: CGFloat) -> String {
+    static func key(for preset: ProjectPresetIcon, pointSize: CGFloat, isDarkMode: Bool = false) -> String {
         let sizeKey = String(format: "%.1f", pointSize)
+        let darkSuffix = isDarkMode ? "@dark" : ""
         switch preset {
         case .material(let name):
-            return "m:\(name)@\(sizeKey)"
+            return "m:\(name)@\(sizeKey)\(darkSuffix)"
         case .bundled(let fileName):
-            return "b:\(fileName)@\(sizeKey)"
+            return "b:\(fileName)@\(sizeKey)\(darkSuffix)"
         }
     }
 
@@ -171,8 +172,8 @@ enum ProjectIconThumbnailCache {
 
     /// 主线程解析 URL + template 标记；磁盘解码放到后台。
     @MainActor
-    static func load(preset: ProjectPresetIcon, pointSize: CGFloat) async -> (NSImage?, Bool) {
-        let cacheKey = key(for: preset, pointSize: pointSize)
+    static func load(preset: ProjectPresetIcon, pointSize: CGFloat, isDarkMode: Bool = false) async -> (NSImage?, Bool) {
+        let cacheKey = key(for: preset, pointSize: pointSize, isDarkMode: isDarkMode)
         if let hit = cached(for: cacheKey) {
             return (hit.image, hit.isTemplate)
         }
@@ -186,9 +187,25 @@ enum ProjectIconThumbnailCache {
                 resolved = nil
             }
         case .bundled(let fileName):
-            if let url = TerminalAppIconCatalog.shared.fileURLForBundledFile(named: fileName) {
-                let isTemplate = TerminalAppIconCatalog.shared.isBundledFileTemplate(fileName)
-                resolved = (url, isTemplate)
+            if let source = TerminalAppIconCatalog.shared.bundledIconSource(named: fileName) {
+                let effectiveSource: TerminalAppIconSource
+                switch source {
+                case .imageFile(let path, let darkPath):
+                    if isDarkMode, let darkPath {
+                        effectiveSource = .imageFile(path: darkPath, darkPath: nil)
+                    } else {
+                        effectiveSource = .imageFile(path: path, darkPath: nil)
+                    }
+                case .material:
+                    effectiveSource = source
+                }
+                if case .imageFile(let finalPath, _) = effectiveSource {
+                    let url = URL(fileURLWithPath: finalPath)
+                    let isTemplate = TerminalAppIconCatalog.shared.isBundledFileTemplate(fileName)
+                    resolved = (url, isTemplate)
+                } else {
+                    resolved = nil
+                }
             } else {
                 resolved = nil
             }
@@ -220,9 +237,14 @@ struct ProjectPresetIconImage: View {
     /// 网格等大批量展示时开启惰性加载。
     var lazyLoad: Bool = false
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var loadedImage: NSImage?
     @State private var isTemplate = false
     @State private var didFail = false
+
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
 
     var body: some View {
         Group {
@@ -249,7 +271,7 @@ struct ProjectPresetIconImage: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
-        .task(id: ProjectIconThumbnailCache.key(for: preset, pointSize: size)) {
+        .task(id: ProjectIconThumbnailCache.key(for: preset, pointSize: size, isDarkMode: isDarkMode)) {
             loadedImage = nil
             didFail = false
             if lazyLoad {
@@ -266,14 +288,14 @@ struct ProjectPresetIconImage: View {
     }
 
     private var currentCacheHit: (image: NSImage, isTemplate: Bool)? {
-        let key = ProjectIconThumbnailCache.key(for: preset, pointSize: size)
+        let key = ProjectIconThumbnailCache.key(for: preset, pointSize: size, isDarkMode: isDarkMode)
         return ProjectIconThumbnailCache.cached(for: key)
     }
 
     private var displayImage: NSImage? {
         if let hit = currentCacheHit { return hit.image }
         if !lazyLoad {
-            return Self.nsImage(for: preset, pointSize: size)
+            return Self.nsImage(for: preset, pointSize: size, isDarkMode: isDarkMode)
         }
         return loadedImage
     }
@@ -287,13 +309,13 @@ struct ProjectPresetIconImage: View {
     }
 
     private func loadSyncIfNeeded() {
-        let key = ProjectIconThumbnailCache.key(for: preset, pointSize: size)
+        let key = ProjectIconThumbnailCache.key(for: preset, pointSize: size, isDarkMode: isDarkMode)
         if let hit = ProjectIconThumbnailCache.cached(for: key) {
             loadedImage = hit.image
             isTemplate = hit.isTemplate
             return
         }
-        if let image = Self.nsImage(for: preset, pointSize: size) {
+        if let image = Self.nsImage(for: preset, pointSize: size, isDarkMode: isDarkMode) {
             let template = Self.isTemplate(preset)
             ProjectIconThumbnailCache.store(image, isTemplate: template, for: key)
             loadedImage = image
@@ -304,13 +326,13 @@ struct ProjectPresetIconImage: View {
     }
 
     private func loadAsync() async {
-        let key = ProjectIconThumbnailCache.key(for: preset, pointSize: size)
+        let key = ProjectIconThumbnailCache.key(for: preset, pointSize: size, isDarkMode: isDarkMode)
         if let hit = ProjectIconThumbnailCache.cached(for: key) {
             loadedImage = hit.image
             isTemplate = hit.isTemplate
             return
         }
-        let result = await ProjectIconThumbnailCache.load(preset: preset, pointSize: size)
+        let result = await ProjectIconThumbnailCache.load(preset: preset, pointSize: size, isDarkMode: isDarkMode)
         if Task.isCancelled { return }
         if let image = result.0 {
             loadedImage = image
@@ -321,14 +343,15 @@ struct ProjectPresetIconImage: View {
     }
 
     @MainActor
-    static func nsImage(for preset: ProjectPresetIcon, pointSize: CGFloat) -> NSImage? {
+    static func nsImage(for preset: ProjectPresetIcon, pointSize: CGFloat, isDarkMode: Bool = false) -> NSImage? {
         switch preset {
         case .material(let name):
             return MaterialFileIconCatalog.shared.image(named: name, pointSize: pointSize)
         case .bundled(let fileName):
             return TerminalAppIconCatalog.shared.imageForBundledFile(
                 named: fileName,
-                pointSize: pointSize
+                pointSize: pointSize,
+                isDarkMode: isDarkMode
             )
         }
     }

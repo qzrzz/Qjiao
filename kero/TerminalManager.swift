@@ -1634,6 +1634,7 @@ final class TerminalManager: nonisolated ObservableObject {
             project.isArchived = config.isArchived ?? false
             project.aiWritingLanguage = config.aiWritingLanguage
                 .flatMap(AIWritingLanguage.init(rawValue:))
+            project.customGitPath = config.customGitPath
 
             // 为补全的项目分配默认终端会话
             project.newSession(directory: project.projectDirectory.isEmpty ? nil : project.projectDirectory)
@@ -1648,5 +1649,48 @@ final class TerminalManager: nonisolated ObservableObject {
             selectedProjectID = projects.first?.id
         }
         return true
+    }
+
+    /// 为当前选中的项目指定 Git 仓库路径
+    func selectCustomGitRepositoryPath() {
+        guard let project = selectedProject else { return }
+        let openPanel = NSOpenPanel()
+        openPanel.canChooseDirectories = true
+        openPanel.canChooseFiles = false
+        openPanel.allowsMultipleSelection = false
+        openPanel.prompt = L10n.t("Select")
+        openPanel.title = L10n.t("Select Git Repository Directory")
+
+        let initialDir: String
+        if let customGitPath = project.customGitPath, project.isValidCustomGitPath(customGitPath) {
+            initialDir = customGitPath
+        } else if !project.projectDirectory.isEmpty, FileManager.default.fileExists(atPath: project.projectDirectory) {
+            initialDir = project.projectDirectory
+        } else {
+            initialDir = NSHomeDirectory()
+        }
+        openPanel.directoryURL = URL(fileURLWithPath: initialDir, isDirectory: true)
+
+        openPanel.begin { [weak project] response in
+            guard response == .OK, let selectedURL = openPanel.url, let project else { return }
+            let selectedPath = selectedURL.path
+
+            if project.isValidCustomGitPath(selectedPath) {
+                project.customGitPath = selectedPath
+            } else {
+                let alert = NSAlert()
+                alert.messageText = L10n.t("Invalid Git Repository Path")
+                alert.informativeText = L10n.t("The selected directory must be within the project directory.")
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: L10n.t("OK"))
+                alert.runModal()
+            }
+        }
+    }
+
+    /// 清除当前选中的项目的指定 Git 仓库路径
+    func clearCustomGitRepositoryPath() {
+        guard let project = selectedProject else { return }
+        project.customGitPath = nil
     }
 }

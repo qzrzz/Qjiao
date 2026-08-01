@@ -254,6 +254,17 @@ struct GitPanel: View {
             } label: {
                 Label(L10n.t("Reveal Repository in Finder"), systemImage: "finder")
             }
+            Divider()
+            Button(L10n.t("Specify Git Repository Path…")) {
+                selectCustomGitRepositoryPath()
+            }
+            .disabled(project == nil)
+            if project?.customGitPath != nil {
+                Button(L10n.t("Clear Custom Git Repository Path")) {
+                    clearCustomGitRepositoryPath()
+                }
+                .disabled(project == nil)
+            }
         }
     }
 
@@ -1067,30 +1078,102 @@ struct GitPanel: View {
     }
 
     private var notRepository: some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 12) {
             Spacer()
             Image(systemName: "arrow.triangle.branch")
                 .font(SidebarTypography.emptyIcon())
                 .foregroundStyle(.quaternary)
-            VStack(spacing: 2) {
+            VStack(spacing: 4) {
                 Text(L10n.t("No Git Repository"))
                     .font(SidebarTypography.body(.medium))
-                Text(L10n.t("Initialize the terminal’s current directory to start tracking changes."))
+                if let customGitPath = project?.customGitPath, project?.isValidCustomGitPath(customGitPath) == true {
+                    Text(L10n.format("Specified path: %@", (customGitPath as NSString).lastPathComponent))
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                } else {
+                    Text(L10n.t("Initialize the terminal’s current directory to start tracking changes."))
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            VStack(spacing: 8) {
+                Button(L10n.t("Initialize Repository")) {
+                    model.initializeRepository()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .tint(Color(nsColor: Theme.cursor))
+                .disabled(model.rootPath.isEmpty || model.isBusy)
+
+                Button(L10n.t("Specify Git Repository Directory…")) {
+                    selectCustomGitRepositoryPath()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .disabled(project == nil || model.isBusy)
+
+                if project?.customGitPath != nil {
+                    Button(L10n.t("Clear Custom Git Repository Path")) {
+                        clearCustomGitRepositoryPath()
+                    }
+                    .buttonStyle(.plain)
                     .font(SidebarTypography.caption())
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+                }
             }
-            Button(L10n.t("Initialize Repository")) {
-                model.initializeRepository()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .tint(Color(nsColor: Theme.cursor))
-            .disabled(model.rootPath.isEmpty || model.isBusy)
             Spacer()
         }
         .padding(.horizontal, 18)
         .frame(maxWidth: .infinity)
+    }
+
+    private func selectCustomGitRepositoryPath() {
+        guard let project else { return }
+        let openPanel = NSOpenPanel()
+        openPanel.canChooseDirectories = true
+        openPanel.canChooseFiles = false
+        openPanel.allowsMultipleSelection = false
+        openPanel.prompt = L10n.t("Select")
+        openPanel.title = L10n.t("Select Git Repository Directory")
+
+        let initialDir: String
+        if let customGitPath = project.customGitPath, project.isValidCustomGitPath(customGitPath) {
+            initialDir = customGitPath
+        } else if !project.projectDirectory.isEmpty, FileManager.default.fileExists(atPath: project.projectDirectory) {
+            initialDir = project.projectDirectory
+        } else {
+            initialDir = NSHomeDirectory()
+        }
+        openPanel.directoryURL = URL(fileURLWithPath: initialDir, isDirectory: true)
+
+        openPanel.begin { response in
+            guard response == .OK, let selectedURL = openPanel.url else { return }
+            let selectedPath = selectedURL.path
+
+            if project.isValidCustomGitPath(selectedPath) {
+                project.customGitPath = selectedPath
+                model.sync(root: selectedPath)
+            } else {
+                let alert = NSAlert()
+                alert.messageText = L10n.t("Invalid Git Repository Path")
+                alert.informativeText = L10n.t("The selected directory must be within the project directory.")
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: L10n.t("OK"))
+                alert.runModal()
+            }
+        }
+    }
+
+    private func clearCustomGitRepositoryPath() {
+        guard let project else { return }
+        project.customGitPath = nil
+        let fallbackRoot = session?.currentDirectoryPath.isEmpty == false
+            ? session!.currentDirectoryPath
+            : (project.projectDirectory.isEmpty ? NSHomeDirectory() : project.projectDirectory)
+        model.sync(root: fallbackRoot)
     }
 
     private func statusFailure(_ message: String) -> some View {

@@ -24,6 +24,8 @@ struct ProjectConfig: Codable {
     var isArchived: Bool? = nil
     /// 可选 AI 写作语言覆盖（`AIWritingLanguage.rawValue`）；nil 表示跟随全局设置。
     var aiWritingLanguage: String? = nil
+    /// 可选指定 Git 仓库路径（位于项目目录的子文件夹或项目目录本身）。
+    var customGitPath: String? = nil
 }
 
 /// 项目配置目录存储。

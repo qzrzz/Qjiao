@@ -236,11 +236,30 @@ struct LauncherFrameReader: View {
 struct StartCommandIcon: View {
     let command: ProjectLaunchCommand
 
+    /// 提取终端命令对应的 CLI 工具图标来源（如 pi、bun、npm、cargo、claude 等），自适应深浅外观。
+    private var cliSource: TerminalAppIconSource? {
+        let trimmed = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        var candidates: [String] = []
+        for token in tokens {
+            if token.contains("=") && !token.contains("/") { continue }
+            if token.hasPrefix("-") { continue }
+            candidates.append(token)
+            if candidates.count >= 3 { break }
+        }
+        return TerminalAppIconCatalog.shared.source(forProcessNames: candidates)
+    }
+
     var body: some View {
         switch command.type {
         case .terminal:
-            Image(systemName: command.type.systemImage)
-                .foregroundStyle(Color(nsColor: Theme.cursor))
+            if let source = cliSource {
+                TerminalAppIconView(source: source, size: 14, isSelected: true)
+            } else {
+                Image(systemName: command.type.systemImage)
+                    .foregroundStyle(Color(nsColor: Theme.cursor))
+            }
 
         case .application:
             if !command.target.isEmpty {

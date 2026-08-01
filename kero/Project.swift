@@ -227,6 +227,12 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             saveConfig()
         }
     }
+    /// 可选指定 Git 仓库路径（位于项目目录 `projectDirectory` 的子文件夹中或项目目录本身）。
+    @Published var customGitPath: String? {
+        didSet {
+            saveConfig()
+        }
+    }
     /// User-configured actions displayed in the right sidebar's Start panel.
     @Published var launchCommands: [ProjectLaunchCommand] = []
     @Published var tabs: [PaneTab] = []
@@ -284,11 +290,29 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         let source: PanelRootSource
     }
 
+    /// 校验指定的 Git 路径是否为合法且位于项目目录内（必须在项目路径的子文件夹中，或是项目目录本身）。
+    func isValidCustomGitPath(_ path: String) -> Bool {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !projectDirectory.isEmpty else { return false }
+        let standardizedProjDir = URL(fileURLWithPath: projectDirectory).standardizedFileURL.path
+        let standardizedPath = URL(fileURLWithPath: trimmed).standardizedFileURL.path
+
+        guard standardizedPath == standardizedProjDir || standardizedPath.hasPrefix(standardizedProjDir + "/") else {
+            return false
+        }
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: standardizedPath, isDirectory: &isDir) && isDir.boolValue
+    }
+
     /// 计算 Files 与 Git 面板应锚定的根目录路径及其来源。
     func panelRoot(
         followingSessionAt cwd: String,
         foregroundAt foregroundCwd: String? = nil
     ) -> PanelRootResult {
+        if let customGitPath, isValidCustomGitPath(customGitPath) {
+            return PanelRootResult(root: customGitPath, source: .pinned)
+        }
+
         if !projectDirectory.isEmpty,
            FileManager.default.fileExists(atPath: projectDirectory) {
             return PanelRootResult(root: projectDirectory, source: .pinned)
@@ -349,7 +373,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
                 projectDirectory: projectDirectory,
                 launchCommands: launchCommands,
                 isArchived: isArchived,
-                aiWritingLanguage: aiWritingLanguage?.rawValue
+                aiWritingLanguage: aiWritingLanguage?.rawValue,
+                customGitPath: customGitPath
             ),
             for: id
         )
@@ -376,6 +401,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         if launchCommands != (config.launchCommands ?? []) { launchCommands = config.launchCommands ?? [] }
         let aiLang = config.aiWritingLanguage.flatMap(AIWritingLanguage.init(rawValue:))
         if aiWritingLanguage != aiLang { aiWritingLanguage = aiLang }
+        if customGitPath != config.customGitPath { customGitPath = config.customGitPath }
     }
 
     /// 历史回调：曾用于「终端 drop 文件夹 → 创建项目」。
