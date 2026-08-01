@@ -919,6 +919,10 @@ struct AIDropdownNSButton: NSViewRepresentable {
             item.isEnabled = true
             item.representedObject = tool.id
             item.image = tool.iconImage(size: 16)
+            // macOS 27 起 AppKit 默认可能隐藏菜单项图标；这里显式要求始终显示。
+            if #available(macOS 27.0, *) {
+                item.preferredImageVisibility = .visible
+            }
             item.state = (tool.id == preferredToolId) ? .on : .off
             menu.addItem(item)
         }
@@ -1035,6 +1039,10 @@ struct EditorDropdownNSButton: NSViewRepresentable {
                 item.isEnabled = true
                 item.representedObject = editor.bundleId
                 item.image = editor.iconImage(size: 16)
+                // macOS 27 起 AppKit 默认可能隐藏菜单项图标；这里显式要求始终显示。
+                if #available(macOS 27.0, *) {
+                    item.preferredImageVisibility = .visible
+                }
                 item.state = (editor.bundleId == preferredBundleId) ? .on : .off
                 menu.addItem(item)
             }

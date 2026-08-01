@@ -66,8 +66,9 @@ struct AITool: Identifiable, Equatable {
         case .cli:
             guard let cmd = cliCommand else { return nil }
             // 尝试通过 TerminalAppIconCatalog 读取配置的专属图标（如 material icon / 本地图标文件）
+            let prefersLight = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua
             if let source = TerminalAppIconCatalog.shared.source(forProcessName: cmd),
-               let rawIcon = TerminalAppIconCatalog.shared.image(for: source, pointSize: size) {
+               let rawIcon = TerminalAppIconCatalog.shared.image(for: source, pointSize: size, prefersLight: prefersLight) {
                 return rawIcon.resizedHighQuality(to: targetSize)
             }
             return nil
