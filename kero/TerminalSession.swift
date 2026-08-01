@@ -32,6 +32,9 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private(set) var hasShownPrompt = false
     /// 最近一次向 PTY 注入命令的时间；脚本状态判定以它而非任务创建时刻为基准。
     private(set) var lastCommandInjectedAt: Date?
+    /// 待运行命令（zsh 集成执行路径）；哨兵到达时用于判断 eval 是否已接管。
+    private var pendingCommand: String?
+    private var pendingCommandWritten = false
 
     /// 项目拖拽回调缓存，延迟装载时应用给新建的 terminalView。
     var pendingOnOpenProjectDirectory: ((URL) -> Bool)? {
@@ -130,7 +133,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         terminalView.configuration = TerminalSurfaceOptions(
             backend: .exec,
             workingDirectory: launchWorkingDirectory,
-            envVars: Self.surfaceEnvironment(shellPath: shellPath)
+            envVars: Self.surfaceEnvironment(
+                shellPath: shellPath,
+                pendingCommandFile: pendingCommandFileURL
+            )
         )
         terminalView.controller = controller
         if let pendingOnOpenProjectDirectory {
@@ -308,7 +314,8 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
                 }
             } else {
                 // 首选：写入 pending 文件，由 zsh 集成在首个提示符时由 shell 自身执行。
-                writePendingCommand(text)
+                pendingCommand = text
+                pendingCommandWritten = writePendingCommand(text)
                 scheduleZshInjectionFallback(text)
             }
             return
@@ -318,10 +325,22 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     }
 
     /// 将待运行命令写入 launch 目录的 pending_command 文件。
-    private func writePendingCommand(_ text: String) {
-        guard let url = pendingCommandFileURL else { return }
+    /// - Returns: 是否写入成功。
+    @discardableResult
+    private func writePendingCommand(_ text: String) -> Bool {
+        guard let url = pendingCommandFileURL else {
+            NSLog("qjiao: pending command skipped (no launch dir)")
+            return false
+        }
         let command = text.hasSuffix("\n") ? String(text.dropLast()) : text
-        try? command.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try command.write(to: url, atomically: true, encoding: .utf8)
+            NSLog("qjiao: pending command written: %@", url.path)
+            return true
+        } catch {
+            NSLog("qjiao: failed to write pending command: %@", error.localizedDescription)
+            return false
+        }
     }
 
     /// 兜底：若 zsh 集成未生效（提示符哨兵迟迟不来），按旧启发式注入命令。
@@ -329,9 +348,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private func scheduleZshInjectionFallback(_ text: String) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
             guard let self, !self.hasExited, !self.hasShownPrompt else { return }
-            guard let url = self.pendingCommandFileURL,
-                  FileManager.default.fileExists(atPath: url.path) else { return }
-            try? FileManager.default.removeItem(at: url)
+            if let url = self.pendingCommandFileURL {
+                try? FileManager.default.removeItem(at: url)
+            }
+            NSLog("qjiao: zsh integration not detected, PTY injection fallback")
             self.sendCommandWhenReady(text, attempt: 0)
         }
     }
@@ -685,7 +705,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         }
     }
 
-    private static func surfaceEnvironment(shellPath: String) -> [String: String] {
+    private static func surfaceEnvironment(
+        shellPath: String,
+        pendingCommandFile: URL?
+    ) -> [String: String] {
         var environment = [
             "TERM": "xterm-256color",
             "COLORTERM": "truecolor",
@@ -702,6 +725,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
                 ? "0" : "1"
             environment["QJIAO_ORIGINAL_ZDOTDIR"] = processEnvironment["ZDOTDIR"] ?? ""
             environment["ZDOTDIR"] = integrationDirectory
+            // 告诉 zsh 集成待运行命令文件的位置（首个提示符时读取执行）。
+            if let pendingCommandFile {
+                environment["QJIAO_PENDING_COMMAND_FILE"] = pendingCommandFile.path
+            }
             // 只向本应用新建的 zsh 注入此变量；不会改动用户系统终端的环境。
             if let idleTitle = AppSettings.shared.zshIdleTitleStyle.environmentValue {
                 environment["ZSH_THEME_TERM_TITLE_IDLE"] = idleTitle
@@ -827,8 +854,29 @@ extension TerminalSession: TerminalSurfaceTitleDelegate {
     func terminalDidChangeTitle(_ title: String) {
         guard !title.isEmpty else { return }
         // zsh 集成的首个提示符哨兵：仅作为“shell 已就绪”信号，不作为标签标题。
+        // 哨兵即首个提示符时刻——zsh 集成会在同一 precmd 中执行 pending 命令，
+        // 以此为注入基准，避免状态判定在命令开始前就把脚本标记为已完成。
         if title == "qjiao-prompt-ready" {
             hasShownPrompt = true
+            lastCommandInjectedAt = Date()
+            // 集成已到首个提示符；若 pending 文件未被消费（eval 未执行，例如
+            // QJIAO_PENDING_COMMAND_FILE 未传到 shell），此时 shell 已就绪，
+            // 改用 PTY 注入兜底，避免命令永远不执行。
+            if let command = pendingCommand {
+                let consumed = pendingCommandWritten
+                    && !(pendingCommandFileURL.flatMap { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                if !consumed {
+                    pendingCommand = nil
+                    if let url = pendingCommandFileURL {
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                    NSLog("qjiao: pending command not consumed by shell, PTY injection")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                        guard let self, !self.hasExited else { return }
+                        self.sendCommand(command)
+                    }
+                }
+            }
             return
         }
         self.title = title

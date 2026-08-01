@@ -20,6 +20,14 @@ if [[ -o interactive && -z "${_qjiao_semantic_prompt_loaded-}" ]]; then
         builtin local prompt_start=$'%{\e]133;A;cl=line\a%}'
         builtin local prompt_end=$'%{\e]133;B\a%}'
 
+        # 先消费待运行命令（先删文件再 eval：哨兵到达宿主时文件已移除，宿主据此判断
+        # 集成是否已接管执行，避免与宿主 PTY 注入重复执行）。
+        builtin local pending_cmd=""
+        if [[ -n "${QJIAO_PENDING_COMMAND_FILE-}" && -r "$QJIAO_PENDING_COMMAND_FILE" ]]; then
+            pending_cmd=$(command cat "$QJIAO_PENDING_COMMAND_FILE" 2>/dev/null)
+            command rm -f "$QJIAO_PENDING_COMMAND_FILE"
+        fi
+
         # 首个提示符就绪标记：宿主应用据此得知登录 shell 已可安全接收命令，
         # 避免在 shell 初始化期间注入的命令被回显但不执行。
         if (( ! _qjiao_prompt_ready_emitted )); then
@@ -27,22 +35,16 @@ if [[ -o interactive && -z "${_qjiao_semantic_prompt_loaded-}" ]]; then
             _qjiao_prompt_ready_emitted=1
         fi
 
-        # 首个提示符就绪后执行宿主待运行命令（pending_command 文件）。
-        # 由 shell 自身执行而非向 PTY 注入字节，彻底避免与登录 shell 初始化竞争。
-        if [[ -n "${QJIAO_PENDING_COMMAND_FILE-}" && -r "$QJIAO_PENDING_COMMAND_FILE" ]]; then
-            builtin local pending_cmd
-            pending_cmd=$(command cat "$QJIAO_PENDING_COMMAND_FILE" 2>/dev/null)
-            command rm -f "$QJIAO_PENDING_COMMAND_FILE"
-            if [[ -n "$pending_cmd" ]]; then
-                # 回显命令本身（视觉上等同用户输入后回车）
-                builtin print -rn -- "${pending_cmd}"$'\n'
-                # 命令开始/结束报告，保持宿主对命令完成状态的跟踪（133;D）
-                builtin print -rn -- $'\e]133;C\a'
-                builtin local pending_status=0
-                builtin eval "$pending_cmd"
-                pending_status=$?
-                builtin print -rn -- $'\e]133;D;'"$pending_status"$'\a'
-            fi
+        # 由 shell 自身执行待运行命令（而非向 PTY 注入字节），彻底避免与初始化竞争。
+        if [[ -n "$pending_cmd" ]]; then
+            # 回显命令本身（视觉上等同用户输入后回车）
+            builtin print -rn -- "${pending_cmd}"$'\n'
+            # 命令开始/结束报告，保持宿主对命令完成状态的跟踪（133;D）
+            builtin print -rn -- $'\e]133;C\a'
+            builtin local pending_status=0
+            builtin eval "$pending_cmd"
+            pending_status=$?
+            builtin print -rn -- $'\e]133;D;'"$pending_status"$'\a'
         fi
 
         if (( _qjiao_command_active )); then
