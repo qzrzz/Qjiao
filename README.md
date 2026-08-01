@@ -15,7 +15,14 @@
 
 ## 增加功能
 
+- **项目指定 Git 路径与 Git 无参考体验优化**：
+  - **项目指定 Git 路径**：在项目配置中支持指定自定义 Git 仓库路径（`customGitPath`，存储在项目配置 `config.json` 中），路径必须位于项目根目录的子文件夹或项目目录本身中。当未指定时继续走默认判定逻辑。
+  - **Git 菜单项增补**：在 Git 面板顶部菜单（`ellipsis`）以及系统顶栏 `Git` 菜单中添加「指定 Git 仓库路径…」功能；若当前项目已指定 Git 路径，还会添加「清除指定 Git 仓库设置」选项，便于随时恢复默认逻辑。
+  - **Git 无参考体验优化**：在未初始化或未检测到 Git 仓库的无参考界面中，将「初始化仓库」按钮扩大为标准突出样式，并新增「指定 Git 仓库文件夹…」按钮，点击弹出文件夹选择框（默认初始路径为项目目录），方便快速指定并跟踪子仓库或微服务仓库。
 - **文本编辑 ⌘Z 撤销崩溃修复（悬垂撤销记录）**：修复 Note 笔记与 Git 提交信息编辑器在 ⌘Z 撤销时偶发崩溃（`-[_NSUndoStack popAndInvoke]` 中 `objc_msgSend` 命中已释放对象的悬垂指针，SIGSEGV / PAC failure）。两个 `NSTextView` 编辑器此前沿响应链复用窗口共享的 `NSUndoManager`，编辑器随项目切换 / 面板开关 / 提交完成频繁销毁重建后，共享撤销栈仍残留指向已销毁编辑器的记录，下一次 ⌘Z 即触发；现改为每个编辑器实例独享 `UndoManager`（与 STTextView 文件编辑器同策略），随视图一起销毁，杜绝悬垂记录。同时输入法组合（marked text）期间不再整段写回外部文本，避免打断组合与输入上下文撤销登记。
+- **Project 打开按钮与预置 CLI 图标深色/浅色自适应**：
+  - **打开按钮 CLI 图标自动关联**：Project 面板快捷打开按钮（Project Launchers）对于终端类命令（如 `pi`、`bun`、`npm`、`cargo`、`claude` 等），自动从命令行匹配对应的 CLI 工具图标（`TerminalAppIconView`），无需手动选择。
+  - **深色/浅色外观动态响应**：`TerminalAppIconCatalog` 新增 `bundledFileToDarkPath` 映射与 `isDarkMode` 参数，预置图标与打开按钮 CLI 图标均能响应系统 / 应用的 `@Environment(\.colorScheme)`，在深色外观下自动加载 `iconDark` 变体（如 `pi-logo-dark.svg`），浅色外观下恢复浅色变体，即时无缝刷新。
 - **终端应用图标支持深色/浅色双变体**：`apps.json` 条目新增可选 `iconDark` 字段（`icons/` 下的深色模式变体文件名，与 `icon` 配对）；应用处于深色外观时自动使用深色变体，浅色外观用回 `icon`（如 pi 图标 `pi-logo-light.svg` / `pi-logo-dark.svg`），外观切换即时刷新，图标缓存按实际路径区分。用户侧 `terminal-app-icons.json` 同样支持。
 - **Project 面板脚本运行的命令注入与端口绑定修复**：修复点击运行 NPM / Gradle / Cargo 等脚本时偶发「命令填入终端但不执行、需手动回车」的问题。旧逻辑在启动 shim 写入 `shell.pid` 后固定等 0.1s 就向 PTY 注入命令，遇到 zsh 慢启动（插件 / compinit 等）时字节落在登录 shell 初始化窗口内，被回显但不执行；现在**改为让 shell 自身执行命令**：应用把命令写入该 session launch 目录的 `pending_command` 文件（`QJIAO_PENDING_COMMAND_FILE` 环境变量），zsh 集成在**首个提示符**的 `_qjiao_precmd` 中读取并 `eval` 执行（视觉上先回显命令文本，等价于用户输入后回车），同时发出 OSC 133 C/D 保持命令完成状态跟踪；首个提示符还会发一次性 OSC 2 哨兵 `qjiao-prompt-ready`（不显示为标签标题），应用据此确认 shell 就绪并作为脚本状态判定基准；8s 兜底：集成失效（哨兵迟迟不来）时移除 pending 文件并按旧启发式注入，避免命令永远不执行或重复执行。同时修复运行后端口/浏览器按钮不即时出现的问题：① 脚本运行后等新 session 的 shell pid 就绪即发通知（`.qjiaoSidebarShellDidAttach`）触发侧栏立即重扫，进程/端口采集马上包含新 shell，不再等 2s 轮询或切换标签；② `checkPackageScriptStatus` 的完成判定改为以**命令实际注入时刻**（`lastCommandInjectedAt`）而非任务创建时刻为基准，避免 shell 启动慢时记录被过早标记 idle 导致端口永不绑定；③ 修复 `ProjectPanelModel.refreshProcesses` 采集任务被取消时 `isRefreshingProcesses` 卡在 true、后续轮询被永久跳过的问题。
 - **Files 面板目录内容缓存与后台扫描（大量文件不再卡顿）**：`FileTreeModel` 由「每次展开/折叠全量重扫磁盘」改为「目录内容缓存 + 指纹校验 + 后台扫描」：每个目录扫描结果（含 contentModificationDate 指纹）缓存于内存，展开/折叠只扫变化的目录，折叠再展开缓存命中不重扫；目录指纹在主线程一次轻量 stat 校验，外部新增/删除文件（终端 mkdir/touch/rm 等）触发对应目录自动重扫；失效目录的 readdir + stat 全部移出主线程（`Task.detached(priority: .utility)`），扫描期间显示行内 loading 占位行；扫描改为一次 `contentsOfDirectory` 预取属性（每文件 1 次 stat，替代旧的 fileExists + attributesOfItem 两次 stat），路径统一字符串拼接避免 `/var` → `/private/var` realpath 不一致导致展开失效；排序在主线程展平时进行（size 排序依赖目录体积缓存，排序切换无需失效缓存）；root 切换整体清缓存并按 generation 丢弃在飞扫描结果。
@@ -168,7 +175,7 @@
 - Files / CWD 与 Note 的本地快捷键按真实键盘焦点隔离：未获焦的可见侧栏不参与窗口的 key-equivalent 处理；终端、编辑器或文本输入控件获焦时不再被侧栏残留点击状态、鼠标悬停或可见的 Note 抢占，方向键及文件操作键仅作用于当前焦点区域。Files 的 `⌘F` 按焦点形成三态操作：文件树打开 Filter、Filter 输入框切换至 Search、Search 主输入框关闭 Search 并返回文件树；该循环不作用于 CWD 或其他区域。
 - 统一 chrome 字号体系（`SidebarTypography`）：左侧项目栏、右侧边栏 Start / Files / CWD / Git / Info 与顶栏 Tabs 共用 title / body / secondary / caption 等角色；列表与标签主文字统一为 13，正文字号不低于 11 以提高可读性。
 - Start 面板「Add Launcher」按钮加大（顶栏 + 与空状态主按钮）。
-- 右侧面板上下分区框架：上半保留 Start/Files/Git 等；中间可拖分割（默认 70/30，双击恢复）；下半区顶部为 System / Note tabs（最小宽 75、宽度随内容），可收起到仅显示 tabs（双击底栏切换收起/展开）。
+- 右侧面板上下分区框架：上半保留 Start/Files/Git 等；中间可拖分割（默认 70/30，双击恢复）；下半区顶部为 System / Note tabs（最小宽 75、宽度随内容），可收起到仅显示 tabs（单击 tab 切换收起/展开，或双击底栏切换）。
 - System 面板通过命令行采集主机信息（CPU%、内存、磁盘可用/总量、磁盘传输量、网络上下行、本机局域网 IP、系统代理、Google/Baidu/Cloudflare/GitHub 可达性）；不显示温度；并行 CLI 轮询、超时杀进程、手动刷新；预留 CLI runner 以便日后 SSH 远程。
 - System 内存指标与活动监视器对齐：用 `vm_stat` 计算 Used = App + Wired + Compressed（不含文件缓存）；tooltip 展示 App / Wired / Compressed / Cached / Free；`top` PhysMem 仅作回退。
 - Note 面板：按项目的纯文本草稿编辑器（自动换行、⌘F 查找）；内容防抖保存到 `~/.config/qjiao/projects/{projectId}/note.txt`（Debug 为 `qjiao-dev`），切换项目 / 收起面板 / 隐藏侧栏时立即落盘。
@@ -181,7 +188,7 @@
 - 顶栏 Tabs（含 Tab 总览、重命名与分栏拖拽缩略图）对打开的文件 / Diff 使用与文件树相同的 Material Icon；终端 Tab 默认使用 SF Symbol，仅右侧栏发起的命令显示转圈，匹配到终端应用时仍优先显示应用图标。
 - 终端应用图标识别：检测前台进程（如 `agy` / `grok` / `codex` / `claude` / `rsbuild` / `node` 等）并切换 Tab 图标；图标来源为 Material Icon Theme 与本地文件（`icon` 字段指定 `icons/` 下的 `.png` / `.svg` 等文件名，如 `antigravity-color.png`）。配置见 `kero/TerminalAppIcons/apps.json`，用户可在 `~/.config/qjiao/terminal-app-icons.json` 覆盖；`bun run vendor:terminal-app-icons` 可同步 Iconify 资源。枚举前台进程组内全部 PID 并解析 argv（支持 `npm run dev` → `node …/rsbuild`）。
 - 左侧面板底部 Theme 按钮支持左键点击立即切换主题（Light ↔ Dark，System 模式按系统实际外观反转），右键菜单提供主题选择、分割线及 Appearance Settings 快捷入口。
-- 右侧面板下半区底部 Tabs（System/Note 选项卡栏）的最小高度调整为 36，并优化展开逻辑（若之前拖拽将高度缩至最小，点击展开/双击 tabs 时自动恢复至默认 70/30 高度）。
+- 右侧面板下半区底部 Tabs（System/Note 选项卡栏）的最小高度调整为 36，并优化展开逻辑（若之前拖拽将高度缩至最小，点击 tab 展开/双击底栏时自动恢复至默认 70/30 高度）。
 - 图片查看器增强：
   - 放缩 > 100% 自动无缝切换像素插值模式（`.none`），≤ 100% 自动高质量插值（`.high`）。
   - 支持以鼠标指针位置为中心的视口滚轮放缩与 Cmd/Shift 快捷平移；支持原图与对比图左右双图叠加对比与竖线分界。

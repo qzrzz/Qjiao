@@ -603,17 +603,17 @@ struct RightSidebarView: View {
         .frame(height: Self.bottomBarHeight)
         .background { WindowDragArea() }
         .contentShape(Rectangle())
-        // 与 tab 按钮并存：双击底栏任意处（含标签）切换收起/展开。
+        // 与 tab 按钮并存：双击底栏空白处切换收起/展开。
         .simultaneousGesture(
             TapGesture(count: 2).onEnded {
                 toggleBottomCollapsed()
             }
         )
-        .help(bottomCollapsed ? "Double-click to expand" : "Double-click to collapse")
-        .accessibilityHint(bottomCollapsed ? "Double-click to expand panel" : "Double-click to collapse panel")
+        .help(bottomCollapsed ? L10n.t("Click to expand") : L10n.t("Click tab to collapse"))
+        .accessibilityHint(bottomCollapsed ? L10n.t("Click to expand panel") : L10n.t("Click active tab to collapse panel"))
     }
 
-    /// 底栏右侧收起/展开，行为与双击 tabs 一致。
+    /// 底栏右侧收起/展开，行为与点击 tabs 一致。
     private var bottomCollapseButton: some View {
         let title = bottomCollapsed ? L10n.t("Expand") : L10n.t("Collapse")
         return Button {
@@ -636,7 +636,16 @@ struct RightSidebarView: View {
     private func bottomTabButton(_ tab: RightBottomPanel, showTitle: Bool) -> some View {
         let isActive = bottomTab == tab
         return Button {
-            bottomTabRaw = tab.rawValue
+            if bottomCollapsed {
+                bottomTabRaw = tab.rawValue
+                toggleBottomCollapsed()
+            } else {
+                if isActive {
+                    toggleBottomCollapsed()
+                } else {
+                    bottomTabRaw = tab.rawValue
+                }
+            }
         } label: {
             sidebarTabLabel(
                 systemImage: tab.systemImage,
@@ -853,9 +862,14 @@ struct RightSidebarView: View {
         // 无论当前 panelTab 是什么，只要侧边栏可见且 refreshGit 为 true，都更新 git 状态以实时保持 Git 角标数量精准。
         // 优先使用当前 terminal session 的 cwd，若无 session 或 cwd 为空则回退到项目根目录，确保切换项目时即时同步 Git 状态。
         if refreshGit {
-            let root = session?.currentDirectoryPath.isEmpty == false
-                ? session!.currentDirectoryPath
-                : projectRoot(for: project, fallback: session)
+            let root: String
+            if let customGitPath = project.customGitPath, project.isValidCustomGitPath(customGitPath) {
+                root = customGitPath
+            } else {
+                root = session?.currentDirectoryPath.isEmpty == false
+                    ? session!.currentDirectoryPath
+                    : projectRoot(for: project, fallback: session)
+            }
             if !root.isEmpty {
                 git.sync(root: root)
             }

@@ -265,6 +265,20 @@ private struct KeroCommands: Commands {
             .disabled(manager?.selectedProject == nil)
         }
 
+        CommandMenu(L10n.t("Git")) {
+            Button(L10n.t("Specify Git Repository Path…")) {
+                manager?.selectCustomGitRepositoryPath()
+            }
+            .disabled(manager?.selectedProject == nil)
+
+            if manager?.selectedProject?.customGitPath != nil {
+                Button(L10n.t("Clear Custom Git Repository Path")) {
+                    manager?.clearCustomGitRepositoryPath()
+                }
+                .disabled(manager?.selectedProject == nil)
+            }
+        }
+
         CommandMenu(L10n.t("Projects")) {
             Button(L10n.t("Next Project")) {
                 manager?.selectNextProject()

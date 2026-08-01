@@ -73,6 +73,8 @@ final class TerminalAppIconCatalog {
 
     /// `TerminalAppIcons/icons` 文件名 → `apps.json` 中的 label（若有），供预置选择器 tooltip。
     private(set) var bundledFileLabels: [String: String] = [:]
+    /// `TerminalAppIcons/icons` 文件名 → 配对的 `iconDark` 绝对路径（若有）。
+    private var bundledFileToDarkPath: [String: String] = [:]
     /// 内置图标文件名缓存，避免选择器反复扫盘。
     private var cachedBundledIconFileNames: [String]?
 
@@ -81,6 +83,7 @@ final class TerminalAppIconCatalog {
         exactMap.removeAll(keepingCapacity: true)
         prefixRules.removeAll(keepingCapacity: true)
         bundledFileLabels.removeAll(keepingCapacity: true)
+        bundledFileToDarkPath.removeAll(keepingCapacity: true)
         cachedBundledIconFileNames = nil
         // 不丢 imageCache：文件路径不变时复用光栅结果。
 
@@ -119,16 +122,35 @@ final class TerminalAppIconCatalog {
         locateIconFile(fileName: fileName, preferUser: false)
     }
 
-    /// 按内置文件名加载图标（用于项目预置图标）。
-    func imageForBundledFile(named fileName: String, pointSize: CGFloat) -> NSImage? {
+    /// 按内置文件名获取 TerminalAppIconSource（包含可选的深色变体 darkPath）。
+    func bundledIconSource(named fileName: String) -> TerminalAppIconSource? {
         guard let url = locateIconFile(fileName: fileName, preferUser: false) else { return nil }
-        return image(for: .imageFile(path: url.path, darkPath: nil), pointSize: pointSize)
+        let bare = (fileName as NSString).lastPathComponent
+        let darkPath = bundledFileToDarkPath[fileName] ?? bundledFileToDarkPath[bare]
+        return .imageFile(path: url.path, darkPath: darkPath)
+    }
+
+    /// 按内置文件名加载图标（用于项目预置图标），支持深色模式。
+    func imageForBundledFile(named fileName: String, pointSize: CGFloat, isDarkMode: Bool = false) -> NSImage? {
+        guard let source = bundledIconSource(named: fileName) else { return nil }
+        let effectiveSource: TerminalAppIconSource
+        switch source {
+        case .imageFile(let path, let darkPath):
+            if isDarkMode, let darkPath {
+                effectiveSource = .imageFile(path: darkPath, darkPath: nil)
+            } else {
+                effectiveSource = .imageFile(path: path, darkPath: nil)
+            }
+        case .material:
+            effectiveSource = source
+        }
+        return image(for: effectiveSource, pointSize: pointSize)
     }
 
     /// 内置文件名是否应按 template 着色（单色 currentColor SVG）。
     func isBundledFileTemplate(_ fileName: String) -> Bool {
-        guard let url = locateIconFile(fileName: fileName, preferUser: false) else { return false }
-        return isTemplate(.imageFile(path: url.path, darkPath: nil))
+        guard let source = bundledIconSource(named: fileName) else { return false }
+        return isTemplate(source)
     }
 
     /// 按进程可执行文件 basename 查找图标来源；未配置时返回 nil。
@@ -308,6 +330,11 @@ final class TerminalAppIconCatalog {
                 .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .flatMap { locateIconFile(fileName: $0, preferUser: isUser) }
                 .map(\.path)
+            if let darkPath {
+                let bare = (fileName as NSString).lastPathComponent
+                bundledFileToDarkPath[fileName] = darkPath
+                bundledFileToDarkPath[bare] = darkPath
+            }
             return .imageFile(path: url.path, darkPath: darkPath)
         }
         if let iconify = entry.iconify?.trimmingCharacters(in: .whitespacesAndNewlines), !iconify.isEmpty {
