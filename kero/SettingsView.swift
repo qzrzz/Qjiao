@@ -366,36 +366,6 @@ struct SettingsView: View {
                 }
             }
 
-            Section(L10n.t("AI")) {
-                Group {
-                    LocalAIHeadlessProviderPicker()
-
-                    settingWithDescription(
-                        L10n.t("Writing language"),
-                        L10n.t(
-                            "Language for AI-generated Git commits, descriptions, and similar text. Projects can override this."
-                        )
-                    ) {
-                        Picker("", selection: $settings.aiWritingLanguage) {
-                            ForEach(AIWritingLanguage.allCases) { lang in
-                                Text(lang.nativeDisplayName).tag(lang)
-                            }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-
-                    settingWithDescription(
-                        L10n.t("Git Commit Message Emoji"),
-                        L10n.t("Use the Gitmoji convention (e.g. ✨ feat) in AI commit messages.")
-                    ) {
-                        Toggle("", isOn: $settings.gitCommitMessageEmoji)
-                            .labelsHidden()
-                    }
-                }
-                .settingsRowPadding()
-            }
-
             Section(L10n.t("Defaults")) {
                 Group {
                 HStack {
@@ -422,6 +392,60 @@ struct SettingsView: View {
                         updater.checkForUpdates()
                     }
                     .disabled(!updater.canCheckForUpdates)
+                }
+                .settingsRowPadding()
+            }
+            }
+
+            if selectedSection == .ai {
+            Section(L10n.t("Backend")) {
+                Group {
+                    HStack {
+                        Text(L10n.t("Type"))
+                        Spacer()
+                        Picker("", selection: $settings.aiBackend) {
+                            ForEach(AIBackend.allCases) { backend in
+                                Text(backend.displayName).tag(backend)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                }
+                .settingsRowPadding()
+            }
+
+            Section(settings.aiBackend == .cli ? L10n.t("Local CLI") : L10n.t("AI API")) {
+                Group {
+                    if settings.aiBackend == .cli {
+                        LocalAIHeadlessProviderPicker()
+                    } else {
+                        AIAPIProviderSettings()
+                    }
+                }
+                .settingsRowPadding()
+            }
+
+            Section(L10n.t("Writing")) {
+                Group {
+                    HStack {
+                        Text(L10n.t("Writing language"))
+                        Spacer()
+                        Picker("", selection: $settings.aiWritingLanguage) {
+                            ForEach(AIWritingLanguage.allCases) { lang in
+                                Text(lang.nativeDisplayName).tag(lang)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+
+                    HStack {
+                        Text(L10n.t("Git Commit Message Emoji"))
+                        Spacer()
+                        Toggle("", isOn: $settings.gitCommitMessageEmoji)
+                            .labelsHidden()
+                    }
                 }
                 .settingsRowPadding()
             }
@@ -878,6 +902,10 @@ struct SettingsView: View {
             && settings.directClickMovesCursor
             && settings.packageManagerCommand == .auto
             && settings.localAIHeadlessProvider == .disabled
+            && settings.aiBackend == .cli
+            && settings.aiAPIProvider == .openAI
+            && settings.aiAPIModel == AIAPIProviderID.openAI.defaultModel
+            && settings.aiAPIBaseURL == AIAPIProviderID.openAI.defaultBaseURL
             && settings.aiWritingLanguage == .english
             && settings.gitCommitMessageEmoji
     }
@@ -886,7 +914,7 @@ struct SettingsView: View {
 
 // MARK: - Local AI headless provider
 
-/// General 设置中的 AI headless provider 选择器：列出支持的 CLI，未安装项不可选并标注。
+/// AI 设置中的 headless provider 选择器：列出支持的 CLI，未安装项不可选并标注。
 ///
 /// 排版与 `settingWithDescription` 对齐：标题用默认字号，说明用 `.callout`，避免 caption 过小难读。
 private struct LocalAIHeadlessProviderPicker: View {
@@ -894,15 +922,8 @@ private struct LocalAIHeadlessProviderPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(L10n.t("AI headless provider"))
-                        .fontWeight(.semibold)
-                    Text(L10n.t("Provide AI capabilities using a local AI CLI."))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            HStack(spacing: 12) {
+                Text(L10n.t("Provider"))
                 Spacer(minLength: 12)
                 // 使用 Menu 而非 Picker，以便对未安装 CLI 使用 .disabled
                 Menu {
@@ -928,7 +949,6 @@ private struct LocalAIHeadlessProviderPicker: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .padding(.top, 1)
             }
 
             // 命令预览靠左（浅灰底、宽度随内容）、刷新靠右，同一行节省纵向空间
@@ -970,6 +990,140 @@ private struct LocalAIHeadlessProviderPicker: View {
         .onAppear {
             registry.refresh()
         }
+    }
+}
+
+// MARK: - AI API provider
+
+/// AI API 供应商、模型、端点与 Keychain 密钥设置。
+private struct AIAPIProviderSettings: View {
+    @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var registry = AIAPIRegistry.shared
+    @State private var apiKey = ""
+    @State private var keyStatus: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            apiSettingRow(L10n.t("Provider")) {
+                Picker("", selection: providerBinding) {
+                    ForEach(AIAPIProviderID.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+
+            apiSettingRow(L10n.t("Model")) {
+                TextField("", text: $settings.aiAPIModel)
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 300)
+            }
+
+            apiSettingRow(L10n.t("API base URL")) {
+                TextField("", text: $settings.aiAPIBaseURL)
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 300)
+            }
+
+            apiSettingRow(L10n.t("API Key")) {
+                HStack(spacing: 8) {
+                    SecureField("", text: $apiKey)
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 194)
+                    Button(L10n.t("Save")) {
+                        saveKey()
+                    }
+                    .controlSize(.small)
+                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if registry.hasAPIKey {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .help(L10n.t("Stored securely in macOS Keychain."))
+                        Button {
+                            deleteKey()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(L10n.t("Remove API Key"))
+                    }
+                }
+            }
+
+            if let keyStatus {
+                Label(keyStatus, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label(L10n.t("Requests may include project context."), systemImage: "info.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { loadKey() }
+    }
+
+    /// 统一 API 设置的左侧标题与右侧控件对齐，避免表单再次渲染控件标签。
+    private func apiSettingRow<Control: View>(
+        _ title: String,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        HStack(spacing: 16) {
+            Text(title)
+            Spacer(minLength: 16)
+            control()
+        }
+    }
+
+    /// 切换供应商时恢复其默认模型与端点，并读取该供应商独立保存的密钥。
+    private var providerBinding: Binding<AIAPIProviderID> {
+        Binding(
+            get: { settings.aiAPIProvider },
+            set: { provider in
+                settings.aiAPIProvider = provider
+                settings.aiAPIModel = provider.defaultModel
+                settings.aiAPIBaseURL = provider.defaultBaseURL
+                loadKey()
+            }
+        )
+    }
+
+    /// 从 Keychain 载入当前供应商密钥，SecureField 只显示掩码。
+    private func loadKey() {
+        do {
+            apiKey = try AIAPIKeyStore.load(for: settings.aiAPIProvider)
+            keyStatus = nil
+        } catch {
+            apiKey = ""
+            keyStatus = error.localizedDescription
+        }
+        registry.refreshKeyState()
+    }
+
+    private func saveKey() {
+        do {
+            try AIAPIKeyStore.save(apiKey, for: settings.aiAPIProvider)
+            keyStatus = nil
+        } catch {
+            keyStatus = error.localizedDescription
+        }
+        registry.refreshKeyState()
+    }
+
+    private func deleteKey() {
+        do {
+            try AIAPIKeyStore.delete(for: settings.aiAPIProvider)
+            apiKey = ""
+            keyStatus = nil
+        } catch {
+            keyStatus = error.localizedDescription
+        }
+        registry.refreshKeyState()
     }
 }
 
@@ -1113,6 +1267,7 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
 /// 设置页的可见分类；每个分类对应左侧导航一项。
 private enum SettingsSection: CaseIterable, Identifiable, Hashable {
     case general
+    case ai
     case terminal
     case editor
     case files
@@ -1124,6 +1279,7 @@ private enum SettingsSection: CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
         case .general: L10n.t("General")
+        case .ai: L10n.t("AI")
         case .terminal: L10n.t("Terminal")
         case .editor: L10n.t("Editor")
         case .files: L10n.t("Files")
@@ -1135,6 +1291,7 @@ private enum SettingsSection: CaseIterable, Identifiable, Hashable {
     var systemImage: String {
         switch self {
         case .general: "gearshape"
+        case .ai: "sparkles"
         case .terminal: "terminal"
         case .editor: "text.cursor"
         case .files: "folder"

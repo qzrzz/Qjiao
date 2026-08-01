@@ -280,6 +280,11 @@ GitHub Release 的基础资产及差分包会逐个上传，日志显示当前�
 版本的 ZIP URL；历史条目不会被改写到当前 tag。产物复验只要求当前
 tag 新生成的 delta 位于 `build/updates`，历史 delta 继续使用原 Release。
 
+已成功发布的 `CURRENT_PROJECT_VERSION` 是不可变 delta 基线。即使只是
+重新签名或覆盖同一营销版本，也必须先递增 build；脚本检测到
+当前 build 不大于本地缓存最大 build 时会在任何编译、生成和
+上传前终止；build 必须是正整数。
+
 ```text
 release/
 ├── appcast.xml

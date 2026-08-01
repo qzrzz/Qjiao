@@ -353,6 +353,26 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 应用内 AI 功能使用 CLI 或云端 API；默认保留原有 CLI 行为。
+    @Published var aiBackend: AIBackend {
+        didSet { save() }
+    }
+
+    /// 云端 API 供应商。
+    @Published var aiAPIProvider: AIAPIProviderID {
+        didSet { save() }
+    }
+
+    /// 云端 API 模型 ID，由用户按供应商账号可用模型编辑。
+    @Published var aiAPIModel: String {
+        didSet { save() }
+    }
+
+    /// 云端 API 根地址；API Key 独立存放在 macOS Keychain。
+    @Published var aiAPIBaseURL: String {
+        didSet { save() }
+    }
+
     /// AI 写作语言（Git Commit、描述等生成内容）；默认英文。
     ///
     /// 写入 `config.toml` 的 `ai.writing-language`；项目可单独覆盖。
@@ -511,6 +531,13 @@ final class AppSettings: nonisolated ObservableObject {
         preferredAIToolId = toml["ai.preferred-tool"]?.string ?? ""
         localAIHeadlessProvider = toml["ai.headless-provider"]?.string
             .flatMap(LocalAIProviderID.init(rawValue:)) ?? .disabled
+        aiBackend = toml["ai.backend"]?.string
+            .flatMap(AIBackend.init(rawValue:)) ?? .cli
+        let apiProvider = toml["ai.api-provider"]?.string
+            .flatMap(AIAPIProviderID.init(rawValue:)) ?? .openAI
+        aiAPIProvider = apiProvider
+        aiAPIModel = toml["ai.api-model"]?.string ?? apiProvider.defaultModel
+        aiAPIBaseURL = toml["ai.api-base-url"]?.string ?? apiProvider.defaultBaseURL
         aiWritingLanguage = toml["ai.writing-language"]?.string
             .flatMap(AIWritingLanguage.init(rawValue:)) ?? .english
         // 默认 true：缺省或非法值均视为开启 Gitmoji。
@@ -643,6 +670,10 @@ final class AppSettings: nonisolated ObservableObject {
         preferredCodeEditorBundleId = ""
         preferredAIToolId = ""
         localAIHeadlessProvider = .disabled
+        aiBackend = .cli
+        aiAPIProvider = .openAI
+        aiAPIModel = AIAPIProviderID.openAI.defaultModel
+        aiAPIBaseURL = AIAPIProviderID.openAI.defaultBaseURL
         aiWritingLanguage = .english
         gitCommitMessageEmoji = true
         customCodeEditorPaths = []
@@ -772,6 +803,18 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if localAIHeadlessProvider != .disabled {
             lines.append("ai.headless-provider = \(TOML.quote(localAIHeadlessProvider.rawValue))")
+        }
+        if aiBackend != .cli {
+            lines.append("ai.backend = \(TOML.quote(aiBackend.rawValue))")
+        }
+        if aiAPIProvider != .openAI {
+            lines.append("ai.api-provider = \(TOML.quote(aiAPIProvider.rawValue))")
+        }
+        if aiAPIModel != AIAPIProviderID.openAI.defaultModel || aiAPIProvider != .openAI {
+            lines.append("ai.api-model = \(TOML.quote(aiAPIModel))")
+        }
+        if aiAPIBaseURL != AIAPIProviderID.openAI.defaultBaseURL || aiAPIProvider != .openAI {
+            lines.append("ai.api-base-url = \(TOML.quote(aiAPIBaseURL))")
         }
         // 默认英文：仅非默认时写回。
         if aiWritingLanguage != .english {

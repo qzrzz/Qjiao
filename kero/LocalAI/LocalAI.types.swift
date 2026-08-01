@@ -7,6 +7,106 @@
 
 import Foundation
 
+// MARK: - AI 后端
+
+/// 应用内 AI 功能使用的执行后端。
+enum AIBackend: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
+    case cli
+    case api
+
+    var id: String { rawValue }
+
+    /// 设置面板展示名。
+    var displayName: String {
+        switch self {
+        case .cli: return L10n.t("Local CLI")
+        case .api: return L10n.t("AI API")
+        }
+    }
+}
+
+/// 云端 AI API 供应商。
+enum AIAPIProviderID: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
+    case openAI = "openai"
+    case deepSeek = "deepseek"
+    case anthropic
+    case gemini
+    case openRouter = "openrouter"
+    case xAI = "xai"
+    case custom
+
+    var id: String { rawValue }
+
+    /// 设置与任务状态中展示的品牌名。
+    var displayName: String {
+        switch self {
+        case .openAI: return "OpenAI"
+        case .deepSeek: return "DeepSeek"
+        case .anthropic: return "Anthropic"
+        case .gemini: return "Google Gemini"
+        case .openRouter: return "OpenRouter"
+        case .xAI: return "xAI"
+        case .custom: return L10n.t("OpenAI-compatible")
+        }
+    }
+
+    /// 新选择供应商时使用的可编辑模型建议值。
+    var defaultModel: String {
+        switch self {
+        case .openAI: return "gpt-5.6-luna"
+        case .deepSeek: return "deepseek-v4-flash"
+        case .anthropic: return "claude-sonnet-5"
+        case .gemini: return "gemini-3.6-flash"
+        case .openRouter: return "openai/gpt-5.6"
+        case .xAI: return "grok-4.5"
+        case .custom: return ""
+        }
+    }
+
+    /// 默认 API 根地址；用户仍可在设置中覆盖。
+    var defaultBaseURL: String {
+        switch self {
+        case .openAI: return "https://api.openai.com/v1"
+        case .deepSeek: return "https://api.deepseek.com"
+        case .anthropic: return "https://api.anthropic.com/v1"
+        case .gemini: return "https://generativelanguage.googleapis.com/v1beta"
+        case .openRouter: return "https://openrouter.ai/api/v1"
+        case .xAI: return "https://api.x.ai/v1"
+        case .custom: return ""
+        }
+    }
+
+    /// 供应商使用的 REST 请求协议。
+    var protocolStyle: AIAPIProtocolStyle {
+        switch self {
+        case .anthropic: return .anthropicMessages
+        case .gemini: return .geminiGenerateContent
+        default: return .openAIChatCompletions
+        }
+    }
+}
+
+/// AI API 的请求协议类型。
+enum AIAPIProtocolStyle: Sendable {
+    case openAIChatCompletions
+    case anthropicMessages
+    case geminiGenerateContent
+}
+
+/// 一次 AI 调用实际使用的供应商身份。
+enum AIProviderIdentity: Sendable, Equatable {
+    case cli(LocalAIProviderID)
+    case api(AIAPIProviderID)
+
+    /// 日志与任务状态使用的统一展示名。
+    var displayName: String {
+        switch self {
+        case .cli(let provider): return provider.displayName
+        case .api(let provider): return provider.displayName
+        }
+    }
+}
+
 // MARK: - 写作语言
 
 /// AI 生成 Git Commit / 描述等内容时使用的自然语言。
@@ -216,19 +316,19 @@ struct LocalAIRequest: Sendable, Equatable {
     }
 }
 
-/// 本地 AI 调用结果。
+/// CLI 或 API AI 调用结果。
 struct LocalAIResponse: Sendable, Equatable {
     /// 解析后的主要文本输出（优先 last message / stdout 正文）。
     var text: String
-    /// 进程退出码。
+    /// CLI 进程退出码；API 成功时为 0。
     var exitCode: Int32
     /// 实际使用的 Provider。
-    var provider: LocalAIProviderID
-    /// 完整 stdout。
+    var provider: AIProviderIdentity
+    /// CLI stdout 或 API 原始 JSON。
     var rawStdout: String
     /// 完整 stderr。
     var rawStderr: String
-    /// 使用的可执行文件路径。
+    /// 使用的 CLI 可执行文件路径或 API 请求地址。
     var executablePath: String
 
     /// 通常以 exit 0 为成功；部分 CLI 非 0 仍可能写出部分结果。
@@ -251,11 +351,15 @@ enum LocalAIError: Error, LocalizedError, Equatable {
     case timedOut(Duration)
     /// CLI 返回非 0，且无法提取有效文本。
     case commandFailed(provider: LocalAIProviderID, exitCode: Int32, stderr: String)
+    /// API 模式缺少 Key、模型或有效地址。
+    case invalidAPIConfiguration(String)
+    /// API 返回了错误状态或无法解析的响应。
+    case apiRequestFailed(provider: AIAPIProviderID, statusCode: Int, message: String)
 
     var errorDescription: String? {
         switch self {
         case .disabled:
-            return "Local AI is disabled. Choose an AI headless provider in Settings → General."
+            return L10n.t("AI is disabled. Configure a provider in Settings → AI.")
         case .notInstalled(let id):
             return "\(id.displayName) is not installed or not found in PATH."
         case .emptyPrompt:
@@ -272,6 +376,15 @@ enum LocalAIError: Error, LocalizedError, Equatable {
                 return "\(provider.displayName) exited with code \(exitCode)."
             }
             return "\(provider.displayName) exited with code \(exitCode): \(detail)"
+        case .invalidAPIConfiguration(let message):
+            return message
+        case .apiRequestFailed(let provider, let statusCode, let message):
+            return L10n.format(
+                "%@ API request failed (%lld): %@",
+                provider.displayName,
+                Int64(statusCode),
+                message
+            )
         }
     }
 }

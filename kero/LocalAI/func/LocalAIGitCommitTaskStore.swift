@@ -65,8 +65,7 @@ final class LocalAIGitCommitTaskStore: ObservableObject {
         guard LocalAI.isEnabled else {
             var s = states[key] ?? LocalAIGitCommitTaskState()
             s.isRunning = false
-            s.lastError =
-                "Local AI is disabled. Choose an AI headless provider in Settings → General."
+            s.lastError = L10n.t("AI is disabled. Configure a provider in Settings → AI.")
             s.providerLabel = nil
             s.lastMessage = nil
             states[key] = s

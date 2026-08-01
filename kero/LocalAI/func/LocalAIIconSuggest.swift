@@ -29,7 +29,7 @@ enum LocalAIIconSuggest {
     /// 默认超时：图标选择应较快返回。
     static let defaultTimeout: Duration = .seconds(90)
 
-    /// 为项目请求 AI 选图标；需已在设置中启用 headless provider。
+    /// 为项目请求 AI 选图标；需已在设置中配置可用的 CLI 或 API provider。
     ///
     /// - Parameter project: 目标项目（读取 name / description / directory）。
     /// - Returns: 校验通过的建议；失败抛出 `LocalAIError` 或 `LocalAIIconSuggestError`。

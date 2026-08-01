@@ -33,7 +33,7 @@ enum LocalAIGitCommitSuggest {
     /// 未跟踪文件最多列出条数（不读正文）。
     static let maxUntrackedList = 15
 
-    /// 收集 diff 并请求 AI；需已启用 headless provider。
+    /// 收集 diff 并请求 AI；需已配置可用的 CLI 或 API provider。
     ///
     /// - Parameters:
     ///   - repoRoot: 仓库根目录绝对路径。
@@ -53,8 +53,13 @@ enum LocalAIGitCommitSuggest {
         }
         let provider = await MainActor.run { LocalAI.selectedProvider }
         let providerName = provider.displayName
-        // Codex 固定使用 gpt-5.6-luna；其它 provider 不传 model
-        let modelOverride: String? = provider == .codex ? LocalAIProviderID.codexDefaultModel : nil
+        // CLI Codex 固定使用 gpt-5.6-luna；API 后端使用设置中的模型。
+        let modelOverride: String?
+        if case .cli(.codex) = provider {
+            modelOverride = LocalAIProviderID.codexDefaultModel
+        } else {
+            modelOverride = nil
+        }
 
         let root = repoRoot.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !root.isEmpty else {

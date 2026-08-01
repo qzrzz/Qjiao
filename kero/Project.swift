@@ -304,15 +304,11 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         return FileManager.default.fileExists(atPath: standardizedPath, isDirectory: &isDir) && isDir.boolValue
     }
 
-    /// 计算 Files 与 Git 面板应锚定的根目录路径及其来源。
+    /// 计算 Files 与 Project 面板应锚定的根目录路径及其来源。
     func panelRoot(
         followingSessionAt cwd: String,
         foregroundAt foregroundCwd: String? = nil
     ) -> PanelRootResult {
-        if let customGitPath, isValidCustomGitPath(customGitPath) {
-            return PanelRootResult(root: customGitPath, source: .pinned)
-        }
-
         if !projectDirectory.isEmpty,
            FileManager.default.fileExists(atPath: projectDirectory) {
             return PanelRootResult(root: projectDirectory, source: .pinned)
@@ -335,6 +331,29 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         }
 
         return PanelRootResult(root: cwd, source: .shell)
+    }
+
+    /// 计算 Git 面板与状态扫描应锚定的仓库根目录。
+    /// 若用户为项目指定了 customGitPath，且合法并存在，优先使用 customGitPath；
+    /// 否则按 session cwd / shell repo / foreground repo / projectDirectory 自动判定。
+    func gitRoot(
+        followingSessionAt cwd: String = "",
+        foregroundAt foregroundCwd: String? = nil
+    ) -> String {
+        if let customGitPath, isValidCustomGitPath(customGitPath) {
+            return customGitPath
+        }
+        if let foregroundCwd, !foregroundCwd.isEmpty,
+           let fgRepo = Self.closestGitRepository(for: foregroundCwd) {
+            return fgRepo
+        }
+        if !cwd.isEmpty, let shellRepo = Self.closestGitRepository(for: cwd) {
+            return shellRepo
+        }
+        if !projectDirectory.isEmpty, FileManager.default.fileExists(atPath: projectDirectory) {
+            return projectDirectory
+        }
+        return cwd
     }
 
     /// 查找包含指定路径的最近 Git 仓库根目录（向上寻找包含 .git 的目录）。
