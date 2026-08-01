@@ -82,7 +82,7 @@ final class TabSwitcherController: ObservableObject {
     /// 点击列表项时立即选择并关闭切换器。
     func select(_ tabID: UUID, in project: Project) {
         guard project.tabs.contains(where: { $0.id == tabID }) else { return }
-        project.selectedTabID = tabID
+        project.selectTab(tabID)
         reset()
     }
 
@@ -143,7 +143,7 @@ final class TabSwitcherController: ObservableObject {
             cancel()
             return
         }
-        project.selectedTabID = tabID
+        project.selectTab(tabID)
         reset()
     }
 

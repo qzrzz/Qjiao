@@ -58,6 +58,23 @@ enum PackageManagerCommand: String, CaseIterable, Identifiable {
     }
 }
 
+/// 主内容区 Tabs 布局模式（滚动 / 弹性压缩）。
+enum TabsLayoutMode: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
+    /// 溢出时横向滚动；选中项自动滚入视口。
+    case scroll = "scroll"
+    /// 优先压缩非激活 Tab（左先右后），尽量保持首个 Tab 可见；极端溢出仍可滚动（默认）。
+    case elastic = "elastic"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .scroll: return L10n.t("Scroll")
+        case .elastic: return L10n.t("Elastic")
+        }
+    }
+}
+
 /// Zsh 闲时标签页名称控制模式。
 enum ZshIdleTitleStyle: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
     case defaultStyle = "default"
@@ -183,6 +200,11 @@ final class AppSettings: nonisolated ObservableObject {
             L10n.shared.setLanguage(language)
             save()
         }
+    }
+
+    /// 主内容 Tabs 布局：滚动或弹性压缩。默认弹性；写入 `ui.tabs-layout`。
+    @Published var tabsLayoutMode: TabsLayoutMode {
+        didSet { save() }
     }
 
     /// Light/dark appearance override; `system` follows macOS.
@@ -472,6 +494,8 @@ final class AppSettings: nonisolated ObservableObject {
         let existing = TOML.parse(at: Self.configURL)
         let toml = existing ?? Self.legacyDefaults()
         language = toml["ui.language"]?.string.flatMap(AppLanguage.init(rawValue:)) ?? .system
+        tabsLayoutMode = toml["ui.tabs-layout"]?.string
+            .flatMap(TabsLayoutMode.init(rawValue:)) ?? .elastic
         theme = toml["theme"]?.string.flatMap(AppTheme.init(rawValue:)) ?? .system
         themeDark = Self.knownTheme(toml["theme-dark"]?.string, fallback: Theme.defaultDarkThemeName)
         themeLight = Self.knownTheme(toml["theme-light"]?.string, fallback: Theme.defaultLightThemeName)
@@ -640,6 +664,7 @@ final class AppSettings: nonisolated ObservableObject {
         resetFont()
         useBundledChineseTerminalFont = true
         language = .system
+        tabsLayoutMode = .elastic
         theme = .system
         themeDark = Theme.defaultDarkThemeName
         themeLight = Theme.defaultLightThemeName
@@ -691,6 +716,10 @@ final class AppSettings: nonisolated ObservableObject {
         // 默认跟随系统：仅在非默认语言时写回，避免污染默认配置。
         if language != .system {
             lines.append("ui.language = \(TOML.quote(language.rawValue))")
+        }
+        // 默认弹性：仅在非默认布局时写回。
+        if tabsLayoutMode != .elastic {
+            lines.append("ui.tabs-layout = \(TOML.quote(tabsLayoutMode.rawValue))")
         }
         if theme != .system {
             lines.append("theme = \(TOML.quote(theme.rawValue))")
