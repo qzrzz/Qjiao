@@ -46,6 +46,8 @@ private func shellQuote(_ value: String) -> String {
 
 extension Notification.Name {
     static let qjiaoProjectListDidChange = Notification.Name("qjiaoProjectListDidChange")
+    /// 脚本/命令新建的 session 的 login shell pid 就绪，请求侧栏立即重扫进程与端口。
+    static let qjiaoSidebarShellDidAttach = Notification.Name("qjiaoSidebarShellDidAttach")
 }
 
 /// Owns the list of projects and the current selection. Each project holds
@@ -665,8 +667,16 @@ final class TerminalManager: nonisolated ObservableObject {
 
             if session.hasExited {
                 markScriptAsIdle(executionKey, endedAt: now)
-            } else if now.timeIntervalSince(record.startedAt) > 0.5 && !session.isForegroundCommandRunning {
-                // 运行超过 0.5 秒且前台命令已被 shell 释放（命令运行结束），判定为完成/停止
+            } else if let injectedAt = session.lastCommandInjectedAt {
+                // 命令已注入 PTY；shell 前台命令结束（回到空闲提示符）即视为完成。
+                // 以注入时刻为基准而非 startedAt：shell 启动慢时命令可能延迟注入，
+                // 避免在命令真正开始前就被误判为“已结束”而丢失端口绑定。
+                if !session.isForegroundCommandRunning,
+                   now.timeIntervalSince(injectedAt) > 0.8 {
+                    markScriptAsIdle(executionKey, endedAt: now)
+                }
+            } else if now.timeIntervalSince(record.startedAt) > 5 {
+                // 命令长时间未能注入（shell 未就绪），按失败收尾，避免永远显示 running。
                 markScriptAsIdle(executionKey, endedAt: now)
             }
         }
@@ -684,10 +694,12 @@ final class TerminalManager: nonisolated ObservableObject {
 
             if session.hasExited {
                 rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
-            } else if now.timeIntervalSince(startedAt) > 0.5,
-                      session.isInitialized,
-                      !session.isForegroundCommandRunning
-            {
+            } else if let injectedAt = session.lastCommandInjectedAt {
+                if !session.isForegroundCommandRunning,
+                   now.timeIntervalSince(injectedAt) > 0.8 {
+                    rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
+                }
+            } else if now.timeIntervalSince(startedAt) > 5 {
                 rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
             }
         }
@@ -832,6 +844,24 @@ final class TerminalManager: nonisolated ObservableObject {
             command = "\(prefix) \(baseCmd)"
         }
         session.sendCommandWhenReady(command + "\n")
+
+        // 新 session 的 shell pid 由启动 shim 异步写入；就绪后通知右侧栏立即
+        // 纳入进程/端口采集，避免端口/浏览器按钮要等 2s 轮询或切换标签页才出现。
+        notifySidebarWhenShellAttaches(session)
+    }
+
+    /// 等待 session 的 login shell pid 出现，然后通知右侧栏重扫（用于即时端口采集）。
+    private func notifySidebarWhenShellAttaches(_ session: TerminalSession) {
+        Task { @MainActor [weak session] in
+            guard let session else { return }
+            var attempts = 0
+            while !session.hasExited && session.shellPid == nil && attempts < 200 {
+                try? await Task.sleep(for: .milliseconds(50))
+                attempts += 1
+            }
+            guard !session.hasExited, session.shellPid != nil else { return }
+            NotificationCenter.default.post(name: .qjiaoSidebarShellDidAttach, object: nil)
+        }
     }
 
     /// 运行指定的 npm script

@@ -60,6 +60,7 @@
       "match": ["yarn", "yarn.js"],
       "material": "yarn"
     },
+  
     {
       "label": "Bun",
       "match": ["bun"],
@@ -176,6 +177,12 @@
       "label": "opencode",
       "match": ["opencode"],
       "icon": "opencode.svg"
+    },
+    {
+      "label": "pi",
+      "match": ["pi"],
+      "icon": "pi-logo-light.svg",
+      "iconDark": "pi-logo-dark.svg"
     }
   ]
 }

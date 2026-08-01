@@ -16,8 +16,8 @@ import SwiftUI
 enum TerminalAppIconSource: Hashable, Sendable {
     /// Material Icon Theme 逻辑名（如 `nodejs`、`claude`）。
     case material(String)
-    /// 本地图标文件绝对路径（`.png` / `.svg` / `.icns` 等）。
-    case imageFile(path: String)
+    /// 本地图标文件绝对路径（`.png` / `.svg` / `.icns` 等）；`darkPath` 为可选深色模式变体。
+    case imageFile(path: String, darkPath: String?)
 }
 
 // MARK: - Catalog
@@ -40,6 +40,8 @@ final class TerminalAppIconCatalog {
         var iconify: String?
         /// 推荐：`icons/` 下的文件名，如 `antigravity-color.png`、`rsbuild.svg`。
         var icon: String?
+        /// 深色模式变体（可选）：`icons/` 下的文件名，与 `icon` 配对使用。
+        var iconDark: String?
         /// 兼容旧字段，等同于 `icon`。
         var svg: String?
     }
@@ -120,13 +122,13 @@ final class TerminalAppIconCatalog {
     /// 按内置文件名加载图标（用于项目预置图标）。
     func imageForBundledFile(named fileName: String, pointSize: CGFloat) -> NSImage? {
         guard let url = locateIconFile(fileName: fileName, preferUser: false) else { return nil }
-        return image(for: .imageFile(path: url.path), pointSize: pointSize)
+        return image(for: .imageFile(path: url.path, darkPath: nil), pointSize: pointSize)
     }
 
     /// 内置文件名是否应按 template 着色（单色 currentColor SVG）。
     func isBundledFileTemplate(_ fileName: String) -> Bool {
         guard let url = locateIconFile(fileName: fileName, preferUser: false) else { return false }
-        return isTemplate(.imageFile(path: url.path))
+        return isTemplate(.imageFile(path: url.path, darkPath: nil))
     }
 
     /// 按进程可执行文件 basename 查找图标来源；未配置时返回 nil。
@@ -212,7 +214,7 @@ final class TerminalAppIconCatalog {
         switch source {
         case .material(let name):
             cacheKey = "material:\(name)@\(sizeKey)"
-        case .imageFile(let path):
+        case .imageFile(let path, _):
             cacheKey = "file:\(path)@\(sizeKey)"
         }
         if let hit = imageCache[cacheKey] { return hit }
@@ -221,7 +223,7 @@ final class TerminalAppIconCatalog {
         switch source {
         case .material(let name):
             image = MaterialFileIconCatalog.shared.image(named: name, pointSize: pointSize)
-        case .imageFile(let path):
+        case .imageFile(let path, _):
             image = loadImageFile(path: path, pointSize: pointSize)
         }
         if let image {
@@ -235,7 +237,7 @@ final class TerminalAppIconCatalog {
         switch source {
         case .material:
             return false
-        case .imageFile(let path):
+        case .imageFile(let path, _):
             if let cached = templateFlags[path] { return cached }
             let flag = path.lowercased().hasSuffix(".svg") && Self.svgUsesCurrentColor(path: path)
             templateFlags[path] = flag
@@ -258,7 +260,7 @@ final class TerminalAppIconCatalog {
         for entry in manifest.apps {
             // 记录 icon 文件名 → label，供预置选择器展示（不依赖 match 是否解析成功）。
             if let label = entry.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
-                let fileName = [entry.icon, entry.svg]
+                let fileName = [entry.icon, entry.svg, entry.iconDark]
                     .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .first { !$0.isEmpty }
                 if let fileName {
@@ -301,12 +303,17 @@ final class TerminalAppIconCatalog {
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
         if let fileName, let url = locateIconFile(fileName: fileName, preferUser: isUser) {
-            return .imageFile(path: url.path)
+            // 可选深色模式变体（`iconDark`），随主题自动切换。
+            let darkPath = entry.iconDark
+                .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .flatMap { locateIconFile(fileName: $0, preferUser: isUser) }
+                .map(\.path)
+            return .imageFile(path: url.path, darkPath: darkPath)
         }
         if let iconify = entry.iconify?.trimmingCharacters(in: .whitespacesAndNewlines), !iconify.isEmpty {
             let name = Self.iconifyFileName(iconify)
             if let url = locateIconFile(fileName: name, preferUser: isUser) {
-                return .imageFile(path: url.path)
+                return .imageFile(path: url.path, darkPath: nil)
             }
         }
         if let material = entry.material?.trimmingCharacters(in: .whitespacesAndNewlines), !material.isEmpty {
@@ -635,9 +642,24 @@ struct TerminalAppIconView: View {
     let source: TerminalAppIconSource
     var size: CGFloat = 12
     var isSelected: Bool = true
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// 按当前外观解析实际图标：深色模式优先 `darkPath` 变体。
+    private var effectiveSource: TerminalAppIconSource {
+        switch source {
+        case .imageFile(let path, let darkPath):
+            if colorScheme == .dark, let darkPath {
+                return .imageFile(path: darkPath, darkPath: nil)
+            }
+            return .imageFile(path: path, darkPath: nil)
+        case .material:
+            return source
+        }
+    }
 
     var body: some View {
         let catalog = TerminalAppIconCatalog.shared
+        let source = effectiveSource
         if let image = catalog.image(for: source, pointSize: size) {
             let template = catalog.isTemplate(source)
             Image(nsImage: image)

@@ -3,6 +3,7 @@
 if [[ -o interactive && -z "${_qjiao_semantic_prompt_loaded-}" ]]; then
     builtin typeset -gi _qjiao_semantic_prompt_loaded=1
     builtin typeset -gi _qjiao_command_active=0
+    builtin typeset -gi _qjiao_prompt_ready_emitted=0
 
     _qjiao_get_idle_title_pattern() {
         builtin local config_file="${QJIAO_CONFIG_DIR:-$HOME/.config/qjiao}/idle_title"
@@ -18,6 +19,13 @@ if [[ -o interactive && -z "${_qjiao_semantic_prompt_loaded-}" ]]; then
         builtin local exit_status=$?
         builtin local prompt_start=$'%{\e]133;A;cl=line\a%}'
         builtin local prompt_end=$'%{\e]133;B\a%}'
+
+        # 首个提示符就绪标记：宿主应用据此得知登录 shell 已可安全接收命令，
+        # 避免在 shell 初始化期间注入的命令被回显但不执行。
+        if (( ! _qjiao_prompt_ready_emitted )); then
+            builtin print -rn -- $'\e]2;qjiao-prompt-ready\a'
+            _qjiao_prompt_ready_emitted=1
+        fi
 
         if (( _qjiao_command_active )); then
             builtin print -rn -- $'\e]133;D;'"$exit_status"$'\a'

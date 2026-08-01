@@ -27,6 +27,11 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     @Published private(set) var isInitialized = false
     /// 每次 Ghostty 收到 OSC 133 命令完成报告时递增，供 Git 等事件消费者观察。
     @Published private(set) var commandCompletionSequence: UInt64 = 0
+    /// 是否已确认登录 shell 到达首个提示符（zsh 集成通过 OSC 2 哨兵上报）。
+    /// 这是向 PTY 注入命令的最安全时机：shell 初始化期间写入的命令会被回显但不执行。
+    private(set) var hasShownPrompt = false
+    /// 最近一次向 PTY 注入命令的时间；脚本状态判定以它而非任务创建时刻为基准。
+    private(set) var lastCommandInjectedAt: Date?
 
     /// 项目拖拽回调缓存，延迟装载时应用给新建的 terminalView。
     var pendingOnOpenProjectDirectory: ((URL) -> Bool)? {
@@ -261,6 +266,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     }
 
     func sendCommand(_ text: String) {
+        lastCommandInjectedAt = Date()
         terminalView.sendText(text)
     }
 
@@ -274,6 +280,11 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     }
 
 
+    /// 该会话的登录 shell 是否带有 Qjiao zsh 集成（可收到首个提示符哨兵）。
+    private var usesPromptReadySignal: Bool {
+        (shellPath as NSString).lastPathComponent == "zsh"
+    }
+
     /// Queues an automated command until this surface has been attached and
     /// its login shell has started. New tabs are mounted asynchronously by
     /// SwiftUI; sending immediately would otherwise be discarded before the
@@ -284,10 +295,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
     private func sendCommandWhenReady(_ text: String, attempt: Int) {
         guard !hasExited else { return }
-        if terminalView.window != nil, shellPid != nil {
-            // The PID file is written immediately before the login shell is
-            // exec'd. Give the shell one short run-loop turn to install its
-            // prompt before inserting the command.
+
+        // 已确认 shell 位于首个提示符（zsh 集成 OSC 2 哨兵）——最安全时机。
+        // 稍候片刻让提示符渲染完成、行编辑器进入读取状态再注入。
+        if hasShownPrompt {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self, !self.hasExited else { return }
                 self.sendCommand(text)
@@ -295,9 +306,20 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             return
         }
 
-        // A slow first launch may need a little time to attach its Metal
-        // surface. Stop retrying after five seconds rather than retaining a
-        // command for a terminal that failed to start.
+        // zsh 会话等待首个提示符哨兵（上限约 4s）；未等到再退回旧启发式，
+        // 覆盖 zsh 集成未生效的退化场景。
+        let waitForPrompt = usesPromptReadySignal && attempt < 80
+
+        if !waitForPrompt, terminalView.window != nil, shellPid != nil {
+            // 兜底（非 zsh / 哨兵超时）：shell 已启动后沿用固定延迟发送。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self, !self.hasExited else { return }
+                self.sendCommand(text)
+            }
+            return
+        }
+
+        // 继续等待 surface 挂载 / shell 启动 / 提示符哨兵。
         guard attempt < 100 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.sendCommandWhenReady(text, attempt: attempt + 1)
@@ -772,6 +794,11 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 extension TerminalSession: TerminalSurfaceTitleDelegate {
     func terminalDidChangeTitle(_ title: String) {
         guard !title.isEmpty else { return }
+        // zsh 集成的首个提示符哨兵：仅作为“shell 已就绪”信号，不作为标签标题。
+        if title == "qjiao-prompt-ready" {
+            hasShownPrompt = true
+            return
+        }
         self.title = title
     }
 }

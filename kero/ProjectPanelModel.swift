@@ -176,7 +176,16 @@ final class ProjectPanelModel: nonisolated ObservableObject {
         processTask?.cancel()
         processTask = Task.detached(priority: .utility) { [self] in
             let (processes, ports) = SidebarProbe.collect(shellPids: expectedPids)
-            guard !Task.isCancelled else { return }
+            if Task.isCancelled {
+                // 结果被更新的采集取代：释放采集标记，避免后续轮询被永久跳过
+                // （旧实现直接 return，导致 isRefreshingProcesses 卡在 true）。
+                await MainActor.run {
+                    if processGeneration == generation {
+                        isRefreshingProcesses = false
+                    }
+                }
+                return
+            }
             await apply(
                 processes: processes,
                 ports: ports,
