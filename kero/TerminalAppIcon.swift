@@ -50,14 +50,28 @@ final class TerminalAppIconCatalog {
         let source: TerminalAppIconSource
     }
 
+    /// 图标色调统计（与显示尺寸无关，可缓存复用）。
+    struct IconTone: Hashable {
+        /// 覆盖像素的感知亮度均值（0...1）。
+        var averageBrightness: Double
+        /// 不透明像素占画布比例（0...1）。
+        var coverage: Double
+    }
+
     /// 精确匹配：lowercased process name → 规则（用户配置优先，后写覆盖）。
     private var exactMap: [String: ResolvedRule] = [:]
     /// 前缀匹配：按前缀长度降序，避免短前缀抢先。
     private var prefixRules: [(prefix: String, rule: ResolvedRule)] = []
     /// NSImage 缓存：source + pointSize。
     private var imageCache: [String: NSImage] = [:]
+    /// 剪影模板图缓存：source + pointSize（低对比度图标重绘用）。
+    private var silhouetteCache: [String: NSImage] = [:]
     /// SVG 是否应按 template 绘制（含 currentColor 的单色品牌图标）。
     private var templateFlags: [String: Bool] = [:]
+    /// 图标色调分析缓存：实际渲染文件路径。
+    private var toneCache: [String: IconTone] = [:]
+    /// 原始（未缩放）图标缓存：文件路径 → NSImage，供色调分析复用，避免二次读盘。
+    private var rawImageCache: [String: NSImage] = [:]
 
     private let bundledIconsDirectory: URL?
     private let userIconsDirectory: URL
@@ -230,10 +244,13 @@ final class TerminalAppIconCatalog {
     }
 
     /// 加载指定来源的图标；`pointSize` 为显示逻辑点。
-    func image(for source: TerminalAppIconSource, pointSize: CGFloat) -> NSImage? {
+    /// `prefersLight` 为浅色外观时优先使用 Material 图标的 `_light` 变体
+    /// （深色描边版本，浅色背景更清晰，与 Files 面板的 `MaterialFileIconView` 行为一致）。
+    func image(for source: TerminalAppIconSource, pointSize: CGFloat, prefersLight: Bool = false) -> NSImage? {
         let sizeKey = String(format: "%.1f", pointSize)
+        let renderSource = resolvedSource(source, prefersLight: prefersLight)
         let cacheKey: String
-        switch source {
+        switch renderSource {
         case .material(let name):
             cacheKey = "material:\(name)@\(sizeKey)"
         case .imageFile(let path, _):
@@ -242,7 +259,7 @@ final class TerminalAppIconCatalog {
         if let hit = imageCache[cacheKey] { return hit }
 
         let image: NSImage?
-        switch source {
+        switch renderSource {
         case .material(let name):
             image = MaterialFileIconCatalog.shared.image(named: name, pointSize: pointSize)
         case .imageFile(let path, _):
@@ -252,6 +269,136 @@ final class TerminalAppIconCatalog {
             imageCache[cacheKey] = image
         }
         return image
+    }
+
+    /// 浅色外观下把 Material 来源解析到 `_light` 变体（若存在）。
+    private func resolvedSource(_ source: TerminalAppIconSource, prefersLight: Bool) -> TerminalAppIconSource {
+        guard prefersLight else { return source }
+        switch source {
+        case .material(let name)
+            where !name.hasSuffix("_light") && MaterialFileIconCatalog.shared.hasIcon(named: name + "_light"):
+            return .material(name + "_light")
+        default:
+            return source
+        }
+    }
+
+    // MARK: - 低对比度自适应
+
+    /// 色调分析采样边长（逻辑点）。
+    private static let toneSampleSize = 48
+
+    /// 判断在给定外观下图标是否需要重绘为剪影（与背景对比度不足）。
+    /// 深色外观背景亮度约 0.06，浅色外观约 0.94；图标平均亮度与背景过于接近即判定低可视度。
+    static func needsRecolorTone(_ tone: IconTone, isDark: Bool) -> Bool {
+        // 全出血位图（覆盖率接近 1，如整幅品牌图）不做剪影处理，避免变成整块色块。
+        guard tone.coverage < 0.82 else { return false }
+        let backgroundBrightness = isDark ? 0.06 : 0.94
+        return abs(tone.averageBrightness - backgroundBrightness) < 0.20
+    }
+
+    /// 图标是否需要重绘为剪影：非模板且与当前外观背景对比度不足。
+    func shouldRecolor(source: TerminalAppIconSource, prefersLight: Bool, isDark: Bool) -> Bool {
+        guard let tone = tone(for: source, prefersLight: prefersLight) else { return false }
+        return Self.needsRecolorTone(tone, isDark: isDark)
+    }
+
+    /// 剪影模板图（以 alpha 通道作遮罩、`isTemplate` 标记），供低对比度图标重绘着色。
+    func silhouetteImage(for source: TerminalAppIconSource, pointSize: CGFloat, prefersLight: Bool = false) -> NSImage? {
+        let renderSource = resolvedSource(source, prefersLight: prefersLight)
+        let sizeKey = String(format: "%.1f", pointSize)
+        let cacheKey: String
+        switch renderSource {
+        case .material(let name):
+            cacheKey = "silhouette:material:\(name)@\(sizeKey)"
+        case .imageFile(let path, _):
+            cacheKey = "silhouette:file:\(path)@\(sizeKey)"
+        }
+        if let hit = silhouetteCache[cacheKey] { return hit }
+        // 复制原图再标记 template，避免污染共享的原色缓存。
+        guard let base = image(for: renderSource, pointSize: pointSize),
+              let copy = base.copy() as? NSImage
+        else { return nil }
+        copy.isTemplate = true
+        silhouetteCache[cacheKey] = copy
+        return copy
+    }
+
+    /// 按实际渲染文件取得图标色调（与显示尺寸无关，缓存复用）。
+    private func tone(for source: TerminalAppIconSource, prefersLight: Bool) -> IconTone? {
+        let renderSource = resolvedSource(source, prefersLight: prefersLight)
+        let key: String
+        switch renderSource {
+        case .material(let name):
+            guard let url = MaterialFileIconCatalog.shared.fileURL(forIconName: name) else { return nil }
+            key = "tone:material:\(url.path)"
+        case .imageFile(let path, _):
+            key = "tone:file:\(path)"
+        }
+        if let cached = toneCache[key] { return cached }
+
+        let image: NSImage?
+        switch renderSource {
+        case .material(let name):
+            image = MaterialFileIconCatalog.shared.image(named: name, pointSize: CGFloat(Self.toneSampleSize))
+        case .imageFile(let path, _):
+            image = rawImageCache[path] ?? NSImage(contentsOf: URL(fileURLWithPath: path))
+        }
+        guard let image, let tone = Self.analyzeTone(of: image, sampleSize: Self.toneSampleSize) else {
+            return nil
+        }
+        toneCache[key] = tone
+        return tone
+    }
+
+    /// 分析位图色调：感知亮度均值与不透明覆盖率。失败返回 nil。
+    nonisolated static func analyzeTone(of image: NSImage, sampleSize: Int = 48) -> IconTone? {
+        guard sampleSize > 0 else { return nil }
+        let drawRect = NSRect(x: 0, y: 0, width: sampleSize, height: sampleSize)
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: sampleSize,
+            pixelsHigh: sampleSize,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+
+        NSGraphicsContext.saveGraphicsState()
+        let context = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current = context
+        context?.imageInterpolation = .high
+        image.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let data = rep.bitmapData else { return nil }
+        let bytesPerRow = rep.bytesPerRow
+        var sumBrightness = 0.0
+        var sumAlpha = 0.0
+        var covered = 0
+        for y in 0..<sampleSize {
+            let row = data + y * bytesPerRow
+            for x in 0..<sampleSize {
+                let pixel = row + x * 4
+                let alpha = Double(pixel[3])
+                guard alpha > 8 else { continue }
+                covered += 1
+                sumAlpha += alpha
+                let brightness = 0.299 * Double(pixel[0]) + 0.587 * Double(pixel[1]) + 0.114 * Double(pixel[2])
+                sumBrightness += brightness * alpha
+            }
+        }
+        guard sumAlpha > 0 else {
+            return IconTone(averageBrightness: 0, coverage: 0)
+        }
+        return IconTone(
+            averageBrightness: sumBrightness / sumAlpha / 255.0,
+            coverage: Double(covered) / Double(sampleSize * sampleSize)
+        )
     }
 
     /// 单色（currentColor）SVG 应用 template 渲染，便于随主题着色；PNG 等位图始终原色。
@@ -374,6 +521,10 @@ final class TerminalAppIconCatalog {
     private func loadImageFile(path: String, pointSize: CGFloat) -> NSImage? {
         let url = URL(fileURLWithPath: path)
         guard let base = NSImage(contentsOf: url) else { return nil }
+        // 保留原始图供色调分析复用。
+        if rawImageCache[path] == nil {
+            rawImageCache[path] = base
+        }
         let targetSize: NSSize
         let src = base.size
         if src.width > 0, src.height > 0 {
@@ -687,20 +838,28 @@ struct TerminalAppIconView: View {
     var body: some View {
         let catalog = TerminalAppIconCatalog.shared
         let source = effectiveSource
-        if let image = catalog.image(for: source, pointSize: size) {
+        let isDark = colorScheme == .dark
+        let prefersLight = !isDark
+        if let image = catalog.image(for: source, pointSize: size, prefersLight: prefersLight) {
             let template = catalog.isTemplate(source)
-            Image(nsImage: image)
+            // 非模板图标在浅/深外观下与背景对比度不足时，重绘为剪影并用主题色填充。
+            let recolor = !template && catalog.shouldRecolor(source: source, prefersLight: prefersLight, isDark: isDark)
+            let displayImage = recolor
+                ? (catalog.silhouetteImage(for: source, pointSize: size, prefersLight: prefersLight) ?? image)
+                : image
+            let isMask = template || recolor
+            Image(nsImage: displayImage)
                 .resizable()
                 .interpolation(.high)
-                .renderingMode(template ? .template : .original)
+                .renderingMode(isMask ? .template : .original)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
                 .foregroundStyle(
-                    template
+                    isMask
                         ? AnyShapeStyle(isSelected ? Color(nsColor: Theme.cursor) : Color.secondary)
                         : AnyShapeStyle(Color.primary)
                 )
-                .opacity(isSelected || template ? 1 : 0.72)
+                .opacity(isSelected || isMask ? 1 : 0.72)
                 .accessibilityHidden(true)
         } else {
             Image(systemName: "terminal")

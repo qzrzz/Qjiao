@@ -161,6 +161,11 @@ final class MaterialFileIconCatalog {
         svgURL(for: iconName)
     }
 
+    /// 逻辑名是否存在对应 SVG（如 `copilot_light` 变体）。
+    func hasIcon(named iconName: String) -> Bool {
+        svgURL(for: iconName) != nil
+    }
+
     /// 加载指定逻辑名的图标；`pointSize` 为 SwiftUI 显示逻辑点（默认 16）。
     func image(named iconName: String, pointSize: CGFloat = 16) -> NSImage? {
         // 点尺寸取整后做 key，同一列表行共用同一缓存项。
