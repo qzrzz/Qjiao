@@ -203,6 +203,10 @@ struct RightSidebarView: View {
     @State private var imageBuildSession: ImageBuildSession?
 
     private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+    /// 脚本/命令新建 session 的 shell pid 就绪通知（类型预绑定，减轻 body 类型检查开销）。
+    private let shellAttachPublisher = NotificationCenter.default
+        .publisher(for: .qjiaoSidebarShellDidAttach)
+        .map { _ in () }
     /// 任一项目终端完成命令都会改变对应序号；字典保留连续相同退出结果的事件。
     private var commandCompletionSequences: [UUID: UInt64] {
         Dictionary(uniqueKeysWithValues:
@@ -347,6 +351,11 @@ struct RightSidebarView: View {
             default:
                 break
             }
+        }
+        // 脚本/命令新建的 session 的 shell pid 异步出现；就绪后立即重扫，
+        // 让进程/端口采集马上包含新 shell，端口/浏览器按钮无需等 2s 轮询或切换标签。
+        .onReceive(shellAttachPublisher) {
+            syncModels()
         }
         .onChange(of: bottomTabRaw) {
             syncSystemPolling()

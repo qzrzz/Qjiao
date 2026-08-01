@@ -45,6 +45,7 @@
 | `match` | 进程可执行文件名（basename）精确匹配，大小写不敏感 |
 | `matchPrefix` | 前缀匹配（如 `python3.` 匹配 `python3.12`，`grok-` 匹配版本化二进制） |
 | `icon` | **推荐**。`icons/` 下的文件名，如 `antigravity-color.png`、`rsbuild.svg` |
+| `iconDark` | （可选）深色模式变体：`icons/` 下的文件名，与 `icon` 配对，深色外观下自动使用 |
 | `svg` | 兼容旧字段，等同于 `icon` |
 | `iconify` | Iconify 名，`prefix:name`（如 `bxl:openai`），解析为 `icons/{prefix}-{name}.svg` |
 | `material` | Material Icon Theme 逻辑名（见 `MaterialIcons/`） |

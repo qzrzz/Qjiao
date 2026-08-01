@@ -170,6 +170,14 @@ struct FileTreePanel: View {
                 PanelHeader(title: model.rootName, subtitle: model.rootPath, isSubtitlePath: true)
                     .contentShape(Rectangle())
                     .simultaneousGesture(panelTreeActivateGesture)
+                    // 根文件夹名 / 路径右键：与文件树空白区域同一套菜单（含手动完全刷新）。
+                    .contextMenu {
+                        fileTreeBlankMenu(
+                            model: model,
+                            manager: manager,
+                            visibleItems: filteredItems
+                        )
+                    }
 
                 SidebarIconButton(
                     systemImage: "magnifyingglass",
@@ -538,6 +546,14 @@ struct FileTreePanel: View {
                                     .frame(minHeight: 20)
                             }
                             .frame(minHeight: geo.size.height, alignment: .top)
+                            // 空白区域右键菜单：行内右键仍优先显示 FileTreeRow 的菜单。
+                            .contextMenu {
+                                fileTreeBlankMenu(
+                                    model: model,
+                                    manager: manager,
+                                    visibleItems: filteredItems
+                                )
+                            }
                         }
                         .coordinateSpace(name: "FileTreePanelContainer")
                         .overlay(
@@ -987,6 +1003,9 @@ private struct FileTreeRow: View {
                 .background(
                     RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.05))
                 )
+        } else if item.isLoading {
+            // 目录内容正在后台扫描：只读占位行，无 hover/menu/拖拽。
+            loadingRow
         } else {
             content
                 .background(
@@ -1594,6 +1613,27 @@ private struct FileTreeRow: View {
         }
     }
 
+    /// 目录内容后台扫描中的占位行：缩进与普通行一致，只读不响应任何交互。
+    private var loadingRow: some View {
+        HStack(spacing: 5) {
+            Spacer().frame(width: 12)
+            ProgressView()
+                .controlSize(.mini)
+                .scaleEffect(0.75)
+                .frame(width: 14, height: 14)
+            Text(L10n.t("Loading…"))
+                .font(FileTreeFont.caption)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 4)
+        }
+        .font(FileTreeFont.body)
+        .frame(minHeight: FileTreeFont.rowMinHeight, alignment: .leading)
+        .padding(.leading, CGFloat(item.depth) * 12 + 6)
+        .padding(.trailing, 6)
+        .padding(.vertical, 2)
+        .accessibilityLabel(L10n.t("Loading…"))
+    }
+
     private var draftRow: some View {
         HStack(spacing: 5) {
             leadingGlyphs
@@ -1969,6 +2009,43 @@ private final class AnchorNSView: NSView {
         if window != nil {
             onLayout?(self)
         }
+    }
+}
+
+// MARK: - 文件树空白区域 / 文件名行共用右键菜单
+
+/// 文件树空白区域与文件名行共用的右键菜单：手动完全刷新、新建、全选、
+/// 粘贴与根目录操作。菜单构建期只读状态（canPaste 等），不写 selectedPaths。
+@ViewBuilder
+fileprivate func fileTreeBlankMenu(
+    model: FileTreeModel,
+    manager: TerminalManager?,
+    visibleItems: [FileTreeModel.Item]?
+) -> some View {
+    Button(L10n.t("Refresh")) {
+        model.forceReload()
+    }
+    Divider()
+    Button(L10n.t("New File…")) {
+        model.beginNewFile(in: model.rootPath)
+    }
+    Button(L10n.t("New Folder…")) {
+        model.beginNewFolder(in: model.rootPath)
+    }
+    Button(L10n.t("Select All")) {
+        model.selectAllVisible(visibleItems: visibleItems)
+    }
+    if FileTreeModel.canPasteFromPasteboard {
+        Button(L10n.t("Paste")) {
+            model.pasteFromPasteboard()
+        }
+    }
+    Divider()
+    Button(L10n.t("Reveal in Finder")) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.rootPath)])
+    }
+    Button(L10n.t("Open in Terminal")) {
+        manager?.newSession(directory: model.rootPath)
     }
 }
 

@@ -42,6 +42,19 @@ final class FileTreeModel: nonisolated ObservableObject {
         /// True for the transient inline "new file/folder" input row, which
         /// has no backing file yet.
         var isDraft = false
+        /// True for the transient "loading directory contents" placeholder row,
+        /// shown while a folder's scan runs off the main thread. Not selectable.
+        var isLoading = false
+
+        /// 缓存中的目录子项以占位 `depth = 0` 存储，展平时按实际层级复制出新 Item。
+        func withDepth(_ depth: Int) -> Item {
+            guard depth != self.depth else { return self }
+            return Item(
+                name: name, path: path, isDirectory: isDirectory,
+                depth: depth, fileSize: fileSize, modificationDate: modificationDate,
+                isDraft: isDraft, isLoading: isLoading
+            )
+        }
     }
 
     /// A pending inline "new file/folder": an input row shown inside
@@ -57,6 +70,20 @@ final class FileTreeModel: nonisolated ObservableObject {
         case calculating
         case ready(UInt64)
         case failed
+    }
+
+    /// 目录内容指纹：用于缓存失效校验。
+    /// 只取目录自身的 contentModificationDate——直接子项增删/改名都会更新它；
+    /// 已有文件内容/大小变化不改目录 mtime（该缺口由后续文件监听方案覆盖）。
+    private struct DirectoryFingerprint: Equatable {
+        let contentModificationDate: Date
+    }
+
+    /// 单个目录的扫描结果缓存。`fingerprint == nil` 表示目录不存在/不可读：
+    /// 稳定显示为空且不重复入队扫描（目录重新出现由父目录重扫驱动，不会漏）。
+    private struct DirectoryCacheEntry {
+        let items: [Item]
+        let fingerprint: DirectoryFingerprint?
     }
 
     @Published private(set) var rootPath = ""
@@ -85,6 +112,13 @@ final class FileTreeModel: nonisolated ObservableObject {
         return true
     }()
     private var expanded: Set<String> = []
+    /// 目录内容缓存（path → 已扫描的直接子项，未排序）。
+    /// 排序在展平时于主线程进行，因此排序切换无需失效缓存；root 切换时整体清空。
+    private var directoryCache: [String: DirectoryCacheEntry] = [:]
+    /// 正在后台扫描的目录（去重，避免同一目录被并发扫多次）。
+    private var inFlightScans: Set<String> = []
+    /// root 切换等结构性变化时递增；后台扫描完成回主线程时校验，丢弃过期结果。
+    private var scanGeneration: UInt64 = 0
     /// ⇧ 范围选择的锚点：最近一次普通单击或 ⌘ 点击的目标。
     private var selectionAnchorPath: String?
     /// ⇧ 范围选择的游标端点：指示当前移动/扩展方向的目标。
@@ -105,7 +139,7 @@ final class FileTreeModel: nonisolated ObservableObject {
     /// 当前选中且仍在可见列表中的项（按树顺序）。
     var selectedItems: [Item] {
         let set = selectedPaths
-        return items.filter { !$0.isDraft && set.contains($0.path) }
+        return items.filter { !$0.isDraft && !$0.isLoading && set.contains($0.path) }
     }
 
     func isExpanded(_ item: Item) -> Bool {
@@ -131,7 +165,21 @@ final class FileTreeModel: nonisolated ObservableObject {
             draft = nil
             clearSelection()
             clearAllFolderSizes()
+            // 旧 root 的目录缓存整体作废；在飞扫描结果按 generation 丢弃。
+            directoryCache.removeAll()
+            scanGeneration &+= 1
         }
+        rebuild()
+    }
+
+    /// 手动完全刷新：清空全部目录缓存并丢弃在飞扫描，强制所有已展开目录
+    /// 重新后台扫描。用于绕过缓存的场景——目录 mtime 指纹只能感知「子项增删」，
+    /// 已有文件的大小/日期变化不会触发自动重扫，用户可手动强制全量刷新。
+    func forceReload() {
+        guard !rootPath.isEmpty else { return }
+        directoryCache.removeAll()
+        inFlightScans.removeAll()
+        scanGeneration &+= 1
         rebuild()
     }
 
@@ -167,7 +215,7 @@ final class FileTreeModel: nonisolated ObservableObject {
 
     /// 处理单击：支持普通 / ⌘ / ⇧ 多选。草稿行忽略。
     func selectClick(_ item: Item, modifiers: NSEvent.ModifierFlags, visibleItems: [Item]? = nil) {
-        guard !item.isDraft else { return }
+        guard !item.isDraft, !item.isLoading else { return }
         if modifiers.contains(.shift) {
             shiftSelect(to: item, visibleItems: visibleItems)
         } else if modifiers.contains(.command) {
@@ -181,7 +229,7 @@ final class FileTreeModel: nonisolated ObservableObject {
 
     /// 右键菜单：若点在已选中项上则保留多选，否则改为单选该项。
     func prepareContextSelection(for item: Item) {
-        guard !item.isDraft else { return }
+        guard !item.isDraft, !item.isLoading else { return }
         if !selectedPaths.contains(item.path) {
             selectedPaths = [item.path]
             selectionAnchorPath = item.path
@@ -197,7 +245,7 @@ final class FileTreeModel: nonisolated ObservableObject {
 
     /// 全选当前可见的非草稿行。
     func selectAllVisible(visibleItems: [Item]? = nil) {
-        let visible = visibleItems ?? items.filter { !$0.isDraft }
+        let visible = visibleItems ?? items.filter { !$0.isDraft && !$0.isLoading }
         let paths = visible.map(\.path)
         selectedPaths = Set(paths)
         selectionAnchorPath = paths.first
@@ -217,7 +265,7 @@ final class FileTreeModel: nonisolated ObservableObject {
 
     /// 从锚点到目标之间、当前可见列表上的连续范围（含两端）。
     func shiftSelect(to item: Item, visibleItems: [Item]? = nil) {
-        let visible = visibleItems ?? items.filter { !$0.isDraft }
+        let visible = visibleItems ?? items.filter { !$0.isDraft && !$0.isLoading }
         guard let endIndex = visible.firstIndex(where: { $0.path == item.path }) else {
             selectedPaths = [item.path]
             selectionAnchorPath = item.path
@@ -253,7 +301,7 @@ final class FileTreeModel: nonisolated ObservableObject {
     /// - Returns: 新选中的目标 Item（供界面平滑滚动），若无变化返回 nil。
     @discardableResult
     func moveSelection(direction: ArrowDirection, shift: Bool, visibleItems: [Item]) -> Item? {
-        let visible = visibleItems.filter { !$0.isDraft }
+        let visible = visibleItems.filter { !$0.isDraft && !$0.isLoading }
         guard !visible.isEmpty else { return nil }
 
         switch direction {
@@ -1256,14 +1304,21 @@ final class FileTreeModel: nonisolated ObservableObject {
     private func rebuild() {
         guard !rootPath.isEmpty else { return }
         var out: [Item] = []
-        appendChildren(of: rootPath, depth: 0, into: &out)
+        var stale: [String] = []
+        appendCachedChildren(of: rootPath, depth: 0, into: &out, stale: &stale)
+        if !stale.isEmpty {
+            scheduleScan(of: stale)
+        }
         if out != items {
             items = out
         }
         pruneSelection()
     }
 
-    private func appendChildren(of dir: String, depth: Int, into out: inout [Item]) {
+    /// 展平已展开目录树：全部来自 `directoryCache`（内存），不做任何磁盘 I/O。
+    /// 缓存缺失或指纹过期（目录内容变化）的目录收集进 `stale`，由 `scheduleScan`
+    /// 在后台补扫；补扫完成前该目录显示一行 loading 占位。
+    private func appendCachedChildren(of dir: String, depth: Int, into out: inout [Item], stale: inout [String]) {
         // Guard against runaway recursion through symlink cycles.
         guard depth < 32 else { return }
         // Show the inline new-file/folder input at the top of its folder.
@@ -1276,41 +1331,138 @@ final class FileTreeModel: nonisolated ObservableObject {
                 )
             )
         }
-        let fm = FileManager.default
-        guard let names = try? fm.contentsOfDirectory(atPath: dir) else { return }
-
-        let children = names
-            .filter { $0 != ".git" }
-            .map { name -> Item in
-                let path = (dir as NSString).appendingPathComponent(name)
-                var isDir: ObjCBool = false
-                fm.fileExists(atPath: path, isDirectory: &isDir)
-                let isDirectory = isDir.boolValue
-                let attrs = try? fm.attributesOfItem(atPath: path)
-                let fileSize: UInt64? = {
-                    guard !isDirectory else { return nil }
-                    return (attrs?[.size] as? NSNumber)?.uint64Value
-                }()
-                let modificationDate = attrs?[.modificationDate] as? Date
-                return Item(
-                    name: name, path: path, isDirectory: isDirectory,
-                    depth: depth, fileSize: fileSize, modificationDate: modificationDate
-                )
+        let needsPlaceholder = dir == rootPath || expanded.contains(dir)
+        guard let entry = directoryCache[dir] else {
+            if needsPlaceholder {
+                out.append(loadingItem(in: dir, depth: depth))
             }
-            .sorted { [weak self] a, b in
-                guard let self else {
-                    if a.isDirectory != b.isDirectory { return a.isDirectory }
-                    return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            stale.append(dir)
+            return
+        }
+        // 指纹有效则校验：目录内容变化（直接子项增删/改名）时失效重扫。
+        // fingerprint == nil 的目录（不存在/不可读）稳定显示为空，不重复入队。
+        if let cachedFingerprint = entry.fingerprint {
+            guard let current = fingerprint(of: dir), current == cachedFingerprint else {
+                if needsPlaceholder {
+                    out.append(loadingItem(in: dir, depth: depth))
                 }
-                return self.compareItems(a, b)
-            }
-
-        for child in children {
-            out.append(child)
-            if child.isDirectory, expanded.contains(child.path) {
-                appendChildren(of: child.path, depth: depth + 1, into: &out)
+                stale.append(dir)
+                return
             }
         }
+        // 排序在主线程展平时进行：size 排序需要 folderSizeStates，且排序切换
+        // 无需失效缓存。
+        let children = entry.items.sorted { compareItems($0, $1) }
+        for child in children {
+            out.append(child.withDepth(depth))
+            if child.isDirectory, expanded.contains(child.path) {
+                appendCachedChildren(of: child.path, depth: depth + 1, into: &out, stale: &stale)
+            }
+        }
+    }
+
+    /// 目录内容扫描中的 loading 占位行（不参与选择/右键/拖拽，由视图按 isLoading 分支渲染）。
+    private func loadingItem(in dir: String, depth: Int) -> Item {
+        Item(
+            name: "", path: dir + "/\u{1}loading", isDirectory: true,
+            depth: depth, fileSize: nil, modificationDate: nil, isLoading: true
+        )
+    }
+
+    /// 把失效目录的扫描任务批量调度到后台（utility 优先级）。全部完成后回主线程
+    /// 写缓存并再次 `rebuild()`（此时应全部命中，除非扫描期间目录又变化）。
+    /// 同一目录同时只允许一个在飞任务，避免并发读盘。
+    private func scheduleScan(of dirs: [String]) {
+        let toScan = dirs.filter { !inFlightScans.contains($0) }
+        guard !toScan.isEmpty else { return }
+        inFlightScans.formUnion(toScan)
+        let generation = scanGeneration
+        Task.detached(priority: .utility) { [weak self] in
+            var results: [String: DirectoryCacheEntry] = [:]
+            results.reserveCapacity(toScan.count)
+            for dir in toScan {
+                results[dir] = Self.scanDirectoryContents(at: dir)
+            }
+            await MainActor.run {
+                guard let self else { return }
+                // 先清理在飞标记：即使 root 已切换（generation 不匹配），
+                // 也不能让旧目录残留阻塞后续扫描。
+                self.inFlightScans.subtract(toScan)
+                // root 已切换：结果整体作废，不写缓存（sync 已递增 generation）。
+                guard self.scanGeneration == generation else { return }
+                for (dir, result) in results {
+                    self.directoryCache[dir] = result
+                }
+                self.rebuild()
+            }
+        }
+    }
+
+    /// 主线程校验目录指纹：对每个已展开目录做一次轻量 stat（比全量重扫便宜几个数量级）。
+    private func fingerprint(of dir: String) -> DirectoryFingerprint? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: dir),
+              let mtime = attrs[FileAttributeKey.modificationDate] as? Date
+        else { return nil }
+        return DirectoryFingerprint(contentModificationDate: mtime)
+    }
+
+    /// 后台扫描单个目录：一次 readdir（预取属性）批量取元数据，替代旧的
+    /// 「每文件 fileExists + attributesOfItem 两次 stat」。纯函数，不碰主线程状态。
+    /// 目录不存在/不可读时返回指纹为 nil 的条目，避免反复入队扫描造成死循环。
+    nonisolated private static func scanDirectoryContents(at dir: String) -> DirectoryCacheEntry {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: dir),
+              let mtime = attrs[FileAttributeKey.modificationDate] as? Date
+        else {
+            return DirectoryCacheEntry(items: [], fingerprint: nil)
+        }
+        let url = URL(fileURLWithPath: dir, isDirectory: true)
+        let keys: [URLResourceKey] = [
+            .isDirectoryKey, .fileSizeKey,
+            .contentModificationDateKey, .isSymbolicLinkKey,
+        ]
+        guard let urls = try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: [])
+        else {
+            return DirectoryCacheEntry(items: [], fingerprint: nil)
+        }
+        let keySet = Set(keys)
+        var items: [Item] = []
+        items.reserveCapacity(urls.count)
+        for child in urls {
+            let name = child.lastPathComponent
+            guard name != ".git" else { continue }
+            guard let values = try? child.resourceValues(forKeys: keySet) else { continue }
+            // 路径必须用字符串拼接而非 child.path：contentsOfDirectory 返回的
+            // URL.path 是 realpath 后的形式（如 /var → /private/var），而 rootPath
+            // 与旧代码的 appendingPathComponent 都是字符串拼接，混用会导致
+            // expanded / hasPrefix 等路径匹配全部失效。属性值仍从 URL 批量取。
+            let path = (dir as NSString).appendingPathComponent(name)
+            // 符号链接按目标类型显示（与旧的 fileExists 语义一致）；
+            // 仅 symlink 需要多一次 stat，普通文件/目录保持一次 resourceValues。
+            let isSymlink = values.isSymbolicLink == true
+            let isDirectory: Bool
+            if isSymlink {
+                var isDir: ObjCBool = false
+                fm.fileExists(atPath: path, isDirectory: &isDir)
+                isDirectory = isDir.boolValue
+            } else {
+                isDirectory = values.isDirectory == true
+            }
+            // values.fileSize 为 Int?，Item.fileSize 为 UInt64?：显式转换避免编译器歧义。
+            let fileSize: UInt64? = isDirectory ? nil : values.fileSize.map(UInt64.init)
+            items.append(
+                Item(
+                    name: name, path: path, isDirectory: isDirectory,
+                    depth: 0, // 占位深度，展平时由 withDepth 重设
+                    fileSize: fileSize,
+                    modificationDate: values.contentModificationDate
+                )
+            )
+        }
+        return DirectoryCacheEntry(
+            items: items,
+            fingerprint: DirectoryFingerprint(contentModificationDate: mtime)
+        )
     }
 
     /// 比较两个树项排序顺序（同级节点）。
