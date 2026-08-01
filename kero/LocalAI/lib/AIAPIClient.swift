@@ -24,15 +24,21 @@ enum AIAPIClient {
     ) async throws -> LocalAIResponse {
         let urlRequest = try makeURLRequest(request, configuration: configuration)
         let startedAt = Date()
+        let metricsDelegate = AIAPIRequestMetricsDelegate()
         logRequest(urlRequest, configuration: configuration)
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: urlRequest)
+            (data, response) = try await URLSession.shared.data(
+                for: urlRequest,
+                delegate: metricsDelegate
+            )
         } catch is CancellationError {
+            logNetworkMetrics(metricsDelegate.snapshot, startedAt: startedAt)
             logRequestFailure(CancellationError(), configuration: configuration)
             throw CancellationError()
         } catch {
+            logNetworkMetrics(metricsDelegate.snapshot, startedAt: startedAt)
             logRequestFailure(error, configuration: configuration)
             if Task.isCancelled { throw CancellationError() }
             throw LocalAIError.apiRequestFailed(
@@ -43,6 +49,7 @@ enum AIAPIClient {
         }
 
         try Task.checkCancellation()
+        logNetworkMetrics(metricsDelegate.snapshot, startedAt: startedAt)
         logResponse(
             response,
             data: data,
@@ -161,6 +168,7 @@ enum AIAPIClient {
             method: \(request.httpMethod ?? "POST")
             url: \(redactedURL(request.url))
             timeout: \(String(format: "%.1f", request.timeoutInterval))s
+            body bytes: \(request.httpBody?.count ?? 0)
             headers:
             \(headerLines)
             body:
@@ -203,6 +211,49 @@ enum AIAPIClient {
             error: \(error.localizedDescription)
             """
         )
+    }
+
+    /// 打印 DNS、TCP/TLS、上传、首字节等阶段耗时，用于定位请求慢在本地还是供应商。
+    private static func logNetworkMetrics(
+        _ snapshot: AIAPIRequestMetricsSnapshot?,
+        startedAt: Date
+    ) {
+        let elapsed = Date().timeIntervalSince(startedAt) * 1_000
+        guard let snapshot else {
+            print(
+                "[LocalAI API] HTTP metrics unavailable; elapsed: "
+                    + String(format: "%.0fms", elapsed)
+            )
+            return
+        }
+
+        let transactions = snapshot.transactions.enumerated().map { index, item in
+            """
+            transaction \(index + 1): protocol=\(item.networkProtocol) reused=\(item.reusedConnection) proxy=\(item.proxyConnection)
+              dns: \(formatMilliseconds(item.dnsMilliseconds))
+              connect: \(formatMilliseconds(item.connectMilliseconds))
+              tls: \(formatMilliseconds(item.tlsMilliseconds))
+              upload: \(formatMilliseconds(item.uploadMilliseconds))
+              ttfb: \(formatMilliseconds(item.timeToFirstByteMilliseconds))
+              download: \(formatMilliseconds(item.downloadMilliseconds))
+            """
+        }.joined(separator: "\n")
+
+        print(
+            """
+            [LocalAI API] ——— HTTP metrics begin ———
+            elapsed: \(String(format: "%.0f", elapsed))ms
+            task: \(String(format: "%.0f", snapshot.taskMilliseconds))ms
+            redirects: \(snapshot.redirectCount)
+            \(transactions.isEmpty ? "transactions: unavailable" : transactions)
+            [LocalAI API] ——— HTTP metrics end ———
+            """
+        )
+    }
+
+    /// 缺失的阶段表示请求在进入该阶段前已失败或超时。
+    private static func formatMilliseconds(_ value: Double?) -> String {
+        value.map { String(format: "%.0fms", $0) } ?? "n/a"
     }
 
     /// 将 JSON 负载格式化为可读文本，非 JSON 数据回退为 UTF-8 原文。
@@ -315,5 +366,90 @@ enum AIAPIClient {
         let components = duration.components
         let seconds = Double(components.seconds) + Double(components.attoseconds) / 1e18
         return max(1, seconds)
+    }
+}
+
+/// URLSession 网络阶段耗时的可并发传递快照。
+private struct AIAPIRequestMetricsSnapshot: Sendable {
+    let taskMilliseconds: Double
+    let redirectCount: Int
+    let transactions: [AIAPITransactionMetricsSnapshot]
+}
+
+/// 单次 HTTP 交易的 DNS、连接、TLS 与数据传输耗时。
+private struct AIAPITransactionMetricsSnapshot: Sendable {
+    let networkProtocol: String
+    let reusedConnection: Bool
+    let proxyConnection: Bool
+    let dnsMilliseconds: Double?
+    let connectMilliseconds: Double?
+    let tlsMilliseconds: Double?
+    let uploadMilliseconds: Double?
+    let timeToFirstByteMilliseconds: Double?
+    let downloadMilliseconds: Double?
+}
+
+/// 只收集当次 data task 的网络指标，不改变 URLSession 请求行为。
+private final class AIAPIRequestMetricsDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedSnapshot: AIAPIRequestMetricsSnapshot?
+
+    /// URLSession 回调与 async 请求处于不同线程，通过锁读取不可变快照。
+    var snapshot: AIAPIRequestMetricsSnapshot? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedSnapshot
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didFinishCollecting metrics: URLSessionTaskMetrics
+    ) {
+        let transactions = metrics.transactionMetrics.map { item in
+            AIAPITransactionMetricsSnapshot(
+                networkProtocol: item.networkProtocolName ?? "unknown",
+                reusedConnection: item.isReusedConnection,
+                proxyConnection: item.isProxyConnection,
+                dnsMilliseconds: Self.milliseconds(
+                    from: item.domainLookupStartDate,
+                    to: item.domainLookupEndDate
+                ),
+                connectMilliseconds: Self.milliseconds(
+                    from: item.connectStartDate,
+                    to: item.connectEndDate
+                ),
+                tlsMilliseconds: Self.milliseconds(
+                    from: item.secureConnectionStartDate,
+                    to: item.secureConnectionEndDate
+                ),
+                uploadMilliseconds: Self.milliseconds(
+                    from: item.requestStartDate,
+                    to: item.requestEndDate
+                ),
+                timeToFirstByteMilliseconds: Self.milliseconds(
+                    from: item.requestEndDate,
+                    to: item.responseStartDate
+                ),
+                downloadMilliseconds: Self.milliseconds(
+                    from: item.responseStartDate,
+                    to: item.responseEndDate
+                )
+            )
+        }
+        let snapshot = AIAPIRequestMetricsSnapshot(
+            taskMilliseconds: metrics.taskInterval.duration * 1_000,
+            redirectCount: metrics.redirectCount,
+            transactions: transactions
+        )
+        lock.lock()
+        storedSnapshot = snapshot
+        lock.unlock()
+    }
+
+    /// 两个阶段时间点均存在时才输出耗时。
+    private static func milliseconds(from start: Date?, to end: Date?) -> Double? {
+        guard let start, let end else { return nil }
+        return max(0, end.timeIntervalSince(start) * 1_000)
     }
 }

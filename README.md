@@ -72,8 +72,8 @@
   - **实现**：`kero/L10n/`（`L10n.swift` 核心 + 各语言表如 `zh-Hans.swift`、`ja.swift`）；以英文源字符串为 key，运行时切换无需重启；菜单、设置、左右侧栏、Git/Files/Project/System/Note、命令面板、图标选择器、图片查看器、终端剪贴板确认与常用对话框等已接入简体中文与日本語，主题名称与代码预览样本保持原文。
 - 新增 AI 统一模块 `kero/LocalAI`：应用侧只依赖 `LocalAI.prompt` 统一接口，可在本地 AI CLI 与云端 AI API 两种后端之间切换，现有 AI Select Icon、AI Name & Desc & Icon、AI Git Commit Message 等功能无需修改调用点。
   - **支持 Provider**：`grok`（`grok --single`）、`codex`（`codex exec`）、`claude`（`claude -p` / `--print`）、`agy`（`agy --print`）、`opencode`（`opencode run`）、`pi`（`pi -p` / `--print`），以及 **Disabled**。
-  - **独立设置分类**：原 Settings → General → AI 已提升为 Settings → **AI**；可选择 **Local CLI** 或 **AI API** 后端。AI 表单采用紧凑单行对齐，不重复显示字段标签，仅保留必要的隐私与密钥状态。CLI 模式列出全部支持的 CLI，未安装项显示 “Not installed” 且不可选，可 Refresh 重新探测 PATH / 常见安装目录。
-  - **AI API**：内置 OpenAI、DeepSeek、Anthropic、Google Gemini、OpenRouter、xAI 与自定义 OpenAI-compatible 提供方；支持编辑模型 ID 与 API 根地址，分别适配 OpenAI Chat Completions、Anthropic Messages 和 Gemini GenerateContent 协议；API Key 按提供方独立保存到 macOS Keychain，不写入 `config.toml`。HTTP 请求与响应会在日志中打印供调试，认证头与 URL 中的密钥参数始终脱敏。
+  - **独立设置分类**：原 Settings → General → AI 已提升为 Settings → **AI**；可选择 **Local CLI** 或 **AI API** 后端。AI 表单采用紧凑单行对齐，不重复显示字段标签，仅保留必要的隐私与密钥状态；API Key 操作按钮保持固有宽度，窄宽度下不会显示为空白按钮。CLI 模式列出全部支持的 CLI，未安装项显示 “Not installed” 且不可选，可 Refresh 重新探测 PATH / 常见安装目录。
+  - **AI API**：内置 OpenAI、DeepSeek、Anthropic、Google Gemini、OpenRouter、xAI 与自定义 OpenAI-compatible 提供方；支持编辑模型 ID 与 API 根地址，分别适配 OpenAI Chat Completions、Anthropic Messages 和 Gemini GenerateContent 协议；API Key 按提供方独立保存到 macOS Keychain，不写入 `config.toml`，并且只在进入 API 设置页或实际发起 AI 请求时按需读取，应用启动阶段不访问钥匙串。HTTP 请求与响应会在日志中打印供调试，认证头与 URL 中的密钥参数始终脱敏；同时输出 DNS、TCP/TLS、上传、TTFB 与下载阶段耗时，用于定位慢请求。
   - **配置**：写入 `~/.config/qjiao/config.toml` 的 `ai.headless-provider`（默认 disabled，不写回）。
   - **能力**：单轮 prompt、可选工作目录 / model / 超时 / autoApprove；`LocalAIRegistry` 负责安装探测与当前选择。
   - **提示词约定（唯一来源）**：全部可调教正文集中在 `kero/LocalAI/prompts/*Prompt.swift`（见 `LocalAIPrompts.swift` 索引）；业务 `*Suggest` 只做上下文采集与组装，禁止旁路 `.md` / 功能文件内大段模板副本。

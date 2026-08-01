@@ -1038,6 +1038,8 @@ private struct AIAPIProviderSettings: View {
                         saveKey()
                     }
                     .controlSize(.small)
+                    // API Key 较长时优先压缩输入框，不把“保存”文字压成空白按钮。
+                    .fixedSize(horizontal: true, vertical: false)
                     .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     if registry.hasAPIKey {
                         Image(systemName: "checkmark.circle.fill")
@@ -1095,35 +1097,41 @@ private struct AIAPIProviderSettings: View {
 
     /// 从 Keychain 载入当前供应商密钥，SecureField 只显示掩码。
     private func loadKey() {
+        let provider = settings.aiAPIProvider
         do {
-            apiKey = try AIAPIKeyStore.load(for: settings.aiAPIProvider)
+            apiKey = try AIAPIKeyStore.load(for: provider)
             keyStatus = nil
+            registry.recordKeyState(apiKey, for: provider)
         } catch {
             apiKey = ""
             keyStatus = error.localizedDescription
+            registry.recordKeychainError(error, for: provider)
         }
-        registry.refreshKeyState()
     }
 
     private func saveKey() {
+        let provider = settings.aiAPIProvider
         do {
-            try AIAPIKeyStore.save(apiKey, for: settings.aiAPIProvider)
+            try AIAPIKeyStore.save(apiKey, for: provider)
             keyStatus = nil
+            registry.recordKeyState(apiKey, for: provider)
         } catch {
             keyStatus = error.localizedDescription
+            registry.recordKeychainError(error, for: provider)
         }
-        registry.refreshKeyState()
     }
 
     private func deleteKey() {
+        let provider = settings.aiAPIProvider
         do {
-            try AIAPIKeyStore.delete(for: settings.aiAPIProvider)
+            try AIAPIKeyStore.delete(for: provider)
             apiKey = ""
             keyStatus = nil
+            registry.recordKeyState("", for: provider)
         } catch {
             keyStatus = error.localizedDescription
+            registry.recordKeychainError(error, for: provider)
         }
-        registry.refreshKeyState()
     }
 }
 
