@@ -122,6 +122,8 @@ struct ContentView: View {
         }
         .onAppear {
             manager.reloadActiveProjectTheme()
+            // Tab Agent 角标依赖全局轮询；Info 面板也会 activate，幂等。
+            AgentWatcher.shared.activate(manager: manager)
             NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { event in
                 FileTreeModel.isDraggingFromTree = false
                 return event
@@ -1223,6 +1225,7 @@ private struct PaneTabItem: View {
             case .session(let session):
                 SessionTabLabel(
                     session: session,
+                    tabSessions: tab.sessions,
                     showsCommandSpinner: manager.isRightSidebarCommandRunning(
                         sessionID: session.id
                     ),
@@ -1354,6 +1357,9 @@ private struct TabRenameChrome: View {
 
 private struct SessionTabLabel: View {
     @ObservedObject var session: TerminalSession
+    @ObservedObject private var agentWatcher = AgentWatcher.shared
+    /// 同 Tab 内所有 session（分屏）；未读按 Tab 聚合。
+    var tabSessions: [TerminalSession] = []
     let showsCommandSpinner: Bool
     var customTitle: String?
     let paneCount: Int
@@ -1369,6 +1375,11 @@ private struct SessionTabLabel: View {
         // state. A lightweight timeline refreshes just the visible tab icon.
         TimelineView(.periodic(from: .now, by: 0.3)) { _ in
             let appIcon = session.foregroundAppIcon
+            let isAgentWorking = agentWatcher.snapshot(for: session.id)?.status == .working
+            let sessionsForUnread = tabSessions.isEmpty ? [session] : tabSessions
+            let isAgentUnread = sessionsForUnread.contains {
+                agentWatcher.isUnread(sessionID: $0.id)
+            }
             TabItemChrome(
                 systemImage: "terminal",
                 title: customTitle ?? session.title,
@@ -1378,13 +1389,28 @@ private struct SessionTabLabel: View {
                 isTaskTab: session.isTaskRunning,
                 taskHasError: session.taskHasError,
                 isTerminalRunning: showsCommandSpinner,
+                isAgentWorking: isAgentWorking,
+                isAgentUnread: isAgentUnread,
                 terminalAppIcon: appIcon,
                 minWidth: minWidth,
                 maxWidth: maxWidth,
                 iconOnly: iconOnly,
-                select: select,
+                select: {
+                    // 点开即视为已读。
+                    for s in sessionsForUnread {
+                        agentWatcher.markRead(sessionID: s.id)
+                    }
+                    select()
+                },
                 close: close
             )
+        }
+        .onChange(of: isSelected) { _, selected in
+            guard selected else { return }
+            let sessionsForUnread = tabSessions.isEmpty ? [session] : tabSessions
+            for s in sessionsForUnread {
+                agentWatcher.markRead(sessionID: s.id)
+            }
         }
     }
 }
@@ -1509,6 +1535,78 @@ struct TaskStatusOverlayView: View {
     }
 }
 
+/// Agent 工作中：图标右下角呼吸闪烁的小绿点；结束时渐隐而非瞬间消失。
+///
+/// 需由父视图在 `isActive` 变为 false 后仍短暂保留本视图（始终 overlay 即可），
+/// 否则 SwiftUI 会直接卸载子树，渐隐无法完成。
+struct AgentWorkingStatusDot: View {
+    var isActive: Bool = true
+
+    private static let green = Color(red: 0.25, green: 0.73, blue: 0.31)
+    private static let pulseDuration: Double = 1.1
+    private static let fadeInDuration: Double = 0.22
+    private static let fadeOutDuration: Double = 0.55
+
+    /// 整体显现强度 0…1；结束时缓出到 0。
+    @State private var presence: Double = 0
+    /// 呼吸相位：true 为更暗/更小的一端。
+    @State private var pulseDimmed = false
+
+    private var drawnOpacity: Double {
+        let pulse = pulseDimmed ? 0.28 : 1.0
+        return presence * pulse
+    }
+
+    private var drawnScale: Double {
+        let pulse = pulseDimmed ? 0.78 : 1.0
+        // 渐隐时略微收一点，避免「还在原地突然没了」的感觉。
+        return pulse * (0.88 + 0.12 * presence)
+    }
+
+    var body: some View {
+        Circle()
+            .fill(Self.green)
+            .frame(width: 5, height: 5)
+            .opacity(drawnOpacity)
+            .scaleEffect(drawnScale)
+            .offset(x: 2, y: 2)
+            .allowsHitTesting(false)
+            .accessibilityLabel(L10n.t("Working"))
+            .accessibilityHidden(presence < 0.08)
+            .onAppear {
+                apply(active: isActive, animated: presence > 0.01)
+            }
+            .onChange(of: isActive) { _, active in
+                apply(active: active, animated: true)
+            }
+    }
+
+    private func apply(active: Bool, animated: Bool) {
+        if active {
+            if animated {
+                withAnimation(.easeOut(duration: Self.fadeInDuration)) {
+                    presence = 1
+                }
+            } else {
+                presence = 1
+            }
+            // 呼吸循环（仅在 active 时驱动）。
+            withAnimation(
+                .easeInOut(duration: Self.pulseDuration)
+                    .repeatForever(autoreverses: true)
+            ) {
+                pulseDimmed = true
+            }
+        } else {
+            // 用非循环动画覆盖 forever，并把 presence 缓出到 0。
+            withAnimation(.easeOut(duration: Self.fadeOutDuration)) {
+                pulseDimmed = false
+                presence = 0
+            }
+        }
+    }
+}
+
 private struct TabItemChrome: View {
     /// 默认最小宽度（标签条未满）；实际下限由 `minWidth` 传入。
     private static let defaultMinWidth: CGFloat = 150
@@ -1529,6 +1627,10 @@ private struct TabItemChrome: View {
     var isTaskTab = false
     var taskHasError = false
     var isTerminalRunning = false
+    /// Agent 正在工作：图标右下角呼吸绿点（优先于 Task 状态角标）。
+    var isAgentWorking = false
+    /// Agent 完成但未读：小蓝点（working 绿点优先；否则显示未读）。
+    var isAgentUnread = false
     /// 终端前台进程匹配到的应用图标；有值时优先于转圈动画。
     var terminalAppIcon: TerminalAppIconSource? = nil
     /// 由标签条挤满状态决定：默认 150，挤满时 130；弹性模式为分配宽。
@@ -1614,6 +1716,13 @@ private struct TabItemChrome: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                    } else if isAgentUnread && !isAgentWorking {
+                        // Agent 未读：小蓝点（与 dirty 同位置）。
+                        Circle()
+                            .fill(Color(nsColor: .systemBlue))
+                            .frame(width: 5, height: 5)
+                            .frame(width: 14, height: 14)
+                            .accessibilityLabel(L10n.t("Unread"))
                     } else if isDirty {
                         Circle()
                             .fill(Theme.secondaryColor)
@@ -1676,26 +1785,35 @@ private struct TabItemChrome: View {
             }
         }
 
-        if isTaskTab {
-            iconBase.overlay(
-                TaskStatusOverlayView(
-                    isExecuting: isTerminalRunning,
-                    hasError: taskHasError,
-                    tint: isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor
-                ),
-                alignment: .bottomTrailing
-            )
-        } else if iconOnly && isDirty {
-            // 仅图标时仍提示未保存：右下小圆点。
-            iconBase.overlay(alignment: .bottomTrailing) {
-                Circle()
-                    .fill(Theme.secondaryColor)
-                    .frame(width: 5, height: 5)
-                    .offset(x: 2, y: 2)
+        // Agent 绿点始终挂在 overlay 上，靠 isActive 渐显/渐隐，避免状态结束时瞬间卸载。
+        iconBase
+            .overlay(alignment: .bottomTrailing) {
+                AgentWorkingStatusDot(isActive: isAgentWorking)
             }
-        } else {
-            iconBase
-        }
+            .overlay(alignment: .bottomTrailing) {
+                if !isAgentWorking {
+                    if isAgentUnread && iconOnly {
+                        // 仅图标模式：未读蓝点挂在图标右下（无右侧标题区）。
+                        Circle()
+                            .fill(Color(nsColor: .systemBlue))
+                            .frame(width: 5, height: 5)
+                            .offset(x: 2, y: 2)
+                            .accessibilityLabel(L10n.t("Unread"))
+                    } else if !isAgentUnread && isTaskTab {
+                        TaskStatusOverlayView(
+                            isExecuting: isTerminalRunning,
+                            hasError: taskHasError,
+                            tint: isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor
+                        )
+                    } else if iconOnly && isDirty {
+                        // 仅图标时仍提示未保存：右下小圆点。
+                        Circle()
+                            .fill(Theme.secondaryColor)
+                            .frame(width: 5, height: 5)
+                            .offset(x: 2, y: 2)
+                    }
+                }
+            }
     }
 
     /// 根据 AppKit 测得的标题自然宽度更新显示宽度：扩张即时生效，收缩等待一段时间后再执行。
@@ -1801,12 +1919,13 @@ private struct TabTruncatedTitleTooltip: ViewModifier {
     }
 }
 
-/// Terminal: 前台已知应用 → TerminalAppIcon；Task 标志 → 右下角 indicator；其他情况 → SF Symbol。
+/// Terminal: 前台已知应用 → TerminalAppIcon；Agent 工作中 → 呼吸绿点；Task 标志 → 右下角 indicator；其他情况 → SF Symbol。
 /// Open files / diffs use Material icons (same as the Files tree).
 struct TabContentIcon: View {
     let content: PaneContent?
     var showsCommandSpinner = false
     let tint: Color
+    @ObservedObject private var agentWatcher = AgentWatcher.shared
     private static let materialSize: CGFloat = 14
 
     var body: some View {
@@ -1827,18 +1946,29 @@ struct TabContentIcon: View {
                         .foregroundStyle(tint)
                 }
             }
-            if session.isTaskRunning {
-                iconBase.overlay(
-                    TaskStatusOverlayView(
-                        isExecuting: showsCommandSpinner,
-                        hasError: session.taskHasError,
-                        tint: tint
-                    ),
-                    alignment: .bottomTrailing
-                )
-            } else {
-                iconBase
-            }
+            let isAgentWorking = agentWatcher.snapshot(for: session.id)?.status == .working
+            let isAgentUnread = agentWatcher.isUnread(sessionID: session.id)
+            iconBase
+                .overlay(alignment: .bottomTrailing) {
+                    AgentWorkingStatusDot(isActive: isAgentWorking)
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if !isAgentWorking {
+                        if isAgentUnread {
+                            Circle()
+                                .fill(Color(nsColor: .systemBlue))
+                                .frame(width: 5, height: 5)
+                                .offset(x: 2, y: 2)
+                                .accessibilityLabel(L10n.t("Unread"))
+                        } else if session.isTaskRunning {
+                            TaskStatusOverlayView(
+                                isExecuting: showsCommandSpinner,
+                                hasError: session.taskHasError,
+                                tint: tint
+                            )
+                        }
+                    }
+                }
         } else if let fileName = content?.materialFileName {
             MaterialFileIconView(
                 fileName: fileName,

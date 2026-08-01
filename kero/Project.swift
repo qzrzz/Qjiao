@@ -629,6 +629,13 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         }
     }
 
+    /// 应用退出路径没有下一轮 runloop，必须同步停止所有终端进程组。
+    func terminateAllImmediately() {
+        for session in sessions {
+            session.terminateImmediately()
+        }
+    }
+
     // MARK: - Splits
 
     func splitRight() { split(toward: .right) }

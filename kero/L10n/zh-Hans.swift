@@ -11,6 +11,7 @@ import Foundation
 extension L10n {
     /// English → 简体中文. Unlisted keys keep the English source.
     static let zhHans: [String: String] = [
+        "%lld unread": "%lld 条未读",
         "(all themes)": "（所有主题）",
         "(Bundled)": "（内置）",
         "%@ (%lld items were already moved to Trash.)": "%@（其中 %lld 项已在废纸篓中。）",
@@ -35,6 +36,10 @@ extension L10n {
         "%lld outgoing commits": "待推送 %lld 个提交",
         "%lld pt": "%lld pt",
         "%lld sessions": "%lld 个会话",
+        "Agent Status": "Agent 状态",
+        "Blocked": "阻塞",
+        "Unread": "未读",
+        "Working": "工作中",
         "`kero +themes` needs an interactive terminal. Use `kero +themes --list` to print theme names.": "`kero +themes` 需要交互式终端。请使用 `kero +themes --list` 列出主题名称。",
         "`kero` must be run inside a Kero terminal.": "`kero` 必须在 Kero 终端内运行。",
         "↑↓ navigate · Return save · Esc cancel · Tab light/dark": "↑↓ 浏览 · Return 保存 · Esc 取消 · Tab 明暗切换",
