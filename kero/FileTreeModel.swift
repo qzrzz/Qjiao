@@ -731,8 +731,9 @@ final class FileTreeModel: nonisolated ObservableObject {
     /// - Parameters:
     ///   - paths: 待移动的源路径数组
     ///   - targetDir: 目标目录绝对路径
+    ///   - overwrite: 若为 true，目标位置已存在同名项时先删除再移动
     ///   - onRename: 文件路径变更回调（用于同步更新打开的主编辑器标签页）
-    func moveItems(paths: [String], into targetDir: String, onRename: ((_ oldPath: String, _ newPath: String) -> Void)? = nil) {
+    func moveItems(paths: [String], into targetDir: String, overwrite: Bool = false, onRename: ((_ oldPath: String, _ newPath: String) -> Void)? = nil) {
         let normalizedDestDir = (targetDir as NSString).standardizingPath
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: normalizedDestDir, isDirectory: &isDir),
@@ -757,10 +758,24 @@ final class FileTreeModel: nonisolated ObservableObject {
 
             let fm = FileManager.default
             if fm.fileExists(atPath: destPath) {
-                if firstError == nil {
-                    firstError = L10n.format("An item named “%@” already exists in this location.", itemName)
+                if overwrite {
+                    // 覆盖模式：先删除目标，再移动
+                    do {
+                        try fm.removeItem(atPath: destPath)
+                    } catch {
+                        if firstError == nil {
+                            firstError = L10n.format("Couldn’t replace “%@”: %@", itemName, error.localizedDescription)
+                        }
+                        continue
+                    }
+                    // 清理已被删除路径的缓存
+                    dropFolderSizes(under: [destPath])
+                } else {
+                    if firstError == nil {
+                        firstError = L10n.format("An item named “%@” already exists in this location.", itemName)
+                    }
+                    continue
                 }
-                continue
             }
 
             do {
