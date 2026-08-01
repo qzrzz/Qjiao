@@ -2,7 +2,7 @@
 //  AIAPIRegistry.swift
 //  kero
 //
-//  缓存当前 API 配置是否完整，供设置页与现有 AI 功能即时刷新启用状态。
+//  按需缓存当前 API 密钥状态，避免应用启动时访问 macOS Keychain。
 //
 
 import Combine
@@ -19,35 +19,49 @@ final class AIAPIRegistry: nonisolated ObservableObject {
     /// Keychain 读取失败时供设置页展示的错误。
     @Published private(set) var keychainError: String?
 
-    private init() {
-        refreshKeyState()
+    /// 密钥缓存对应的提供方；nil 表示应用启动后尚未读取 Keychain。
+    private var loadedProvider: AIAPIProviderID?
+
+    private init() {}
+
+    /// 设置页或实际请求读取密钥后，用已有结果更新缓存，不再次访问 Keychain。
+    func recordKeyState(_ apiKey: String, for provider: AIAPIProviderID) {
+        loadedProvider = provider
+        hasAPIKey = !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        keychainError = nil
     }
 
-    /// API Key、供应商切换或设置页出现后刷新缓存。
-    func refreshKeyState() {
-        do {
-            hasAPIKey = try !AIAPIKeyStore.load(for: AppSettings.shared.aiAPIProvider).isEmpty
-            keychainError = nil
-        } catch {
-            hasAPIKey = false
-            keychainError = error.localizedDescription
-        }
+    /// 记录按需读取 Keychain 时的失败状态。
+    func recordKeychainError(_ error: Error, for provider: AIAPIProviderID) {
+        loadedProvider = provider
+        hasAPIKey = false
+        keychainError = error.localizedDescription
     }
 
     /// 当前 API 配置是否足以发起请求。
     var isEnabled: Bool {
         let settings = AppSettings.shared
-        return hasAPIKey
-            && !settings.aiAPIModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasValidFields = !settings.aiAPIModel
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !settings.aiAPIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // 尚未按需读取时不为了按钮状态提前查询 Keychain；实际请求会校验密钥。
+        let keyIsUsable = loadedProvider == settings.aiAPIProvider ? hasAPIKey : true
+        return hasValidFields && keyIsUsable
     }
 
     /// 从 AppSettings 与 Keychain 生成一次调用使用的不可变配置。
     func configuration() throws -> AIAPIConfiguration {
         let settings = AppSettings.shared
         let provider = settings.aiAPIProvider
-        let apiKey = try AIAPIKeyStore.load(for: provider)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey: String
+        do {
+            apiKey = try AIAPIKeyStore.load(for: provider)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            recordKeyState(apiKey, for: provider)
+        } catch {
+            recordKeychainError(error, for: provider)
+            throw error
+        }
         let model = settings.aiAPIModel.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseURL = settings.aiAPIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !apiKey.isEmpty else {
