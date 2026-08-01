@@ -33,23 +33,25 @@ struct SessionInfoPanel: View {
                     VStack(alignment: .leading, spacing: 0) {
                         LazyVStack(alignment: .leading, spacing: 1) {
                             TopToolsOpenSection(path: model.cwdPath, manager: manager)
-                            PackageScriptsSection(
-                                projectID: projectID,
-                                directory: model.cwdPath,
-                                scripts: model.packageScripts,
-                                records: manager.packageScriptRecords,
-                                isCollapsed: $packageScriptsCollapsed,
-                                runPackageScript: runPackageScript,
-                                stopPackageScript: { manager.stopPackageScript($0) },
-                                restartPackageScript: {
-                                    manager.restartPackageScript(
-                                        $0,
-                                        mode: $1,
-                                        directory: model.cwdPath
-                                    )
-                                },
-                                openPackageJSON: openPackageJSON
-                            )
+                            if !model.packageScripts.isEmpty {
+                                PackageScriptsSection(
+                                    projectID: projectID,
+                                    directory: model.cwdPath,
+                                    scripts: model.packageScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $packageScriptsCollapsed,
+                                    runPackageScript: runPackageScript,
+                                    stopPackageScript: { manager.stopPackageScript($0) },
+                                    restartPackageScript: {
+                                        manager.restartPackageScript(
+                                            $0,
+                                            mode: $1,
+                                            directory: model.cwdPath
+                                        )
+                                    },
+                                    openPackageJSON: openPackageJSON
+                                )
+                            }
                             if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.cwdPath) {
                                 UniversalTasksSection(
                                     configuration: .gradle,
