@@ -1672,7 +1672,8 @@ struct GitCommitMessageEditor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? GitCommitTextView else { return }
-        if textView.string != text {
+        // 输入法组合（marked text）期间不整段写回，避免打断组合与其撤销登记。
+        if textView.string != text, !textView.hasMarkedText() {
             textView.string = text
         }
         textView.placeholderString = placeholder
@@ -1693,6 +1694,16 @@ struct GitCommitMessageEditor: NSViewRepresentable {
 }
 
 private class GitCommitTextView: NSTextView {
+    /// 专用撤销管理器：不沿响应链共享窗口的 NSUndoManager。
+    /// Git 提交信息编辑器随面板开关 / 提交完成频繁销毁重建，若与窗口共享撤销栈，
+    /// 已销毁编辑器的悬垂撤销记录会在 ⌘Z 时触发崩溃（`_undoRedoTextOperation:`）。
+    /// 每实例独享一个 UndoManager，随视图一起销毁，杜绝悬垂记录。
+    private let undoManagerForText = UndoManager()
+
+    override var undoManager: UndoManager? {
+        allowsUndo ? undoManagerForText : nil
+    }
+
     var placeholderString: String = "" {
         didSet { needsDisplay = true }
     }

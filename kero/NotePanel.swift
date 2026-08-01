@@ -149,7 +149,8 @@ struct PlainTextEditor: NSViewRepresentable {
         apply(to: textView)
 
         // 仅在外部文本与当前不同时写回，避免光标跳动。
-        if textView.string != text {
+        // 输入法组合（marked text）期间不整段写回，避免打断组合与其撤销登记。
+        if textView.string != text, !textView.hasMarkedText() {
             let selected = textView.selectedRanges
             textView.string = text
             textView.selectedRanges = selected
@@ -315,6 +316,16 @@ private final class NoteScrollView: NSScrollView {
 
 /// Note 正文：不参与 ideal-size 测量；获焦时隔离工作区快捷键；自带缺省字绘制（输入法拼音/查找栏开启时隐藏）。
 private final class NoteTextView: NSTextView {
+    /// 专用撤销管理器：NSTextView 默认沿响应链复用窗口共享的 NSUndoManager。
+    /// Note 编辑器会随项目切换 / 面板关闭频繁销毁重建，共享撤销栈会残留指向
+    /// 已销毁编辑器的悬垂记录，⌘Z 撤销时命中悬垂目标导致崩溃（`_undoRedoTextOperation:`）。
+    /// 每实例独享一个 UndoManager，随视图一起销毁，杜绝悬垂记录。
+    private let undoManagerForText = UndoManager()
+
+    override var undoManager: UndoManager? {
+        allowsUndo ? undoManagerForText : nil
+    }
+
     /// 缺省字文本
     var placeholder: String = "" {
         didSet {

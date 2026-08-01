@@ -1374,9 +1374,8 @@ private struct FileTreeRow: View {
             let targetDir = item.isDirectory ? item.path : (item.path as NSString).deletingLastPathComponent
             let sources: [String]
             if FileTreeModel.isDraggingFromTree {
-                sources = isSelected && model.selectedPaths.count > 1
-                    ? model.selectedItems.map(\.path)
-                    : [item.path]
+                // dragProvider() 已确保正确的项被选中，直接使用当前选中项作为拖拽源
+                sources = model.selectedItems.map(\.path)
             } else {
                 sources = []
             }
@@ -2052,6 +2051,7 @@ fileprivate func fileTreeBlankMenu(
 // MARK: - Drag and Drop Move Helpers
 
 /// 校验并弹出确认移动对话框（NSAlert），用户确认后执行移动操作。
+/// 若目标位置存在同名文件，会先弹出覆盖确认对话框。
 @MainActor
 fileprivate func confirmAndPerformMove(
     sources: [String],
@@ -2077,6 +2077,53 @@ fileprivate func confirmAndPerformMove(
     guard !validSources.isEmpty else {
         FileTreeModel.isDraggingFromTree = false
         return
+    }
+
+    // 检查目标位置是否有同名冲突
+    let fm = FileManager.default
+    var conflictNames: [String] = []
+    for srcPath in validSources {
+        let itemName = (srcPath as NSString).lastPathComponent
+        let destPath = (normalizedTarget as NSString).appendingPathComponent(itemName)
+        if srcPath != destPath, fm.fileExists(atPath: destPath) {
+            conflictNames.append(itemName)
+        }
+    }
+
+    // 存在同名冲突 → 弹出覆盖确认对话框
+    var shouldOverwrite = false
+    if !conflictNames.isEmpty {
+        let conflictAlert = NSAlert()
+        if conflictNames.count == 1 {
+            conflictAlert.messageText = L10n.format(
+                "An item named “%@” already exists in this location.",
+                conflictNames[0]
+            )
+            conflictAlert.informativeText = L10n.t(
+                "Do you want to replace it with the one you're moving?"
+            )
+        } else {
+            conflictAlert.messageText = L10n.format(
+                "%d items already exist in this location.",
+                conflictNames.count
+            )
+            let preview = conflictNames.prefix(8).joined(separator: "\n")
+            let more = conflictNames.count > 8 ? "\n\u{2026}" : ""
+            conflictAlert.informativeText =
+                "\(preview)\(more)\n\n"
+                + L10n.format(
+                    "Do you want to replace the %d conflicting items?",
+                    conflictNames.count
+                )
+        }
+        conflictAlert.alertStyle = .warning
+        conflictAlert.addButton(withTitle: L10n.t("Replace"))
+        conflictAlert.addButton(withTitle: L10n.t("Cancel"))
+        if conflictAlert.runModal() != .alertFirstButtonReturn {
+            FileTreeModel.isDraggingFromTree = false
+            return
+        }
+        shouldOverwrite = true
     }
 
     let targetDirName = (normalizedTarget as NSString).lastPathComponent
@@ -2108,7 +2155,7 @@ fileprivate func confirmAndPerformMove(
 
     let response = alert.runModal()
     if response == .alertFirstButtonReturn {
-        model.moveItems(paths: validSources, into: normalizedTarget, onRename: onRename)
+        model.moveItems(paths: validSources, into: normalizedTarget, overwrite: shouldOverwrite, onRename: onRename)
     }
     FileTreeModel.isDraggingFromTree = false
 }

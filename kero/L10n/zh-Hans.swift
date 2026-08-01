@@ -317,6 +317,8 @@ extension L10n {
         "Display File Size": "显示文件大小",
         "Show Git Status Decorations": "显示 Git 状态装饰",
         "Color file names and show status badges in the Files and CWD panels for repository changes.": "在 Files 与 CWD 面板中为仓库变更显示彩色文件名与状态徽章。",
+        "Do you want to replace it with the one you're moving?": "是否要用正在移动的项目替换它？",
+        "Do you want to replace the %d conflicting items?": "是否要替换这 %d 个冲突项目？",
         "Do you want to save the changes you made to %@?": "要保存对 %@ 的更改吗？",
         "Don't Save": "不保存",
         "Don’t Save": "不保存",

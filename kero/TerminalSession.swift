@@ -285,20 +285,63 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         (shellPath as NSString).lastPathComponent == "zsh"
     }
 
+    /// pending 命令文件：zsh 集成在首个提示符时读取并执行它。
+    private var pendingCommandFileURL: URL? {
+        launchDirectoryURL?.appendingPathComponent("pending_command")
+    }
+
     /// Queues an automated command until this surface has been attached and
     /// its login shell has started. New tabs are mounted asynchronously by
     /// SwiftUI; sending immediately would otherwise be discarded before the
     /// exec-backed PTY exists.
+    ///
+    /// zsh 会话优先写入 pending 文件、由登录 shell 在首个提示符时自行执行
+    /// （不经过 PTY 注入，规避与 shell 初始化竞争）；非 zsh 退回 PTY 轮询注入。
     func sendCommandWhenReady(_ text: String) {
+        guard !hasExited else { return }
+        if usesPromptReadySignal {
+            if hasShownPrompt {
+                // shell 已位于提示符：直接注入即可。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    guard let self, !self.hasExited else { return }
+                    self.sendCommand(text)
+                }
+            } else {
+                // 首选：写入 pending 文件，由 zsh 集成在首个提示符时由 shell 自身执行。
+                writePendingCommand(text)
+                scheduleZshInjectionFallback(text)
+            }
+            return
+        }
+        // 非 zsh：保持原有 PTY 轮询注入。
         sendCommandWhenReady(text, attempt: 0)
+    }
+
+    /// 将待运行命令写入 launch 目录的 pending_command 文件。
+    private func writePendingCommand(_ text: String) {
+        guard let url = pendingCommandFileURL else { return }
+        let command = text.hasSuffix("\n") ? String(text.dropLast()) : text
+        try? command.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// 兜底：若 zsh 集成未生效（提示符哨兵迟迟不来），按旧启发式注入命令。
+    /// 注入前先移除 pending 文件，避免集成稍后到达提示符时重复执行同一命令。
+    private func scheduleZshInjectionFallback(_ text: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            guard let self, !self.hasExited, !self.hasShownPrompt else { return }
+            guard let url = self.pendingCommandFileURL,
+                  FileManager.default.fileExists(atPath: url.path) else { return }
+            try? FileManager.default.removeItem(at: url)
+            self.sendCommandWhenReady(text, attempt: 0)
+        }
     }
 
     private func sendCommandWhenReady(_ text: String, attempt: Int) {
         guard !hasExited else { return }
-
-        // 已确认 shell 位于首个提示符（zsh 集成 OSC 2 哨兵）——最安全时机。
-        // 稍候片刻让提示符渲染完成、行编辑器进入读取状态再注入。
-        if hasShownPrompt {
+        if terminalView.window != nil, shellPid != nil {
+            // The PID file is written immediately before the login shell is
+            // exec'd. Give the shell one short run-loop turn to install its
+            // prompt before inserting the command.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self, !self.hasExited else { return }
                 self.sendCommand(text)
@@ -306,20 +349,9 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             return
         }
 
-        // zsh 会话等待首个提示符哨兵（上限约 4s）；未等到再退回旧启发式，
-        // 覆盖 zsh 集成未生效的退化场景。
-        let waitForPrompt = usesPromptReadySignal && attempt < 80
-
-        if !waitForPrompt, terminalView.window != nil, shellPid != nil {
-            // 兜底（非 zsh / 哨兵超时）：shell 已启动后沿用固定延迟发送。
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                guard let self, !self.hasExited else { return }
-                self.sendCommand(text)
-            }
-            return
-        }
-
-        // 继续等待 surface 挂载 / shell 启动 / 提示符哨兵。
+        // A slow first launch may need a little time to attach its Metal
+        // surface. Stop retrying after five seconds rather than retaining a
+        // command for a terminal that failed to start.
         guard attempt < 100 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.sendCommandWhenReady(text, attempt: attempt + 1)

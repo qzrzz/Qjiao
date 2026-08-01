@@ -317,6 +317,8 @@ extension L10n {
         "Display File Size": "Display File Size",
         "Show Git Status Decorations": "Gitステータスの装飾を表示",
         "Color file names and show status badges in the Files and CWD panels for repository changes.": "Files/CWDパネルでリポジトリの変更を色付きファイル名とステータスバッジで表示します。",
+        "Do you want to replace it with the one you're moving?": "移動中の項目で置き換えますか？",
+        "Do you want to replace the %d conflicting items?": "競合する %d 個の項目を置き換えますか？",
         "Do you want to save the changes you made to %@?": "%@への変更を保存しますか？",
         "Don't Save": "Don't Save",
         "Don’t Save": "保存しない",

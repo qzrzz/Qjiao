@@ -27,6 +27,24 @@ if [[ -o interactive && -z "${_qjiao_semantic_prompt_loaded-}" ]]; then
             _qjiao_prompt_ready_emitted=1
         fi
 
+        # 首个提示符就绪后执行宿主待运行命令（pending_command 文件）。
+        # 由 shell 自身执行而非向 PTY 注入字节，彻底避免与登录 shell 初始化竞争。
+        if [[ -n "${QJIAO_PENDING_COMMAND_FILE-}" && -r "$QJIAO_PENDING_COMMAND_FILE" ]]; then
+            builtin local pending_cmd
+            pending_cmd=$(command cat "$QJIAO_PENDING_COMMAND_FILE" 2>/dev/null)
+            command rm -f "$QJIAO_PENDING_COMMAND_FILE"
+            if [[ -n "$pending_cmd" ]]; then
+                # 回显命令本身（视觉上等同用户输入后回车）
+                builtin print -rn -- "${pending_cmd}"$'\n'
+                # 命令开始/结束报告，保持宿主对命令完成状态的跟踪（133;D）
+                builtin print -rn -- $'\e]133;C\a'
+                builtin local pending_status=0
+                builtin eval "$pending_cmd"
+                pending_status=$?
+                builtin print -rn -- $'\e]133;D;'"$pending_status"$'\a'
+            fi
+        fi
+
         if (( _qjiao_command_active )); then
             builtin print -rn -- $'\e]133;D;'"$exit_status"$'\a'
             _qjiao_command_active=0
