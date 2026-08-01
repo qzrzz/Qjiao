@@ -12,6 +12,8 @@ import SwiftUI
 struct SessionInfoPanel: View {
     @ObservedObject var model: SessionInfoModel
     @ObservedObject var manager: TerminalManager
+    @ObservedObject private var agentWatcher = AgentWatcher.shared
+    @ObservedObject private var l10n = L10n.shared
     let projectID: UUID
     let runPackageScript: (String, TerminalManager.PackageScriptRunMode) -> Void
     let openPackageJSON: () -> Void
@@ -26,12 +28,14 @@ struct SessionInfoPanel: View {
     @State private var portsCollapsed = false
 
     var body: some View {
+        let _ = l10n.language
         VStack(spacing: 0) {
             header
             GeometryReader { geo in
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
                         LazyVStack(alignment: .leading, spacing: 1) {
+                            agentStatusSection
                             TopToolsOpenSection(path: model.cwdPath, manager: manager)
                             if !model.packageScripts.isEmpty {
                                 PackageScriptsSection(
@@ -226,6 +230,10 @@ struct SessionInfoPanel: View {
             )
         }
         .onAppear {
+            agentWatcher.activate(manager: manager)
+            if let session = manager.selectedProject?.selectedSession {
+                agentWatcher.refresh(session: session)
+            }
             if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
             if model.gradleScripts.isEmpty && !GradleScriptProvider.isGradleProject(at: model.cwdPath) {
                 gradleTasksCollapsed = true
@@ -244,6 +252,20 @@ struct SessionInfoPanel: View {
             }
             if model.processes.isEmpty { processesCollapsed = true }
             if model.ports.isEmpty { portsCollapsed = true }
+        }
+    }
+
+    /// Agent Status 条目：仅在识别到 Coding Agent 时显示。
+    @ViewBuilder
+    private var agentStatusSection: some View {
+        if let session = manager.selectedProject?.selectedSession,
+           let snap = agentWatcher.snapshot(for: session.id),
+           snap.status != .none,
+           let kind = snap.kind {
+            AgentStatusInfoRow(kind: kind, status: snap.status)
+                .padding(.horizontal, 6)
+                .padding(.top, 2)
+                .padding(.bottom, 4)
         }
     }
 
@@ -332,6 +354,49 @@ struct SessionInfoPanel: View {
         .padding(.bottom, 8)
         // Session Info 面板 Header 空白区域允许拖拽移动窗口
         .background { WindowDragArea() }
+    }
+}
+
+/// Info 面板 Agent 状态行：`[色点] [Agent 名] · [状态名]`。
+struct AgentStatusInfoRow: View {
+    let kind: AgentKind
+    let status: AgentStatus
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+            Text(kind.displayName)
+                .font(SidebarTypography.body())
+                .foregroundStyle(Theme.primaryColor)
+                .lineLimit(1)
+            Text("·")
+                .font(SidebarTypography.caption())
+                .foregroundStyle(Theme.secondaryColor.opacity(0.55))
+            Text(L10n.t(status.displayKey))
+                .font(SidebarTypography.body())
+                .foregroundStyle(statusColor)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(L10n.t("Agent Status")): \(kind.displayName), \(L10n.t(status.displayKey))")
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .working:
+            return Color(red: 0.25, green: 0.73, blue: 0.31)
+        case .blocked:
+            return Color(red: 0.96, green: 0.62, blue: 0.14)
+        case .done:
+            return Color(nsColor: Theme.cursor)
+        case .none:
+            return Theme.secondaryColor
+        }
     }
 }
 

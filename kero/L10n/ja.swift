@@ -11,6 +11,7 @@ import Foundation
 extension L10n {
     /// English → 日本語. Unlisted keys keep the English source.
     static let ja: [String: String] = [
+        "%lld unread": "%lld 件の未読",
         "(all themes)": "（すべてのテーマ）",
         "(Bundled)": "（同梱）",
         "%@ (%lld items were already moved to Trash.)": "%@（%lld個の項目はすでにゴミ箱に移動済みです。）",
@@ -35,6 +36,10 @@ extension L10n {
         "%lld outgoing commits": "プッシュ可能なコミット%lld件",
         "%lld pt": "%lld pt",
         "%lld sessions": "%lld件のセッション",
+        "Agent Status": "Agent ステータス",
+        "Blocked": "ブロック",
+        "Unread": "未読",
+        "Working": "作業中",
         "`kero +themes` needs an interactive terminal. Use `kero +themes --list` to print theme names.": "`kero +themes`には対話型ターミナルが必要です。テーマ名を表示するには`kero +themes --list`を使ってください。",
         "`kero` must be run inside a Kero terminal.": "`kero`はKeroのターミナル内で実行してください。",
         "↑↓ navigate · Return save · Esc cancel · Tab light/dark": "↑↓ 移動 · Return 保存 · Esc キャンセル · Tab ライト/ダーク",
@@ -328,7 +333,7 @@ extension L10n {
         "Do you want to save the changes you made to %@?": "%@への変更を保存しますか？",
         "Don't Save": "Don't Save",
         "Don’t Save": "保存しない",
-        "Done": "Done",
+        "Done": "完了",
         "Down": "下",
         "Drop an image file here, or paste from clipboard": "Drop an image file here, or paste from clipboard",
         "Drop Commit": "Drop Commit",
@@ -594,7 +599,7 @@ extension L10n {
         "No symbols": "No symbols",
         "No tasks in Justfile": "No tasks in Justfile",
         "No themes match “%@”.": "「%@」に一致するテーマはありません。",
-        "None": "None",
+        "None": "なし",
         "Not installed": "Not installed",
         "Not selected": "未選択",
         "Note": "Note",

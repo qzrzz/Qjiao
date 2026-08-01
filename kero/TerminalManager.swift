@@ -225,6 +225,13 @@ final class TerminalManager: nonisolated ObservableObject {
                 guard !TerminalManager.isQuitting else { return }
                 TerminalManager.isQuitting = true
                 TerminalManager.saveAll(captureTerminalHistory: true)
+                // `windowClosed()` 在退出状态会跳过普通清理；这里必须同步
+                // 杀掉全部 PTY 进程组，不能依赖 120ms 后才执行的 Task。
+                for manager in TerminalManager.registry {
+                    for project in manager.projects {
+                        project.terminateAllImmediately()
+                    }
+                }
             }
     }
 
@@ -1038,7 +1045,6 @@ final class TerminalManager: nonisolated ObservableObject {
             let title = command.title.trimmingCharacters(in: .whitespacesAndNewlines)
             project.selectedTab?.customName = title.isEmpty ? nil : title
         }
-        trackRightSidebarCommand(in: session)
         session.sendCommandWhenReady(text + "\n")
     }
 

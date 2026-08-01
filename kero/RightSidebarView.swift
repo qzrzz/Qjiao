@@ -900,6 +900,9 @@ struct RightSidebarView: View {
                 shellPid: session.shellPid,
                 reloadScripts: reloadActivePanel
             )
+            // Agent 状态：侧栏 Info 可见时激活低频检测。
+            AgentWatcher.shared.activate(manager: manager)
+            AgentWatcher.shared.refresh(session: session)
         case .files:
             fileTree.sync(root: projectRoot(for: project, fallback: session))
         case .cwd:

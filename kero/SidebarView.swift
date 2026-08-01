@@ -437,6 +437,12 @@ private struct SidebarProjectRow: View {
     /// 共享后台任务状态：菜单关闭后项目行仍可显示进度。
     @ObservedObject private var aiIconTasks = LocalAIIconTaskStore.shared
     @ObservedObject private var aiMetaTasks = LocalAIProjectMetaTaskStore.shared
+    @ObservedObject private var agentWatcher = AgentWatcher.shared
+
+    /// 该项目下 Agent 未读 session 数。
+    private var agentUnreadCount: Int {
+        agentWatcher.unreadCount(for: project)
+    }
 
     var body: some View {
         Group {
@@ -708,46 +714,62 @@ private struct SidebarProjectRow: View {
 
             ZStack(alignment: .trailing) {
                 if project.isArchived {
-                    // 已归档项目：操作按钮区域常驻布局，Hover 时控制 opacity，避免尺寸抖动
+                    // 已归档项目：操作按钮 hover 显隐；未读蓝角标始终保留。
                     HStack(spacing: 4) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                manager.unarchiveProject(project)
+                        if agentUnreadCount > 0 {
+                            projectAgentUnreadBadge(count: agentUnreadCount)
+                        }
+                        HStack(spacing: 4) {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    manager.unarchiveProject(project)
+                                }
+                            } label: {
+                                Image(systemName: "tray.and.arrow.up")
+                                    .font(SidebarTypography.micro(.bold))
+                                    .foregroundStyle(Theme.secondaryColor)
+                                    .frame(width: 16, height: 16)
+                                    .contentShape(Rectangle())
                             }
-                        } label: {
-                            Image(systemName: "tray.and.arrow.up")
-                                .font(SidebarTypography.micro(.bold))
-                                .foregroundStyle(Theme.secondaryColor)
-                                .frame(width: 16, height: 16)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help(L10n.t("Unarchive Project"))
+                            .buttonStyle(.plain)
+                            .help(L10n.t("Unarchive Project"))
 
-                        Button(action: requestClose) {
-                            Image(systemName: "xmark")
-                                .font(SidebarTypography.micro(.bold))
-                                .foregroundStyle(Theme.secondaryColor)
-                                .frame(width: 16, height: 16)
-                                .contentShape(Rectangle())
+                            Button(action: requestClose) {
+                                Image(systemName: "xmark")
+                                    .font(SidebarTypography.micro(.bold))
+                                    .foregroundStyle(Theme.secondaryColor)
+                                    .frame(width: 16, height: 16)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        .opacity(isHovering && !isRenaming && !isEditingDescription ? 1 : 0)
                     }
-                    .opacity(isHovering && !isRenaming && !isEditingDescription ? 1 : 0)
-                } else {
-                    if isHovering, !isRenaming, !isEditingDescription {
-                        Button(action: requestClose) {
-                            Image(systemName: "xmark")
-                                .font(SidebarTypography.micro(.bold))
-                                .foregroundStyle(Theme.secondaryColor)
-                                .frame(width: 16, height: 16)
-                                .contentShape(Rectangle())
+                    // 无未读且未 hover 时整块透明，与原先行为一致。
+                    .opacity(
+                        (isHovering && !isRenaming && !isEditingDescription) || agentUnreadCount > 0
+                            ? 1 : 0
+                    )
+                } else if !isRenaming, !isEditingDescription {
+                    HStack(spacing: 5) {
+                        // 未读角标 hover 时仍显示；有角标时不显示 ⌘ 快捷键。
+                        if agentUnreadCount > 0 {
+                            projectAgentUnreadBadge(count: agentUnreadCount)
                         }
-                        .buttonStyle(.plain)
-                    } else if index < 9, !isRenaming, !isEditingDescription {
-                        Text("⌘\(index + 1)")
-                            .font(SidebarTypography.section().monospacedDigit())
-                            .foregroundStyle(.tertiary)
+                        if isHovering {
+                            Button(action: requestClose) {
+                                Image(systemName: "xmark")
+                                    .font(SidebarTypography.micro(.bold))
+                                    .foregroundStyle(Theme.secondaryColor)
+                                    .frame(width: 16, height: 16)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        } else if agentUnreadCount == 0, index < 9 {
+                            Text("⌘\(index + 1)")
+                                .font(SidebarTypography.section().monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
             }
@@ -755,6 +777,21 @@ private struct SidebarProjectRow: View {
         .padding(.horizontal, 8)
         .padding(.vertical, project.isArchived ? 3 : 6)
         .contentShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// 项目列表 Agent 未读数字角标（蓝色胶囊，等宽数字）。
+    private func projectAgentUnreadBadge(count: Int) -> some View {
+        let label = count > 99 ? "99+" : "\(count)"
+        return Text(label)
+            .font(SidebarTypography.micro(.semibold).monospacedDigit())
+            .foregroundStyle(.white)
+            .padding(.horizontal, count >= 10 ? 5 : 0)
+            .frame(minWidth: 16, minHeight: 16)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color(nsColor: .systemBlue))
+            )
+            .accessibilityLabel(L10n.format("%lld unread", Int64(count)))
     }
 
     private func beginRename() {

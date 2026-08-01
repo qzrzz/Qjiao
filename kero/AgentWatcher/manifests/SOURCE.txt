@@ -1,0 +1,5 @@
+Agent detection manifests are adapted from herdr (Apache License 2.0):
+https://github.com/herdrdev/herdr
+
+Upstream path: src/detect/manifests/*.toml
+Used by Qjiao AgentWatcher for screen/title state classification only.

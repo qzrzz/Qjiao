@@ -193,6 +193,23 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         beginTeardown(processAlive: true, notifyExit: false)
     }
 
+    /// 应用退出时同步停止整个 PTY 作业，避免子进程存活到 Sparkle 替换 App 之后。
+    func terminateImmediately() {
+        guard !hasExited, !isTerminating else { return }
+        isTerminating = true
+        guard isInitialized else {
+            hasExited = true
+            removeLaunchArtifacts()
+            return
+        }
+
+        _ = shellPid // 在状态改变前缓存 pid，供进程组信号使用。
+        signalTerminalJob(SIGHUP)
+        signalTerminalJob(SIGKILL)
+        hasExited = true
+        removeLaunchArtifacts()
+    }
+
     /// Keeps the session and surface alive until the child has either exited
     /// or been force-stopped. Releasing AppTerminalView first can make
     /// libghostty wait synchronously for a process that ignored SIGHUP.
