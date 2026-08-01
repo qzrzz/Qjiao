@@ -959,7 +959,7 @@ final class TerminalManager: nonisolated ObservableObject {
     func runLaunchCommand(_ command: ProjectLaunchCommand) {
         guard let project = selectedProject else { return }
         switch command.type {
-        case .terminal:
+        case .terminal, .agentCLI:
             runTerminalLaunch(command, in: project)
 
         case .application:
@@ -993,7 +993,7 @@ final class TerminalManager: nonisolated ObservableObject {
         guard let project = selectedProject else { return }
         var hasStartedTerminal = false
         for command in project.launchCommands {
-            guard command.type == .terminal else {
+            guard command.type == .terminal || command.type == .agentCLI else {
                 runLaunchCommand(command)
                 continue
             }
@@ -1007,7 +1007,19 @@ final class TerminalManager: nonisolated ObservableObject {
         in project: Project,
         forceNewTab: Bool = false
     ) {
-        let text = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text: String
+        if command.type == .agentCLI {
+            let cli = command.target.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cliCmd = cli.isEmpty ? (AIToolRegistry.shared.preferredTool?.cliCommand ?? "agy") : cli
+            let prompt = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if prompt.isEmpty {
+                text = cliCmd
+            } else {
+                text = "\(cliCmd) \(AIToolRegistry.shellQuote(prompt))"
+            }
+        } else {
+            text = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard !text.isEmpty else { return }
         let directory = project.projectDirectory.isEmpty
             ? selectedSession?.currentDirectoryPath

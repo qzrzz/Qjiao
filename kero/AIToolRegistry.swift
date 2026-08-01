@@ -282,7 +282,7 @@ final class AIToolRegistry: nonisolated ObservableObject {
 
         case .cli:
             guard let cmd = targetTool.cliCommand else { return }
-            let cdCmd = "cd \(shellQuote(path))"
+            let cdCmd = "cd \(Self.shellQuote(path))"
             let fullCommand = "\(cdCmd) && \(cmd)"
 
             if let manager = terminalManager, let project = manager.selectedProject {
@@ -299,7 +299,7 @@ final class AIToolRegistry: nonisolated ObservableObject {
         }
     }
 
-    private func shellQuote(_ value: String) -> String {
+    nonisolated static func shellQuote(_ value: String) -> String {
         guard !value.isEmpty else { return "''" }
         if value.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "/" || $0 == "_" || $0 == "-" || $0 == "." }) {
             return value
