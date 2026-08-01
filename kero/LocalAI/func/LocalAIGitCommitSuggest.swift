@@ -21,7 +21,7 @@ struct LocalAIGitCommitSuggestion: Sendable, Equatable {
 /// 通过 LocalAI 根据仓库 diff 生成 commit message。
 enum LocalAIGitCommitSuggest {
     /// 默认超时：纯文本生成应较快；超时后终止当前 CLI 或 API 请求。
-    static let defaultTimeout: Duration = .seconds(45)
+    static let defaultTimeout: Duration = .seconds(90)
 
     /// 注入 prompt 的变更摘要最大字符数（越小越快）。
     static let maxDiffCharacters = 10_000
