@@ -270,6 +270,19 @@ struct SettingsView: View {
                     ProjectThemeOverrideHint()
 
                     settingWithDescription(
+                        L10n.t("Tabs Layout"),
+                        L10n.t("Scroll overflows with a scrollbar; Elastic shrinks inactive tabs (left first) into icons before scrolling.")
+                    ) {
+                        Picker("", selection: $settings.tabsLayoutMode) {
+                            ForEach(TabsLayoutMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+
+                    settingWithDescription(
                         L10n.t("Short Directory Path"),
                         L10n.t("Display ~ instead of home directory path.")
                     ) {

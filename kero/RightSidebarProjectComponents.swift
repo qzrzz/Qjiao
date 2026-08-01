@@ -897,11 +897,11 @@ private struct PackageScriptRow: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(SidebarTypography.micro(.semibold))
-                        .foregroundStyle(isHoveringRestartBtn ? Color.white : Color.secondary)
+                        .foregroundStyle(isHoveringRestartBtn ? Color.white : Color(nsColor: Theme.cursor))
                         .frame(width: 18, height: 18)
                         .background(
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(isHoveringRestartBtn ? Color.primary.opacity(0.8) : (isHoveringRow ? Color.primary.opacity(0.08) : Color.clear))
+                                .fill(isHoveringRestartBtn ? Color(nsColor: Theme.cursor) : (isHoveringRow ? Color.primary.opacity(0.08) : Color.clear))
                         )
                         .contentShape(RoundedRectangle(cornerRadius: 4))
                 }
@@ -1242,11 +1242,11 @@ private struct UniversalScriptRow: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(SidebarTypography.micro(.semibold))
-                        .foregroundStyle(isHoveringRestartBtn ? Color.white : Color.secondary)
+                        .foregroundStyle(isHoveringRestartBtn ? Color.white : Color(nsColor: Theme.cursor))
                         .frame(width: 18, height: 18)
                         .background(
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(isHoveringRestartBtn ? Color.primary.opacity(0.8) : (isHoveringRow ? Color.primary.opacity(0.08) : Color.clear))
+                                .fill(isHoveringRestartBtn ? Color(nsColor: Theme.cursor) : (isHoveringRow ? Color.primary.opacity(0.08) : Color.clear))
                         )
                         .contentShape(RoundedRectangle(cornerRadius: 4))
                 }

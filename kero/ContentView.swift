@@ -514,12 +514,12 @@ private struct TabListPopover: View {
         ForEach(project.tabs) { tab in
             TabListRow(
                 tab: tab,
-                isSelected: tab.id == project.selectedTabID,
+                isSelected: tab.id == (project.chromeSelectedTabID ?? project.selectedTabID),
                 showsCommandSpinner: showsCommandSpinner(for: tab),
                 terminalDetails: details(for: tab),
                 currentTime: currentTime
             ) {
-                project.selectedTabID = tab.id
+                project.selectTab(tab.id)
                 isPresented = false
             }
         }
@@ -663,6 +663,104 @@ private final class TerminalTabDetailsLoader: ObservableObject {
     }
 }
 
+/// 单个主 Tab 在弹性布局下的分配结果。
+private struct ElasticTabSlot: Equatable {
+    var width: CGFloat
+    var iconOnly: Bool
+}
+
+/// 主内容 Tabs 宽度常量与弹性分配算法。
+private enum TabStripMetrics {
+    static let interTabSpacing: CGFloat = 3
+    /// 标签条未满时的单 Tab 最小宽度。
+    static let relaxedTabMinWidth: CGFloat = 150
+    /// 标签条已满（滚动模式）时的单 Tab 最小宽度。
+    static let compressedTabMinWidth: CGFloat = 130
+    /// 标签条未满时的单 Tab 最大宽度。
+    static let relaxedTabMaxWidth: CGFloat = 220
+    /// 标签条已满（滚动模式）时的单 Tab 最大宽度。
+    static let compressedTabMaxWidth: CGFloat = 140
+    /// 仅图标态固定宽度：图标 + 左右内边距。
+    static let iconOnlyWidth: CGFloat = 32
+    /// 分配宽度低于此值时切换为仅图标（无标题、无关闭）。
+    static let iconOnlyThreshold: CGFloat = 72
+
+    /// 图标 + 关闭占位 + 分栏提示等固定配件宽（与 `TabItemChrome` 布局一致）。
+    /// leading 9 + icon 16 + HStack 间距×2 + close 14 + trailing 5 = 54；多分栏再加徽章约 24。
+    static func accessoryWidth(paneCount: Int) -> CGFloat {
+        paneCount > 1 ? 83 : 54
+    }
+
+    /// 标题理想像素宽（向上取整，避免与 SwiftUI 布局差 1pt 误判）。
+    static func idealTitleWidth(_ title: String) -> CGFloat {
+        ceil(
+            (title as NSString).size(
+                withAttributes: [.font: SidebarTypography.bodyNSFont]
+            ).width
+        )
+    }
+
+    static func naturalWidth(title: String, paneCount: Int) -> CGFloat {
+        let titleWidth = idealTitleWidth(title)
+        let floor = min(relaxedTabMinWidth, relaxedTabMaxWidth)
+        return min(
+            max(titleWidth + accessoryWidth(paneCount: paneCount), floor),
+            relaxedTabMaxWidth
+        )
+    }
+
+    /// 弹性模式：激活 Tab 保持自然全宽（受 max 限制）；先从最左侧非激活 Tab 连续压缩到仅图标，
+    /// 仍不够再从最右侧非激活 Tab 压缩。激活 Tab 不参与压缩。
+    static func resolveElastic(
+        titles: [String],
+        paneCounts: [Int],
+        activeIndex: Int,
+        availableWidth: CGFloat
+    ) -> [ElasticTabSlot] {
+        let count = titles.count
+        guard count > 0 else { return [] }
+        let safeActive = min(max(activeIndex, 0), count - 1)
+        var widths: [CGFloat] = (0..<count).map { index in
+            naturalWidth(title: titles[index], paneCount: paneCounts[index])
+        }
+
+        func totalWidth() -> CGFloat {
+            widths.reduce(0, +) + interTabSpacing * CGFloat(max(count - 1, 0))
+        }
+
+        var deficit = totalWidth() - availableWidth
+        if deficit > 0.5, availableWidth > 0 {
+            // 左侧：从最左（远离激活）向激活方向压缩。
+            if safeActive > 0 {
+                for index in 0..<safeActive where deficit > 0.5 {
+                    let reducible = widths[index] - iconOnlyWidth
+                    guard reducible > 0 else { continue }
+                    let take = min(reducible, deficit)
+                    widths[index] -= take
+                    deficit -= take
+                }
+            }
+            // 右侧：从最右（远离激活）向激活方向压缩。
+            if deficit > 0.5, safeActive < count - 1 {
+                for index in stride(from: count - 1, through: safeActive + 1, by: -1)
+                where deficit > 0.5 {
+                    let reducible = widths[index] - iconOnlyWidth
+                    guard reducible > 0 else { continue }
+                    let take = min(reducible, deficit)
+                    widths[index] -= take
+                    deficit -= take
+                }
+            }
+        }
+
+        return widths.enumerated().map { index, width in
+            let iconOnly = index != safeActive && width <= iconOnlyThreshold + 0.5
+            let resolved = iconOnly ? iconOnlyWidth : width
+            return ElasticTabSlot(width: resolved, iconOnly: iconOnly)
+        }
+    }
+}
+
 /// Horizontal tabs for one project — terminal sessions and open files.
 /// 新建在条带右侧（`NewTabButton`）；总览下拉固定在侧栏旁（`TabListButton`）。
 private struct SessionTabsView: View {
@@ -673,12 +771,16 @@ private struct SessionTabsView: View {
     @State private var overflow = StripOverflow()
     /// 标签内容固有宽度（未裁切），用于条带收窄到内容。
     @State private var contentWidth: CGFloat = 0
-    /// 标签条已挤满时压低单 Tab 最小/最大宽度，腾出可见数量。
+    /// 标签条已挤满时压低单 Tab 最小/最大宽度，腾出可见数量（仅滚动模式）。
     @State private var stripIsFull = false
     @State private var draggedTabID: UUID?
     @State private var tabFrames: [UUID: CGRect] = [:]
     @State private var tabSizes: [UUID: CGSize] = [:]
     @State private var renamingTabID: UUID?
+    /// 弹性布局分配结果；随标题 / 选中 / 宽度变化重算。
+    @State private var elasticSlots: [UUID: ElasticTabSlot] = [:]
+    /// 点击时本地抢先的选中态：只刷新顶栏，不经过 Project→Manager 整树广播。
+    @State private var localChromeTabID: UUID?
 
     /// Which edges have off-screen tabs, i.e. where to show a fade hint.
     private struct StripOverflow: Equatable {
@@ -693,21 +795,21 @@ private struct SessionTabsView: View {
         var containerWidth: CGFloat = 0
     }
 
-    /// 标签条未满时的单 Tab 最小宽度。
-    private static let relaxedTabMinWidth: CGFloat = 150
-    /// 标签条已满（需要滚动）时的单 Tab 最小宽度。
-    private static let compressedTabMinWidth: CGFloat = 130
-    /// 标签条未满时的单 Tab 最大宽度。
-    private static let relaxedTabMaxWidth: CGFloat = 220
-    /// 标签条已满（需要滚动）时的单 Tab 最大宽度。
-    private static let compressedTabMaxWidth: CGFloat = 140
+    private var isElastic: Bool {
+        settings.tabsLayoutMode == .elastic
+    }
+
+    /// 顶栏即时选中（可领先内容区一拍）：本地点击 > Project chrome > 内容选中。
+    private var chromeSelectedID: UUID? {
+        localChromeTabID ?? project.chromeSelectedTabID ?? project.selectedTabID
+    }
 
     private var tabMinWidth: CGFloat {
-        stripIsFull ? Self.compressedTabMinWidth : Self.relaxedTabMinWidth
+        stripIsFull ? TabStripMetrics.compressedTabMinWidth : TabStripMetrics.relaxedTabMinWidth
     }
 
     private var tabMaxWidth: CGFloat {
-        stripIsFull ? Self.compressedTabMaxWidth : Self.relaxedTabMaxWidth
+        stripIsFull ? TabStripMetrics.compressedTabMaxWidth : TabStripMetrics.relaxedTabMaxWidth
     }
 
     /// 条带显示宽度：内容与上限取小；硬宽度，避免 ScrollView 把右侧工具顶走。
@@ -718,20 +820,47 @@ private struct SessionTabsView: View {
     }
 
     var body: some View {
+        // 弹性模式用轻量时钟跟踪终端动态标题，以便重算宽度分配。
+        TimelineView(.periodic(from: .now, by: isElastic ? 0.45 : 3600)) { _ in
+            tabStrip
+        }
+        .onChange(of: settings.tabsLayoutMode) { _, _ in
+            recomputeElasticSlots()
+        }
+        .onChange(of: maxStripWidth) { _, _ in
+            recomputeElasticSlots()
+        }
+        // 跟 chrome：点击时先压布局，不必等内容区 selectedTabID。
+        .onChange(of: project.chromeSelectedTabID) { _, _ in
+            recomputeElasticSlots()
+        }
+        .onChange(of: project.selectedTabID) { _, _ in
+            recomputeElasticSlots()
+        }
+        .onChange(of: project.tabs.map(\.id)) { _, _ in
+            recomputeElasticSlots()
+        }
+        .onAppear { recomputeElasticSlots() }
+    }
+
+    private var tabStrip: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 3) {
+                HStack(spacing: TabStripMetrics.interTabSpacing) {
                     ForEach(project.tabs) { tab in
+                        let slot = elasticSlots[tab.id]
                         PaneTabItem(
                             manager: manager,
                             tab: tab,
-                            isSelected: tab.id == project.selectedTabID,
-                            minWidth: tabMinWidth,
-                            maxWidth: tabMaxWidth,
-                            select: { project.selectedTabID = tab.id },
+                            isSelected: tab.id == chromeSelectedID,
+                            minWidth: isElastic ? (slot?.width ?? tabMinWidth) : tabMinWidth,
+                            maxWidth: isElastic ? (slot?.width ?? tabMaxWidth) : tabMaxWidth,
+                            iconOnly: isElastic && (slot?.iconOnly ?? false),
+                            select: { selectTabChromeFirst(tab.id) },
                             close: { project.close(tab) },
                             renamingTabID: $renamingTabID
                         )
+                        .id(tab.id)
                         .contextMenu { tabContextMenu(for: tab) }
                         .background {
                             GeometryReader { geo in
@@ -779,22 +908,43 @@ private struct SessionTabsView: View {
                 if new.contentWidth > 0 {
                     contentWidth = new.contentWidth
                 }
-                updateStripFullness(
-                    contentWidth: new.contentWidth,
-                    containerWidth: new.containerWidth
-                )
+                if !isElastic {
+                    updateStripFullness(
+                        contentWidth: new.contentWidth,
+                        containerWidth: new.containerWidth
+                    )
+                }
             }
             .onChange(of: project.tabs.count) { _, _ in
                 // 关 Tab 后可能立刻腾出空间，用条带上限估一次是否可恢复宽松宽度。
-                reevaluateStripFullnessAfterTabCountChange()
+                if !isElastic {
+                    reevaluateStripFullnessAfterTabCountChange()
+                }
+                recomputeElasticSlots()
             }
             // Keep the active tab visible: scrolls the minimum distance to
             // reveal it (anchor: nil is a no-op when it's already fully in view).
-            .onChange(of: project.selectedTabID) { _, id in
+            // 跟 chrome 即时滚入，不必等内容切换。
+            // 不包 withAnimation：与新开 Tab 同帧时会把插入/宽度布局做成左→右插值。
+            .onChange(of: project.chromeSelectedTabID) { _, id in
                 guard let id else { return }
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    scrollToSelectedTab(using: proxy)
+                scrollToSelectedTab(using: proxy)
+            }
+            .onChange(of: project.selectedTabID) { _, id in
+                // 内容已跟上：清掉本地抢先态，避免与 source of truth 分叉。
+                if localChromeTabID == id {
+                    localChromeTabID = nil
+                } else if localChromeTabID != nil, id != localChromeTabID {
+                    // 外部切换（快捷键等）覆盖本地意图。
+                    localChromeTabID = nil
                 }
+                guard let id else { return }
+                scrollToSelectedTab(using: proxy)
+            }
+            .onChange(of: localChromeTabID) { _, id in
+                guard id != nil else { return }
+                recomputeElasticSlots()
+                scrollToSelectedTab(using: proxy)
             }
             // 侧栏/窗口改变可视宽度、Tab 增删/排序或动态标题改变前序宽度时，
             // 选中项都可能在未切换选择的情况下被挤出视口。
@@ -806,6 +956,11 @@ private struct SessionTabsView: View {
             }
             .onChange(of: tabSizes) { _, _ in
                 scrollToSelectedTab(using: proxy)
+            }
+            .onChange(of: elasticSlots) { _, _ in
+                if isElastic {
+                    scrollToSelectedTab(using: proxy)
+                }
             }
             .onAppear {
                 // Restored sessions may open with an off-screen active tab.
@@ -841,11 +996,60 @@ private struct SessionTabsView: View {
             }
         }
         .frame(width: stripWidth, alignment: .leading)
+        .onChange(of: titleFingerprint) { _, _ in
+            recomputeElasticSlots()
+        }
+    }
+
+    /// 标题指纹：弹性模式随终端/文件标题变化触发重算。
+    private var titleFingerprint: String {
+        project.tabs.map { tab in
+            "\(tab.id.uuidString):\(tab.displayTitle ?? "")"
+        }
+        .joined(separator: "|")
+    }
+
+    /// 顶栏点击：本地立刻高亮，内容切换推迟到下一拍且不先广播 Project chrome。
+    private func selectTabChromeFirst(_ id: UUID) {
+        guard project.tabs.contains(where: { $0.id == id }) else { return }
+        if localChromeTabID != id {
+            localChromeTabID = id
+        }
+        project.selectTab(id, paintChrome: false)
+    }
+
+    private func recomputeElasticSlots() {
+        guard isElastic else {
+            if !elasticSlots.isEmpty { elasticSlots = [:] }
+            return
+        }
+        let tabs = project.tabs
+        guard !tabs.isEmpty, maxStripWidth > 0 else {
+            elasticSlots = [:]
+            return
+        }
+        let titles = tabs.map { $0.displayTitle ?? "" }
+        let paneCounts = tabs.map(\.allPanes.count)
+        let activeIndex = tabs.firstIndex(where: { $0.id == chromeSelectedID }) ?? 0
+        let resolved = TabStripMetrics.resolveElastic(
+            titles: titles,
+            paneCounts: paneCounts,
+            activeIndex: activeIndex,
+            availableWidth: maxStripWidth
+        )
+        var next: [UUID: ElasticTabSlot] = [:]
+        for (index, tab) in tabs.enumerated() where index < resolved.count {
+            next[tab.id] = resolved[index]
+        }
+        // 不带动画写入：新开 Tab / 重算宽度时若 withAnimation，整条会从左到右插值，观感很怪。
+        if next != elasticSlots {
+            elasticSlots = next
+        }
     }
 
     /// 仅滚动到足以完整显示当前 Tab 的位置；已在视口内时保持现有偏移。
     private func scrollToSelectedTab(using proxy: ScrollViewProxy) {
-        guard let id = project.selectedTabID,
+        guard let id = chromeSelectedID,
               project.tabs.contains(where: { $0.id == id })
         else { return }
         proxy.scrollTo(id)
@@ -861,9 +1065,9 @@ private struct SessionTabsView: View {
         guard stripIsFull else { return }
         // 当前已是压缩态且不再溢出；若全部扩到 relaxed 仍不超过条带，才解除压缩。
         let tabCount = max(project.tabs.count, 1)
-        let spacing = CGFloat(max(tabCount - 1, 0)) * 3
+        let spacing = CGFloat(max(tabCount - 1, 0)) * TabStripMetrics.interTabSpacing
         let maxRelaxedTotal =
-            CGFloat(tabCount) * Self.relaxedTabMaxWidth + spacing
+            CGFloat(tabCount) * TabStripMetrics.relaxedTabMaxWidth + spacing
         if maxRelaxedTotal <= maxStripWidth + 0.5 {
             stripIsFull = false
         }
@@ -872,9 +1076,9 @@ private struct SessionTabsView: View {
     private func reevaluateStripFullnessAfterTabCountChange() {
         guard stripIsFull else { return }
         let tabCount = max(project.tabs.count, 1)
-        let spacing = CGFloat(max(tabCount - 1, 0)) * 3
+        let spacing = CGFloat(max(tabCount - 1, 0)) * TabStripMetrics.interTabSpacing
         let maxRelaxedTotal =
-            CGFloat(tabCount) * Self.relaxedTabMaxWidth + spacing
+            CGFloat(tabCount) * TabStripMetrics.relaxedTabMaxWidth + spacing
         if maxRelaxedTotal <= maxStripWidth + 0.5 {
             stripIsFull = false
         }
@@ -990,10 +1194,12 @@ private struct PaneTabItem: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject var tab: PaneTab
     let isSelected: Bool
-    /// 由标签条是否挤满决定：宽松 150 / 压缩 130。
+    /// 由标签条是否挤满决定：宽松 150 / 压缩 130；弹性模式为分配宽。
     var minWidth: CGFloat = 150
-    /// 由标签条是否挤满决定：宽松 220 / 压缩 140。
+    /// 由标签条是否挤满决定：宽松 220 / 压缩 140；弹性模式为分配宽。
     var maxWidth: CGFloat = 220
+    /// 弹性模式仅图标：无标题、无关闭，保留状态指示器。
+    var iconOnly = false
     let select: () -> Void
     let close: () -> Void
     @Binding var renamingTabID: UUID?
@@ -1025,6 +1231,7 @@ private struct PaneTabItem: View {
                     isSelected: isSelected,
                     minWidth: minWidth,
                     maxWidth: maxWidth,
+                    iconOnly: iconOnly,
                     select: select,
                     close: close
                 )
@@ -1036,6 +1243,7 @@ private struct PaneTabItem: View {
                     isSelected: isSelected,
                     minWidth: minWidth,
                     maxWidth: maxWidth,
+                    iconOnly: iconOnly,
                     select: select,
                     close: close
                 )
@@ -1047,6 +1255,7 @@ private struct PaneTabItem: View {
                     isSelected: isSelected,
                     minWidth: minWidth,
                     maxWidth: maxWidth,
+                    iconOnly: iconOnly,
                     select: select,
                     close: close
                 )
@@ -1060,10 +1269,10 @@ private struct PaneTabItem: View {
                     isSelected: isSelected,
                     minWidth: minWidth,
                     maxWidth: maxWidth,
+                    iconOnly: iconOnly,
                     select: select,
                     close: close
                 )
-                .help(diff.path)
             case nil:
                 EmptyView()
             }
@@ -1151,6 +1360,7 @@ private struct SessionTabLabel: View {
     let isSelected: Bool
     var minWidth: CGFloat = 150
     var maxWidth: CGFloat = 220
+    var iconOnly = false
     let select: () -> Void
     let close: () -> Void
 
@@ -1171,6 +1381,7 @@ private struct SessionTabLabel: View {
                 terminalAppIcon: appIcon,
                 minWidth: minWidth,
                 maxWidth: maxWidth,
+                iconOnly: iconOnly,
                 select: select,
                 close: close
             )
@@ -1185,6 +1396,7 @@ private struct FileTabLabel: View {
     let isSelected: Bool
     var minWidth: CGFloat = 150
     var maxWidth: CGFloat = 220
+    var iconOnly = false
     let select: () -> Void
     let close: () -> Void
 
@@ -1199,10 +1411,10 @@ private struct FileTabLabel: View {
             isDirty: file.isDirty,
             minWidth: minWidth,
             maxWidth: maxWidth,
+            iconOnly: iconOnly,
             select: select,
             close: close
         )
-        .help(file.path)
     }
 }
 
@@ -1214,6 +1426,7 @@ private struct BrowserTabLabel: View {
     let isSelected: Bool
     var minWidth: CGFloat = 150
     var maxWidth: CGFloat = 220
+    var iconOnly = false
     let select: () -> Void
     let close: () -> Void
 
@@ -1227,10 +1440,10 @@ private struct BrowserTabLabel: View {
             isSelected: isSelected,
             minWidth: minWidth,
             maxWidth: maxWidth,
+            iconOnly: iconOnly,
             select: select,
             close: close
         )
-        .help(browser.urlString)
     }
 }
 
@@ -1318,10 +1531,12 @@ private struct TabItemChrome: View {
     var isTerminalRunning = false
     /// 终端前台进程匹配到的应用图标；有值时优先于转圈动画。
     var terminalAppIcon: TerminalAppIconSource? = nil
-    /// 由标签条挤满状态决定：默认 150，挤满时 130。
+    /// 由标签条挤满状态决定：默认 150，挤满时 130；弹性模式为分配宽。
     var minWidth: CGFloat = 150
-    /// 由标签条挤满状态决定：默认 220，挤满时 140。
+    /// 由标签条挤满状态决定：默认 220，挤满时 140；弹性模式为分配宽。
     var maxWidth: CGFloat = 220
+    /// 弹性仅图标：无标题、无关闭；保留 Task / dirty 状态指示。
+    var iconOnly = false
     let select: () -> Void
     let close: () -> Void
 
@@ -1329,109 +1544,191 @@ private struct TabItemChrome: View {
     /// 当前显示宽度会立即扩张，但会延迟收缩，给标题的短暂变化留出缓冲。
     @State private var retainedWidth = defaultMinWidth
     @State private var shrinkTask: Task<Void, Never>?
+    /// 标题 Text 实际分到的槽位宽度（用于判断是否截断）。
+    @State private var titleSlotWidth: CGFloat = 0
+
+    /// 弹性模式 min==max 时使用固定分配宽；滚动模式走 retainedWidth。
+    private var isFixedWidth: Bool {
+        abs(minWidth - maxWidth) < 0.5
+    }
+
+    private var displayWidth: CGFloat {
+        if iconOnly { return min(minWidth, maxWidth) }
+        if isFixedWidth { return minWidth }
+        return retainedWidth
+    }
+
+    private var idealTitleWidth: CGFloat {
+        TabStripMetrics.idealTitleWidth(title)
+    }
+
+    /// 标题未完整露出（仅图标，或标题槽位不够放全文）时才显示完整标题 tooltip。
+    private var needsTitleTooltip: Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if iconOnly { return true }
+        // 优先用布局测得的标题槽位；尚未布局时回退到 frame 估算。
+        if titleSlotWidth > 0.5 {
+            return idealTitleWidth > titleSlotWidth + 1
+        }
+        let accessory = TabStripMetrics.accessoryWidth(paneCount: paneCount)
+        return idealTitleWidth + accessory > displayWidth + 0.5
+    }
 
     var body: some View {
         Button(action: select) {
-            HStack(spacing: 5) {
-                let iconBase = Group {
-                    if let browserIcon {
-                        BrowserFaviconView(browser: browserIcon, size: 16)
-                            .opacity(isSelected ? 1 : 0.78)
-                    } else if let terminalAppIcon {
-                        TerminalAppIconView(
-                            source: terminalAppIcon,
-                            size: 16,
-                            isSelected: isSelected
-                        )
-                        .accessibilityLabel(L10n.t("Running application"))
-                    } else {
-                        TabStripIconView(
-                            systemImage: systemImage,
-                            materialFileName: materialFileName,
-                            isSelected: isSelected
-                        )
-                    }
-                }
+            HStack(spacing: iconOnly ? 0 : 5) {
+                tabIcon
 
-                if isTaskTab {
-                    iconBase.overlay(
-                        TaskStatusOverlayView(
-                            isExecuting: isTerminalRunning,
-                            hasError: taskHasError,
-                            tint: isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor
-                        ),
-                        alignment: .bottomTrailing
-                    )
-                } else {
-                    iconBase
-                }
-
-                Text(title)
-                    .font(SidebarTypography.body())
-                    .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
-                    .lineLimit(1)
-                    // 标题独占可伸缩空间，右侧的分栏提示、修改提示和关闭按钮始终右对齐。
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if paneCount > 1 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "square.split.2x1")
-                            .font(SidebarTypography.chevron())
-                        Text("\(paneCount)")
-                            .font(SidebarTypography.micro(.semibold))
+                if !iconOnly {
+                    Text(title)
+                        .font(SidebarTypography.body())
+                        .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
+                        .lineLimit(1)
+                        // 标题独占可伸缩空间，右侧的分栏提示、修改提示和关闭按钮始终右对齐。
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background {
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: TabTitleSlotWidthKey.self,
+                                    value: geo.size.width
+                                )
+                            }
+                        }
+                    if paneCount > 1 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "square.split.2x1")
+                                .font(SidebarTypography.chevron())
+                            Text("\(paneCount)")
+                                .font(SidebarTypography.micro(.semibold))
+                                .monospacedDigit()
+                        }
+                        .foregroundStyle(.tertiary)
                     }
-                    .foregroundStyle(.tertiary)
-                }
-                if isHovering {
-                    Button(action: close) {
-                        Image(systemName: "xmark")
-                            .font(SidebarTypography.compact(.bold))
-                            .foregroundStyle(Theme.secondaryColor)
+                    if isHovering {
+                        Button(action: close) {
+                            Image(systemName: "xmark")
+                                .font(SidebarTypography.compact(.bold))
+                                .foregroundStyle(Theme.secondaryColor)
+                                .frame(width: 14, height: 14)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else if isDirty {
+                        Circle()
+                            .fill(Theme.secondaryColor)
+                            .frame(width: 5, height: 5)
                             .frame(width: 14, height: 14)
-                            .contentShape(Rectangle())
+                    } else {
+                        Spacer()
+                            .frame(width: 14)
                     }
-                    .buttonStyle(.plain)
-                } else if isDirty {
-                    Circle()
-                        .fill(Theme.secondaryColor)
-                        .frame(width: 5, height: 5)
-                        .frame(width: 14, height: 14)
-                } else {
-                    Spacer()
-                        .frame(width: 14)
                 }
             }
-            .padding(.leading, 9)
-            .padding(.trailing, 5)
+            .padding(.leading, iconOnly ? 7 : 9)
+            .padding(.trailing, iconOnly ? 7 : 5)
             // 内容页 Tabs 相对原先各边 +1pt，整体高度 +2pt。
             .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: iconOnly ? .center : .leading)
             .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .frame(width: retainedWidth, alignment: .leading)
+        .frame(width: displayWidth, alignment: .leading)
         .clipped()
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Theme.primaryColor.opacity(0.09) : (isHovering ? Theme.primaryColor.opacity(0.04) : .clear))
         )
+        // 未完整显示时在 Tab 上方展示完整标题；完整显示则不挂 tooltip。
+        .modifier(TabTruncatedTitleTooltip(title: title, enabled: needsTitleTooltip))
+        .onPreferenceChange(TabTitleSlotWidthKey.self) { titleSlotWidth = $0 }
         .onHover { isHovering = $0 }
-        .onAppear { updateRetainedWidth() }
-        .onChange(of: title) { updateRetainedWidth() }
+        // 首帧 / 布局参数变化直接落到目标宽，避免新 Tab 从 defaultMin 扩到自然宽的左→右动画。
+        .onAppear { updateRetainedWidth(immediate: true, animated: false) }
+        .onChange(of: title) { updateRetainedWidth(immediate: isFixedWidth || iconOnly) }
         .onChange(of: manualTitle) { applyManualTitleWidth() }
-        .onChange(of: paneCount) { updateRetainedWidth() }
-        .onChange(of: minWidth) { updateRetainedWidth(immediate: true) }
-        .onChange(of: maxWidth) { updateRetainedWidth(immediate: true) }
+        .onChange(of: paneCount) { updateRetainedWidth(immediate: isFixedWidth || iconOnly) }
+        .onChange(of: minWidth) { updateRetainedWidth(immediate: true, animated: false) }
+        .onChange(of: maxWidth) { updateRetainedWidth(immediate: true, animated: false) }
+        .onChange(of: iconOnly) { updateRetainedWidth(immediate: true, animated: false) }
         .onDisappear { shrinkTask?.cancel() }
+    }
+
+    @ViewBuilder
+    private var tabIcon: some View {
+        let iconBase = Group {
+            if let browserIcon {
+                BrowserFaviconView(browser: browserIcon, size: 16)
+                    .opacity(isSelected ? 1 : 0.78)
+            } else if let terminalAppIcon {
+                TerminalAppIconView(
+                    source: terminalAppIcon,
+                    size: 16,
+                    isSelected: isSelected
+                )
+                .accessibilityLabel(L10n.t("Running application"))
+            } else {
+                TabStripIconView(
+                    systemImage: systemImage,
+                    materialFileName: materialFileName,
+                    isSelected: isSelected
+                )
+            }
+        }
+
+        if isTaskTab {
+            iconBase.overlay(
+                TaskStatusOverlayView(
+                    isExecuting: isTerminalRunning,
+                    hasError: taskHasError,
+                    tint: isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor
+                ),
+                alignment: .bottomTrailing
+            )
+        } else if iconOnly && isDirty {
+            // 仅图标时仍提示未保存：右下小圆点。
+            iconBase.overlay(alignment: .bottomTrailing) {
+                Circle()
+                    .fill(Theme.secondaryColor)
+                    .frame(width: 5, height: 5)
+                    .offset(x: 2, y: 2)
+            }
+        } else {
+            iconBase
+        }
     }
 
     /// 根据 AppKit 测得的标题自然宽度更新显示宽度：扩张即时生效，收缩等待一段时间后再执行。
     /// `immediate` 用于最小/最大宽度随标签条挤满/放宽变化时立刻应用，避免仍卡在旧的 retainedWidth。
-    private func updateRetainedWidth(immediate: Bool = false) {
+    /// `animated == false` 用于首帧与条带布局重算，避免新开 Tab 出现左→右展开动画。
+    private func updateRetainedWidth(immediate: Bool = false, animated: Bool = true) {
+        func applyWidth(_ width: CGFloat, useAnimation: Bool) {
+            guard width != retainedWidth else { return }
+            if useAnimation {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    retainedWidth = width
+                }
+            } else {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    retainedWidth = width
+                }
+            }
+        }
+
+        // 弹性固定宽：直接采用分配值，不做标题防抖。
+        if isFixedWidth || iconOnly {
+            shrinkTask?.cancel()
+            shrinkTask = nil
+            applyWidth(min(minWidth, maxWidth), useAnimation: animated)
+            return
+        }
+
         // 图标、关闭/修改状态、左右内边距和元素间距占用的固定宽度。
-        let accessoryWidth: CGFloat = paneCount > 1 ? 73 : 44
+        let accessoryWidth = TabStripMetrics.accessoryWidth(paneCount: paneCount)
         // 与 Tab 标题 SwiftUI 字号保持一致，避免测宽偏小导致文字被裁切。
-        let titleWidth = (title as NSString).size(
-            withAttributes: [.font: SidebarTypography.bodyNSFont]
-        ).width
+        let titleWidth = TabStripMetrics.idealTitleWidth(title)
         // 下限不超过上限（挤满时 min 130 / max 140）；始终夹在 [floor, max] 内。
         let floorWidth = min(minWidth, maxWidth)
         let desiredWidth = min(
@@ -1442,10 +1739,7 @@ private struct TabItemChrome: View {
         if immediate {
             shrinkTask?.cancel()
             shrinkTask = nil
-            guard desiredWidth != retainedWidth else { return }
-            withAnimation(.easeInOut(duration: 0.16)) {
-                retainedWidth = desiredWidth
-            }
+            applyWidth(desiredWidth, useAnimation: animated)
             return
         }
 
@@ -1453,8 +1747,12 @@ private struct TabItemChrome: View {
             shrinkTask?.cancel()
             shrinkTask = nil
             guard desiredWidth != retainedWidth else { return }
-            withAnimation(.easeOut(duration: 0.16)) {
-                retainedWidth = desiredWidth
+            if animated {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    retainedWidth = desiredWidth
+                }
+            } else {
+                applyWidth(desiredWidth, useAnimation: false)
             }
             return
         }
@@ -1464,8 +1762,12 @@ private struct TabItemChrome: View {
         shrinkTask = Task { @MainActor in
             try? await Task.sleep(for: Self.shrinkDelay)
             guard !Task.isCancelled, retainedWidth == widthBeforeDelay else { return }
-            withAnimation(.easeInOut(duration: 0.2)) {
-                retainedWidth = desiredWidth
+            if animated {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    retainedWidth = desiredWidth
+                }
+            } else {
+                applyWidth(desiredWidth, useAnimation: false)
             }
         }
     }
@@ -1473,6 +1775,29 @@ private struct TabItemChrome: View {
     /// 用户完成手动改名后不等待自动标题的防抖时间，立即更新为新标题所需宽度。
     private func applyManualTitleWidth() {
         updateRetainedWidth(immediate: true)
+    }
+}
+
+/// 标题 Text 实际槽位宽度（由 `TabItemChrome` 上报）。
+private struct TabTitleSlotWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// 标题被截断 / 仅图标时，在 Tab 上方显示完整标题。
+/// 使用独立 NSPanel 的 macTooltip，避免贴窗顶/窗边被裁切。
+private struct TabTruncatedTitleTooltip: ViewModifier {
+    let title: String
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            content.macTooltip(title, position: .top)
+        } else {
+            content
+        }
     }
 }
 

@@ -236,13 +236,24 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// User-configured actions displayed in the right sidebar's Start panel.
     @Published var launchCommands: [ProjectLaunchCommand] = []
     @Published var tabs: [PaneTab] = []
+    /// 内容区实际选中的 Tab。用户点击切换时可能比顶栏 chrome 晚一拍，避免终端/侧栏重活卡住点击反馈。
     @Published var selectedTabID: UUID? {
         didSet {
+            // 直接赋值（新建/关闭/恢复）时与 chrome 对齐。
+            if chromeSelectedTabID != selectedTabID {
+                chromeSelectedTabID = selectedTabID
+            }
             guard selectedTabID != oldValue, let selectedTabID else { return }
             recentTabIDs.removeAll { $0 == selectedTabID }
             recentTabIDs.insert(selectedTabID, at: 0)
         }
     }
+
+    /// 顶栏 / 列表的即时选中态；用户切换时先更新这里，内容区再跟进 `selectedTabID`。
+    @Published private(set) var chromeSelectedTabID: UUID?
+
+    /// 取消过期的延迟内容切换（快速连点时只应用最后一次）。
+    private var selectTabGeneration = 0
 
     /// 按使用时间从新到旧记录的 Tab ID 列表。
     private var recentTabIDs: [UUID] = []
@@ -984,9 +995,35 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         tabs = reorderedTabs
     }
 
+    /// 用户驱动的标签切换：先更新顶栏选中态，下一 runloop 再切换内容。
+    /// 新建 / 关闭 / 恢复等路径请继续直接写 `selectedTabID`，以同步切换内容。
+    /// - Parameter paintChrome: 为 false 时不写 `chromeSelectedTabID`（调用方已用本地 @State 抢先绘制，避免再触发整树刷新）。
+    func selectTab(_ id: UUID, paintChrome: Bool = true) {
+        guard tabs.contains(where: { $0.id == id }) else { return }
+        if paintChrome, chromeSelectedTabID != id {
+            chromeSelectedTabID = id
+        }
+        guard selectedTabID != id else { return }
+
+        selectTabGeneration += 1
+        let generation = selectTabGeneration
+        // 等当前帧把 chrome 绘制出去，再动终端挂载、侧栏跟随等重活。
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard generation == self.selectTabGeneration else { return }
+            // paintChrome == false 时 chrome 可能仍是旧值，只校验 id 仍有效。
+            if paintChrome {
+                guard self.chromeSelectedTabID == id else { return }
+            }
+            guard self.tabs.contains(where: { $0.id == id }) else { return }
+            guard self.selectedTabID != id else { return }
+            self.selectedTabID = id
+        }
+    }
+
     func select(index: Int) {
         guard tabs.indices.contains(index) else { return }
-        selectedTabID = tabs[index].id
+        selectTab(tabs[index].id)
     }
 
     func selectNext() {
@@ -998,11 +1035,13 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     }
 
     private func shiftSelection(by offset: Int) {
-        guard !tabs.isEmpty,
-              let current = tabs.firstIndex(where: { $0.id == selectedTabID })
+        guard !tabs.isEmpty else { return }
+        // 连按下一标签时以 chrome 为准，避免内容尚未跟进时来回卡在旧选中项。
+        let currentID = chromeSelectedTabID ?? selectedTabID
+        guard let current = tabs.firstIndex(where: { $0.id == currentID })
         else { return }
         let next = (current + offset + tabs.count) % tabs.count
-        selectedTabID = tabs[next].id
+        selectTab(tabs[next].id)
     }
 
     // MARK: - Layout mutation plumbing
