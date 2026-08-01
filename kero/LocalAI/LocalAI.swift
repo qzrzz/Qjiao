@@ -2,28 +2,34 @@
 //  LocalAI.swift
 //  kero
 //
-//  本地 AI 统一门面：应用通过此接口调用 headless / exec 模式的 AI CLI。
+//  AI 统一门面：应用通过此接口调用本地 CLI 或云端 AI API。
 //
 //  支持：grok（--single）、codex（exec）、claude（-p）、agy（--print）、opencode（run）、pi（-p）。
-//  全局设置：Settings → General → AI headless provider。
+//  全局设置：Settings → AI。
 //
 
 import Foundation
 
-/// 本地 AI 功能统一入口。
+/// 应用内 AI 功能统一入口。
 ///
-/// 使用前请在设置中选择已安装的 CLI；未选择或 disabled 时 `prompt` 会抛出 `LocalAIError.disabled`。
+/// 保留 `LocalAI` 名称兼容既有调用点，实际后端由设置中的 CLI / API 选择决定。
 enum LocalAI {
-    /// 当前是否启用且选中 CLI 已安装。
+    /// 当前所选后端是否已完成必要配置。
     @MainActor
     static var isEnabled: Bool {
-        LocalAIRegistry.shared.isEnabled
+        switch AppSettings.shared.aiBackend {
+        case .cli: return LocalAIRegistry.shared.isEnabled
+        case .api: return AIAPIRegistry.shared.isEnabled
+        }
     }
 
-    /// 当前选中的 Provider。
+    /// 当前选中的统一 Provider 身份。
     @MainActor
-    static var selectedProvider: LocalAIProviderID {
-        LocalAIRegistry.shared.selectedProvider
+    static var selectedProvider: AIProviderIdentity {
+        switch AppSettings.shared.aiBackend {
+        case .cli: return .cli(LocalAIRegistry.shared.selectedProvider)
+        case .api: return .api(AppSettings.shared.aiAPIProvider)
+        }
     }
 
     /// 全部 Provider 安装状态（含 disabled 与未安装项）。
@@ -38,7 +44,7 @@ enum LocalAI {
         LocalAIRegistry.shared.refresh()
     }
 
-    /// 执行单轮提示（使用全局设置中的 headless provider，除非 request 覆盖）。
+    /// 执行单轮提示（使用全局设置中的后端；CLI override 存在时强制走 CLI）。
     ///
     /// - Parameter request: 提示词与可选工作目录、模型、超时等。
     /// - Returns: 解析后的文本与原始 stdout/stderr。
@@ -48,18 +54,26 @@ enum LocalAI {
             throw LocalAIError.emptyPrompt
         }
 
-        let provider = await resolveProvider(override: request.providerOverride)
+        var normalized = request
+        normalized.prompt = trimmed
+
+        let backend = resolveBackend(override: request.providerOverride)
+        if backend == .api {
+            let configuration = try await MainActor.run {
+                try AIAPIRegistry.shared.configuration()
+            }
+            return try await AIAPIClient.prompt(normalized, configuration: configuration)
+        }
+
+        let provider = resolveCLIProvider(override: request.providerOverride)
         guard provider.isAIProvider else {
             throw LocalAIError.disabled
         }
 
-        let executable = await resolveExecutable(for: provider)
+        let executable = resolveExecutable(for: provider)
         guard let executable else {
             throw LocalAIError.notInstalled(provider)
         }
-
-        var normalized = request
-        normalized.prompt = trimmed
 
         let command = try LocalAICommandBuilder.build(
             provider: provider,
@@ -99,7 +113,7 @@ enum LocalAI {
         return LocalAIResponse(
             text: text,
             exitCode: processResult.exitCode,
-            provider: provider,
+            provider: .cli(provider),
             rawStdout: processResult.stdout,
             rawStderr: processResult.stderr,
             executablePath: executable
@@ -128,7 +142,13 @@ enum LocalAI {
     // MARK: - Private
 
     @MainActor
-    private static func resolveProvider(override: LocalAIProviderID?) -> LocalAIProviderID {
+    private static func resolveBackend(override: LocalAIProviderID?) -> AIBackend {
+        if override != nil { return .cli }
+        return AppSettings.shared.aiBackend
+    }
+
+    @MainActor
+    private static func resolveCLIProvider(override: LocalAIProviderID?) -> LocalAIProviderID {
         if let override { return override }
         return LocalAIRegistry.shared.selectedProvider
     }

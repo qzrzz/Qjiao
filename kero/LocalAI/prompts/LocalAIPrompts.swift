@@ -19,7 +19,7 @@
 //  | `IconSuggestPrompt.swift` | `IconSuggestPrompt` | AI Select Icon | 否（仅图标标识） |
 //  | `ProjectMetaPrompt.swift` | `ProjectMetaPrompt` | AI Name & Desc & Icon | 是（name / description；icon 除外） |
 //
-//  写作语言：Settings → General → AI → Writing language（项目可覆盖）。
+//  写作语言：Settings → AI → Writing language（项目可覆盖）。
 //  新增 AI 能力时：在本目录新增 `FooPrompt.swift`，并在上表补充一行。
 //
 

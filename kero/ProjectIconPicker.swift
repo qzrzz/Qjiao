@@ -1176,8 +1176,8 @@ struct ProjectIconPicker: View {
                 .disabled(!LocalAI.isEnabled)
                 .help(
                     LocalAI.isEnabled
-                        ? "Use LocalAI headless provider to pick an icon (runs in background)"
-                        : "Enable AI headless provider in Settings → General"
+                        ? L10n.t("Use the configured AI provider to pick an icon (runs in background)")
+                        : L10n.t("Configure an AI provider in Settings → AI")
                 )
             }
             if project.icon != nil {

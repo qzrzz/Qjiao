@@ -33,7 +33,7 @@ enum LocalAIProjectMetaSuggest {
     /// 默认超时：比单纯选图标略长。
     static let defaultTimeout: Duration = .seconds(120)
 
-    /// 请求 AI 生成元数据；需已启用 headless provider。
+    /// 请求 AI 生成元数据；需已配置可用的 CLI 或 API provider。
     @MainActor
     static func suggest(for project: Project) async throws -> LocalAIProjectMetaSuggestion {
         guard LocalAI.isEnabled else {

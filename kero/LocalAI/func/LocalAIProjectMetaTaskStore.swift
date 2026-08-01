@@ -45,8 +45,7 @@ final class LocalAIProjectMetaTaskStore: ObservableObject {
         guard LocalAI.isEnabled else {
             var s = states[project.id] ?? LocalAIProjectMetaTaskState()
             s.isRunning = false
-            s.lastError =
-                "Local AI is disabled. Choose an AI headless provider in Settings → General."
+            s.lastError = L10n.t("AI is disabled. Configure a provider in Settings → AI.")
             s.providerLabel = nil
             states[project.id] = s
             return

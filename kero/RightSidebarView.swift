@@ -862,14 +862,10 @@ struct RightSidebarView: View {
         // 无论当前 panelTab 是什么，只要侧边栏可见且 refreshGit 为 true，都更新 git 状态以实时保持 Git 角标数量精准。
         // 优先使用当前 terminal session 的 cwd，若无 session 或 cwd 为空则回退到项目根目录，确保切换项目时即时同步 Git 状态。
         if refreshGit {
-            let root: String
-            if let customGitPath = project.customGitPath, project.isValidCustomGitPath(customGitPath) {
-                root = customGitPath
-            } else {
-                root = session?.currentDirectoryPath.isEmpty == false
-                    ? session!.currentDirectoryPath
-                    : projectRoot(for: project, fallback: session)
-            }
+            let root = project.gitRoot(
+                followingSessionAt: session?.currentDirectoryPath ?? "",
+                foregroundAt: session?.foregroundDirectoryPath
+            )
             if !root.isEmpty {
                 git.sync(root: root)
             }

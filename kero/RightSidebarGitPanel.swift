@@ -552,7 +552,7 @@ struct GitPanel: View {
             ? L10n.t("Cancel AI Commit Message")
             : (LocalAI.isEnabled
                 ? L10n.t("Generate commit message with AI")
-                : L10n.t("Enable AI headless provider in Settings → General"))
+                : L10n.t("Configure an AI provider in Settings → AI"))
         return GitChromeIconButton(
             systemImage: "sparkles.2",
             help: helpText,
@@ -1170,10 +1170,7 @@ struct GitPanel: View {
     private func clearCustomGitRepositoryPath() {
         guard let project else { return }
         project.customGitPath = nil
-        let fallbackRoot = session?.currentDirectoryPath.isEmpty == false
-            ? session!.currentDirectoryPath
-            : (project.projectDirectory.isEmpty ? NSHomeDirectory() : project.projectDirectory)
-        model.sync(root: fallbackRoot)
+        model.sync(root: project.gitRoot(followingSessionAt: session?.currentDirectoryPath ?? ""))
     }
 
     private func statusFailure(_ message: String) -> some View {

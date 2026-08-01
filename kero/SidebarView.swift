@@ -619,7 +619,7 @@ private struct SidebarProjectRow: View {
     private func startAISelectIcon() {
         guard LocalAI.isEnabled else {
             aiSelectIconError =
-                "Local AI is disabled. Choose an AI headless provider in Settings → General."
+                L10n.t("AI is disabled. Configure a provider in Settings → AI.")
             isAISelectIconErrorPresented = true
             return
         }
@@ -630,7 +630,7 @@ private struct SidebarProjectRow: View {
     private func startAIProjectMeta() {
         guard LocalAI.isEnabled else {
             aiProjectMetaError =
-                "Local AI is disabled. Choose an AI headless provider in Settings → General."
+                L10n.t("AI is disabled. Configure a provider in Settings → AI.")
             isAIProjectMetaErrorPresented = true
             return
         }
@@ -1264,5 +1264,4 @@ private final class SidebarMenuActionTarget: NSObject {
         closure()
     }
 }
-
 

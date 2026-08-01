@@ -109,7 +109,7 @@ const SIGN_IDENTITY =
 const NOTARY_PROFILE = process.env.NOTARY_PROFILE ?? "NOTARY";
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
 const SPARKLE_ACCOUNT = process.env.SPARKLE_ACCOUNT ?? "qjiao";
-const UPDATE_PIPELINE_VERSION = "4";
+const UPDATE_PIPELINE_VERSION = "5";
 const FORCE_RELEASE = process.env.FORCE !== "0";
 const ARCHIVE_RETRIES = readPositiveInteger(
   "ARCHIVE_RETRIES",
@@ -201,6 +201,9 @@ const notesPath = join(UPDATES_DIR, notesName);
 const dmgStaging = join(BUILD_DIR, "dmg");
 const appcastPath = join(UPDATES_DIR, "appcast.xml");
 const releaseState = await initializeReleaseState(identity);
+if (!releaseState.completedSteps.includes("updates-generated")) {
+  assertBuildIsNewerThanCache(build, version);
+}
 
 say(`Preparing Qjiao ${version} (build ${build})…`);
 if (
@@ -394,6 +397,7 @@ if (
     account: SPARKLE_ACCOUNT,
     versions: [build],
   });
+  await normalizeAppcastArchiveUrls(appcastPath);
   if (
     !(await validateUpdateArtifacts(
       zipPath,
@@ -495,6 +499,9 @@ async function readReleaseIdentity(): Promise<IReleaseIdentity> {
       : "git-unavailable";
   if (!version || !build) {
     die("could not read MARKETING_VERSION or CURRENT_PROJECT_VERSION");
+  }
+  if (!/^[1-9][0-9]*$/.test(build)) {
+    die("CURRENT_PROJECT_VERSION must be a positive integer");
   }
   const appSourceFingerprint = await createAppSourceFingerprint();
   const releaseNotesFingerprint = createUpdateArtifactsFingerprint();
@@ -605,7 +612,7 @@ async function prepareLocalDeltaBaselines(currentBuild: string): Promise<void> {
     Bun.file(RELEASE_CACHE_APPCAST_PATH).size > 0
   ) {
     copyFileAtomically(RELEASE_CACHE_APPCAST_PATH, appcastPath);
-    await normalizeCachedAppcastHistory(appcastPath, manifest);
+    await normalizeAppcastArchiveUrls(appcastPath);
     say(`Using local Sparkle history: ${RELEASE_CACHE_APPCAST_PATH}`);
   }
 
@@ -639,39 +646,53 @@ async function prepareLocalDeltaBaselines(currentBuild: string): Promise<void> {
   }
 }
 
-/** 修复 GitHub 按 tag 托管时被 generate_appcast 改写的历史条目。 */
-async function normalizeCachedAppcastHistory(
-  path: string,
-  manifest: IReleaseCacheManifest,
-): Promise<void> {
-  const entriesByBuild = new Map(
-    manifest.entries.map((entry) => [entry.build, entry]),
+/** 防止重新签名后覆盖或回退已发布的 delta 基线。 */
+function assertBuildIsNewerThanCache(build: string, version: string): void {
+  const cachedBuilds = readReleaseCacheManifest().entries.map((entry) =>
+    BigInt(entry.build),
   );
+  if (cachedBuilds.length === 0) return;
+  const latestBuild = cachedBuilds.reduce((latest, cached) =>
+    cached > latest ? cached : latest,
+  );
+  if (BigInt(build) <= latestBuild) {
+    die(
+      `build ${build} is not newer than cached build ${latestBuild}; ` +
+        `increment CURRENT_PROJECT_VERSION before publishing ${version}`,
+    );
+  }
+}
+
+/** 生成前后强制历史完整 ZIP 指向其自身的 GitHub tag。 */
+async function normalizeAppcastArchiveUrls(path: string): Promise<void> {
   const original = readFileSync(path, "utf8");
   const normalized = original.replace(
     /<item>[\s\S]*?<\/item>/g,
     (item): string => {
-      const build = item.match(
-        /<sparkle:version>([^<]+)<\/sparkle:version>/,
+      const version = item.match(
+        /<sparkle:shortVersionString>([^<]+)<\/sparkle:shortVersionString>/,
       )?.[1];
-      const entry = build ? entriesByBuild.get(build) : undefined;
-      if (!entry) return item;
+      if (!version || !/^[0-9A-Za-z.+-]+$/.test(version)) return item;
 
-      const archiveUrl =
-        `https://github.com/${GITHUB_REPOSITORY}/releases/download/` +
-        `${encodeURIComponent(entry.tag)}/${encodeURIComponent(entry.archiveName)}`;
+      const archiveUrl = expectedArchiveUrl(version);
       return item
-        .replace(/<title>[^<]*<\/title>/, `<title>${entry.version}</title>`)
-        .replace(
-          /<sparkle:shortVersionString>[^<]*<\/sparkle:shortVersionString>/,
-          `<sparkle:shortVersionString>${entry.version}</sparkle:shortVersionString>`,
-        )
+        .replace(/<title>[^<]*<\/title>/, `<title>${version}</title>`)
         .replace(/(<enclosure\s+url=")[^"]+\.zip(")/, `$1${archiveUrl}$2`);
     },
   );
   if (normalized !== original) {
     await Bun.write(path, normalized);
   }
+}
+
+/** 构造项目约定的按版本 tag 托管地址。 */
+function expectedArchiveUrl(version: string): string {
+  const tag = `v${version}`;
+  const name = `${ARTIFACT_PREFIX}-${version}.zip`;
+  return (
+    `https://github.com/${GITHUB_REPOSITORY}/releases/download/` +
+    `${encodeURIComponent(tag)}/${encodeURIComponent(name)}`
+  );
 }
 
 /** 正式发布成功后，把当前完整 ZIP 和 appcast 原子写入 release/。 */
@@ -780,7 +801,7 @@ function isReleaseCacheEntry(value: unknown): value is IReleaseCacheEntry {
     typeof entry.version === "string" &&
     entry.version.length > 0 &&
     typeof entry.build === "string" &&
-    entry.build.length > 0 &&
+    /^[1-9][0-9]*$/.test(entry.build) &&
     typeof entry.tag === "string" &&
     entry.tag.length > 0 &&
     typeof entry.archiveName === "string" &&
@@ -1252,11 +1273,27 @@ async function validateUpdateArtifacts(
   ) {
     return false;
   }
+  if (!validateAppcastArchiveUrls(appcast)) return false;
   for (const name of listReferencedDeltaNames(appcast, tag)) {
     const path = join(UPDATES_DIR, name);
     if (!existsSync(path) || Bun.file(path).size === 0) return false;
   }
   return true;
+}
+
+/** 验证每个历史完整 ZIP 仍指向其自身的版本 tag。 */
+function validateAppcastArchiveUrls(appcast: string): boolean {
+  let itemCount = 0;
+  for (const match of appcast.matchAll(/<item>[\s\S]*?<\/item>/g)) {
+    const item = match[0];
+    const version = item.match(
+      /<sparkle:shortVersionString>([^<]+)<\/sparkle:shortVersionString>/,
+    )?.[1];
+    const archiveUrl = item.match(/<enclosure\s+url="([^"]+\.zip)"/)?.[1];
+    if (!version || archiveUrl !== expectedArchiveUrl(version)) return false;
+    itemCount += 1;
+  }
+  return itemCount > 0;
 }
 
 /** 提取 appcast 当前托管地址引用的 delta 文件名。 */
