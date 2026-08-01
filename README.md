@@ -105,6 +105,7 @@
   - 拖到终端区域仍为插入 Shell 路径（与文件一致），不再整窗拦截创建项目，避免覆盖终端 drop。
   - 排除软件内部 Files / CWD 文件树拖拽，避免误触发。
 - **Files Tree 拖拽移动与确认对话框**：文件树支持将文件和文件夹拖拽移动到目标文件夹或根目录，在移动前弹出 macOS 原生确认对话框（显示具体源文件名/项目数量与目标位置，防止误触）；确认后安全移动磁盘文件，自动展开目标目录并联动更新打开的主编辑器标签页路径。
+- **Files Tree 回车键就地重命名**：符合 macOS Finder 原生使用习惯，在文件树中选中单个文件或文件夹时，直接按下 `Return` / `Enter` 键即可立即调起就地重命名输入框，按 `Enter` 确认提交或 `Esc` 取消，流畅无缝。
 - 项目支持自定义图标（预置 / Emoji / SF Symbols / Select File）；图标选择器独立为 `ProjectIconPicker.swift`：
   - **预置**：列出本应用内置 Brands（`TerminalAppIcons`）与 Material Icon Theme 图标，可搜索选择。
   - **SF Symbols**：左侧分类浏览（Suggested / Coding / Arrows…）、分类内搜索防抖、多词过滤。

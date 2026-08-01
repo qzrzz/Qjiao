@@ -466,6 +466,20 @@ struct FileTreePanel: View {
                 }
             }
 
+            // 5. 回车键 (Return / Enter)：在单选且非内联编辑/新建状态下触发就地重命名
+            if relevantFlags.isEmpty, (event.keyCode == 36 || event.keyCode == 76),
+               !isFilterFieldFocused,
+               model.renamingPath == nil,
+               model.draft == nil,
+               isFilesTreeActiveOrFocused() {
+                if model.selectedPaths.count == 1, let targetItem = model.selectedItems.first {
+                    Task { @MainActor in
+                        model.beginRename(targetItem)
+                    }
+                    return nil // 消费回车键，屏蔽系统提示音
+                }
+            }
+
             return event
         }
     }

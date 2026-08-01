@@ -10,6 +10,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
 set in the Xcode project.
 
+## [1.1.1]
+
+### Added
+
+- Support elastic and scroll layout options for top-bar tabs (`Settings` -> `Tabs Layout`).
+- Support smart contrast adaptation for CLI icons by dynamically rendering low-contrast icons as silhouettes based on system theme and background brightness.
+
+### Performance
+
+- Optimize tab switching responsiveness with immediate active tab state updates and lazy-loaded panel contents.
+
+## [1.1.0]
+
+### Added
+
+- Add cloud AI API provider support alongside local CLI AI, with API Key securely stored in macOS Keychain.
+- Add network metrics logging for AI API requests to track connection stats and request duration.
+
+### Changed
+
+- Increase default timeout for Local AI Git commit suggestion to 90 seconds.
+
+## [1.0.9]
+
+### Added
+
+- Support custom Git repository path mapping with automatic CLI icon association.
+
+### Fixed
+
+- Render theme previews according to Retina scaling (`backingScaleFactor`) to fix blurry previews on High-DPI displays.
+
 ## [1.0.8]
 
 ### Added
