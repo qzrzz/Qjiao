@@ -1154,6 +1154,8 @@ async function validatePreparedApp(
   identity: IReleaseIdentity,
 ): Promise<boolean> {
   if (!(await validateAppIdentityAndSignature(appPath, identity))) return false;
+  // zsh 会写入历史文件；签名包中出现该文件会让运行后的 App 失去 delta 资格。
+  if (containsFileNamed(appPath, ".zsh_history")) return false;
   for (const path of await listMachOBinaries(appPath)) {
     const architectures = await readArchitectures(path);
     if (architectures.length !== 1 || architectures[0] !== "arm64") {
@@ -1412,6 +1414,21 @@ function listExecutableFiles(directory: string): string[] {
     }
   }
   return result;
+}
+
+/** 判断目录树中是否包含指定文件，并避免进入 Bundle 内的符号链接。 */
+function containsFileNamed(directory: string, fileName: string): boolean {
+  for (const entry of readdirSync(directory)) {
+    const path = join(directory, entry);
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) {
+      if (containsFileNamed(path, fileName)) return true;
+    } else if (stat.isFile() && entry === fileName) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** 找出 App 中全部可执行 Mach-O 文件。 */

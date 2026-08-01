@@ -72,6 +72,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private let launchCommand: String
     private let launchDirectoryURL: URL?
     private let shellPidFileURL: URL?
+    private let zshIntegrationDirectoryURL: URL?
     private var cachedShellPid: pid_t?
     private var lastScrollbar: TerminalScrollbar?
     private var lastHistorySnapshot: String?
@@ -85,7 +86,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     init(initialDirectory: String? = nil, restoredHistory: String? = nil, isLazy: Bool = false) {
         let shellPath = Self.loginShell()
         let directory = Self.validWorkingDirectory(initialDirectory)
-        let artifacts = Self.makeLaunchArtifacts(restoredHistory: restoredHistory)
+        let artifacts = Self.makeLaunchArtifacts(
+            shellPath: shellPath,
+            restoredHistory: restoredHistory
+        )
         let launchCommand = Self.makeLaunchCommand(
             shellPath: shellPath,
             pidFileURL: artifacts.pidFileURL,
@@ -97,6 +101,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         self.launchCommand = launchCommand
         launchDirectoryURL = artifacts.directoryURL
         shellPidFileURL = artifacts.pidFileURL
+        zshIntegrationDirectoryURL = artifacts.zshIntegrationDirectoryURL
         // 根据 zsh 闲时标题配置格式化初始标题，未改动时退回目录最后一级名称。
         let directoryName = URL(fileURLWithPath: directory).lastPathComponent
         let defaultTitle = directoryName.isEmpty
@@ -135,6 +140,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             workingDirectory: launchWorkingDirectory,
             envVars: Self.surfaceEnvironment(
                 shellPath: shellPath,
+                zshIntegrationDirectoryURL: zshIntegrationDirectoryURL,
                 pendingCommandFile: pendingCommandFileURL
             )
         )
@@ -707,6 +713,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
     private static func surfaceEnvironment(
         shellPath: String,
+        zshIntegrationDirectoryURL: URL?,
         pendingCommandFile: URL?
     ) -> [String: String] {
         var environment = [
@@ -716,9 +723,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         ]
         // 终端区域设置属于用户的 Shell 环境，应用界面语言不得代替用户注入 LANG/LC_*。
         if (shellPath as NSString).lastPathComponent == "zsh",
-           let integrationDirectory = Bundle.main.resourceURL?
-               .appendingPathComponent("TerminalShellIntegration/zsh", isDirectory: true)
-               .path {
+           let integrationDirectory = zshIntegrationDirectoryURL?.path {
             let processEnvironment = ProcessInfo.processInfo.environment
             environment["QJIAO_ZSH_INTEGRATION_DIR"] = integrationDirectory
             environment["QJIAO_ZDOTDIR_WAS_SET"] = processEnvironment["ZDOTDIR"] == nil
@@ -741,9 +746,13 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         let directoryURL: URL?
         let pidFileURL: URL?
         let replayFileURL: URL?
+        let zshIntegrationDirectoryURL: URL?
     }
 
-    private static func makeLaunchArtifacts(restoredHistory: String?) -> LaunchArtifacts {
+    private static func makeLaunchArtifacts(
+        shellPath: String,
+        restoredHistory: String?
+    ) -> LaunchArtifacts {
         let fileManager = FileManager.default
         let directory = fileManager.temporaryDirectory
             .appendingPathComponent("kero-terminal-\(UUID().uuidString)", isDirectory: true)
@@ -754,6 +763,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
                 attributes: [.posixPermissions: 0o700]
             )
             let pidFile = directory.appendingPathComponent("shell.pid")
+            let zshIntegrationDirectory = makeWritableZshIntegrationDirectory(
+                shellPath: shellPath,
+                launchDirectory: directory
+            )
             var replayFile: URL?
             if AppSettings.shared.restoreTerminalHistory,
                let restoredHistory,
@@ -771,12 +784,42 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             return LaunchArtifacts(
                 directoryURL: directory,
                 pidFileURL: pidFile,
-                replayFileURL: replayFile
+                replayFileURL: replayFile,
+                zshIntegrationDirectoryURL: zshIntegrationDirectory
             )
         } catch {
             try? fileManager.removeItem(at: directory)
             NSLog("kero: failed to prepare terminal launch files: \(error)")
-            return LaunchArtifacts(directoryURL: nil, pidFileURL: nil, replayFileURL: nil)
+            return LaunchArtifacts(
+                directoryURL: nil,
+                pidFileURL: nil,
+                replayFileURL: nil,
+                zshIntegrationDirectoryURL: nil
+            )
+        }
+    }
+
+    /// 将 zsh 启动代理复制到会话临时目录，避免 Shell 写入已签名的 App Bundle。
+    private static func makeWritableZshIntegrationDirectory(
+        shellPath: String,
+        launchDirectory: URL
+    ) -> URL? {
+        guard (shellPath as NSString).lastPathComponent == "zsh",
+              let bundledDirectory = Bundle.main.resourceURL?
+                  .appendingPathComponent("TerminalShellIntegration/zsh", isDirectory: true),
+              FileManager.default.fileExists(atPath: bundledDirectory.path) else {
+            return nil
+        }
+
+        let writableDirectory = launchDirectory
+            .appendingPathComponent("zsh-integration", isDirectory: true)
+        do {
+            try FileManager.default.copyItem(at: bundledDirectory, to: writableDirectory)
+            return writableDirectory
+        } catch {
+            // 集成复制失败时仍允许启动原生 zsh，但绝不能退回不可写的 Bundle 目录。
+            NSLog("kero: failed to prepare writable zsh integration: \(error)")
+            return nil
         }
     }
 
