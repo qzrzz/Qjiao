@@ -347,15 +347,15 @@ final class TerminalAppIconCatalog {
     private func loadImageFile(path: String, pointSize: CGFloat) -> NSImage? {
         let url = URL(fileURLWithPath: path)
         guard let base = NSImage(contentsOf: url) else { return nil }
-        let sized = base.copy() as? NSImage ?? base
-        // 保持宽高比：以较长边缩放到 pointSize。
-        let src = sized.size
+        let targetSize: NSSize
+        let src = base.size
         if src.width > 0, src.height > 0 {
-            let scale = pointSize / max(src.width, src.height)
-            sized.size = NSSize(width: src.width * scale, height: src.height * scale)
+            let scaleFactor = pointSize / max(src.width, src.height)
+            targetSize = NSSize(width: src.width * scaleFactor, height: src.height * scaleFactor)
         } else {
-            sized.size = NSSize(width: pointSize, height: pointSize)
+            targetSize = NSSize(width: pointSize, height: pointSize)
         }
+        let sized = base.resizedHighQuality(to: targetSize, keepAspectRatio: true)
         if path.lowercased().hasSuffix(".svg"), Self.svgUsesCurrentColor(path: path) {
             sized.isTemplate = true
         }

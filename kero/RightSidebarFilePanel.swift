@@ -1920,6 +1920,7 @@ private struct FileQuickPreviewPopoverContentView: View {
             } else if let image {
                 Image(nsImage: image)
                     .resizable()
+                    .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
                     .frame(width: displaySize.width, height: displaySize.height)
 

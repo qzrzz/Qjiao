@@ -724,12 +724,37 @@ nonisolated extension GhosttyThemeDefinition {
 enum ThemePreviewImageRenderer {
     static func image(for themes: [GhosttyThemeDefinition]) -> NSImage {
         let imageSize = NSSize(width: 32, height: 18)
-        let image = NSImage(size: imageSize)
-        image.lockFocus()
-        defer { image.unlockFocus() }
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let pixelSize = NSSize(width: imageSize.width * scale, height: imageSize.height * scale)
 
-        let context = NSGraphicsContext.current?.cgContext
-        context?.setShouldAntialias(true)
+        guard let bitmapRep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(pixelSize.width),
+            pixelsHigh: Int(pixelSize.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .calibratedRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: bitmapRep) else {
+            return NSImage(size: imageSize)
+        }
+
+        bitmapRep.size = imageSize
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+
+        let cgContext = context.cgContext
+        context.imageInterpolation = .high
+        cgContext.interpolationQuality = .high
+        cgContext.setShouldAntialias(true)
+        cgContext.setAllowsAntialiasing(true)
+
+        cgContext.scaleBy(x: scale, y: scale)
+
         let gap: CGFloat = themes.count > 1 ? 1 : 0
         let swatchWidth = (imageSize.width - gap * CGFloat(max(themes.count - 1, 0)))
             / CGFloat(max(themes.count, 1))
@@ -742,7 +767,11 @@ enum ThemePreviewImageRenderer {
             draw(theme: theme, in: rect)
         }
 
-        return image
+        NSGraphicsContext.restoreGraphicsState()
+
+        let finalImage = NSImage(size: imageSize)
+        finalImage.addRepresentation(bitmapRep)
+        return finalImage
     }
 
     private static func draw(theme: GhosttyThemeDefinition, in rect: NSRect) {

@@ -35,24 +35,7 @@ struct CodeEditor: Identifiable, Equatable {
     func iconImage(size: CGFloat = 16) -> NSImage? {
         guard let url = appURL else { return nil }
         let rawIcon = NSWorkspace.shared.icon(forFile: url.path)
-        let targetSize = NSSize(width: size, height: size)
-
-        var proposedRect = CGRect(origin: .zero, size: targetSize)
-        if let cgImage = rawIcon.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) {
-            let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
-            bitmapRep.size = targetSize
-            let image = NSImage(size: targetSize)
-            image.addRepresentation(bitmapRep)
-            return image
-        }
-
-        // 回退机制：使用 lockFocus 强制将图标渲染进离屏 CGContext 画布中
-        let image = NSImage(size: targetSize)
-        image.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
-        rawIcon.draw(in: NSRect(origin: .zero, size: targetSize), from: .zero, operation: .copy, fraction: 1.0)
-        image.unlockFocus()
-        return image
+        return rawIcon.resizedHighQuality(to: NSSize(width: size, height: size))
     }
 }
 

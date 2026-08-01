@@ -120,8 +120,9 @@ struct SettingsView: View {
     /// 设置侧栏底部的应用身份卡片：版本号检查更新，地球按钮打开项目主页。
     private var sidebarAppCard: some View {
         HStack(spacing: 8) {
-            Image(nsImage: NSApplication.shared.applicationIconImage)
+            Image(nsImage: NSApplication.shared.applicationIconImage.resizedHighQuality(to: NSSize(width: 32, height: 32)))
                 .resizable()
+                .interpolation(.high)
                 .scaledToFit()
                 .frame(width: 32, height: 32)
       
@@ -681,8 +682,9 @@ struct SettingsView: View {
             Section {
                 Group {
                     VStack(spacing: 8) {
-                        Image(nsImage: NSApplication.shared.applicationIconImage)
+                        Image(nsImage: NSApplication.shared.applicationIconImage.resizedHighQuality(to: NSSize(width: 54, height: 54)))
                             .resizable()
+                            .interpolation(.high)
                             .scaledToFit()
                             .frame(width: 54, height: 54)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -1672,10 +1674,12 @@ private struct ProjectSettingsSectionView: View {
                         VStack(spacing: 0) {
                             ForEach(Array(settings.customCodeEditorPaths.enumerated()), id: \.element) { index, path in
                                 let url = URL(fileURLWithPath: path)
-                                let icon = NSWorkspace.shared.icon(forFile: path)
+                                let rawIcon = NSWorkspace.shared.icon(forFile: path)
+                                let icon = rawIcon.resizedHighQuality(to: NSSize(width: 16, height: 16))
                                 HStack(spacing: 8) {
                                     Image(nsImage: icon)
                                         .resizable()
+                                        .interpolation(.high)
                                         .frame(width: 16, height: 16)
                                     Text(url.deletingPathExtension().lastPathComponent)
                                         .font(.system(size: 12, weight: .medium))

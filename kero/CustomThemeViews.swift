@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Combine
 import GhosttyTheme
 import SwiftUI
 
@@ -141,6 +142,14 @@ struct CustomThemeEditorSheet: View {
     @State private var foregroundColor: Color
     @State private var accentColor: Color
 
+    /// 标记是否点击了保存或删除，避免关闭时触发还原。
+    @State private var hasSaved = false
+    /// 保存对话框打开前的初始数据，供取消/关闭时完全还原。
+    @State private var initialThemes: [CustomTheme] = []
+    @State private var initialThemeDark: String = ""
+    @State private var initialThemeLight: String = ""
+    @State private var initialAppTheme: AppTheme = .system
+
     init(draft: CustomTheme, isNew: Bool, onDismiss: @escaping () -> Void) {
         self._draft = State(initialValue: draft)
         self.isNew = isNew
@@ -181,21 +190,25 @@ struct CustomThemeEditorSheet: View {
                                 ? Theme.defaultDarkThemeName
                                 : Theme.defaultLightThemeName
                         }
+                        updateLivePreview()
                     }
                 }
 
                 Section(L10n.t("Window Colors")) {
                     colorRow(L10n.t("Background"), color: $backgroundColor) { ns in
                         draft.background = CustomTheme.hex(from: ns)
+                        updateLivePreview()
                     }
                     colorRow(L10n.t("Text"), color: $foregroundColor) { ns in
                         draft.foreground = CustomTheme.hex(from: ns)
+                        updateLivePreview()
                     }
                     Text(L10n.t("Used for sidebar, tabs, and panel labels."))
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryColor)
                     colorRow(L10n.t("Accent"), color: $accentColor) { ns in
                         draft.accent = CustomTheme.hex(from: ns)
+                        updateLivePreview()
                     }
                     HStack {
                         Text(L10n.t("Preview"))
@@ -221,6 +234,9 @@ struct CustomThemeEditorSheet: View {
                         }
                     }
                     .toggleStyle(.checkbox)
+                    .onChange(of: draft.followBackground) { _, _ in
+                        updateLivePreview()
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -228,6 +244,22 @@ struct CustomThemeEditorSheet: View {
             footer
         }
         .frame(width: 420, height: 520)
+        .onChange(of: draft.ghosttyTheme) { _, _ in
+            updateLivePreview()
+        }
+        .onChange(of: draft.name) { _, _ in
+            updateLivePreview()
+        }
+        .onAppear {
+            initialThemes = CustomThemeStore.shared.themes
+            initialThemeDark = AppSettings.shared.themeDark
+            initialThemeLight = AppSettings.shared.themeLight
+            initialAppTheme = AppSettings.shared.theme
+            updateLivePreview()
+        }
+        .onDisappear {
+            restoreOriginalState()
+        }
         .observeLocalization()
         .environment(\.l10nLanguage, l10n.language)
     }
@@ -245,13 +277,17 @@ struct CustomThemeEditorSheet: View {
         HStack {
             if !isNew {
                 Button(L10n.t("Delete"), role: .destructive) {
+                    hasSaved = true
                     try? CustomThemeStore.shared.delete(id: draft.id)
                     closeSheet()
                 }
             }
             Spacer()
-            Button(L10n.t("Cancel")) { closeSheet() }
-                .keyboardShortcut(.cancelAction)
+            Button(L10n.t("Cancel")) {
+                restoreOriginalState()
+                closeSheet()
+            }
+            .keyboardShortcut(.cancelAction)
             Button(L10n.t("Save")) { save() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -341,6 +377,61 @@ struct CustomThemeEditorSheet: View {
         }
     }
 
+    /// 实时预览：将当前的草稿属性注入 Theme 并重载 Terminal / Window 主题。
+    private func updateLivePreview() {
+        var currentDraft = draft
+        currentDraft.background = CustomTheme.hex(from: NSColor(backgroundColor))
+        currentDraft.foreground = CustomTheme.hex(from: NSColor(foregroundColor))
+        currentDraft.accent = CustomTheme.hex(from: NSColor(accentColor))
+
+        let previewName = currentDraft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveName = previewName.isEmpty ? "Preview Theme" : previewName
+        currentDraft.name = effectiveName
+
+        var previewThemes = initialThemes
+        if let index = previewThemes.firstIndex(where: { $0.id == currentDraft.id }) {
+            previewThemes[index] = currentDraft
+        } else {
+            // 清理可能已有的重名临时条目
+            previewThemes.removeAll { $0.name == effectiveName }
+            previewThemes.append(currentDraft)
+        }
+
+        // 1. 更新 Theme 中的 CustomThemes 线程安全快照
+        Theme.reloadCustomThemes(previewThemes)
+
+        // 2. 将当前侧全局主题选为草稿主题
+        if currentDraft.isDark {
+            AppSettings.shared.themeDark = effectiveName
+        } else {
+            AppSettings.shared.themeLight = effectiveName
+        }
+
+        // 3. 重新套用主题选择，并通知界面与终端刷出最新样式
+        Theme.reloadSelection(
+            light: AppSettings.shared.themeLight,
+            dark: AppSettings.shared.themeDark
+        )
+        Theme.changes.objectWillChange.send()
+        TerminalManager.refreshAllAppearances()
+    }
+
+    /// 恢复打开对话框前的主题设置（未保存时取消或关闭对话框触发）。
+    private func restoreOriginalState() {
+        guard !hasSaved else { return }
+        Theme.reloadCustomThemes(initialThemes)
+        AppSettings.shared.themeDark = initialThemeDark
+        AppSettings.shared.themeLight = initialThemeLight
+        AppSettings.shared.theme = initialAppTheme
+        Theme.setAppThemePreference(initialAppTheme)
+        Theme.reloadSelection(
+            light: initialThemeLight.isEmpty ? Theme.defaultLightThemeName : initialThemeLight,
+            dark: initialThemeDark.isEmpty ? Theme.defaultDarkThemeName : initialThemeDark
+        )
+        Theme.changes.objectWillChange.send()
+        TerminalManager.refreshAllAppearances()
+    }
+
     private func save() {
         var theme = draft
         theme.background = CustomTheme.hex(from: NSColor(backgroundColor))
@@ -349,9 +440,16 @@ struct CustomThemeEditorSheet: View {
         theme.name = theme.name.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             try CustomThemeStore.shared.save(theme)
+            hasSaved = true
+            if theme.isDark {
+                AppSettings.shared.themeDark = theme.name
+            } else {
+                AppSettings.shared.themeLight = theme.name
+            }
             nameError = nil
             closeSheet()
         } catch {
+            hasSaved = false
             nameError = error.localizedDescription
         }
     }

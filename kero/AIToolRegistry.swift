@@ -61,35 +61,14 @@ struct AITool: Identifiable, Equatable {
         case .desktop:
             guard let url = appURL else { return nil }
             let rawIcon = NSWorkspace.shared.icon(forFile: url.path)
-            var proposedRect = CGRect(origin: .zero, size: targetSize)
-            if let cgImage = rawIcon.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) {
-                let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
-                bitmapRep.size = targetSize
-                let image = NSImage(size: targetSize)
-                image.addRepresentation(bitmapRep)
-                return image
-            }
-            let image = NSImage(size: targetSize)
-            image.lockFocus()
-            NSGraphicsContext.current?.imageInterpolation = .high
-            rawIcon.draw(in: NSRect(origin: .zero, size: targetSize), from: .zero, operation: .copy, fraction: 1.0)
-            image.unlockFocus()
-            return image
+            return rawIcon.resizedHighQuality(to: targetSize)
 
         case .cli:
             guard let cmd = cliCommand else { return nil }
             // 尝试通过 TerminalAppIconCatalog 读取配置的专属图标（如 material icon / 本地图标文件）
             if let source = TerminalAppIconCatalog.shared.source(forProcessName: cmd),
                let rawIcon = TerminalAppIconCatalog.shared.image(for: source, pointSize: size) {
-                var proposedRect = CGRect(origin: .zero, size: targetSize)
-                if let cgImage = rawIcon.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) {
-                    let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
-                    bitmapRep.size = targetSize
-                    let image = NSImage(size: targetSize)
-                    image.addRepresentation(bitmapRep)
-                    return image
-                }
-                return rawIcon
+                return rawIcon.resizedHighQuality(to: targetSize)
             }
             return nil
         }
