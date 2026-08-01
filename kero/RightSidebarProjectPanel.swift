@@ -29,15 +29,16 @@ private struct LaunchersSection: View {
                     SidebarSectionHeader.Action(
                         systemImage: "play.fill",
                         help: L10n.t("Run all launchers in order"),
+                        disabled: project.launchCommands.isEmpty,
                         perform: runAllCommands
                     ),
                     SidebarSectionHeader.Action(
                         systemImage: "plus",
                         help: L10n.t("Add Launcher"),
+                        disabled: false,
                         perform: addCommand
                     )
-                ],
-                actionsDisabled: project.launchCommands.isEmpty
+                ]
             ).padding(.trailing, 4)
 
             if !isCollapsed {
@@ -243,23 +244,25 @@ struct ProjectPanel: View {
                                 runCommand: runLaunchCommand,
                                 runAllCommands: runAllLaunchCommands
                             )
-                            PackageScriptsSection(
-                                projectID: project.id,
-                                directory: model.rootPath,
-                                scripts: model.packageScripts,
-                                records: manager.packageScriptRecords,
-                                isCollapsed: $packageScriptsCollapsed,
-                                runPackageScript: runPackageScript,
-                                stopPackageScript: { manager.stopPackageScript($0) },
-                                restartPackageScript: {
-                                    manager.restartPackageScript(
-                                        $0,
-                                        mode: $1,
-                                        directory: model.rootPath
-                                    )
-                                },
-                                openPackageJSON: openPackageJSON
-                            )
+                            if !model.packageScripts.isEmpty {
+                                PackageScriptsSection(
+                                    projectID: project.id,
+                                    directory: model.rootPath,
+                                    scripts: model.packageScripts,
+                                    records: manager.packageScriptRecords,
+                                    isCollapsed: $packageScriptsCollapsed,
+                                    runPackageScript: runPackageScript,
+                                    stopPackageScript: { manager.stopPackageScript($0) },
+                                    restartPackageScript: {
+                                        manager.restartPackageScript(
+                                            $0,
+                                            mode: $1,
+                                            directory: model.rootPath
+                                        )
+                                    },
+                                    openPackageJSON: openPackageJSON
+                                )
+                            }
                             if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.rootPath) {
                                 UniversalTasksSection(
                                     configuration: .gradle,
@@ -434,6 +437,7 @@ struct ProjectPanel: View {
             )
         }
         .onAppear {
+            if project.launchCommands.isEmpty { launchersCollapsed = true }
             if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
             if model.gradleScripts.isEmpty && !GradleScriptProvider.isGradleProject(at: model.rootPath) {
                 gradleTasksCollapsed = true

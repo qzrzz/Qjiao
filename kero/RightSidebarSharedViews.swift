@@ -256,6 +256,7 @@ struct SidebarSectionHeader: View {
         let id = UUID()
         let systemImage: String
         let help: String
+        var disabled: Bool = false
         let perform: () -> Void
     }
 
@@ -308,7 +309,7 @@ struct SidebarSectionHeader: View {
                     SidebarSectionHeaderActionButton(
                         systemImage: action.systemImage,
                         help: action.help,
-                        disabled: actionsDisabled,
+                        disabled: action.disabled || actionsDisabled,
                         rowHovering: isHovering,
                         action: action.perform
                     )
