@@ -50,25 +50,33 @@ struct AITool: Identifiable, Equatable {
         }
     }
 
-    /// 从应用包路径或 TerminalAppIconCatalog 读取图标，生成高清实体 NSImage。
+    /// 从应用包路径或 TerminalAppIconCatalog 读取图标，生成高清实体 NSImage（支持 dark/light 切换）。
     ///
-    /// - Parameter size: 图标边长（逻辑点，正方形），默认 16。
+    /// - Parameters:
+    ///   - size: 图标边长（逻辑点，正方形），默认 16。
+    ///   - prefersLight: 外观偏好：true 表示浅色外观，false 表示深色外观；为 nil 时自动检测。
     /// - Returns: 已画好具体 Canvas 的实体像素图标；无法获取时返回 nil。
-    func iconImage(size: CGFloat = 16) -> NSImage? {
+    func iconImage(size: CGFloat = 16, prefersLight: Bool? = nil) -> NSImage? {
         let targetSize = NSSize(width: size, height: size)
+        let effectivePrefersLight = prefersLight ?? (NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua)
 
         switch kind {
         case .desktop:
+            let catalog = TerminalAppIconCatalog.shared
+            if let source = catalog.source(forProcessName: displayName.lowercased())
+                ?? (bundleId.flatMap { catalog.source(forProcessName: $0) }),
+               let rawIcon = catalog.image(for: source, pointSize: size, prefersLight: effectivePrefersLight) {
+                return rawIcon.resizedHighQuality(to: targetSize)
+            }
             guard let url = appURL else { return nil }
             let rawIcon = NSWorkspace.shared.icon(forFile: url.path)
             return rawIcon.resizedHighQuality(to: targetSize)
 
         case .cli:
             guard let cmd = cliCommand else { return nil }
-            // 尝试通过 TerminalAppIconCatalog 读取配置的专属图标（如 material icon / 本地图标文件）
-            let prefersLight = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua
-            if let source = TerminalAppIconCatalog.shared.source(forProcessName: cmd),
-               let rawIcon = TerminalAppIconCatalog.shared.image(for: source, pointSize: size, prefersLight: prefersLight) {
+            let catalog = TerminalAppIconCatalog.shared
+            if let source = catalog.source(forProcessName: cmd),
+               let rawIcon = catalog.image(for: source, pointSize: size, prefersLight: effectivePrefersLight) {
                 return rawIcon.resizedHighQuality(to: targetSize)
             }
             return nil
@@ -174,6 +182,8 @@ final class AIToolRegistry: nonisolated ObservableObject {
             desktop("com.opencode.desktop",            name: "OpenCode App",     symbol: "curlybraces"),
             desktop("com.google.antigravity",          name: "Antigravity",      symbol: "globe.americas"),
             desktop("com.gemini.antigravity",          name: "Antigravity App",  symbol: "globe.americas"),
+            desktop("com.ollama.ollama",               name: "Ollama",           symbol: "cpu"),
+            desktop("ai.ollama.ollama",                name: "Ollama App",       symbol: "cpu"),
 
             // ── 命令行 CLI 工具
             cli("codex",       name: "codex",       symbol: "terminal"),

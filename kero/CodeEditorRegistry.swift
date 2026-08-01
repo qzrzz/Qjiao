@@ -26,16 +26,28 @@ struct CodeEditor: Identifiable, Equatable {
     /// 是否已安装。
     var isInstalled: Bool { appURL != nil }
 
-    /// 从应用包路径生成特定尺寸的系统应用图标。
+    /// 从应用包路径或 TerminalAppIconCatalog 生成特定尺寸的代码编辑器图标（支持 dark/light 切换）。
     ///
     /// 通过 `lockFocus()`/`CGImage` 将图标强行离屏像素化绘制为实体 `NSImage`，
     /// 解决 AppKit `NSMenuItem` 不触发 `drawingHandler` 闭包导致菜单项图标显示空白的问题。
-    /// - Parameter size: 图标边长（逻辑点，正方形），默认 16。
+    /// - Parameters:
+    ///   - size: 图标边长（逻辑点，正方形），默认 16。
+    ///   - prefersLight: 外观偏好：true 表示浅色外观，false 表示深色外观；为 nil 时自动检测。
     /// - Returns: 含有真实像素 Rep 的实体图标；未安装时返回 nil。
-    func iconImage(size: CGFloat = 16) -> NSImage? {
+    func iconImage(size: CGFloat = 16, prefersLight: Bool? = nil) -> NSImage? {
+        let targetSize = NSSize(width: size, height: size)
+        let effectivePrefersLight = prefersLight ?? (NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua)
+
+        let catalog = TerminalAppIconCatalog.shared
+        let searchNames = [displayName.lowercased(), bundleId.lowercased()]
+        if let source = catalog.source(forProcessNames: searchNames),
+           let rawIcon = catalog.image(for: source, pointSize: size, prefersLight: effectivePrefersLight) {
+            return rawIcon.resizedHighQuality(to: targetSize)
+        }
+
         guard let url = appURL else { return nil }
         let rawIcon = NSWorkspace.shared.icon(forFile: url.path)
-        return rawIcon.resizedHighQuality(to: NSSize(width: size, height: size))
+        return rawIcon.resizedHighQuality(to: targetSize)
     }
 }
 

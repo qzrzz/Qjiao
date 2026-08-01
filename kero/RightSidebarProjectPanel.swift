@@ -665,15 +665,38 @@ struct ProjectPanel: View {
 /// 固定以 32×32 物理像素取图（`appIcon()`），再以 `frame(16, 16)` 显示，
 /// Retina 2× 屏下正好 1:1 物理像素对应，渲染清晰锐利。
 struct CodeEditorIcon: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let editor: CodeEditor
     var size: CGFloat = 16
 
     var body: some View {
-        if let icon = editor.iconImage(size: size) {
-            Image(nsImage: icon)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: size, height: size)
+        let isDark = colorScheme == .dark
+        let prefersLight = !isDark
+        if let icon = editor.iconImage(size: size, prefersLight: prefersLight) {
+            let catalog = TerminalAppIconCatalog.shared
+            let searchNames = [editor.displayName.lowercased(), editor.bundleId.lowercased()]
+            if let source = catalog.source(forProcessNames: searchNames) {
+                let template = catalog.isTemplate(source)
+                let recolor = !template && catalog.shouldRecolor(source: source, prefersLight: prefersLight, isDark: isDark)
+                let displayImage = recolor
+                    ? (catalog.silhouetteImage(for: source, pointSize: size, prefersLight: prefersLight) ?? icon)
+                    : icon
+                let isMask = template || recolor
+
+                Image(nsImage: displayImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .renderingMode(isMask ? .template : .original)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size, height: size)
+                    .foregroundStyle(isMask ? AnyShapeStyle(Color.secondary) : AnyShapeStyle(Color.primary))
+            } else {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: size, height: size)
+            }
         } else {
             // 应用未安装或图标读取失败时回退到 SF Symbol。
             Image(systemName: editor.symbolName)
@@ -750,15 +773,40 @@ struct CodeEditorOpenButton: View {
 
 /// 显示 AI 工具图标的辅助视图：优先展示工具/应用真实图标，不可用时回退到 SF Symbol。
 struct AIToolIcon: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let tool: AITool
     var size: CGFloat = 16
 
     var body: some View {
-        if let icon = tool.iconImage(size: size) {
-            Image(nsImage: icon)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: size, height: size)
+        let isDark = colorScheme == .dark
+        let prefersLight = !isDark
+        if let icon = tool.iconImage(size: size, prefersLight: prefersLight) {
+            let catalog = TerminalAppIconCatalog.shared
+            let cmd = tool.cliCommand ?? tool.displayName.lowercased()
+            let source = catalog.source(forProcessName: cmd)
+                ?? (tool.bundleId.flatMap { catalog.source(forProcessName: $0) })
+            if let source {
+                let template = catalog.isTemplate(source)
+                let recolor = !template && catalog.shouldRecolor(source: source, prefersLight: prefersLight, isDark: isDark)
+                let displayImage = recolor
+                    ? (catalog.silhouetteImage(for: source, pointSize: size, prefersLight: prefersLight) ?? icon)
+                    : icon
+                let isMask = template || recolor
+
+                Image(nsImage: displayImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .renderingMode(isMask ? .template : .original)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size, height: size)
+                    .foregroundStyle(isMask ? AnyShapeStyle(Color.secondary) : AnyShapeStyle(Color.primary))
+            } else {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: size, height: size)
+            }
         } else {
             Image(systemName: tool.symbolName)
                 .frame(width: size, height: size)
@@ -853,9 +901,11 @@ struct AIDropdownNSButton: NSViewRepresentable {
     }
 
     func updateNSView(_ button: NSButton, context: Context) {
+        let prefersLight = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua
         context.coordinator.update(
             tools: tools,
             preferredToolId: preferredToolId,
+            prefersLight: prefersLight,
             onSelect: onSelect
         )
     }
@@ -866,6 +916,7 @@ struct AIDropdownNSButton: NSViewRepresentable {
         private let menu = NSMenu()
         private var tools: [AITool] = []
         private var preferredToolId: String = ""
+        private var prefersLight: Bool = false
         private var onSelect: ((AITool) -> Void)?
 
         override init() {
@@ -873,9 +924,10 @@ struct AIDropdownNSButton: NSViewRepresentable {
             menu.autoenablesItems = false
         }
 
-        func update(tools: [AITool], preferredToolId: String, onSelect: @escaping (AITool) -> Void) {
+        func update(tools: [AITool], preferredToolId: String, prefersLight: Bool, onSelect: @escaping (AITool) -> Void) {
             self.tools = tools
             self.preferredToolId = preferredToolId
+            self.prefersLight = prefersLight
             self.onSelect = onSelect
             rebuildMenu()
         }
@@ -918,7 +970,7 @@ struct AIDropdownNSButton: NSViewRepresentable {
             item.target = self
             item.isEnabled = true
             item.representedObject = tool.id
-            item.image = tool.iconImage(size: 16)
+            item.image = tool.iconImage(size: 16, prefersLight: prefersLight)
             // macOS 27 起 AppKit 默认可能隐藏菜单项图标；这里显式要求始终显示。
             if #available(macOS 27.0, *) {
                 item.preferredImageVisibility = .visible
@@ -997,9 +1049,11 @@ struct EditorDropdownNSButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSButton, context: Context) {
         // 每次数据变化时更新 Coordinator 状态并重建菜单。
+        let prefersLight = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua
         context.coordinator.update(
             editors: editors,
             preferredBundleId: preferredBundleId,
+            prefersLight: prefersLight,
             onSelect: onSelect
         )
     }
@@ -1011,6 +1065,7 @@ struct EditorDropdownNSButton: NSViewRepresentable {
         private let menu = NSMenu()
         private var editors: [CodeEditor] = []
         private var preferredBundleId: String = ""
+        private var prefersLight: Bool = false
         private var onSelect: ((CodeEditor) -> Void)?
 
         override init() {
@@ -1019,9 +1074,10 @@ struct EditorDropdownNSButton: NSViewRepresentable {
         }
 
         /// 接收来自 SwiftUI 的最新数据并重建菜单。
-        func update(editors: [CodeEditor], preferredBundleId: String, onSelect: @escaping (CodeEditor) -> Void) {
+        func update(editors: [CodeEditor], preferredBundleId: String, prefersLight: Bool, onSelect: @escaping (CodeEditor) -> Void) {
             self.editors = editors
             self.preferredBundleId = preferredBundleId
+            self.prefersLight = prefersLight
             self.onSelect = onSelect
             rebuildMenu()
         }
@@ -1038,7 +1094,7 @@ struct EditorDropdownNSButton: NSViewRepresentable {
                 item.target = self
                 item.isEnabled = true
                 item.representedObject = editor.bundleId
-                item.image = editor.iconImage(size: 16)
+                item.image = editor.iconImage(size: 16, prefersLight: prefersLight)
                 // macOS 27 起 AppKit 默认可能隐藏菜单项图标；这里显式要求始终显示。
                 if #available(macOS 27.0, *) {
                     item.preferredImageVisibility = .visible
