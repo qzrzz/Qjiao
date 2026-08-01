@@ -15,6 +15,10 @@
 
 ## 增加功能
 
+- **启动器（Launcher）新增 Agent CLI 任务类型与空分组体验优化**：
+  - **新增 Agent CLI 启动器类型**：启动器任务类型新增 **Agent CLI**（`ProjectLaunchCommandType.agentCLI`），支持从系统中已检测到或预置的本地 AI CLI 工具（如 `agy`、`claude`、`codex`、`opencode`、`ollama` 等）中选择，并可配置预置提示词（Prompt）。点击运行或一键全部运行时，自动在项目终端窗口/分栏中拉起该 AI CLI 并带入格式化好的预置提示词执行。
+  - **启动器分组体验优化**：在 Project 面板中，若当前项目未配置任何启动器，Launcher 分组默认初始化为收起状态；同时修复了空状态下 Header 添加按钮被误禁用的问题，使得 `+`（添加启动器）按钮在空状态下始终可用，点击即自动展开分组并新建启动器。
+- **Project 面板无 NPM Script 自动隐藏分组**：在 Project 面板与 Info 面板中，若未检测到 `package.json` 或 `package.json` 中无任何 scripts 脚本，自动隐藏 `NPM SCRIPTS` 分组，避免展示无意义的空行。
 - **标签切换先反馈 UI 再切内容**：点击 / 快捷键 / Tab Switcher 切换主标签时，顶栏选中态（`chromeSelectedTabID`）立即更新；终端挂载、侧栏跟随等重活推迟到下一 runloop 再应用 `selectedTabID`，避免点击后顶栏长时间无响应。新建、关闭、恢复会话仍同步切换内容。
 - **主内容 Tabs 布局模式（滚动 / 弹性）**：Settings → General → Appearance 新增 **Tabs Layout**（`ui.tabs-layout`，默认 `elastic`）。
   - **弹性（Elastic）**（默认）：左对齐；空间不足时**先从最左侧**连续压缩激活 Tab 左侧的非激活标签，仍不够再从最右侧压缩激活 Tab 右侧；宽度连续变短，低于阈值后变为**仅图标**（显示该 Tab 自身图标，保留 Task/dirty 状态指示，无关闭按钮）；激活 Tab 保持可读全宽（仍受 max 限制）。极端情况下（全压到仅图标仍溢出）保留横向 ScrollView。

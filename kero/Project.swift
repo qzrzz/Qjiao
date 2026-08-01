@@ -31,6 +31,7 @@ enum ProjectLaunchCommandType: String, Codable, CaseIterable, Identifiable {
     case application
     case finderFolder
     case web
+    case agentCLI
 
     var id: String { rawValue }
 
@@ -40,6 +41,7 @@ enum ProjectLaunchCommandType: String, Codable, CaseIterable, Identifiable {
         case .application: return L10n.t("Application")
         case .finderFolder: return L10n.t("Finder Folder")
         case .web: return L10n.t("Webpage")
+        case .agentCLI: return L10n.t("Agent CLI")
         }
     }
 
@@ -49,6 +51,7 @@ enum ProjectLaunchCommandType: String, Codable, CaseIterable, Identifiable {
         case .application: return "app"
         case .finderFolder: return "folder"
         case .web: return "globe"
+        case .agentCLI: return "sparkles"
         }
     }
 }
@@ -129,6 +132,11 @@ struct ProjectLaunchCommand: Codable, Identifiable, Equatable {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
         let content = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if type == .agentCLI {
+            let cli = target.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cliName = cli.isEmpty ? "Agent CLI" : cli
+            return content.isEmpty ? cliName : "\(cliName): \(content)"
+        }
         return content.isEmpty ? type.title : content
     }
 

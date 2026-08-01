@@ -101,6 +101,10 @@ struct StartCommandRow: View {
         case .application:
             let arguments = command.content.isEmpty ? "No arguments" : command.content
             return "\(command.target)\n\(arguments)"
+        case .agentCLI:
+            let cli = command.target.isEmpty ? (AIToolRegistry.shared.preferredTool?.cliCommand ?? "agy") : command.target
+            let prompt = command.content.isEmpty ? "No prompt" : command.content
+            return "\(cli)\n\(prompt)"
         default:
             return command.content
         }
@@ -112,6 +116,8 @@ struct StartCommandInlineEditor: View {
     var projectDirectory: String = ""
     let delete: () -> Void
 
+    @ObservedObject private var aiRegistry = AIToolRegistry.shared
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             Picker(L10n.t("Type"), selection: $command.type) {
@@ -121,9 +127,9 @@ struct StartCommandInlineEditor: View {
             }
 
             TextField(
-                command.type == .terminal ? "Tab title" : "Name",
+                command.type == .terminal || command.type == .agentCLI ? "Tab title" : "Name",
                 text: $command.title,
-                prompt: Text(command.type == .terminal ? "Optional tab title" : "Optional name")
+                prompt: Text(command.type == .terminal || command.type == .agentCLI ? "Optional tab title" : "Optional name")
             )
             typeEditor
 
@@ -184,6 +190,56 @@ struct StartCommandInlineEditor: View {
         case .web:
             TextField("URL", text: $command.content)
             Text(L10n.t("A scheme is optional; https:// is used when omitted."))
+                .foregroundStyle(.secondary)
+
+        case .agentCLI:
+            HStack {
+                Text(L10n.t("AI CLI"))
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: Binding(
+                    get: {
+                        let current = command.target.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if current.isEmpty {
+                            return aiRegistry.preferredTool?.cliCommand ?? "agy"
+                        }
+                        return current
+                    },
+                    set: { newValue in
+                        command.target = newValue
+                    }
+                )) {
+                    let cliTools = aiRegistry.installedTools.filter { $0.kind == .cli }
+                    if cliTools.isEmpty {
+                        Text("agy").tag("agy")
+                        Text("claude").tag("claude")
+                        Text("codex").tag("codex")
+                        Text("opencode").tag("opencode")
+                        Text("ollama").tag("ollama")
+                    } else {
+                        ForEach(cliTools) { tool in
+                            let cmd = tool.cliCommand ?? tool.displayName
+                            Text(tool.displayName).tag(cmd)
+                        }
+                    }
+                }
+                .labelsHidden()
+                .controlSize(.small)
+
+                TextField("CLI Command", text: $command.target, prompt: Text("e.g. agy"))
+                    .controlSize(.small)
+            }
+
+            TextField(L10n.t("Prompt"), text: $command.content, axis: .vertical)
+                .lineLimit(2...4)
+
+            Picker(L10n.t("Split"), selection: $command.split) {
+                ForEach(ProjectLaunchSplit.allCases) { split in
+                    Text(split.title).tag(split)
+                }
+            }
+
+            Text(L10n.t("Opens terminal and runs the AI CLI with the preset prompt."))
                 .foregroundStyle(.secondary)
         }
     }
@@ -282,6 +338,22 @@ struct StartCommandIcon: View {
             } else {
                 Image(systemName: command.type.systemImage)
                     .foregroundStyle(.secondary)
+            }
+
+        case .agentCLI:
+            let cli = command.target.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cliName = cli.isEmpty ? (AIToolRegistry.shared.preferredTool?.cliCommand ?? "agy") : cli
+            let catalog = TerminalAppIconCatalog.shared
+            if let source = catalog.source(forProcessName: cliName) {
+                TerminalAppIconView(source: source, size: 14, isSelected: true)
+            } else if let tool = AIToolRegistry.shared.installedTools.first(where: { $0.cliCommand == cliName }),
+                      let icon = tool.iconImage(size: 14) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: command.type.systemImage)
+                    .foregroundStyle(Color(nsColor: Theme.cursor))
             }
         }
     }
