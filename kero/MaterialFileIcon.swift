@@ -179,13 +179,7 @@ final class MaterialFileIconCatalog {
     /// 在后台线程从磁盘光栅化图标（不碰 MainActor 缓存）。
     nonisolated static func loadSizedImage(at url: URL, pointSize: CGFloat) -> NSImage? {
         guard let base = NSImage(contentsOf: url) else { return nil }
-        let targetSize = NSSize(width: pointSize, height: pointSize)
-        if base.size == targetSize {
-            return base
-        }
-        let sized = base.copy() as? NSImage ?? base
-        sized.size = targetSize
-        return sized
+        return base.resizedHighQuality(to: NSSize(width: pointSize, height: pointSize))
     }
 
     func image(
