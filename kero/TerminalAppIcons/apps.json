@@ -183,6 +183,12 @@
       "match": ["pi"],
       "icon": "pi-logo-light.svg",
       "iconDark": "pi-logo-dark.svg"
+    },
+    {
+      "label": "Ollama",
+      "match": ["ollama"],
+      "icon": "ollama-light.png",
+      "iconDark": "ollama-dark.png"
     }
   ]
 }

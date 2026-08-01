@@ -108,12 +108,13 @@ struct PathDirectorySection: View {
                         // 多个编辑器时右键菜单切换默认。
                         .contextMenu {
                             if registry.installedEditors.count > 1 {
+                                let prefersLight = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua
                                 ForEach(registry.installedEditors) { editor in
                                     Button {
                                         registry.preferredBundleId = editor.bundleId
                                         registry.open(path: path, with: editor)
                                     } label: {
-                                        if let icon = editor.iconImage(size: 16) {
+                                        if let icon = editor.iconImage(size: 16, prefersLight: prefersLight) {
                                             Label {
                                                 Text(editor.displayName)
                                             } icon: {
@@ -154,6 +155,7 @@ struct PathDirectorySection: View {
                         .help("Open in \(preferredAI.displayName)")
                         .contextMenu {
                             if aiRegistry.installedTools.count > 1 {
+                                let prefersLight = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua
                                 let desktopTools = aiRegistry.installedTools.filter { $0.kind == .desktop }
                                 let cliTools = aiRegistry.installedTools.filter { $0.kind == .cli }
 
@@ -162,7 +164,7 @@ struct PathDirectorySection: View {
                                         aiRegistry.preferredToolId = tool.id
                                         aiRegistry.open(path: path, with: tool)
                                     } label: {
-                                        if let icon = tool.iconImage(size: 16) {
+                                        if let icon = tool.iconImage(size: 16, prefersLight: prefersLight) {
                                             Label {
                                                 Text(tool.displayName)
                                             } icon: {
@@ -183,7 +185,7 @@ struct PathDirectorySection: View {
                                         aiRegistry.preferredToolId = tool.id
                                         aiRegistry.open(path: path, with: tool)
                                     } label: {
-                                        if let icon = tool.iconImage(size: 16) {
+                                        if let icon = tool.iconImage(size: 16, prefersLight: prefersLight) {
                                             Label {
                                                 Text(tool.displayName)
                                             } icon: {

@@ -271,14 +271,18 @@ final class TerminalAppIconCatalog {
         return image
     }
 
-    /// 浅色外观下把 Material 来源解析到 `_light` 变体（若存在）。
+    /// 外观解析：深色外观解析 `darkPath`，浅色外观解析 Material `_light` 变体。
     private func resolvedSource(_ source: TerminalAppIconSource, prefersLight: Bool) -> TerminalAppIconSource {
-        guard prefersLight else { return source }
         switch source {
-        case .material(let name)
-            where !name.hasSuffix("_light") && MaterialFileIconCatalog.shared.hasIcon(named: name + "_light"):
-            return .material(name + "_light")
-        default:
+        case .imageFile(let path, let darkPath):
+            if !prefersLight, let darkPath, !darkPath.isEmpty {
+                return .imageFile(path: darkPath, darkPath: nil)
+            }
+            return source
+        case .material(let name):
+            if prefersLight && !name.hasSuffix("_light") && MaterialFileIconCatalog.shared.hasIcon(named: name + "_light") {
+                return .material(name + "_light")
+            }
             return source
         }
     }
