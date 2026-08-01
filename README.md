@@ -15,6 +15,8 @@
 
 ## 增加功能
 
+- **内容视图 Tabs 非激活终端图标颜色优化**：将内容视图标签页（`TabStripIconView` 与 `TerminalAppIconView`）中默认终端图标在非激活模式下的颜色由过暗的 `.tertiary` / `Color.secondary` 优化为主题感知次要色 `Theme.secondaryColor`，使其与非激活状态下的标签页标题文字及周围 UI 元素在深浅外观下保持视觉对比度协调一致。
+
 - **AgentWatcher（Agent 状态检测）**：新增 `kero/AgentWatcher`，参考 [herdr](https://github.com/herdrdev/herdr) 的 screen manifest 思路，从终端**前台进程名**识别 Coding Agent，再结合 **OSC 标题**与**屏幕尾部文本**规则判定 `working` / `blocked` / `done`。内置 herdr 同源 TOML 规则（claude、codex、agy、pi、opencode、grok 及 cursor、gemini、kimi 等）。**性能优先**：仅对识别到的 Agent 终端做读屏；进程轮询约 2s，读屏最短间隔约 3s；非 Agent 终端不扫屏。Info 面板展示 Agent 状态（`● agent · Working`）。**Tab Agent State 角标**：当 Agent 为 `working` 时，主标签与 Tab Switcher 图标右下角显示呼吸闪烁的小绿点（优先于 Task 状态角标）。**未读提醒**：`working → done` 时若终端不可见（非当前 Tab、非当前项目、或窗口/应用未激活），标记未读；对应 Tab 显示小蓝点；切换到该 Tab / 应用重新激活且终端已在当前视图时自动清除；左侧**项目列表**显示蓝色数字角标，表示该项目下未读条目数（等宽数字）。
 - **启动器（Launcher）新增 Agent CLI 任务类型与空分组体验优化**：
   - **新增 Agent CLI 启动器类型**：启动器任务类型新增 **Agent CLI**（`ProjectLaunchCommandType.agentCLI`），支持从系统中已检测到或预置的本地 AI CLI 工具（如 `agy`、`claude`、`codex`、`opencode`、`ollama` 等）中选择，并可配置预置提示词（Prompt）。点击运行或一键全部运行时，自动在项目终端窗口/分栏中拉起该 AI CLI 并带入格式化好的预置提示词执行。

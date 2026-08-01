@@ -860,7 +860,7 @@ struct TerminalAppIconView: View {
                 .frame(width: size, height: size)
                 .foregroundStyle(
                     isMask
-                        ? AnyShapeStyle(isSelected ? Color(nsColor: Theme.cursor) : Color.secondary)
+                        ? AnyShapeStyle(isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor)
                         : AnyShapeStyle(Color.primary)
                 )
                 .opacity(isSelected || isMask ? 1 : 0.72)
@@ -868,7 +868,7 @@ struct TerminalAppIconView: View {
         } else {
             Image(systemName: "terminal")
                 .font(.system(size: size * 0.85, weight: .medium))
-                .foregroundStyle(isSelected ? Color(nsColor: Theme.cursor) : Color.secondary)
+                .foregroundStyle(isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor)
                 .frame(width: size, height: size)
                 .accessibilityHidden(true)
         }
