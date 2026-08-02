@@ -701,16 +701,23 @@ final class TerminalManager: nonisolated ObservableObject {
 
             if session.hasExited {
                 rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
+                finishTaskCommand(session: session)
             } else if let injectedAt = session.lastCommandInjectedAt {
                 if !session.isForegroundCommandRunning,
                    now.timeIntervalSince(injectedAt) > 0.8 {
                     rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
+                    finishTaskCommand(session: session)
                 }
             } else if now.timeIntervalSince(startedAt) > 5 {
                 rightSidebarCommandStartedAt.removeValue(forKey: sessionID)
+                finishTaskCommand(session: session)
             }
         }
         stopScriptCheckTimerIfEmpty()
+    }
+
+    private func finishTaskCommand(session: TerminalSession) {
+        SoundEffects.shared.play(session.taskHasError ? .commandFailed : .commandSucceeded)
     }
 
     /// 用指定 Shell 集合的最新监听端口更新脚本绑定；端口消失时同步清空旧值。
@@ -749,6 +756,11 @@ final class TerminalManager: nonisolated ObservableObject {
         updated.boundPort = nil
         packageScriptRecords[scriptKey] = updated
         rightSidebarCommandStartedAt.removeValue(forKey: record.sessionID)
+
+        if let project = project(containingSessionID: record.sessionID),
+           let session = project.sessions.first(where: { $0.id == record.sessionID }) {
+            SoundEffects.shared.play(session.taskHasError ? .commandFailed : .commandSucceeded)
+        }
     }
 
     /// 注册右侧栏命令对应的 Session，记录 Task 运行标志，并在终端退出时及时清理状态。

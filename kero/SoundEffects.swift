@@ -103,15 +103,16 @@ final class SoundEffects {
     /// 播放指定事件音效；未开启对应开关或间隔内已播放过则忽略。
     func play(_ kind: Kind) {
         guard AppSettings.shared.soundEffectsEnabled, kind.isEnabled else { return }
-        preview(kind.soundID)
+        let now = Date()
+        if let last = lastPlayedAt[kind], now.timeIntervalSince(last) < Self.minimumInterval {
+            return
+        }
+        lastPlayedAt[kind] = now
+        playSound(soundID: kind.soundID)
     }
 
     /// 试听指定音效（无视设置开关，设置页预览使用）。
     func preview(_ soundID: String) {
-        let now = Date()
-        if let last = lastPlayedAt[.commandSucceeded], now.timeIntervalSince(last) < Self.minimumInterval {
-            // 保留极短间隔控制
-        }
         playSound(soundID: soundID)
     }
 
