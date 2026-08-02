@@ -439,9 +439,89 @@ private struct SidebarProjectRow: View {
     @ObservedObject private var aiMetaTasks = LocalAIProjectMetaTaskStore.shared
     @ObservedObject private var agentWatcher = AgentWatcher.shared
 
+    /// 项目侧栏状态枚举（按优先级降序：运行中 > Agent 阻塞待确认 > Agent 工作中 > Agent 未读 > 无状态）。
+    private enum ProjectSidebarStatus: Equatable {
+        /// 运行中状态（Tab 图标下转圈状态）
+        case running
+        /// Agent 阻塞待确认状态（橙色圆点）
+        case agentBlocked
+        /// Agent 工作中状态（呼吸绿点）
+        case agentWorking
+        /// Agent 未读状态（蓝色数字角标）
+        case agentUnread(count: Int)
+        /// 无状态（显示快捷键或空）
+        case none
+    }
+
+    /// 项目是否有 Tab 处于运行中状态。
+    private var isProjectRunning: Bool {
+        project.tabs.contains { tab in
+            tab.isTaskRunning || tab.sessions.contains { s in
+                s.isTaskRunning || manager.isRightSidebarCommandRunning(sessionID: s.id)
+            }
+        }
+    }
+
+    /// 项目是否有 Agent 处于阻塞待确认状态。
+    private var isProjectAgentBlocked: Bool {
+        project.sessions.contains { session in
+            agentWatcher.snapshot(for: session.id)?.status == .blocked
+        }
+    }
+
+    /// 项目是否有 Agent 处于工作中状态。
+    private var isProjectAgentWorking: Bool {
+        project.sessions.contains { session in
+            agentWatcher.snapshot(for: session.id)?.status == .working
+        }
+    }
+
     /// 该项目下 Agent 未读 session 数。
     private var agentUnreadCount: Int {
         agentWatcher.unreadCount(for: project)
+    }
+
+    /// 计算当前项目的侧栏状态（遵从优先级：运行中 > Agent 阻塞待确认 > Agent 工作中 > Agent 未读 > 无状态）。
+    private var projectSidebarStatus: ProjectSidebarStatus {
+        if isProjectRunning {
+            return .running
+        }
+        if isProjectAgentBlocked {
+            return .agentBlocked
+        }
+        if isProjectAgentWorking {
+            return .agentWorking
+        }
+        let unread = agentUnreadCount
+        if unread > 0 {
+            return .agentUnread(count: unread)
+        }
+        return .none
+    }
+
+    /// 项目状态指示图标/角标视图。
+    @ViewBuilder
+    private func projectStatusIndicator(for status: ProjectSidebarStatus) -> some View {
+        switch status {
+        case .running:
+            ProgressView()
+                .controlSize(.mini)
+                .tint(Color(nsColor: Theme.cursor))
+                .frame(width: 16, height: 16)
+        case .agentBlocked:
+            Circle()
+                .fill(Color(red: 0.96, green: 0.62, blue: 0.14))
+                .frame(width: 6, height: 6)
+                .frame(width: 16, height: 16)
+                .accessibilityLabel(L10n.t("Blocked"))
+        case .agentWorking:
+            AgentWorkingStatusDot(isActive: true, dotOffset: .zero, size: 6)
+                .frame(width: 16, height: 16)
+        case .agentUnread(let count):
+            projectAgentUnreadBadge(count: count)
+        case .none:
+            EmptyView()
+        }
     }
 
     var body: some View {
@@ -713,62 +793,66 @@ private struct SidebarProjectRow: View {
             Spacer(minLength: 0)
 
             ZStack(alignment: .trailing) {
-                if project.isArchived {
-                    // 已归档项目：操作按钮 hover 显隐；未读蓝角标始终保留。
-                    HStack(spacing: 4) {
-                        if agentUnreadCount > 0 {
-                            projectAgentUnreadBadge(count: agentUnreadCount)
-                        }
-                        HStack(spacing: 4) {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    manager.unarchiveProject(project)
-                                }
-                            } label: {
-                                Image(systemName: "tray.and.arrow.up")
-                                    .font(SidebarTypography.micro(.bold))
-                                    .foregroundStyle(Theme.secondaryColor)
-                                    .frame(width: 16, height: 16)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help(L10n.t("Unarchive Project"))
+                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                    let status = projectSidebarStatus
+                    let hasStatus = status != .none
 
-                            Button(action: requestClose) {
-                                Image(systemName: "xmark")
-                                    .font(SidebarTypography.micro(.bold))
-                                    .foregroundStyle(Theme.secondaryColor)
-                                    .frame(width: 16, height: 16)
-                                    .contentShape(Rectangle())
+                    if project.isArchived {
+                        // 已归档项目：操作按钮 hover 显隐；状态指示器（运行中/Agent工作中/未读角标）有状态时显示。
+                        HStack(spacing: 4) {
+                            if hasStatus {
+                                projectStatusIndicator(for: status)
                             }
-                            .buttonStyle(.plain)
-                        }
-                        .opacity(isHovering && !isRenaming && !isEditingDescription ? 1 : 0)
-                    }
-                    // 无未读且未 hover 时整块透明，与原先行为一致。
-                    .opacity(
-                        (isHovering && !isRenaming && !isEditingDescription) || agentUnreadCount > 0
-                            ? 1 : 0
-                    )
-                } else if !isRenaming, !isEditingDescription {
-                    HStack(spacing: 5) {
-                        // 未读角标 hover 时仍显示；有角标时不显示 ⌘ 快捷键。
-                        if agentUnreadCount > 0 {
-                            projectAgentUnreadBadge(count: agentUnreadCount)
-                        }
-                        if isHovering {
-                            Button(action: requestClose) {
-                                Image(systemName: "xmark")
-                                    .font(SidebarTypography.micro(.bold))
-                                    .foregroundStyle(Theme.secondaryColor)
-                                    .frame(width: 16, height: 16)
-                                    .contentShape(Rectangle())
+                            HStack(spacing: 4) {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        manager.unarchiveProject(project)
+                                    }
+                                } label: {
+                                    Image(systemName: "tray.and.arrow.up")
+                                        .font(SidebarTypography.micro(.bold))
+                                        .foregroundStyle(Theme.secondaryColor)
+                                        .frame(width: 16, height: 16)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help(L10n.t("Unarchive Project"))
+
+                                Button(action: requestClose) {
+                                    Image(systemName: "xmark")
+                                        .font(SidebarTypography.micro(.bold))
+                                        .foregroundStyle(Theme.secondaryColor)
+                                        .frame(width: 16, height: 16)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
-                        } else if agentUnreadCount == 0, index < 9 {
-                            Text("⌘\(index + 1)")
-                                .font(SidebarTypography.section().monospacedDigit())
-                                .foregroundStyle(.tertiary)
+                            .opacity(isHovering && !isRenaming && !isEditingDescription ? 1 : 0)
+                        }
+                        .opacity(
+                            (isHovering && !isRenaming && !isEditingDescription) || hasStatus
+                                ? 1 : 0
+                        )
+                    } else if !isRenaming, !isEditingDescription {
+                        HStack(spacing: 5) {
+                            // 项目状态区 (按优先级: 运行中 > Agent 工作中 > Agent 未读)
+                            projectStatusIndicator(for: status)
+
+                            if isHovering {
+                                Button(action: requestClose) {
+                                    Image(systemName: "xmark")
+                                        .font(SidebarTypography.micro(.bold))
+                                        .foregroundStyle(Theme.secondaryColor)
+                                        .frame(width: 16, height: 16)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            } else if !hasStatus, index < 9 {
+                                // 无状态时显示快捷键 ⌘1~9
+                                Text("⌘\(index + 1)")
+                                    .font(SidebarTypography.section().monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                     }
                 }
@@ -779,18 +863,12 @@ private struct SidebarProjectRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    /// 项目列表 Agent 未读数字角标（蓝色胶囊，等宽数字）。
+    /// 项目列表 Agent 未读指示器（蓝色圆点，不带数字）。
     private func projectAgentUnreadBadge(count: Int) -> some View {
-        let label = count > 99 ? "99+" : "\(count)"
-        return Text(label)
-            .font(SidebarTypography.micro(.semibold).monospacedDigit())
-            .foregroundStyle(.white)
-            .padding(.horizontal, count >= 10 ? 5 : 0)
-            .frame(minWidth: 16, minHeight: 16)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color(nsColor: .systemBlue))
-            )
+        Circle()
+            .fill(Color(nsColor: .systemBlue))
+            .frame(width: 6, height: 6)
+            .frame(width: 16, height: 16)
             .accessibilityLabel(L10n.format("%lld unread", Int64(count)))
     }
 
