@@ -1923,13 +1923,6 @@ private struct TabItemChrome: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                    } else if isAgentBlocked && !isAgentWorking {
-                        // Agent 阻塞/等待介入：橙色小点（与 dirty / unread 同位置）。
-                        Circle()
-                            .fill(Color(red: 0.96, green: 0.62, blue: 0.14))
-                            .frame(width: 5, height: 5)
-                            .frame(width: 14, height: 14)
-                            .accessibilityLabel(L10n.t("Blocked"))
                     } else if isAgentUnread && !isAgentWorking {
                         // Agent 未读：小蓝点（与 dirty 同位置）。
                         Circle()
