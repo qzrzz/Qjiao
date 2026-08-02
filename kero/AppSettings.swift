@@ -358,6 +358,26 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 应用内事件音效总开关（命令结束 / 失败、Agent 完成）。写入 `ui.sound-effects`。
+    @Published var soundEffectsEnabled: Bool {
+        didSet { save() }
+    }
+
+    /// 命令成功结束音效。写入 `ui.sound-command-succeeded`。
+    @Published var commandSucceededSoundEnabled: Bool {
+        didSet { save() }
+    }
+
+    /// 命令失败音效。写入 `ui.sound-command-failed`。
+    @Published var commandFailedSoundEnabled: Bool {
+        didSet { save() }
+    }
+
+    /// Agent 完成音效。写入 `ui.sound-agent-completed`。
+    @Published var agentCompletedSoundEnabled: Bool {
+        didSet { save() }
+    }
+
     /// 用户首选代码编辑器的 Bundle ID；空字符串表示使用检测到的第一个已安装编辑器。
     @Published var preferredCodeEditorBundleId: String {
         didSet { save() }
@@ -607,6 +627,10 @@ final class AppSettings: nonisolated ObservableObject {
         } else {
             systemReachabilityInterval = .default
         }
+        soundEffectsEnabled = toml["ui.sound-effects"]?.bool ?? true
+        commandSucceededSoundEnabled = toml["ui.sound-command-succeeded"]?.bool ?? true
+        commandFailedSoundEnabled = toml["ui.sound-command-failed"]?.bool ?? true
+        agentCompletedSoundEnabled = toml["ui.sound-agent-completed"]?.bool ?? true
         applyAppearance()
         reloadThemeSelection()
         Theme.reloadWindowBackgroundOpacity(windowBackgroundOpacity)
@@ -692,6 +716,10 @@ final class AppSettings: nonisolated ObservableObject {
         enableTerminalHelpBar = true
         packageManagerCommand = .auto
         systemReachabilityInterval = .default
+        soundEffectsEnabled = true
+        commandSucceededSoundEnabled = true
+        commandFailedSoundEnabled = true
+        agentCompletedSoundEnabled = true
         preferredCodeEditorBundleId = ""
         preferredAIToolId = ""
         localAIHeadlessProvider = .disabled
@@ -865,6 +893,19 @@ final class AppSettings: nonisolated ObservableObject {
             lines.append(
                 "system.reachability-interval = \(TOML.quote(systemReachabilityInterval.rawValue))"
             )
+        }
+        // 默认全部开启：仅在关闭时写回，避免污染默认配置文件。
+        if !soundEffectsEnabled {
+            lines.append("ui.sound-effects = false")
+        }
+        if !commandSucceededSoundEnabled {
+            lines.append("ui.sound-command-succeeded = false")
+        }
+        if !commandFailedSoundEnabled {
+            lines.append("ui.sound-command-failed = false")
+        }
+        if !agentCompletedSoundEnabled {
+            lines.append("ui.sound-agent-completed = false")
         }
         let homeConfigDir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".config")
         let prodIdleTitle = homeConfigDir.appendingPathComponent("qjiao/idle_title")

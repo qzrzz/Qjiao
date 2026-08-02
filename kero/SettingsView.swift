@@ -379,6 +379,37 @@ struct SettingsView: View {
                 }
             }
 
+            Section(L10n.t("Sound Effects")) {
+                Group {
+                    settingWithDescription(
+                        L10n.t("Sound effects"),
+                        L10n.t("Play a sound when terminal commands finish or fail, and when an agent completes its work.")
+                    ) {
+                        Toggle("", isOn: $settings.soundEffectsEnabled)
+                            .labelsHidden()
+                    }
+                    soundToggleRow(
+                        L10n.t("Command succeeded"),
+                        kind: .commandSucceeded,
+                        isOn: $settings.commandSucceededSoundEnabled
+                    )
+                    .disabled(!settings.soundEffectsEnabled)
+                    soundToggleRow(
+                        L10n.t("Command failed"),
+                        kind: .commandFailed,
+                        isOn: $settings.commandFailedSoundEnabled
+                    )
+                    .disabled(!settings.soundEffectsEnabled)
+                    soundToggleRow(
+                        L10n.t("Agent completed"),
+                        kind: .agentCompleted,
+                        isOn: $settings.agentCompletedSoundEnabled
+                    )
+                    .disabled(!settings.soundEffectsEnabled)
+                }
+                .settingsRowPadding()
+            }
+
             Section(L10n.t("Defaults")) {
                 Group {
                 HStack {
@@ -812,6 +843,27 @@ struct SettingsView: View {
         }
     }
 
+    /// 音效开关行：标题 + 试听按钮 + Toggle。试听无视开关直接播放，便于对比选择。
+    private func soundToggleRow(
+        _ title: String,
+        kind: SoundEffects.Kind,
+        isOn: Binding<Bool>
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+            Spacer()
+            Button {
+                SoundEffects.shared.preview(kind)
+            } label: {
+                Image(systemName: "speaker.wave.2.fill")
+            }
+            .buttonStyle(.borderless)
+            .help(L10n.t("Play preview"))
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+        }
+    }
+
     /// 将设置标题、说明与右侧控件合并为一个表单行，避免标题和说明之间出现分隔线。
     private func settingWithDescription<Control: View>(
         _ title: String,
@@ -921,6 +973,10 @@ struct SettingsView: View {
             && settings.aiAPIBaseURL == AIAPIProviderID.openAI.defaultBaseURL
             && settings.aiWritingLanguage == .english
             && settings.gitCommitMessageEmoji
+            && settings.soundEffectsEnabled
+            && settings.commandSucceededSoundEnabled
+            && settings.commandFailedSoundEnabled
+            && settings.agentCompletedSoundEnabled
     }
 
 }
@@ -1047,6 +1103,12 @@ private struct AIAPIProviderSettings: View {
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 194)
+                        // macOS 26+ 对 SecureField 默认注入 Safari 密码建议
+                        // （ViewBridge 远程视图 SPCompletionListService）；该视图在
+                        // 设置窗关闭后残留，后续 borderless NSPanel 显示会触发
+                        // ViewBridge 断言崩溃（NSInternalInconsistencyException）。
+                        // 自定义未知 content type 让系统不提供自动填充。
+                        .textContentType(NSTextContentType(rawValue: "kero.apiKey.noAutofill"))
                     Button(L10n.t("Save")) {
                         saveKey()
                     }
@@ -1255,6 +1317,20 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
 
         // 红绿灯落在 48pt 顶栏垂直中线（水平间距沿用主窗口常量）。
         repositionTrafficLights(in: window)
+        installCloseCleanup(on: window)
+    }
+
+    /// 设置窗关闭前清空 firstResponder：SecureField 聚焦期间系统密码建议
+    /// （Safari ViewBridge 远程视图 SPCompletionListService）会 attach 到窗口；
+    /// 若窗口关闭时仍挂着，之后应用内 borderless NSPanel 显示会触发
+    /// ViewBridge 断言崩溃（`containingWindowWillOrderOnScreen: expected (null)`）。
+    private static func installCloseCleanup(on window: NSWindow) {
+        if window.delegate is SettingsWindowLifecycleDelegate { return }
+        let delegate = SettingsWindowLifecycleDelegate()
+        objc_setAssociatedObject(
+            window, &settingsWindowLifecycleKey, delegate, .OBJC_ASSOCIATION_RETAIN
+        )
+        window.delegate = delegate
     }
 
     /// 48pt 顶栏的红绿灯垂直中心（相对窗口顶边向下）。
@@ -1284,6 +1360,18 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
         }
     }
 }
+
+/// 设置窗生命周期清理：关闭时移走焦点、结束编辑，让系统 detach 密码建议视图。
+/// 用 associated object 持有，避免 SwiftUI 重建窗口时 delegate 被提前释放。
+private final class SettingsWindowLifecycleDelegate: NSObject, NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        window.makeFirstResponder(nil)
+        window.endEditing(for: nil)
+    }
+}
+
+private var settingsWindowLifecycleKey: UInt8 = 0
 
 /// 设置页的可见分类；每个分类对应左侧导航一项。
 private enum SettingsSection: CaseIterable, Identifiable, Hashable {

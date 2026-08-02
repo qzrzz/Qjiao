@@ -754,6 +754,36 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         return nil
     }
 
+    /// 以十六进制编辑器模式打开 `path`。复用已有的十六进制标签页；
+    /// 同路径若已以文本模式打开则另开新标签页，互不干扰。
+    func openFileInHexEditor(_ path: String) {
+        if let (tab, paneID) = findHexFilePane(path: path) {
+            selectedTabID = tab.id
+            tab.focusedPaneID = paneID
+            return
+        }
+        let context = selectedSession
+        let file = FileTab(path: path, hexEditor: true)
+        let tab = makeTab(content: .file(file))
+        tab.contextSession = context
+        insertNextToSelected(tab)
+        selectedTabID = tab.id
+    }
+
+    private func findHexFilePane(path: String) -> (tab: PaneTab, paneID: UUID)? {
+        for tab in tabs {
+            if let pane = tab.allPanes.first(where: {
+                if case .file(let file) = $0.content {
+                    return file.path == path && file.isHexMode
+                }
+                return false
+            }) {
+                return (tab, pane.id)
+            }
+        }
+        return nil
+    }
+
     // MARK: - Browser
 
     /// 在当前标签旁创建原生浏览器 Tab。
@@ -1144,6 +1174,10 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             )
         case .file(let path, let editorState):
             let file = FileTab(path: path)
+            if let editorState { file.editorState = editorState }
+            return .file(file)
+        case .fileHex(let path, let editorState):
+            let file = FileTab(path: path, hexEditor: true)
             if let editorState { file.editorState = editorState }
             return .file(file)
         case .browser(let url):

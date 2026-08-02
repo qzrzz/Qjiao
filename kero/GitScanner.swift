@@ -213,6 +213,27 @@ actor GitScanner {
         return path.isEmpty ? nil : path
     }
 
+    /// 修复失效的 Git fsmonitor daemon：停止 → 删除残留 IPC socket → 重新拉起。
+    /// 「Bad file descriptor」类错误多由 daemon 崩溃或 git 版本切换后残留的
+    /// socket 引起，仅重新扫描无法自愈。只对启用了内建 fsmonitor
+    /// （`core.fsmonitor = true`）的仓库执行；hook 路径模式与未启用仓库跳过，
+    /// 避免多启动无用 daemon 进程。stop / start 失败均忽略，git 在下次
+    /// status 时会自动回退全量扫描或按需拉起 daemon。
+    nonisolated static func recoverFilesystemMonitor(in root: String) {
+        let config = runGit(["config", "--get", "core.fsmonitor"], in: root)
+        guard config.status == 0,
+              strippingTrailingLineEnding(config.stdout) == "true" else { return }
+        _ = runGit(["fsmonitor--daemon", "stop"], in: root)
+        let gitDir = runGit(["rev-parse", "--absolute-git-dir"], in: root)
+        if gitDir.status == 0 {
+            let dir = strippingTrailingLineEnding(gitDir.stdout)
+            let socketPath = (dir as NSString)
+                .appendingPathComponent("fsmonitor--daemon.ipc")
+            try? FileManager.default.removeItem(atPath: socketPath)
+        }
+        _ = runGit(["fsmonitor--daemon", "start"], in: root)
+    }
+
     /// Runs Git while draining stdout and stderr concurrently. Reading either
     /// pipe only after the process exits can deadlock when the other fills.
     nonisolated static func runGit(

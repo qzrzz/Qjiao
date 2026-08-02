@@ -1203,6 +1203,11 @@ final class TerminalManager: nonisolated ObservableObject {
         selectedProject?.openFile(path)
     }
 
+    /// 以十六进制编辑器模式打开文件。
+    func openFileInHexEditor(_ path: String) {
+        selectedProject?.openFileInHexEditor(path)
+    }
+
     /// Opens `path` as a file tab and moves cursor to specified line and column.
     func openFile(_ path: String, line: Int, column: Int = 0) {
         selectedProject?.openFile(path, line: line, column: column)
@@ -1557,6 +1562,9 @@ final class TerminalManager: nonisolated ObservableObject {
         case .session(let session):
             return .session(workingDirectory: session.currentDirectoryPath)
         case .file(let file):
+            if file.isHexMode {
+                return .fileHex(path: file.path, editorState: file.editorState)
+            }
             return .file(path: file.path, editorState: file.editorState)
         case .browser(let browser):
             return .browser(url: browser.snapshotURL)
