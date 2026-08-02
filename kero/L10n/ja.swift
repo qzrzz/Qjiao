@@ -38,6 +38,7 @@ extension L10n {
         "%lld pt": "%lld pt",
         "%lld sessions": "%lld件のセッション",
         "Agent completed": "エージェント完了",
+        "Agent blocked": "エージェント待機中",
         "Agent Status": "Agent ステータス",
         "Blocked": "ブロック",
         "Unread": "未読",

@@ -313,8 +313,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     func isValidCustomGitPath(_ path: String) -> Bool {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !projectDirectory.isEmpty else { return false }
-        let standardizedProjDir = URL(fileURLWithPath: projectDirectory).standardizedFileURL.path
-        let standardizedPath = URL(fileURLWithPath: trimmed).standardizedFileURL.path
+        let standardizedProjDir = URL(fileURLWithPath: projectDirectory).resolvingSymlinksInPath().standardizedFileURL.path
+        let standardizedPath = URL(fileURLWithPath: trimmed).resolvingSymlinksInPath().standardizedFileURL.path
 
         guard standardizedPath == standardizedProjDir || standardizedPath.hasPrefix(standardizedProjDir + "/") else {
             return false
@@ -360,7 +360,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         foregroundAt foregroundCwd: String? = nil
     ) -> String {
         if let customGitPath, isValidCustomGitPath(customGitPath) {
-            return customGitPath
+            return URL(fileURLWithPath: customGitPath).resolvingSymlinksInPath().path
         }
         if let foregroundCwd, !foregroundCwd.isEmpty,
            let fgRepo = Self.closestGitRepository(for: foregroundCwd) {
@@ -370,7 +370,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             return shellRepo
         }
         if !projectDirectory.isEmpty, FileManager.default.fileExists(atPath: projectDirectory) {
-            return projectDirectory
+            return URL(fileURLWithPath: projectDirectory).resolvingSymlinksInPath().path
         }
         return cwd
     }
@@ -378,7 +378,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// 查找包含指定路径的最近 Git 仓库根目录（向上寻找包含 .git 的目录）。
     private static func closestGitRepository(for path: String) -> String? {
         guard !path.isEmpty else { return nil }
-        var currentURL = URL(fileURLWithPath: path).standardizedFileURL
+        var currentURL = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
         while currentURL.pathComponents.count > 1 {
             let gitPath = currentURL.appendingPathComponent(".git").path
             if FileManager.default.fileExists(atPath: gitPath) {

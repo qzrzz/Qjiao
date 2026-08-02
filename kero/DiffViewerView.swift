@@ -230,7 +230,7 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
         }
         readers.enter()
         DispatchQueue.global(qos: .utility).async {
-            errData.value = stderr.fileHandleForReading.readDataToEndOfFile()
+            errData.value = (try? stderr.fileHandleForReading.readToEnd()) ?? Data()
             readers.leave()
         }
         process.waitUntilExit()

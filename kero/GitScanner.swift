@@ -80,10 +80,11 @@ actor GitScanner {
             }
             return .failed(failure)
         }
-        let resolvedRoot = Self.strippingTrailingLineEnding(top.stdout)
-        guard !resolvedRoot.isEmpty else {
+        let rawRoot = Self.strippingTrailingLineEnding(top.stdout)
+        guard !rawRoot.isEmpty else {
             return .failed("Git returned an empty repository path.")
         }
+        let resolvedRoot = URL(fileURLWithPath: rawRoot).resolvingSymlinksInPath().path
         let status = Self.runGit(
             [
                 "status", "--porcelain=v2", "--branch", "-z",
@@ -210,7 +211,7 @@ actor GitScanner {
         let top = runGit(["rev-parse", "--show-toplevel"], in: root)
         guard top.status == 0 else { return nil }
         let path = strippingTrailingLineEnding(top.stdout)
-        return path.isEmpty ? nil : path
+        return path.isEmpty ? nil : URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     }
 
     /// 修复失效的 Git fsmonitor daemon：停止 → 删除残留 IPC socket → 重新拉起。
@@ -269,12 +270,12 @@ actor GitScanner {
         let readers = DispatchGroup()
         readers.enter()
         DispatchQueue.global(qos: .utility).async {
-            outData.value = stdout.fileHandleForReading.readDataToEndOfFile()
+            outData.value = (try? stdout.fileHandleForReading.readToEnd()) ?? Data()
             readers.leave()
         }
         readers.enter()
         DispatchQueue.global(qos: .utility).async {
-            errData.value = stderr.fileHandleForReading.readDataToEndOfFile()
+            errData.value = (try? stderr.fileHandleForReading.readToEnd()) ?? Data()
             readers.leave()
         }
         process.waitUntilExit()

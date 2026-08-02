@@ -297,6 +297,15 @@ final class AgentWatcher: ObservableObject {
             }
         }
 
+        // 转为 blocked（待处理）：无论是否可见都播放 Blocked 待处理音效；未看见则标记未读。
+        if previousStatus != .blocked,
+           snap.status == .blocked {
+            SoundEffects.shared.play(.agentBlocked)
+            if !isSessionAttended(session) {
+                markUnread(sessionID: snap.sessionID)
+            }
+        }
+
         // 已看见：清除未读。
         if isSessionAttended(session) {
             markRead(sessionID: snap.sessionID)
