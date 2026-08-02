@@ -10,6 +10,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
 set in the Xcode project.
 
+## [1.1.25]
+
+### Added
+
+- Support dragging session tabs directly into content view pane edges to create split-pane layouts while preserving active session state.
+- Add Windows 7 and Windows XP retro sound effect schemes, configurable in `Settings → General → Sound Effects`.
+
+### Changed
+
+- Restrict terminal completion sound alerts to UI-initiated background tasks and Agent status updates (`working` → `done`), removing audio notifications from standard interactive shell execution.
+- Adjust Git panel primary action button and toolbar control dimensions to a uniform 28pt height for better visual alignment.
+
+### Fixed
+
+- Remove project directory path restrictions for custom Git executables and fix `customGitPath` state persistence during project configuration saves.
+- Fix notification badge and sound trigger handling when Coding Agent transitions from `blocked` to `done` state.
+
 ## [1.1.21]
 
 ### Added
