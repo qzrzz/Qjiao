@@ -348,6 +348,8 @@ extension L10n {
         "Done": "完成",
         "Down": "下",
         "Drop an image file here, or paste from clipboard": "将图片拖放到此处，或从剪贴板粘贴",
+        "Drop folder here to open project": "松开以打开项目",
+        "Drag a folder here or click below to start": "拖入文件夹或点击下方按钮开始",
         "Drop Commit": "丢弃提交",
         "Edit": "编辑",
         "Edit Commit": "编辑提交",

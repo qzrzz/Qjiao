@@ -6,6 +6,8 @@
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
+
 
 struct ContentView: View {
     @ObservedObject var manager: TerminalManager
@@ -46,7 +48,7 @@ struct ContentView: View {
                         }
                     }
                     Group {
-                        if let tab = manager.selectedProject?.selectedTab {
+                        if let tab = activeTab {
                             PaneLayoutView(
                                 tab: tab,
                                 onSplit: { manager.split(toward: $0) },
@@ -142,44 +144,216 @@ struct ContentView: View {
             .filter { $0.isInitialized && !visibleIDs.contains($0.id) }
     }
 
+    /// 当前内容区选中的 PaneTab。优先匹配 selectedTab / chromeSelectedTabID；
+    /// 只要项目内存有 Tab 就绝不返回 nil，防止新建/切换终端时因 ID 异步刷新误落入 emptyState。
+    private var activeTab: PaneTab? {
+        guard let project = manager.selectedProject, !project.tabs.isEmpty else { return nil }
+        if let selected = project.selectedTab {
+            return selected
+        }
+        if let chromeID = project.chromeSelectedTabID,
+           let tab = project.tabs.first(where: { $0.id == chromeID }) {
+            return tab
+        }
+        return project.tabs.first
+    }
+
     /// The pane layer paints an opaque background to hide unselected diffs in
     /// its gaps — but a diff tab's own pane must stay clear so its web view
     /// (mounted in the stack behind) shows through.
     private var paneLayerIsOpaque: Bool {
-        guard let tab = manager.selectedProject?.selectedTab else { return true }
+        guard let tab = activeTab else { return true }
         return tab.diffs.isEmpty
     }
 
     @ViewBuilder
     private var emptyState: some View {
         if manager.selectedProject == nil {
-            emptyStatePrompt(
-                title: L10n.t("No open projects"),
-                buttonTitle: L10n.t("New Project  ⌘N"),
-                action: { manager.newProject() }
+            EmptyStatePromptView(
+                manager: manager,
+                title: L10n.t("No open projects")
             )
         } else {
             // A project whose tabs were all closed stays open; offer to reopen
             // a session rather than showing the no-projects prompt.
-            emptyStatePrompt(
-                title: L10n.t("No open sessions"),
-                buttonTitle: L10n.t("New Session  ⌘T"),
-                action: { manager.newSession() }
+            EmptyStatePromptView(
+                manager: manager,
+                title: L10n.t("No open sessions")
             )
         }
     }
+}
 
-    private func emptyStatePrompt(
-        title: String, buttonTitle: String, action: @escaping () -> Void
-    ) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "terminal")
-                .font(.system(size: 36, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text(title)
-                .foregroundStyle(Theme.secondaryColor)
-            Button(buttonTitle, action: action)
+/// 无会话 / 无项目时的中心空白状态视图：包含精致大图标、支持拖入文件夹打开项目、加大「新建会话」主按钮及增设「新建项目」次要按钮。
+private struct EmptyStatePromptView: View {
+    @ObservedObject var manager: TerminalManager
+    let title: String
+    @State private var isDropTargeted = false
+
+    var body: some View {
+        ZStack {
+            // 背景拖窗热区：在未命中按钮时点按空白处仍可拖动窗口
+            WindowDragArea()
+
+            VStack(spacing: 20) {
+                // 图标高亮卡片
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(
+                            isDropTargeted
+                                ? Color(nsColor: Theme.cursor).opacity(0.15)
+                                : Color(nsColor: Theme.secondaryForeground).opacity(0.08)
+                        )
+                        .frame(width: 84, height: 84)
+
+                    Image(systemName: isDropTargeted ? "arrow.down.doc.fill" : "terminal")
+                        .font(.system(size: 40, weight: .regular))
+                        .foregroundStyle(
+                            isDropTargeted
+                                ? Color(nsColor: Theme.cursor)
+                                : Theme.secondaryColor
+                        )
+                        .scaleEffect(isDropTargeted ? 1.15 : 1.0)
+                        .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isDropTargeted)
+                }
+
+                VStack(spacing: 6) {
+                    Text(isDropTargeted ? L10n.t("Drop folder here to open project") : title)
+                        .font(SidebarTypography.body(.semibold))
+                        .foregroundStyle(Theme.primaryColor)
+
+                    Text(L10n.t("Drag a folder here or click below to start"))
+                        .font(SidebarTypography.compact())
+                        .foregroundStyle(Theme.secondaryColor.opacity(0.75))
+                }
+
+                // 按钮组：新建会话（加大主按钮）与新建项目（次要按钮）
+                HStack(spacing: 12) {
+                    // 主按钮：新建会话 ⌘T（若已有所选项目优先 newSession，无项目时新建项目）
+                    Button(action: {
+                        if manager.selectedProject != nil {
+                            manager.newSession()
+                        } else {
+                            manager.newProject()
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.square")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(L10n.t("New Session"))
+                                .font(SidebarTypography.body(.semibold))
+                            Text("⌘T")
+                                .font(SidebarTypography.micro(.medium))
+                                .opacity(0.75)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color(nsColor: Theme.cursor).opacity(0.88))
+                        }
+                        .foregroundStyle(Color.white)
+                    }
+                    .buttonStyle(.plain)
+
+                    // 次要按钮：新建项目 ⌘N
+                    Button(action: { manager.newProject() }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.badge.plus")
+                                .font(.system(size: 13, weight: .medium))
+                            Text(L10n.t("New Project"))
+                                .font(SidebarTypography.body(.medium))
+                            Text("⌘N")
+                                .font(SidebarTypography.micro(.medium))
+                                .opacity(0.75)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Theme.secondaryColor.opacity(0.12))
+                        }
+                        .foregroundStyle(Theme.primaryColor)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 40)
+            .padding(.vertical, 36)
+            .background {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(nsColor: Theme.background).opacity(0.65))
+                    .overlay {
+                        if isDropTargeted {
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .strokeBorder(
+                                    Color(nsColor: Theme.cursor),
+                                    style: StrokeStyle(lineWidth: 2, dash: [6, 4])
+                                )
+                        }
+                    }
+            }
+            .animation(.easeInOut(duration: 0.16), value: isDropTargeted)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onDrop(
+            of: [UTType.fileURL],
+            isTargeted: $isDropTargeted,
+            perform: handleFolderDrop
+        )
+    }
+
+    /// 拖入文件夹到中心区域：解析 URL 并在当前应用打开/新建项目
+    private func handleFolderDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+
+        let dragPb = NSPasteboard(name: .drag)
+        let isInternalFileTreeDrag = FileTreeModel.isDraggingFromTree
+            || (dragPb.types?.contains(NSPasteboard.PasteboardType("com.qjiao.filetree-item")) ?? false)
+            || (FileTreeModel.activeTreeDragPasteboardChangeCount == dragPb.changeCount)
+        if isInternalFileTreeDrag {
+            FileTreeModel.isDraggingFromTree = false
+            return false
+        }
+
+        let externalProviders = providers.filter { provider in
+            !provider.registeredTypeIdentifiers.contains("com.qjiao.filetree-item")
+                && !provider.hasItemConformingToTypeIdentifier("com.qjiao.filetree-item")
+        }
+        guard !externalProviders.isEmpty else { return false }
+
+        var accepted = false
+        for provider in externalProviders {
+            guard provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) else {
+                continue
+            }
+            accepted = true
+            provider.loadItem(
+                forTypeIdentifier: UTType.fileURL.identifier,
+                options: nil
+            ) { item, _ in
+                let url: URL? = if let url = item as? URL {
+                    url
+                } else if let data = item as? Data {
+                    URL(dataRepresentation: data, relativeTo: nil)
+                } else {
+                    nil
+                }
+                guard let url else { return }
+                var isDirectory: ObjCBool = false
+                let targetURL: URL
+                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+                    targetURL = url
+                } else {
+                    targetURL = url.deletingLastPathComponent()
+                }
+                Task { @MainActor in
+                    _ = manager.addProject(at: targetURL)
+                }
+            }
+        }
+        return accepted
     }
 }
 /// Slim bar above the terminal: the selected project's sessions as
@@ -279,11 +453,13 @@ private struct MainHeaderView: View {
 
                     if let project = manager.selectedProject {
                         HStack(spacing: Self.tabNewSpacing) {
-                            SessionTabsView(
-                                manager: manager,
-                                project: project,
-                                maxStripWidth: stripMaxWidth
-                            )
+                            if !project.tabs.isEmpty {
+                                SessionTabsView(
+                                    manager: manager,
+                                    project: project,
+                                    maxStripWidth: stripMaxWidth
+                                )
+                            }
                             NewTabButton(project: project)
                         }
                     }
@@ -781,6 +957,9 @@ private struct SessionTabsView: View {
     @State private var renamingTabID: UUID?
     /// 弹性布局分配结果；随标题 / 选中 / 宽度变化重算。
     @State private var elasticSlots: [UUID: ElasticTabSlot] = [:]
+    /// 标题驱动的弹性重算防抖：新建 Tab 后 shell 初始化会让标题短时间多次变化，
+    /// 每次都重算会让激活 Tab 宽度来回跳动、条带反复滚动；等标题稳定后再重算一次。
+    @State private var elasticRecomputeTask: Task<Void, Never>?
     /// 点击时本地抢先的选中态：只刷新顶栏，不经过 Project→Manager 整树广播。
     @State private var localChromeTabID: UUID?
 
@@ -977,15 +1156,20 @@ private struct SessionTabsView: View {
                         startPoint: .leading, endPoint: .trailing
                     )
                     .frame(width: 20)
+                    // 动画只作用于渐隐条本身。不能挂在 ScrollView 上：
+                    // 溢出翻转（新建 Tab 恰好撑满条带时）会把新 Tab 插入、
+                    // 弹性宽度重排和滚入视口一起包进 0.15s 插值，
+                    // 表现为创建 Tab 时整条 Tabs 的异常尺寸变化动画。
+                    .animation(.easeInOut(duration: 0.15), value: overflow.left)
                     Color.black
                     LinearGradient(
                         colors: [.black, overflow.right ? .clear : .black],
                         startPoint: .leading, endPoint: .trailing
                     )
                     .frame(width: 20)
+                    .animation(.easeInOut(duration: 0.15), value: overflow.right)
                 }
             }
-            .animation(.easeInOut(duration: 0.15), value: overflow)
             // 硬宽度 = min(内容, 上限)，不参与 HStack 弹性争夺。
             .frame(width: stripWidth, alignment: .leading)
             .clipped()
@@ -999,7 +1183,18 @@ private struct SessionTabsView: View {
         }
         .frame(width: stripWidth, alignment: .leading)
         .onChange(of: titleFingerprint) { _, _ in
-            recomputeElasticSlots()
+            // 标题在 shell 启动 / 命令执行期间可能连续变化（如新 Tab 的目录名→
+            // 提示符→稳定标题），直接重算会让激活 Tab 宽度跟随标题来回跳动。
+            // 防抖：等标题稳定后再重算一次，避免创建 Tab 时的尺寸/位置异常动画。
+            elasticRecomputeTask?.cancel()
+            elasticRecomputeTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(400))
+                guard !Task.isCancelled else { return }
+                recomputeElasticSlots()
+            }
+        }
+        .onDisappear {
+            elasticRecomputeTask?.cancel()
         }
     }
 
@@ -1648,6 +1843,10 @@ private struct TabItemChrome: View {
     @State private var shrinkTask: Task<Void, Never>?
     /// 标题 Text 实际分到的槽位宽度（用于判断是否截断）。
     @State private var titleSlotWidth: CGFloat = 0
+    /// 新建 Tab 的标题稳定窗口：shell 启动期间标题会多次变化（目录名→提示符→
+    /// 稳定标题），窗口内的标题变化直接落到目标宽，不做宽度过渡，
+    /// 避免创建瞬间出现尺寸变化动画。
+    @State private var appearTime = Date.distantPast
 
     /// 弹性模式 min==max 时使用固定分配宽；滚动模式走 retainedWidth。
     private var isFixedWidth: Bool {
@@ -1753,8 +1952,17 @@ private struct TabItemChrome: View {
         .onPreferenceChange(TabTitleSlotWidthKey.self) { titleSlotWidth = $0 }
         .onHover { isHovering = $0 }
         // 首帧 / 布局参数变化直接落到目标宽，避免新 Tab 从 defaultMin 扩到自然宽的左→右动画。
-        .onAppear { updateRetainedWidth(immediate: true, animated: false) }
-        .onChange(of: title) { updateRetainedWidth(immediate: isFixedWidth || iconOnly) }
+        .onAppear {
+            appearTime = Date()
+            updateRetainedWidth(immediate: true, animated: false)
+        }
+        .onChange(of: title) {
+            // 标题稳定窗口（shell 初始化）内不带动画；之后才走平滑过渡。
+            updateRetainedWidth(
+                immediate: isFixedWidth || iconOnly,
+                animated: Date().timeIntervalSince(appearTime) > 0.8
+            )
+        }
         .onChange(of: manualTitle) { applyManualTitleWidth() }
         .onChange(of: paneCount) { updateRetainedWidth(immediate: isFixedWidth || iconOnly) }
         .onChange(of: minWidth) { updateRetainedWidth(immediate: true, animated: false) }
