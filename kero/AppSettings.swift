@@ -378,6 +378,31 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// Agent 待处理音效。写入 `ui.sound-agent-blocked`。
+    @Published var agentBlockedSoundEnabled: Bool {
+        didSet { save() }
+    }
+
+    /// 命令成功结束音效名称。写入 `ui.sound-command-succeeded-name`。
+    @Published var commandSucceededSoundName: String {
+        didSet { save() }
+    }
+
+    /// 命令失败音效名称。写入 `ui.sound-command-failed-name`。
+    @Published var commandFailedSoundName: String {
+        didSet { save() }
+    }
+
+    /// Agent 完成音效名称。写入 `ui.sound-agent-completed-name`。
+    @Published var agentCompletedSoundName: String {
+        didSet { save() }
+    }
+
+    /// Agent 待处理音效名称。写入 `ui.sound-agent-blocked-name`。
+    @Published var agentBlockedSoundName: String {
+        didSet { save() }
+    }
+
     /// 用户首选代码编辑器的 Bundle ID；空字符串表示使用检测到的第一个已安装编辑器。
     @Published var preferredCodeEditorBundleId: String {
         didSet { save() }
@@ -631,6 +656,11 @@ final class AppSettings: nonisolated ObservableObject {
         commandSucceededSoundEnabled = toml["ui.sound-command-succeeded"]?.bool ?? true
         commandFailedSoundEnabled = toml["ui.sound-command-failed"]?.bool ?? true
         agentCompletedSoundEnabled = toml["ui.sound-agent-completed"]?.bool ?? true
+        agentBlockedSoundEnabled = toml["ui.sound-agent-blocked"]?.bool ?? true
+        commandSucceededSoundName = toml["ui.sound-command-succeeded-name"]?.string ?? "macOS/Glass"
+        commandFailedSoundName = toml["ui.sound-command-failed-name"]?.string ?? "macOS/Basso"
+        agentCompletedSoundName = toml["ui.sound-agent-completed-name"]?.string ?? "macOS/Tink"
+        agentBlockedSoundName = toml["ui.sound-agent-blocked-name"]?.string ?? "macOS/Blow"
         applyAppearance()
         reloadThemeSelection()
         Theme.reloadWindowBackgroundOpacity(windowBackgroundOpacity)
@@ -720,6 +750,11 @@ final class AppSettings: nonisolated ObservableObject {
         commandSucceededSoundEnabled = true
         commandFailedSoundEnabled = true
         agentCompletedSoundEnabled = true
+        agentBlockedSoundEnabled = true
+        commandSucceededSoundName = "macOS/Glass"
+        commandFailedSoundName = "macOS/Basso"
+        agentCompletedSoundName = "macOS/Tink"
+        agentBlockedSoundName = "macOS/Blow"
         preferredCodeEditorBundleId = ""
         preferredAIToolId = ""
         localAIHeadlessProvider = .disabled
@@ -906,6 +941,21 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if !agentCompletedSoundEnabled {
             lines.append("ui.sound-agent-completed = false")
+        }
+        if !agentBlockedSoundEnabled {
+            lines.append("ui.sound-agent-blocked = false")
+        }
+        if commandSucceededSoundName != "macOS/Glass" {
+            lines.append("ui.sound-command-succeeded-name = \(TOML.quote(commandSucceededSoundName))")
+        }
+        if commandFailedSoundName != "macOS/Basso" {
+            lines.append("ui.sound-command-failed-name = \(TOML.quote(commandFailedSoundName))")
+        }
+        if agentCompletedSoundName != "macOS/Tink" {
+            lines.append("ui.sound-agent-completed-name = \(TOML.quote(agentCompletedSoundName))")
+        }
+        if agentBlockedSoundName != "macOS/Blow" {
+            lines.append("ui.sound-agent-blocked-name = \(TOML.quote(agentBlockedSoundName))")
         }
         let homeConfigDir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".config")
         let prodIdleTitle = homeConfigDir.appendingPathComponent("qjiao/idle_title")

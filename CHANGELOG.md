@@ -10,6 +10,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
 set in the Xcode project.
 
+## [1.1.21]
+
+### Added
+
+- Add native Hex Editor for binary files with dual Hex/ASCII editing modes, text and hex search/replace with wildcard support, offset jump dialog, session persistence, and file tree context menu integration.
+- Add in-app sound effects service (`SoundEffects`) using native macOS system sounds for terminal command completion (success/failure exit code via OSC 133;D) and Coding Agent task completion (`working` → `done`), configurable in `Settings → General → Sound Effects`.
+
+### Changed
+
+- Enhance process tree scanning and zsh integration to support custom PTY completion proxies like `ghost-complete`, preserving `ZDOTDIR` and tracking real shell PIDs for background tasks and Agent status.
+
+### Fixed
+
+- Add Git fsmonitor daemon auto-recovery and IPC socket cleanup on Git status retry to resolve stale daemon connection errors.
+- Fix potential macOS ViewBridge assertion crashes (`containingWindowWillOrderOnScreen`) by clearing focus on Settings window close and adopting SwiftUI text fields in Hex editor toolbar.
+
 ## [1.1.9]
 
 ### Added

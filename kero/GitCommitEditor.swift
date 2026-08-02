@@ -315,8 +315,8 @@ public enum GitCommitEditor {
 
             do {
                 try process.run()
-                let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                let outData = (try? outPipe.fileHandleForReading.readToEnd()) ?? Data()
+                let errData = (try? errPipe.fileHandleForReading.readToEnd()) ?? Data()
                 process.waitUntilExit()
 
                 let stdout = String(data: outData, encoding: .utf8) ?? ""

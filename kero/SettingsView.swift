@@ -391,19 +391,29 @@ struct SettingsView: View {
                     soundToggleRow(
                         L10n.t("Command succeeded"),
                         kind: .commandSucceeded,
+                        soundName: $settings.commandSucceededSoundName,
                         isOn: $settings.commandSucceededSoundEnabled
                     )
                     .disabled(!settings.soundEffectsEnabled)
                     soundToggleRow(
                         L10n.t("Command failed"),
                         kind: .commandFailed,
+                        soundName: $settings.commandFailedSoundName,
                         isOn: $settings.commandFailedSoundEnabled
                     )
                     .disabled(!settings.soundEffectsEnabled)
                     soundToggleRow(
                         L10n.t("Agent completed"),
                         kind: .agentCompleted,
+                        soundName: $settings.agentCompletedSoundName,
                         isOn: $settings.agentCompletedSoundEnabled
+                    )
+                    .disabled(!settings.soundEffectsEnabled)
+                    soundToggleRow(
+                        L10n.t("Agent blocked"),
+                        kind: .agentBlocked,
+                        soundName: $settings.agentBlockedSoundName,
+                        isOn: $settings.agentBlockedSoundEnabled
                     )
                     .disabled(!settings.soundEffectsEnabled)
                 }
@@ -843,22 +853,50 @@ struct SettingsView: View {
         }
     }
 
-    /// 音效开关行：标题 + 试听按钮 + Toggle。试听无视开关直接播放，便于对比选择。
+    /// 音效开关行：标题 + 2 级音效选择菜单 + 试听按钮 + Toggle。试听无视开关直接播放，便于对比选择。
     private func soundToggleRow(
         _ title: String,
         kind: SoundEffects.Kind,
+        soundName: Binding<String>,
         isOn: Binding<Bool>
     ) -> some View {
         HStack(spacing: 12) {
             Text(title)
             Spacer()
+            Menu {
+                ForEach(SoundEffects.categories) { category in
+                    Menu(category.title) {
+                        ForEach(category.sounds) { sound in
+                            Button {
+                                soundName.wrappedValue = sound.id
+                                SoundEffects.shared.preview(sound.id)
+                            } label: {
+                                HStack {
+                                    Text(sound.name)
+                                    if soundName.wrappedValue == sound.id {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Text(SoundEffects.displayName(for: soundName.wrappedValue))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .menuStyle(.borderlessButton)
+            .disabled(!isOn.wrappedValue)
+
             Button {
-                SoundEffects.shared.preview(kind)
+                SoundEffects.shared.preview(soundName.wrappedValue)
             } label: {
                 Image(systemName: "speaker.wave.2.fill")
             }
             .buttonStyle(.borderless)
             .help(L10n.t("Play preview"))
+
             Toggle("", isOn: isOn)
                 .labelsHidden()
         }

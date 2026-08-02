@@ -38,6 +38,7 @@ extension L10n {
         "%lld pt": "%lld pt",
         "%lld sessions": "%lld 个会话",
         "Agent completed": "Agent 完成",
+        "Agent blocked": "Agent 待处理",
         "Agent Status": "Agent 状态",
         "Blocked": "阻塞",
         "Unread": "未读",
