@@ -15,6 +15,12 @@
 
 ## 增加功能
 
+- **Tabs 创建时异常尺寸/位置动画修复**：修复新建 Tab 时 Tab 自身出现尺寸变化与位置变化的异常动画。根因有二：① 新建 Tab 后 shell 初始化期间标题会多次变化（目录名→提示符→稳定标题），弹性模式下标题驱动 `recomputeElasticSlots` 重算，激活 Tab 宽度（=标题自然宽）随之 150→220→150 来回跳动，条带也反复滚动；现对**标题驱动的弹性重算加 400ms 防抖**，标题稳定后再重算一次，创建期间宽度保持稳定。② 溢出渐隐动画作用域过大——`.animation(value: overflow)` 挂在 ScrollView 上，溢出翻转时会把 Tab 插入/弹性重排/滚入视口一起包进 0.15s 插值；现已把动画收窄到两侧渐隐条（`LinearGradient`）本身。另外新建 Tab 的标题稳定窗口（0.8s）内不做宽度过渡动画，直接落到目标宽。
+
+- **无会话 / 无项目中心界面与 Tab 栏拖拽优化**：
+  - **Tab 栏拖动窗口**：在无 open tabs（如无打开会话）时，Tabs 顶栏不再渲染空 `ScrollView`，标签栏全域自动转为可拖拽热区（`HeaderWindowDragBand`），支持鼠标点按拖动移动窗口。
+  - **大尺寸主按钮与「新建项目」次要按钮**：优化中心空白提示区（`EmptyStatePromptView`），放大图标与文字排版，将「新建会话 ⌘T」调整为高亮加大主按钮，并新增「新建项目 ⌘N」次要按钮（`manager.newProject()`）。
+  - **拖入文件夹打开项目**：中心区域支持 Finder 文件夹拖入（`.onDrop`），拖入时高亮虚线框与卡片反馈，松开后自动解析目标路径并在应用中打开/创建对应项目。
 - **内容视图 Tabs 非激活终端图标颜色优化**：将内容视图标签页（`TabStripIconView` 与 `TerminalAppIconView`）中默认终端图标在非激活模式下的颜色由过暗的 `.tertiary` / `Color.secondary` 优化为主题感知次要色 `Theme.secondaryColor`，使其与非激活状态下的标签页标题文字及周围 UI 元素在深浅外观下保持视觉对比度协调一致。
 
 - **AgentWatcher（Agent 状态检测）**：新增 `kero/AgentWatcher`，参考 [herdr](https://github.com/herdrdev/herdr) 的 screen manifest 思路，从终端**前台进程名**识别 Coding Agent，再结合 **OSC 标题**与**屏幕尾部文本**规则判定 `working` / `blocked` / `done`。内置 herdr 同源 TOML 规则（claude、codex、agy、pi、opencode、grok 及 cursor、gemini、kimi 等）。**性能优先**：仅对识别到的 Agent 终端做读屏；进程轮询约 2s，读屏最短间隔约 3s；非 Agent 终端不扫屏。Info 面板展示 Agent 状态（`● agent · Working`）。**Tab Agent State 角标**：当 Agent 为 `working` 时，主标签与 Tab Switcher 图标右下角显示呼吸闪烁的小绿点（优先于 Task 状态角标）。**未读提醒**：`working → done` 时若终端不可见（非当前 Tab、非当前项目、或窗口/应用未激活），标记未读；对应 Tab 显示小蓝点；切换到该 Tab / 应用重新激活且终端已在当前视图时自动清除；左侧**项目列表**显示蓝色数字角标，表示该项目下未读条目数（等宽数字）。

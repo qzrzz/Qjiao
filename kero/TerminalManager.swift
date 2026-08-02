@@ -596,7 +596,6 @@ final class TerminalManager: nonisolated ObservableObject {
     func newSession(directory: String? = nil) {
         guard let project = selectedProject else {
             newProject()
-            selectedProject?.newSession(directory: directory)
             return
         }
         project.newSession(directory: directory)
