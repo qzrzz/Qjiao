@@ -309,16 +309,11 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         let source: PanelRootSource
     }
 
-    /// 校验指定的 Git 路径是否为合法且位于项目目录内（必须在项目路径的子文件夹中，或是项目目录本身）。
+    /// 校验指定的 Git 路径是否为合法且存在的目录。
     func isValidCustomGitPath(_ path: String) -> Bool {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !projectDirectory.isEmpty else { return false }
-        let standardizedProjDir = URL(fileURLWithPath: projectDirectory).resolvingSymlinksInPath().standardizedFileURL.path
+        guard !trimmed.isEmpty else { return false }
         let standardizedPath = URL(fileURLWithPath: trimmed).resolvingSymlinksInPath().standardizedFileURL.path
-
-        guard standardizedPath == standardizedProjDir || standardizedPath.hasPrefix(standardizedProjDir + "/") else {
-            return false
-        }
         var isDir: ObjCBool = false
         return FileManager.default.fileExists(atPath: standardizedPath, isDirectory: &isDir) && isDir.boolValue
     }
