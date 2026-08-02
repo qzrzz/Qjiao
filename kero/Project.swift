@@ -1035,6 +1035,43 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         tabs = reorderedTabs
     }
 
+    /// 将 `sourceID` 整个布局并入当前选中 Tab，落在 `targetPaneID` 的 `edge` 侧形成分屏。
+    /// 源 Tab 被移除，但其中的终端 / 文件 / 浏览器会话保持挂载；不可并入自身。
+    /// 源或目标含 diff 时拒绝（diff 独占单 pane Tab）。
+    func mergeTab(_ sourceID: UUID, toward edge: PaneDropEdge, of targetPaneID: UUID) {
+        guard sourceID != selectedTabID,
+              let sourceIndex = tabs.firstIndex(where: { $0.id == sourceID }),
+              let targetTab = selectedTab,
+              targetTab.canSplit,
+              targetTab.layout.contains(targetPaneID)
+        else { return }
+
+        let sourceTab = tabs[sourceIndex]
+        // diff 独占单 pane，不允许拖入其它 Tab 的分屏树
+        guard sourceTab.diffs.isEmpty else { return }
+        if let targetPane = targetTab.allPanes.first(where: { $0.id == targetPaneID }),
+           case .diff = targetPane.content {
+            return
+        }
+
+        let incomingLayout = sourceTab.layout
+        let focusing = sourceTab.focusedPaneID
+
+        // 只摘掉 Tab 条目与 tab 级观察；session / browser 观察继续由内容 id 持有。
+        tabObservations[sourceID] = nil
+        tabs.remove(at: sourceIndex)
+        if chromeSelectedTabID == sourceID {
+            chromeSelectedTabID = targetTab.id
+        }
+
+        targetTab.absorb(
+            layout: incomingLayout,
+            toward: edge,
+            beside: targetPaneID,
+            focusing: focusing
+        )
+    }
+
     /// 用户驱动的标签切换：先更新顶栏选中态，下一 runloop 再切换内容。
     /// 新建 / 关闭 / 恢复等路径请继续直接写 `selectedTabID`，以同步切换内容。
     /// - Parameter paintChrome: 为 false 时不写 `chromeSelectedTabID`（调用方已用本地 @State 抢先绘制，避免再触发整树刷新）。

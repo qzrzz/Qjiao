@@ -16,6 +16,8 @@ struct ContentView: View {
     @ObservedObject private var l10n = L10n.shared
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var tabSwitcher = TabSwitcherController()
+    /// Tab 条拖到内容区分屏的共享落点状态（与排序共用同一拖拽手势）。
+    @StateObject private var tabSplitDrag = TabSplitDragController()
 
     var body: some View {
         let _ = l10n.language
@@ -27,7 +29,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 // Above the pane stack so header tooltips, which hang down
                 // into the terminal area, aren't covered by it.
-                MainHeaderView(manager: manager)
+                MainHeaderView(manager: manager, tabSplitDrag: tabSplitDrag)
                     .zIndex(1)
 
                 ZStack {
@@ -51,6 +53,7 @@ struct ContentView: View {
                         if let tab = activeTab {
                             PaneLayoutView(
                                 tab: tab,
+                                tabSplitDrag: tabSplitDrag,
                                 onSplit: { manager.split(toward: $0) },
                                 onClosePane: { manager.closePane($0) },
                                 onNewBrowserTab: {
@@ -366,6 +369,7 @@ private struct EmptyStatePromptView: View {
 /// here when the left sidebar is closed.
 private struct MainHeaderView: View {
     @ObservedObject var manager: TerminalManager
+    @ObservedObject var tabSplitDrag: TabSplitDragController
 
     /// 左侧栏收起时，为红绿灯预留的宽度（不含开关左边距）。
     private static let trafficLightInset: CGFloat = 68
@@ -457,6 +461,7 @@ private struct MainHeaderView: View {
                                 SessionTabsView(
                                     manager: manager,
                                     project: project,
+                                    tabSplitDrag: tabSplitDrag,
                                     maxStripWidth: stripMaxWidth
                                 )
                             }
@@ -941,9 +946,11 @@ private enum TabStripMetrics {
 
 /// Horizontal tabs for one project — terminal sessions and open files.
 /// 新建在条带右侧（`NewTabButton`）；总览下拉固定在侧栏旁（`TabListButton`）。
+/// 拖拽：指针在其它 Tab 上 → 排序；指针在内容区 pane 上 → 并入分屏（不可拖到自己）。
 private struct SessionTabsView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject var project: Project
+    @ObservedObject var tabSplitDrag: TabSplitDragController
     @ObservedObject private var settings = AppSettings.shared
     let maxStripWidth: CGFloat
     @State private var overflow = StripOverflow()
@@ -1281,22 +1288,82 @@ private struct SessionTabsView: View {
         }
     }
 
-    /// Reorders immediately as the pointer crosses another tab. This direct
-    /// gesture deliberately avoids a pasteboard drag session, which the
-    /// hidden title bar can otherwise claim as a window move first.
+    /// 同一拖拽手势两用：
+    /// 1) 指针越过其它 Tab → 立即重排（保持原有行为，不用 pasteboard，避免被标题栏抢窗口拖动）；
+    /// 2) 指针进入当前内容区 pane → 四象限分屏预览，松手并入目标 Tab（不能拖到自己的终端）。
     private func updateTabDrag(source: UUID, location: CGPoint) {
         draggedTabID = source
-        NSCursor.closedHand.set()
-        guard let target = tabFrames.first(where: {
+        tabSplitDrag.begin(sourceTabID: source)
+
+        // 优先：落在另一个 Tab 热区 → 排序，并清掉分屏预览。
+        if let target = tabFrames.first(where: {
             $0.key != source && $0.value.contains(location)
-        })?.key else { return }
-        withAnimation(.easeInOut(duration: 0.12)) {
-            project.moveTab(source, to: target)
+        })?.key {
+            tabSplitDrag.setDropTarget(paneID: nil, edge: nil)
+            NSCursor.closedHand.set()
+            withAnimation(.easeInOut(duration: 0.12)) {
+                project.moveTab(source, to: target)
+            }
+            return
+        }
+
+        // 内容区分屏：仅当源 Tab 不是当前内容 Tab，且目标允许分屏。
+        updateTabSplitDrop(source: source, location: location)
+    }
+
+    /// 根据指针与内容区 pane frame 更新分屏落点预览与光标。
+    private func updateTabSplitDrop(source: UUID, location: CGPoint) {
+        // 当前（内容区）Tab 不能拖到自己的 pane 里分屏。
+        if source == project.selectedTabID {
+            tabSplitDrag.setDropTarget(paneID: nil, edge: nil)
+            if tabSplitDrag.paneFrames.values.contains(where: { $0.contains(location) }) {
+                NSCursor.operationNotAllowed.set()
+            } else {
+                NSCursor.closedHand.set()
+            }
+            return
+        }
+
+        guard let targetTab = project.selectedTab,
+              targetTab.canSplit,
+              let sourceTab = project.tabs.first(where: { $0.id == source }),
+              // diff 独占单 pane，不允许并入分屏树
+              sourceTab.diffs.isEmpty
+        else {
+            tabSplitDrag.setDropTarget(paneID: nil, edge: nil)
+            NSCursor.closedHand.set()
+            return
+        }
+
+        // 目标已分屏时命中具体 pane；单 pane 时 frame 仍会上报。
+        if let (paneID, frame) = tabSplitDrag.paneFrames.first(where: {
+            $0.value.contains(location)
+        }) {
+            // 不能拖到 diff pane 上分屏
+            if let pane = targetTab.allPanes.first(where: { $0.id == paneID }),
+               case .diff = pane.content {
+                tabSplitDrag.setDropTarget(paneID: nil, edge: nil)
+                NSCursor.operationNotAllowed.set()
+                return
+            }
+            let edge = PaneDropEdge.nearest(at: location, in: frame)
+            tabSplitDrag.setDropTarget(paneID: paneID, edge: edge)
+            NSCursor.closedHand.set()
+        } else {
+            tabSplitDrag.setDropTarget(paneID: nil, edge: nil)
+            NSCursor.closedHand.set()
         }
     }
 
     private func endTabDrag() {
+        // 松手时若有合法内容区落点 → 并入当前选中 Tab 形成分屏。
+        if let source = draggedTabID,
+           let drop = tabSplitDrag.dropTarget,
+           tabSplitDrag.sourceTabID == source {
+            project.mergeTab(source, toward: drop.edge, of: drop.paneID)
+        }
         draggedTabID = nil
+        tabSplitDrag.end()
         NSCursor.arrow.set()
     }
 

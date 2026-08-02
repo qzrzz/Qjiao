@@ -4,13 +4,57 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
+
+/// Tab 条拖拽时与内容区分屏落点的共享状态：排序仍走 Tab 条自身逻辑，
+/// 指针进入内容区时在此更新落点，由 `PaneLayoutView` 画半屏高亮。
+@MainActor
+final class TabSplitDragController: ObservableObject {
+    /// 正在拖拽的源 Tab；nil 表示未在拖。
+    @Published private(set) var sourceTabID: UUID?
+    /// 内容区可落点（目标 pane + 边）；nil 表示当前无合法分屏预览。
+    @Published private(set) var dropTarget: DropTarget?
+    /// 当前选中 Tab 内各 pane 的全局 frame，由布局写入，供 Tab 拖拽命中测试（不发布，避免每帧整树刷新）。
+    var paneFrames: [UUID: CGRect] = [:]
+
+    struct DropTarget: Equatable {
+        let paneID: UUID
+        let edge: PaneDropEdge
+    }
+
+    func begin(sourceTabID: UUID) {
+        if self.sourceTabID != sourceTabID {
+            self.sourceTabID = sourceTabID
+            dropTarget = nil
+        }
+    }
+
+    func setDropTarget(paneID: UUID?, edge: PaneDropEdge?) {
+        let next: DropTarget?
+        if let paneID, let edge {
+            next = DropTarget(paneID: paneID, edge: edge)
+        } else {
+            next = nil
+        }
+        if dropTarget != next {
+            dropTarget = next
+        }
+    }
+
+    func end() {
+        sourceTabID = nil
+        dropTarget = nil
+    }
+}
 
 /// Tiles a tab's recursive split tree. Every divider belongs to the pane
 /// rectangle that was split, so nested horizontal and vertical layouts can be
 /// combined freely. Only the selected tab's layout is ever mounted.
 struct PaneLayoutView: View {
     @ObservedObject var tab: PaneTab
+    /// Tab→分屏拖拽共享状态；用于上报 pane frame 与外部落点高亮。
+    @ObservedObject var tabSplitDrag: TabSplitDragController
     /// Splits the focused pane on the given edge — from a pane's context menu.
     var onSplit: (PaneDropEdge) -> Void = { _ in }
     /// Closes the pane that owns a context menu action.
@@ -71,7 +115,7 @@ struct PaneLayoutView: View {
                     showFocusRing: true,
                     allowsMove: false,
                     isMoveSource: false,
-                    dropEdge: nil,
+                    dropEdge: externalDropEdge(for: pane.id),
                     onMove: { _ in },
                     onMoveEnded: {},
                     onSplit: onSplit,
@@ -87,7 +131,11 @@ struct PaneLayoutView: View {
         // tiles, so a split tab has even breathing room on every side. A
         // single-pane tab stays full-bleed, exactly as before splits existed.
         .padding(tab.hasMultiplePanes ? gap : 0)
-        .onPreferenceChange(PaneFramePreferenceKey.self) { paneFrames = $0 }
+        .onPreferenceChange(PaneFramePreferenceKey.self) { frames in
+            paneFrames = frames
+            // 同步给 Tab 条拖拽：命中测试用全局 frame，不触发额外 @Published。
+            tabSplitDrag.paneFrames = frames
+        }
         // A divider or pane-move drag can't deliver its ending callback once
         // toggling zoom unmounts its view — drop any in-flight drag state so a
         // stale snapshot never sticks around.
@@ -99,6 +147,15 @@ struct PaneLayoutView: View {
         }
     }
 
+    /// Tab 条拖入分屏时的外部落点边；源 Tab 必须是其它 Tab。
+    private func externalDropEdge(for paneID: UUID) -> PaneDropEdge? {
+        guard let drop = tabSplitDrag.dropTarget,
+              drop.paneID == paneID,
+              tabSplitDrag.sourceTabID != tab.id
+        else { return nil }
+        return drop.edge
+    }
+
     private var grid: some View {
         GeometryReader { geo in
             let layout = dragLayout ?? tab.layout
@@ -108,14 +165,19 @@ struct PaneLayoutView: View {
 
             ZStack(alignment: .topLeading) {
                 ForEach(geometry.panes) { placement in
+                    let paneDropEdge: PaneDropEdge? = {
+                        if paneDrag?.targetID == placement.pane.id {
+                            return paneDrag?.edge
+                        }
+                        return externalDropEdge(for: placement.pane.id)
+                    }()
                     PaneView(
                         tab: tab,
                         pane: placement.pane,
                         showFocusRing: tab.hasMultiplePanes,
                         allowsMove: true,
                         isMoveSource: paneDrag?.sourceID == placement.pane.id,
-                        dropEdge: paneDrag?.targetID == placement.pane.id
-                            ? paneDrag?.edge : nil,
+                        dropEdge: paneDropEdge,
                         onMove: {
                             updateDropTarget(
                                 source: placement.pane.id, location: $0
@@ -212,7 +274,12 @@ struct PaneLayoutView: View {
             dragThumbnail = thumbnail(for: source)
         }
         if let (targetID, frame) = paneFrames.first(where: { $0.key != source && $0.value.contains(location) }) {
-            paneDrag = PaneMove(sourceID: source, location: location, targetID: targetID, edge: dropEdge(at: location, in: frame))
+            paneDrag = PaneMove(
+                sourceID: source,
+                location: location,
+                targetID: targetID,
+                edge: PaneDropEdge.nearest(at: location, in: frame)
+            )
             NSCursor.closedHand.set()
         } else {
             paneDrag = PaneMove(sourceID: source, location: location, targetID: nil, edge: nil)
@@ -289,19 +356,6 @@ struct PaneLayoutView: View {
         case .file(let file): return file.editorView?.paneSnapshot()
         case .browser(let browser): return browser.webView.paneSnapshot()
         default: return nil
-        }
-    }
-
-    /// Which edge of `frame` the pointer is nearest — the target is cut into
-    /// four triangular quadrants by its diagonals, the standard drop-zone
-    /// scheme (VS Code, Ghostty).
-    private func dropEdge(at location: CGPoint, in frame: CGRect) -> PaneDropEdge {
-        let dx = (location.x - frame.midX) / max(frame.width, 1)
-        let dy = (location.y - frame.midY) / max(frame.height, 1)
-        if abs(dx) > abs(dy) {
-            return dx < 0 ? .left : .right
-        } else {
-            return dy < 0 ? .top : .bottom
         }
     }
 
@@ -387,34 +441,35 @@ private struct PaneView: View {
     @ObservedObject private var settings = AppSettings.shared
 
     var body: some View {
-        // Single-pane tabs render exactly as before splits existed — no ring,
-        // no handle — so nothing about the common case changes.
-        if showFocusRing {
-            VStack(spacing: 0) {
-                if settings.showPaneHeaders {
-                    PaneHeaderView(
-                        tab: tab,
-                        pane: pane,
-                        isFocused: isFocused,
-                        allowsMove: allowsMove,
-                        onMove: onMove,
-                        onMoveEnded: onMoveEnded,
-                        onSplit: splitFromMenu,
-                        onClosePane: onClosePane
-                    )
+        // 单 pane Tab 仍无 ring / 拖动手柄；但始终上报 frame、可显示外部 Tab 拖入分屏高亮。
+        Group {
+            if showFocusRing {
+                VStack(spacing: 0) {
+                    if settings.showPaneHeaders {
+                        PaneHeaderView(
+                            tab: tab,
+                            pane: pane,
+                            isFocused: isFocused,
+                            allowsMove: allowsMove,
+                            onMove: onMove,
+                            onMoveEnded: onMoveEnded,
+                            onSplit: splitFromMenu,
+                            onClosePane: onClosePane
+                        )
+                    }
+                    content
                 }
+                .overlay { focusRing }
+                .overlay(alignment: .top) {
+                    if allowsMove && !settings.showPaneHeaders { moveHandle }
+                }
+                .opacity(isMoveSource ? 0.55 : 1)
+            } else {
                 content
             }
-            .overlay { focusRing }
-            .overlay(alignment: .top) {
-                if allowsMove && !settings.showPaneHeaders { moveHandle }
-            }
-            .overlay { dropHighlight }
-            .opacity(isMoveSource ? 0.55 : 1)
-            .background(frameReporter)
-        } else {
-            content
         }
+        .overlay { dropHighlight }
+        .background(frameReporter)
     }
 
     /// Focuses this pane, then splits it — the context menu acts on the pane it
