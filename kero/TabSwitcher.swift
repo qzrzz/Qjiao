@@ -729,6 +729,24 @@ private struct TabSwitcherPanePreview: View {
                 .resizable()
                 .scaledToFit()
                 .padding(5)
+        case .hex:
+            let bytes = file.hexData.prefix(96)
+            let hex = bytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+            let ascii = bytes.map { FileTab.asciiPreviewCharacter(for: $0) }.joined()
+            VStack(alignment: .leading, spacing: 2) {
+                Text(hex)
+                Text(ascii)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 5.2, design: .monospaced))
+            .lineSpacing(0)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .topLeading
+            )
+            .padding(5)
         case .unavailable(let reason):
             VStack(spacing: 4) {
                 Image(systemName: "doc")

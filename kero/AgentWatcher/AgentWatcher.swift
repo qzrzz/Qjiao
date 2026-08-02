@@ -288,11 +288,13 @@ final class AgentWatcher: ObservableObject {
     private func publish(_ snap: AgentSnapshot, session: TerminalSession) {
         let previousStatus = states[snap.sessionID]?.status ?? lastSemanticStatus[snap.sessionID]
 
-        // working → done 且用户看不见：标记未读。
+        // working → done 且用户看不见：标记未读；无论是否可见都播放完成音效。
         if previousStatus == .working,
-           snap.status == .done,
-           !isSessionAttended(session) {
-            markUnread(sessionID: snap.sessionID)
+           snap.status == .done {
+            SoundEffects.shared.play(.agentCompleted)
+            if !isSessionAttended(session) {
+                markUnread(sessionID: snap.sessionID)
+            }
         }
 
         // 已看见：清除未读。

@@ -1061,6 +1061,12 @@ private struct FileTreeRow: View {
                     selectForContextAction()
                     openToSide(only.path)
                 }
+                Button {
+                    selectForContextAction()
+                    manager?.openFileInHexEditor(only.path)
+                } label: {
+                    Label(L10n.t("Open in Hex Editor"), systemImage: "number")
+                }
             }
         }
 

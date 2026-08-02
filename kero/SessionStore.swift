@@ -393,6 +393,7 @@ struct SessionSnapshot: Codable {
         enum PaneContentSnapshot: Codable {
             case session(workingDirectory: String)
             case file(path: String, editorState: EditorState?)
+            case fileHex(path: String, editorState: EditorState?)
             case browser(url: String?)
             case diff(repoRoot: String, path: String, staged: Bool, untracked: Bool, origPath: String?)
         }

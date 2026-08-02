@@ -21,6 +21,7 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     enum Content {
         case text
         case image(NSImage)
+        case hex
         case unavailable(String)
     }
 
@@ -33,6 +34,46 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     /// retyping the same characters) clears the dirty indicator rather than
     /// leaving it stuck on.
     private var savedText = ""
+    /// 十六进制编辑模式下的工作字节。Not published：HexEditorNSView 拥有显示。
+    var hexData = Data()
+    /// 十六进制编辑模式下最后一次写入磁盘的字节，`isDirty` 即两者之差。
+    private var savedHexData = Data()
+    /// 十六进制编辑器的光标偏移 / 选区摘要，供底部状态栏展示。
+    @Published private(set) var hexSelectionSummary: String?
+    /// 十六进制编辑器撤销栈：随 FileTab 生命周期（工具条替换与编辑器键入共用，
+    /// 跨挂载保留；目标始终是 FileTab 自身，无悬垂记录）。
+    let hexUndoManager: UndoManager = {
+        let manager = UndoManager()
+        manager.groupsByEvent = false
+        return manager
+    }()
+    /// 工具条 → 编辑器视图的命令回调（跳转 / 展示匹配）。
+    var onHexEditorCommand: ((HexEditorCommand) -> Void)?
+    /// Find 菜单 → 十六进制工具条的回调（⌘F / ⌘G / ⌘E 路由）。
+    var onHexFindAction: ((FindAction) -> Void)?
+
+    // MARK: 搜索 / 替换 / 跳转状态
+
+    /// 查找输入（文本或十六进制）。
+    @Published var hexFindQuery = ""
+    /// 查找输入模式。
+    @Published var hexFindMode: HexSearchMode = .text
+    /// 文本查找是否区分大小写（hex 模式天然大小写无关）。
+    @Published var hexFindIgnoreCase = false
+    /// 替换输入（文本或十六进制）。
+    @Published var hexReplaceQuery = ""
+    /// 替换输入模式。
+    @Published var hexReplaceMode: HexSearchMode = .text
+    /// 全部匹配区间（按位置升序），由后台搜索任务写回。
+    @Published var hexMatches: [Range<Int>] = []
+    /// 当前匹配在 `hexMatches` 中的下标。
+    @Published var hexCurrentMatchIndex = 0
+    /// 搜索输入解析失败时的提示。
+    @Published var hexSearchError: String?
+    /// 跳转输入（十进制或 0x 十六进制）。
+    @Published var hexJumpQuery = ""
+    /// 跳转模式（0 = 十进制，1 = 十六进制）。
+    @Published var hexJumpMode = 0
     /// Scroll position and cursor, written back by the editor as they
     /// change. Lives here (not in the view) so the state survives tab
     /// switches, and in the session snapshot so it survives relaunches. Not
@@ -65,18 +106,26 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     weak var editorView: NSView?
     /// 当前挂载编辑器的文本同步回调；使用弱引用捕获，避免文件与协调器互相持有。
     var onReloadEditorText: (() -> Void)?
+    /// 当前挂载十六进制编辑器的数据同步回调（外部变动静默重载后调用）。
+    var onReloadHexData: (() -> Void)?
     /// 当外部触发精确定位（如从搜索结果点击跳转）时的回调
     var onJumpToSelection: ((NSRange) -> Void)?
 
     private static let maxTextBytes = 5 << 20
+    /// 十六进制编辑器可打开的最大字节数（64 MiB），超过则提示无法打开。
+    static let maxHexBytes = 64 << 20
     private static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "heic", "webp", "jxl", "tiff", "bmp", "icns",
     ]
 
-    init(path: String) {
+    /// - Parameter hexEditor: 以十六进制编辑器模式打开（显式指定，如右键菜单）。
+    ///   为 false 时按内容自动选择：图片 → 预览；UTF-8 文本（≤ 5 MiB）→ 文本编辑器；
+    ///   其余二进制文件 / 超大文本文件（≤ 64 MiB）→ 十六进制编辑器。
+    init(path: String, hexEditor: Bool = false) {
         self.path = path
         let url = URL(fileURLWithPath: path)
-        if Self.imageExtensions.contains(url.pathExtension.lowercased()),
+        if !hexEditor,
+           Self.imageExtensions.contains(url.pathExtension.lowercased()),
            let data = try? Data(contentsOf: url),
            let image = NSImage(data: data) {
             content = .image(image)
@@ -92,19 +141,29 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
             text = ""
             return
         }
-        guard data.count <= Self.maxTextBytes else {
-            content = .unavailable("File is too large to open")
+        let isText = data.count <= Self.maxTextBytes
+            && String(data: data, encoding: .utf8) != nil
+        if !hexEditor, isText {
+            let string = String(data: data, encoding: .utf8) ?? ""
+            content = .text
+            text = string
+            savedText = string
+            lastDiskModificationDate = currentDiskModificationDate()
+            startFileWatcher()
+            setupAppFocusObservation()
+            return
+        }
+        guard data.count <= Self.maxHexBytes else {
+            content = .unavailable(
+                isText ? "File is too large to open" : "Binary file"
+            )
             text = ""
             return
         }
-        guard let string = String(data: data, encoding: .utf8) else {
-            content = .unavailable("Binary file")
-            text = ""
-            return
-        }
-        content = .text
-        text = string
-        savedText = string
+        content = .hex
+        text = ""
+        hexData = data
+        savedHexData = data
         lastDiskModificationDate = currentDiskModificationDate()
         startFileWatcher()
         setupAppFocusObservation()
@@ -133,9 +192,12 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     /// reverting to the saved content clears the dirty state.
     func refreshDirtyState() {
         let dirty: Bool
-        if case .text = content {
+        switch content {
+        case .text:
             dirty = text != savedText
-        } else {
+        case .hex:
+            dirty = hexData != savedHexData
+        default:
             dirty = false
         }
         if isDirty != dirty {
@@ -144,19 +206,327 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     }
 
     func save() {
-        guard case .text = content, isDirty else { return }
-        isInternalSaving = true
-        defer { isInternalSaving = false }
-        do {
-            try text.write(toFile: path, atomically: true, encoding: .utf8)
-            savedText = text
-            isDirty = false
-            hasExternalConflict = false
-            saveError = nil
-            lastDiskModificationDate = currentDiskModificationDate()
-        } catch {
-            saveError = error.localizedDescription
+        guard isDirty else { return }
+        switch content {
+        case .text:
+            isInternalSaving = true
+            defer { isInternalSaving = false }
+            do {
+                try text.write(toFile: path, atomically: true, encoding: .utf8)
+                savedText = text
+                isDirty = false
+                hasExternalConflict = false
+                saveError = nil
+                lastDiskModificationDate = currentDiskModificationDate()
+            } catch {
+                saveError = error.localizedDescription
+            }
+        case .hex:
+            isInternalSaving = true
+            defer { isInternalSaving = false }
+            do {
+                try hexData.write(to: URL(fileURLWithPath: path), options: .atomic)
+                savedHexData = hexData
+                isDirty = false
+                hasExternalConflict = false
+                saveError = nil
+                lastDiskModificationDate = currentDiskModificationDate()
+            } catch {
+                saveError = error.localizedDescription
+            }
+        default:
+            break
         }
+    }
+
+    // MARK: - 十六进制编辑
+
+    var isHexMode: Bool {
+        if case .hex = content { return true }
+        return false
+    }
+
+    /// 单字节的 ASCII 展示字符：可打印字符原样显示，其余用 `.` 占位。
+    /// 供十六进制编辑器与 Tab Switcher 预览共用。
+    static func asciiPreviewCharacter(for byte: UInt8) -> String {
+        (0x20...0x7E).contains(byte) ? String(UnicodeScalar(byte)) : "."
+    }
+
+    /// 修改单个字节并登记撤销（`undoManager` 为 nil 时仅修改，用于撤销回放）。
+    func setHexByte(at offset: Int, to value: UInt8, undoManager: UndoManager? = nil) {
+        guard offset >= 0, offset < hexData.count else { return }
+        let old = hexData[offset]
+        guard old != value else { return }
+        undoManager?.registerUndo(withTarget: self) { file in
+            file.setHexByte(at: offset, to: old, undoManager: undoManager)
+        }
+        hexData[offset] = value
+        refreshDirtyState()
+    }
+
+    /// 以 `data` 覆盖 `[offset, offset+count)` 区间（越界部分截断，不改变文件长度），
+    /// 并登记撤销。粘贴与剪切共用此入口。
+    func replaceHexBytes(
+        at offset: Int, with data: Data, undoManager: UndoManager? = nil
+    ) {
+        guard !data.isEmpty, offset >= 0, offset < hexData.count else { return }
+        let count = min(data.count, hexData.count - offset)
+        guard count > 0 else { return }
+        let range = offset..<(offset + count)
+        let old = hexData.subdata(in: range)
+        guard old != data.prefix(count) else { return }
+        undoManager?.registerUndo(withTarget: self) { file in
+            file.replaceHexBytes(at: offset, with: old, undoManager: undoManager)
+        }
+        hexData.replaceSubrange(range, with: data.prefix(count))
+        refreshDirtyState()
+    }
+
+    /// 十六进制编辑器光标 / 选区变化时写回 editorState（字节偏移语义）与状态栏摘要。
+    func updateHexSelection(offset: Int, length: Int) {
+        editorState.selectionLocation = offset
+        editorState.selectionLength = length
+        if length > 0 {
+            hexSelectionSummary = String(format: "0x%08X", offset)
+                + " · " + L10n.format("%d bytes", length)
+        } else {
+            hexSelectionSummary = String(format: "0x%08X", offset)
+        }
+    }
+
+    /// 以 `data` 替换 `[lowerBound, upperBound)` 区间；支持任意长度变化
+    /// （替换为更长 / 更短的字节序列、空替换即删除）。
+    func replaceHexRange(
+        _ range: Range<Int>, with data: Data, undoManager: UndoManager? = nil
+    ) {
+        guard range.lowerBound >= 0, range.upperBound <= hexData.count else { return }
+        let old = hexData.subdata(in: range)
+        guard old != data else { return }
+        undoManager?.registerUndo(withTarget: self) { file in
+            file.replaceHexRange(range, with: old, undoManager: undoManager)
+        }
+        hexData.replaceSubrange(range, with: data)
+        refreshDirtyState()
+        // 工具条替换可能不改变 dirty 状态，主动通知视图重建几何并重绘。
+        objectWillChange.send()
+    }
+
+    // MARK: - 十六进制搜索 / 替换 / 跳转
+
+    /// 当前匹配区间；无匹配或索引越界时为 nil。
+    var currentHexMatchRange: Range<Int>? {
+        hexMatches.indices.contains(hexCurrentMatchIndex)
+            ? hexMatches[hexCurrentMatchIndex] : nil
+    }
+
+    /// 查询或模式变化后由工具条触发：后台计算全部匹配并写回。
+    /// 旧任务的结果若已过期（用户继续输入）会被丢弃。
+    func performHexSearchAsync() async {
+        let query = hexFindQuery
+        let mode = hexFindMode
+        let ignoreCase = hexFindIgnoreCase
+        let data = hexData
+        guard !query.isEmpty else {
+            hexMatches = []
+            hexCurrentMatchIndex = 0
+            hexSearchError = nil
+            return
+        }
+        guard let pattern = HexSearchPattern.parse(query: query, mode: mode) else {
+            hexMatches = []
+            hexCurrentMatchIndex = 0
+            hexSearchError = L10n.t("Invalid hex pattern")
+            return
+        }
+        let matches = await Task.detached(priority: .userInitiated) {
+            HexSearchPattern.find(
+                pattern: pattern, in: data,
+                ignoreCase: mode == .text && ignoreCase
+            )
+        }.value
+        // 结果可能来自旧输入，丢弃
+        guard query == hexFindQuery, mode == hexFindMode else { return }
+        hexMatches = matches
+        hexSearchError = nil
+        if matches.isEmpty {
+            hexCurrentMatchIndex = 0
+        } else {
+            hexCurrentMatchIndex = min(hexCurrentMatchIndex, matches.count - 1)
+        }
+    }
+
+    /// 移动到下一个 / 上一个匹配（循环）并让编辑器展示。
+    func hexShowNextMatch(delta: Int) {
+        guard !hexMatches.isEmpty else { return }
+        let count = hexMatches.count
+        hexCurrentMatchIndex = ((hexCurrentMatchIndex + delta) % count + count) % count
+        onHexEditorCommand?(.showMatch(index: hexCurrentMatchIndex))
+    }
+
+    /// 替换当前匹配；替换后旧匹配失效并重新搜索。
+    func hexReplaceCurrentMatch() {
+        guard let range = currentHexMatchRange,
+              let pattern = HexSearchPattern.parse(
+                  query: hexReplaceQuery, mode: hexReplaceMode
+              )
+        else { NSSound.beep(); return }
+        // 替换内容不允许通配；text 模式恒为确定字节
+        let values = pattern.bytes.compactMap(\.value)
+        guard values.count == pattern.bytes.count, !values.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        replaceHexRange(range, with: Data(values), undoManager: hexUndoManager)
+        hexMatches = []
+        hexCurrentMatchIndex = 0
+        Task { await performHexSearchAsync() }
+    }
+
+    /// 从后往前替换全部匹配（一次撤销分组），确认后执行并重新搜索。
+    func hexReplaceAllMatches() {
+        guard !hexMatches.isEmpty,
+              let pattern = HexSearchPattern.parse(
+                  query: hexReplaceQuery, mode: hexReplaceMode
+              )
+        else { NSSound.beep(); return }
+        let values = pattern.bytes.compactMap(\.value)
+        guard values.count == pattern.bytes.count, !values.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        let count = hexMatches.count
+        let alert = NSAlert()
+        alert.messageText = L10n.format("Replace %d matches?", count)
+        alert.informativeText = L10n.t("This action cannot be undone.")
+        alert.addButton(withTitle: L10n.t("Replace All"))
+        alert.addButton(withTitle: L10n.t("Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        hexUndoManager.beginUndoGrouping()
+        for range in hexMatches.reversed() {
+            replaceHexRange(range, with: Data(values), undoManager: hexUndoManager)
+        }
+        hexUndoManager.endUndoGrouping()
+        hexMatches = []
+        hexCurrentMatchIndex = 0
+        Task { await performHexSearchAsync() }
+    }
+
+    /// 「跳转到偏移」对话框中十六进制单选/复选框 (`NSButton` checkbox) 的事件响应 Target。
+    private final class HexJumpCheckboxTarget: NSObject {
+        var onStateChanged: ((Bool) -> Void)?
+
+        @objc func checkboxClicked(_ sender: NSButton) {
+            onStateChanged?(sender.state == .on)
+        }
+    }
+
+    /// 弹出「跳转到偏移」对话框：输入框 + 1 个「十六进制」单选框，
+    /// 默认十进制，勾选为十六进制，确认后让编辑器滚动到目标字节。输入记忆在 `hexJumpQuery` 和 `hexJumpMode`。
+    func presentHexJumpDialog() {
+        guard !hexData.isEmpty else { NSSound.beep(); return }
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L10n.t("Jump to Offset")
+        alert.informativeText = L10n.t("Enter an offset in decimal or hexadecimal.")
+        alert.addButton(withTitle: L10n.t("Jump"))
+        alert.addButton(withTitle: L10n.t("Cancel"))
+
+        // 使用 1 个 AppKit 原生单选/复选框（Hexadecimal Checkbox），界面极简清爽，并带显式 Auto Layout 约束
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 64))
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        container.heightAnchor.constraint(equalToConstant: 64).isActive = true
+
+        let initialMode = hexJumpMode
+        let isHexModeInitial = initialMode == 1
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 34, width: 280, height: 26))
+        input.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        input.placeholderString = isHexModeInitial
+            ? L10n.t("Offset (hex)")
+            : L10n.t("Offset (decimal)")
+        input.stringValue = hexJumpQuery
+        input.isBordered = true
+        input.bezelStyle = .roundedBezel
+
+        let checkboxTarget = HexJumpCheckboxTarget()
+
+        let hexCheckbox = NSButton(
+            checkboxWithTitle: L10n.t("Hexadecimal"),
+            target: checkboxTarget,
+            action: #selector(HexJumpCheckboxTarget.checkboxClicked(_:))
+        )
+        hexCheckbox.frame = NSRect(x: 2, y: 4, width: 200, height: 22)
+        hexCheckbox.state = isHexModeInitial ? .on : .off
+
+        checkboxTarget.onStateChanged = { isHex in
+            input.placeholderString = isHex
+                ? L10n.t("Offset (hex)")
+                : L10n.t("Offset (decimal)")
+        }
+
+        container.addSubview(input)
+        container.addSubview(hexCheckbox)
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = input
+
+        // 模态运行后聚焦输入框；若已有输入则全选，若为空则仅聚焦（防 AppKit 误将 placeholder 错选为高亮文本）
+        DispatchQueue.main.async {
+            alert.window.makeFirstResponder(input)
+            if !input.stringValue.isEmpty {
+                input.selectText(nil)
+            }
+        }
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let text = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isHexMode = hexCheckbox.state == .on
+        let selectedMode = isHexMode ? 1 : 0
+        let offset: Int?
+        if isHexMode {
+            // 十六进制：容忍 0x 前缀
+            let cleaned = text.lowercased().hasPrefix("0x")
+                ? String(text.dropFirst(2)) : text
+            offset = Int(cleaned, radix: 16)
+        } else {
+            offset = Int(text)
+        }
+        guard let offset, offset >= 0 else { NSSound.beep(); return }
+        hexJumpMode = selectedMode
+        hexJumpQuery = text
+        onHexEditorCommand?(.jump(to: min(offset, hexData.count - 1)))
+    }
+
+    /// 当前字节 offset 命中的匹配下标（二分）；无匹配返回 nil。
+    func hexMatchIndex(containing offset: Int) -> Int? {
+        var low = 0
+        var high = hexMatches.count - 1
+        while low <= high {
+            let mid = (low + high) / 2
+            let range = hexMatches[mid]
+            if offset < range.lowerBound {
+                high = mid - 1
+            } else if offset >= range.upperBound {
+                low = mid + 1
+            } else {
+                return mid
+            }
+        }
+        return nil
+    }
+
+    /// ⌘E：把当前选中字节作为十六进制查找内容。
+    func useHexSelectionForFind() {
+        let location = editorState.selectionLocation ?? 0
+        let length = editorState.selectionLength ?? 0
+        guard length > 0, location < hexData.count else { return }
+        let bytes = hexData.subdata(
+            in: location..<min(location + length, hexData.count)
+        )
+        hexFindQuery = bytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+        hexFindMode = .hex
     }
 
     /// 将编辑器选择范围转换为状态栏使用的英文摘要。
@@ -172,20 +542,45 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         selectionSummary = "\(lines) \(lines == 1 ? "line" : "lines") \(selection.count) chars"
     }
 
-    /// 当前编辑器文本的 UTF-8 文件大小；未保存修改也能准确反映在状态栏。
+    /// 当前编辑器内容的文件大小；未保存修改也能准确反映在状态栏。
     var editorFileSize: String {
-        ByteCountFormatter.string(fromByteCount: Int64(text.utf8.count), countStyle: .file)
+        let count: Int64 = switch content {
+        case .text: Int64(text.utf8.count)
+        case .hex: Int64(hexData.count)
+        default: 0
+        }
+        return ByteCountFormatter.string(fromByteCount: count, countStyle: .file)
     }
 
     /// 文件扩展名作为轻量语法格式提示；无扩展名时明确显示 Plain Text。
+    /// 十六进制编辑器固定显示 Hex。
     var languageLabel: String {
+        if isHexMode { return "Hex" }
         let ext = URL(fileURLWithPath: path).pathExtension
         return ext.isEmpty ? "Plain Text" : ext.uppercased()
     }
 
-    /// 格式化工具改写磁盘文件后重新读取内容并清除未保存状态。
-    /// 光标/选区保存在 `editorState`，由挂载的编辑器在同步文本时恢复。
+    /// 重新读取磁盘内容并清除未保存状态。
+    /// 光标/选区保存在 `editorState`，由挂载的编辑器在同步时恢复。
     func reloadFromDisk() {
+        if case .hex = content {
+            guard let data = FileManager.default.contents(atPath: path),
+                  data.count <= Self.maxHexBytes
+            else { return }
+            hexData = data
+            savedHexData = data
+            isDirty = false
+            hasExternalConflict = false
+            saveError = nil
+            lastDiskModificationDate = currentDiskModificationDate()
+            hexMatches = []
+            hexCurrentMatchIndex = 0
+            onReloadHexData?()
+            if !hexFindQuery.isEmpty {
+                Task { await performHexSearchAsync() }
+            }
+            return
+        }
         guard let data = FileManager.default.contents(atPath: path),
               let formatted = String(data: data, encoding: .utf8)
         else { return }
@@ -283,6 +678,10 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
             reloadImageFromDiskIfChanged()
             return
         }
+        if case .hex = content {
+            checkHexDiskChanges()
+            return
+        }
         guard case .text = content, !isInternalSaving else { return }
         guard let diskDate = currentDiskModificationDate() else { return }
 
@@ -329,11 +728,52 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         lastDiskModificationDate = currentDiskModificationDate()
         content = .image(image)
     }
+
+    /// 十六进制编辑模式的磁盘变动检查：与文本模式同策略——本地无改动时静默重载，
+    /// 有未保存修改时提示冲突条。
+    private func checkHexDiskChanges() {
+        guard !isInternalSaving else { return }
+        guard let diskDate = currentDiskModificationDate() else { return }
+        guard let lastDate = lastDiskModificationDate else {
+            lastDiskModificationDate = diskDate
+            return
+        }
+        guard diskDate > lastDate else { return }
+        guard let data = FileManager.default.contents(atPath: path) else { return }
+
+        // 内容与基线相同（例如仅修改了时间戳），无需重载
+        if data == savedHexData {
+            lastDiskModificationDate = diskDate
+            return
+        }
+
+        lastDiskModificationDate = diskDate
+        if !isDirty {
+            // 本地无改动：静默重载
+            hexData = data
+            savedHexData = data
+            isDirty = false
+            saveError = nil
+            hasExternalConflict = false
+            // 匹配位置已失效，重新搜索
+            hexMatches = []
+            hexCurrentMatchIndex = 0
+            onReloadHexData?()
+            if !hexFindQuery.isEmpty {
+                Task { await performHexSearchAsync() }
+            }
+        } else {
+            // 本地有改动：显示冲突提示条
+            hasExternalConflict = true
+        }
+    }
 }
 
 /// Content of a file tab: an STTextView editor (line numbers, system find
 /// bar), an image preview, or a placeholder for anything binary or
 /// oversized.
+
+
 struct FileViewerView: View {
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject var file: FileTab
@@ -373,10 +813,10 @@ struct FileViewerView: View {
             } else {
                 VStack(spacing: 0) {
                     if file.hasExternalConflict {
-                        externalConflictBar
+                        FileExternalConflictBar(file: file)
                     }
                     if let error = file.saveError {
-                        saveErrorBar(error)
+                        FileSaveErrorBar(message: error)
                     }
                     SourceTextEditor(
                         file: file,
@@ -402,6 +842,35 @@ struct FileViewerView: View {
                 }
             }
 
+        case .hex:
+            VStack(spacing: 0) {
+                if file.hasExternalConflict {
+                    FileExternalConflictBar(file: file)
+                }
+                if let error = file.saveError {
+                    FileSaveErrorBar(message: error)
+                }
+                HexEditorToolbar(file: file)
+                HexEditorView(
+                    file: file,
+                    palette: .theme(
+                        themeName: colorScheme == .dark
+                            ? settings.editorThemeDark
+                            : settings.editorThemeLight,
+                        dark: colorScheme == .dark
+                    ),
+                    isFocused: isFocused,
+                    onFocused: onFocused,
+                    onSplit: onSplit,
+                    onNewBrowserTab: onNewBrowserTab,
+                    onNewBrowserPane: onNewBrowserPane
+                )
+                if settings.showEditorStatusBar {
+                    HexEditorStatusBar(file: file)
+                        .zIndex(100)
+                }
+            }
+
         case .image(let image):
             ImageViewerView(
                 file: file,
@@ -423,8 +892,14 @@ struct FileViewerView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
+}
 
-    private var externalConflictBar: some View {
+/// 外部修改冲突提示条：本地有未保存修改且磁盘文件被外部改动时显示，
+/// 供文本编辑器 / SVG 视图与十六进制编辑器共用。
+struct FileExternalConflictBar: View {
+    @ObservedObject var file: FileTab
+
+    var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 11))
@@ -452,8 +927,13 @@ struct FileViewerView: View {
         .padding(.vertical, 5)
         .background(Color(red: 0.90, green: 0.65, blue: 0.15).opacity(0.12))
     }
+}
 
-    private func saveErrorBar(_ message: String) -> some View {
+/// 保存失败提示条。
+struct FileSaveErrorBar: View {
+    let message: String
+
+    var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 10))
@@ -3057,10 +3537,10 @@ struct SVGFileViewerView: View {
     var body: some View {
         VStack(spacing: 0) {
             if file.hasExternalConflict {
-                externalConflictBar
+                FileExternalConflictBar(file: file)
             }
             if let error = file.saveError {
-                saveErrorBar(error)
+                FileSaveErrorBar(message: error)
             }
 
             GeometryReader { geometry in
@@ -3110,50 +3590,6 @@ struct SVGFileViewerView: View {
                     .zIndex(100)
             }
         }
-    }
-
-    private var externalConflictBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(Color(red: 0.90, green: 0.65, blue: 0.15))
-
-            Text(L10n.t("File modified externally"))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.primary)
-
-            Spacer(minLength: 0)
-
-            Button(L10n.t("Reload")) {
-                file.resolveConflictWithReload()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.mini)
-
-            Button(L10n.t("Keep Local")) {
-                file.dismissExternalConflict()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color(red: 0.90, green: 0.65, blue: 0.15).opacity(0.12))
-    }
-
-    private func saveErrorBar(_ message: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 10))
-            Text(L10n.format("Could not save: %@", message))
-                .font(.system(size: 11))
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(Color(red: 0.82, green: 0.60, blue: 0.13))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(Color.primary.opacity(0.04))
     }
 }
 

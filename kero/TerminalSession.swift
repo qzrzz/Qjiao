@@ -1092,6 +1092,10 @@ extension TerminalSession: TerminalSurfaceCommandFinishedDelegate {
         commandCompletionSequence &+= 1
         if let exitCode {
             taskHasError = (exitCode != 0)
+            // 命令结束 / 失败音效（可在 Settings → General → Sound Effects 关闭）。
+            SoundEffects.shared.play(
+                exitCode == 0 ? .commandSucceeded : .commandFailed
+            )
         }
     }
 }

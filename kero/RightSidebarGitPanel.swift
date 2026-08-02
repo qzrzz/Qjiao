@@ -1189,7 +1189,7 @@ struct GitPanel: View {
                     .lineLimit(5)
                     .textSelection(.enabled)
             }
-            Button(L10n.t("Retry")) { model.refresh() }
+            Button(L10n.t("Retry")) { model.retryRecovery() }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(model.isBusy || model.isResolvingInitialStatus)

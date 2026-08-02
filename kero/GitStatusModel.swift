@@ -239,6 +239,27 @@ final class GitStatusModel: nonisolated ObservableObject {
         }
     }
 
+    /// Retry 的「从头刷新」：先修复失效的 Git fsmonitor daemon（停止 →
+    /// 清理残留 IPC socket → 重新拉起，见 `GitScanner.recoverFilesystemMonitor`），
+    /// 再全量重扫仓库状态。用于「Bad file descriptor」这类 daemon / IPC
+    /// 失效错误——仅重新扫描无法自愈。修复期间置 `isBusy` 禁用 UI，
+    /// 完成后恢复并走正常 `refresh()` 流程。
+    func retryRecovery() {
+        let root = rootPath
+        let generation = contextGeneration
+        guard !root.isEmpty, !isRefreshing, !isBusy else { return }
+        isBusy = true
+        Task { [weak self] in
+            await Task.detached(priority: .utility) {
+                GitScanner.recoverFilesystemMonitor(in: root)
+            }.value
+            guard let self else { return }
+            self.isBusy = false
+            guard self.contextGeneration == generation, self.rootPath == root else { return }
+            self.refresh()
+        }
+    }
+
     func dismissOperation() {
         guard operation?.isRunning != true else { return }
         operation = nil

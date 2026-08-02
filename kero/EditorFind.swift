@@ -21,6 +21,11 @@ extension FileTab {
     }
 
     func performFindAction(_ action: FindAction) {
+        // 十六进制编辑器：Find 菜单路由到工具条（聚焦输入框 / 切换匹配 / 选区搜索）。
+        if isHexMode {
+            onHexFindAction?(action)
+            return
+        }
         guard let textView else { return }
         let finderAction: NSTextFinder.Action =
             switch action {
