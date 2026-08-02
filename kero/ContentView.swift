@@ -1572,6 +1572,9 @@ private struct SessionTabLabel: View {
             let appIcon = session.foregroundAppIcon
             let isAgentWorking = agentWatcher.snapshot(for: session.id)?.status == .working
             let sessionsForUnread = tabSessions.isEmpty ? [session] : tabSessions
+            let isAgentBlocked = sessionsForUnread.contains {
+                agentWatcher.snapshot(for: $0.id)?.status == .blocked
+            }
             let isAgentUnread = sessionsForUnread.contains {
                 agentWatcher.isUnread(sessionID: $0.id)
             }
@@ -1585,6 +1588,7 @@ private struct SessionTabLabel: View {
                 taskHasError: session.taskHasError,
                 isTerminalRunning: showsCommandSpinner,
                 isAgentWorking: isAgentWorking,
+                isAgentBlocked: isAgentBlocked,
                 isAgentUnread: isAgentUnread,
                 terminalAppIcon: appIcon,
                 minWidth: minWidth,
@@ -1736,6 +1740,8 @@ struct TaskStatusOverlayView: View {
 /// 否则 SwiftUI 会直接卸载子树，渐隐无法完成。
 struct AgentWorkingStatusDot: View {
     var isActive: Bool = true
+    var dotOffset: CGPoint = CGPoint(x: 2, y: 2)
+    var size: CGFloat = 5
 
     private static let green = Color(red: 0.25, green: 0.73, blue: 0.31)
     private static let pulseDuration: Double = 1.1
@@ -1761,10 +1767,10 @@ struct AgentWorkingStatusDot: View {
     var body: some View {
         Circle()
             .fill(Self.green)
-            .frame(width: 5, height: 5)
+            .frame(width: size, height: size)
             .opacity(drawnOpacity)
             .scaleEffect(drawnScale)
-            .offset(x: 2, y: 2)
+            .offset(x: dotOffset.x, y: dotOffset.y)
             .allowsHitTesting(false)
             .accessibilityLabel(L10n.t("Working"))
             .accessibilityHidden(presence < 0.08)
@@ -1824,6 +1830,8 @@ private struct TabItemChrome: View {
     var isTerminalRunning = false
     /// Agent 正在工作：图标右下角呼吸绿点（优先于 Task 状态角标）。
     var isAgentWorking = false
+    /// Agent 阻塞/等待介入：橙色小点（优先于未读小蓝点）。
+    var isAgentBlocked = false
     /// Agent 完成但未读：小蓝点（working 绿点优先；否则显示未读）。
     var isAgentUnread = false
     /// 终端前台进程匹配到的应用图标；有值时优先于转圈动画。
@@ -1915,6 +1923,13 @@ private struct TabItemChrome: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                    } else if isAgentBlocked && !isAgentWorking {
+                        // Agent 阻塞/等待介入：橙色小点（与 dirty / unread 同位置）。
+                        Circle()
+                            .fill(Color(red: 0.96, green: 0.62, blue: 0.14))
+                            .frame(width: 5, height: 5)
+                            .frame(width: 14, height: 14)
+                            .accessibilityLabel(L10n.t("Blocked"))
                     } else if isAgentUnread && !isAgentWorking {
                         // Agent 未读：小蓝点（与 dirty 同位置）。
                         Circle()
@@ -2000,7 +2015,14 @@ private struct TabItemChrome: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 if !isAgentWorking {
-                    if isAgentUnread && iconOnly {
+                    if isAgentBlocked {
+                        // Agent Blocked（等待介入/确认）：图标右下角橙色点
+                        Circle()
+                            .fill(Color(red: 0.96, green: 0.62, blue: 0.14))
+                            .frame(width: 5, height: 5)
+                            .offset(x: 2, y: 2)
+                            .accessibilityLabel(L10n.t("Blocked"))
+                    } else if isAgentUnread && iconOnly {
                         // 仅图标模式：未读蓝点挂在图标右下（无右侧标题区）。
                         Circle()
                             .fill(Color(nsColor: .systemBlue))
