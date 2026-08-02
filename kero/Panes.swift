@@ -69,8 +69,19 @@ extension PaneContent {
 
 /// Which side of a target pane a dragged pane is dropped on, deciding where it
 /// lands relative to that pane.
-enum PaneDropEdge {
+enum PaneDropEdge: Equatable {
     case left, right, top, bottom
+
+    /// 四象限分割：指针落在目标矩形哪条边最近（与终端内 Pane 拖拽分屏同款，VS Code / Ghostty 方案）。
+    static func nearest(at location: CGPoint, in frame: CGRect) -> PaneDropEdge {
+        let dx = (location.x - frame.midX) / max(frame.width, 1)
+        let dy = (location.y - frame.midY) / max(frame.height, 1)
+        if abs(dx) > abs(dy) {
+            return dx < 0 ? .left : .right
+        } else {
+            return dy < 0 ? .top : .bottom
+        }
+    }
 }
 
 /// The direction in which a split lays out its two children.
@@ -123,6 +134,11 @@ indirect enum PaneNode {
 
     /// Replaces `target` with a split containing it and `pane`.
     func inserting(_ pane: Pane, toward edge: PaneDropEdge, beside target: UUID) -> PaneNode {
+        inserting(.pane(pane), toward: edge, beside: target)
+    }
+
+    /// 在 `target` 旁插入一整棵布局树（单 pane 或已分屏的子树），用于 Tab 拖入分屏。
+    func inserting(_ node: PaneNode, toward edge: PaneDropEdge, beside target: UUID) -> PaneNode {
         switch self {
         case .pane(let existing):
             guard existing.id == target else { return self }
@@ -132,14 +148,14 @@ indirect enum PaneNode {
             return .split(PaneSplit(
                 axis: axis,
                 fraction: 0.5,
-                first: .pane(insertedFirst ? pane : existing),
-                second: .pane(insertedFirst ? existing : pane)
+                first: insertedFirst ? node : .pane(existing),
+                second: insertedFirst ? .pane(existing) : node
             ))
         case .split(var split):
             if split.first.contains(target) {
-                split.first = split.first.inserting(pane, toward: edge, beside: target)
+                split.first = split.first.inserting(node, toward: edge, beside: target)
             } else if split.second.contains(target) {
-                split.second = split.second.inserting(pane, toward: edge, beside: target)
+                split.second = split.second.inserting(node, toward: edge, beside: target)
             }
             return .split(split)
         }
@@ -554,6 +570,23 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
               remaining.contains(target) else { return }
         layout = remaining.inserting(moved, toward: edge, beside: target)
         focusedPaneID = moved.id
+    }
+
+    /// 把另一棵布局树嵌到 `target` 的指定边（Tab 拖入分屏）。`focusing` 为并入后的焦点 pane。
+    func absorb(
+        layout incoming: PaneNode,
+        toward edge: PaneDropEdge,
+        beside target: UUID,
+        focusing: UUID
+    ) {
+        unzoom()
+        guard layout.contains(target) else { return }
+        layout = layout.inserting(incoming, toward: edge, beside: target)
+        if layout.contains(focusing) {
+            focusedPaneID = focusing
+        } else if let first = incoming.allPanes.first {
+            focusedPaneID = first.id
+        }
     }
 
     /// Removes the pane with `id`, collapsing the empty split branch and moving
