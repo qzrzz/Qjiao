@@ -590,7 +590,7 @@ struct GitPanel: View {
         GitChromeMenuButton(
             systemImage: "chevron.down",
             help: L10n.t("Commit Options"),
-            side: 24,
+            side: 28,
             cornerRadius: 6,
             idleBackgroundOpacity: 0.06
         ) {
@@ -1266,7 +1266,7 @@ private struct GitPrimaryActionButton: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
+            .frame(height: 28)
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color(nsColor: Theme.cursor).opacity(fillOpacity))
@@ -1362,7 +1362,7 @@ private struct GitChromeIconButton: View {
 private struct GitChromeMenuButton<Content: View>: View {
     let systemImage: String
     let help: String
-    var side: CGFloat = 24
+    var side: CGFloat = 28
     var cornerRadius: CGFloat = 6
     var idleBackgroundOpacity: Double = 0.06
     var tooltipPosition: MacTooltipPosition = .top
