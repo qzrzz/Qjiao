@@ -610,9 +610,147 @@ enum TerminalProcessIdentity {
         "login", "script", "env",
     ]
 
+    /// 夹在终端与 shell 之间的 PTY 代理（如 ghost-complete）。
+    /// 真实登录 shell 是它们的子进程；libghostty 的 `tcgetpgrp` 往往是
+    /// **进程组 ID**（常等于 launch shim），**不是** proxy 的 PID，不能拿来
+    /// 直接 `isPtyProxyProcess(foregroundPid)`。
+    private static let ptyProxyNames: Set<String> = [
+        "ghost-complete",
+    ]
+
+    /// `libproc.h`：`proc_listpids(PROC_PPID_ONLY, ppid, …)` 按父 PID 枚举子进程。
+    /// 注意：`proc_listchildpids` 在部分 macOS 上对 NULL 缓冲区的 size 查询不可靠，
+    /// 本项目刻意不用它（与 SidebarProbe 的注释一致）。
+    private static let procPPIDOnly: UInt32 = 6
+
     private static let scriptExtensions = [
         ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".rb", ".mjs",
     ]
+
+    /// 进程是否为已知 PTY 代理二进制。
+    nonisolated static func isPtyProxyProcess(_ pid: pid_t) -> Bool {
+        guard let base = executableBaseName(pid: pid)?.lowercased() else { return false }
+        let name = base.hasPrefix("-") ? String(base.dropFirst()) : base
+        return ptyProxyNames.contains(name)
+    }
+
+    /// 登录 shell 是否嵌在 PTY 代理下（看祖先，不看 tcgetpgrp）。
+    nonisolated static func isNestedUnderPtyProxy(shellPid: pid_t) -> Bool {
+        var current = shellPid
+        for _ in 0..<8 {
+            guard let parent = parentPid(of: current), parent > 1 else { return false }
+            if isPtyProxyProcess(parent) { return true }
+            current = parent
+        }
+        return false
+    }
+
+    /// 将启动 shim / proxy 的 PID 解析为真实登录 shell。
+    /// proxy 尚未拉起子 shell 时返回 `nil`（调用方应稍后重试，勿缓存 proxy）。
+    nonisolated static func resolveLoginShellPid(from pid: pid_t) -> pid_t? {
+        guard pid > 1 else { return nil }
+        guard isPtyProxyProcess(pid) else { return pid }
+        let children = directChildPids(of: pid)
+        for child in children {
+            guard let base = executableBaseName(pid: child)?.lowercased() else { continue }
+            let name = base.hasPrefix("-") ? String(base.dropFirst()) : base
+            if shellNames.contains(name) { return child }
+        }
+        // 单子进程兜底（部分代理先起 login/wrapper）
+        if children.count == 1 { return resolveLoginShellPid(from: children[0]) }
+        return nil
+    }
+
+    /// 登录 shell 下是否有非 shell 子孙（PTY 代理场景下替代 `tcgetpgrp` 判断前台作业）。
+    nonisolated static func hasNonShellDescendants(of rootPid: pid_t) -> Bool {
+        firstNonShellDescendant(of: rootPid) != nil
+    }
+
+    /// BFS 找到第一个非 shell / 非 proxy 的子孙 PID（用于代理场景下的 CWD / 作业探测）。
+    nonisolated static func firstNonShellDescendant(of rootPid: pid_t) -> pid_t? {
+        var queue = directChildPids(of: rootPid)
+        var seen = Set<pid_t>([rootPid])
+        var index = 0
+        while index < queue.count {
+            let pid = queue[index]
+            index += 1
+            guard seen.insert(pid).inserted else { continue }
+            if let base = executableBaseName(pid: pid)?.lowercased() {
+                let name = base.hasPrefix("-") ? String(base.dropFirst()) : base
+                if !shellNames.contains(name), !ptyProxyNames.contains(name) {
+                    return pid
+                }
+            }
+            queue.append(contentsOf: directChildPids(of: pid))
+        }
+        return nil
+    }
+
+    /// PTY 代理下无法依赖 Ghostty 的前台 pgid；改为枚举 shell 子孙的可执行名。
+    nonisolated static func descendantExecutableNames(of rootPid: pid_t) -> [String] {
+        var ordered: [String] = []
+        var seenNames = Set<String>()
+        var seenPids = Set<pid_t>([rootPid])
+        var queue = directChildPids(of: rootPid)
+        var index = 0
+
+        func appendName(_ raw: String) {
+            let key = raw.lowercased()
+            let normalized = key.hasPrefix("-") ? String(key.dropFirst()) : key
+            if normalized.isEmpty || shellNames.contains(normalized) || ptyProxyNames.contains(normalized) {
+                return
+            }
+            if seenNames.insert(normalized).inserted {
+                ordered.append(raw)
+            }
+        }
+
+        while index < queue.count {
+            let pid = queue[index]
+            index += 1
+            guard seenPids.insert(pid).inserted else { continue }
+            for name in identityCandidates(pid: pid) {
+                appendName(name)
+            }
+            queue.append(contentsOf: directChildPids(of: pid))
+        }
+        return ordered
+    }
+
+    /// `proc_pidinfo(PROC_PIDT_SHORTBSDINFO)` 取父 PID。
+    nonisolated private static func parentPid(of pid: pid_t) -> pid_t? {
+        guard pid > 1 else { return nil }
+        var info = proc_bsdshortinfo()
+        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+        let got = proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, size)
+        guard got == size else { return nil }
+        let ppid = pid_t(info.pbsi_ppid)
+        return ppid > 1 ? ppid : nil
+    }
+
+    /// 按父 PID 枚举直接子进程。使用 `proc_listpids(PROC_PPID_ONLY)` + 固定缓冲，
+    /// 避免 `proc_listchildpids(NULL)` 在部分系统上返回错误 size。
+    nonisolated private static func directChildPids(of pid: pid_t) -> [pid_t] {
+        guard pid > 1 else { return [] }
+        var capacity = 64
+        for _ in 0..<5 {
+            var buffer = [pid_t](repeating: 0, count: capacity)
+            let byteSize = Int32(buffer.count * MemoryLayout<pid_t>.size)
+            let written = buffer.withUnsafeMutableBytes { raw -> Int32 in
+                guard let base = raw.baseAddress else { return 0 }
+                return proc_listpids(procPPIDOnly, UInt32(bitPattern: pid), base, byteSize)
+            }
+            guard written > 0 else { return [] }
+            let count = Int(written) / MemoryLayout<pid_t>.size
+            // 缓冲可能不够：放大重试
+            if count >= capacity - 1 {
+                capacity *= 2
+                continue
+            }
+            return buffer.prefix(count).filter { $0 > 1 }
+        }
+        return []
+    }
 
     /// 读取进程可执行路径的 basename；失败时回退 `proc_name`。
     nonisolated static func executableBaseName(pid: pid_t) -> String? {

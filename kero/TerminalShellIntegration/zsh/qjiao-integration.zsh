@@ -1,9 +1,18 @@
 # Semantic-prompt markers and idle title integration for Qjiao's embedded Ghostty terminal.
 # `cl=line` and the `B` input-area marker are required for click-to-move.
+#
+# Compatible with PTY proxies such as ghost-complete: the outer process on
+# libghostty's PTY may be the proxy, while this file runs in the *inner* shell.
+# Rewrite shell.pid to this shell's $$ so the host tracks the real login shell.
 if [[ -o interactive && -z "${_qjiao_semantic_prompt_loaded-}" ]]; then
     builtin typeset -gi _qjiao_semantic_prompt_loaded=1
     builtin typeset -gi _qjiao_command_active=0
     builtin typeset -gi _qjiao_prompt_ready_emitted=0
+
+    # 内层真实 shell PID（ghost-complete 等 proxy 下 shim 写入的是 proxy 的 pid）。
+    if [[ -n "${QJIAO_SHELL_PID_FILE-}" ]]; then
+        builtin print -r -- "$$" >| "$QJIAO_SHELL_PID_FILE" 2>/dev/null
+    fi
 
     _qjiao_get_idle_title_pattern() {
         builtin local config_file="${QJIAO_CONFIG_DIR:-$HOME/.config/qjiao}/idle_title"
