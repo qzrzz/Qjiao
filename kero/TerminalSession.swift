@@ -141,7 +141,8 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             envVars: Self.surfaceEnvironment(
                 shellPath: shellPath,
                 zshIntegrationDirectoryURL: zshIntegrationDirectoryURL,
-                pendingCommandFile: pendingCommandFileURL
+                pendingCommandFile: pendingCommandFileURL,
+                shellPidFile: shellPidFileURL
             )
         )
         terminalView.controller = controller
@@ -287,7 +288,15 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// 终端前台作业的工作目录（当该作业非 shell 本身时）。
     /// Coding Agent (如 Claude Code) 切换到其自身的 worktree 时会在进程内执行 chdir，
     /// 而 shell 并没有移动，因此该属性可获取前台作业真实的 CWD。
+    /// PTY 代理（ghost-complete）下 Ghostty 的 tcgetpgrp 不可用，改为取 shell 子孙。
     var foregroundDirectoryPath: String? {
+        guard let shellPid else { return nil }
+        if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
+            guard let job = TerminalProcessIdentity.firstNonShellDescendant(of: shellPid) else {
+                return nil
+            }
+            return Self.processWorkingDirectory(pid: job)
+        }
         guard let foreground = terminalView.foregroundPid, foreground > 0,
               foreground != shellPid
         else { return nil }
@@ -415,8 +424,14 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         guard AppSettings.shared.restoreTerminalHistory else { return nil }
         guard captureLive, isInitialized else { return lastHistorySnapshot }
 
-        let rootShellIsForeground = shellPid != nil
-            && terminalView.foregroundPid == shellPid
+        // 空闲提示符：无 PTY 代理时比较 tcgetpgrp；代理下改用「无非 shell 子孙」。
+        let rootShellIsForeground: Bool = {
+            guard let shellPid else { return false }
+            if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
+                return !TerminalProcessIdentity.hasNonShellDescendants(of: shellPid)
+            }
+            return terminalView.foregroundPid == shellPid
+        }()
         if !rootShellIsForeground,
            !TerminalHistorySerializer.hasPrimaryScrollback(terminalView) {
             // A primary screen with no rows above the viewport and an
@@ -443,24 +458,42 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// PID of the root login shell. The launch shim records its own PID before
     /// `exec`, so this remains stable while Ghostty's foreground PID moves to
     /// child jobs and back.
+    ///
+    /// 当用户安装了 ghost-complete 等 PTY 代理时，shim 的 PID 会先变成 proxy，
+    /// 真实 zsh 是其子进程。集成脚本会把 `shell.pid` 回写为内层 shell；在回写
+    /// 前这里也会从 proxy 解析到登录 shell，避免侧栏 / Agent 一直盯着 proxy。
     var shellPid: pid_t? {
-        if let cachedShellPid, cachedShellPid > 0 { return cachedShellPid }
+        if let cachedShellPid, cachedShellPid > 0,
+           !TerminalProcessIdentity.isPtyProxyProcess(cachedShellPid) {
+            return cachedShellPid
+        }
         guard !hasExited, let shellPidFileURL,
               let text = try? String(contentsOf: shellPidFileURL, encoding: .utf8),
               let value = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
               value > 0
         else { return nil }
-        cachedShellPid = value
-        return value
+        guard let resolved = TerminalProcessIdentity.resolveLoginShellPid(from: value) else {
+            // proxy 尚无子 shell：勿缓存，下次再读。
+            return nil
+        }
+        cachedShellPid = resolved
+        return resolved
     }
 
     /// Whether a child process currently owns this terminal's foreground
     /// process group. An idle prompt keeps the login shell in the foreground.
+    ///
+    /// ghost-complete 等 PTY 代理下：libghostty 的 `tcgetpgrp` 是**进程组 ID**，
+    /// 通常等于 launch shim，**不是** proxy PID，也不能代表内层作业。
+    /// 用 shell 祖先是否含 proxy 判断，再用 shell 子孙探测是否有前台作业。
     var isForegroundCommandRunning: Bool {
-        guard isInitialized, !hasExited,
-              let shellPid,
-              let foregroundPid = _terminalView?.foregroundPid
-        else { return false }
+        guard isInitialized, !hasExited, let shellPid else { return false }
+
+        if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
+            return TerminalProcessIdentity.hasNonShellDescendants(of: shellPid)
+        }
+
+        guard let foregroundPid = _terminalView?.foregroundPid else { return false }
         // `foregroundPid` is the terminal's foreground *process group* ID
         // (`tcgetpgrp`), which is not necessarily the shell's process ID.
         // Comparing it directly to `shellPid` marked every idle shell whose
@@ -470,18 +503,28 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         return foregroundPid > 0 && foregroundPid != idleProcessGroup
     }
 
+    /// 前台作业的可执行名（含 argv 脚本名）。兼容 PTY 代理：代理场景下改扫 shell 子孙。
+    var foregroundJobExecutableNames: [String] {
+        guard let shellPid else { return [] }
+        if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
+            return TerminalProcessIdentity.descendantExecutableNames(of: shellPid)
+        }
+        if let foregroundPid = _terminalView?.foregroundPid, foregroundPid > 0 {
+            return TerminalProcessIdentity.foregroundExecutableNames(
+                shellPid: shellPid,
+                foregroundPgid: foregroundPid
+            )
+        }
+        return []
+    }
+
     /// 当前终端处于需要辅助工具栏的特定交互模式（如 Vi/Vim/Neovim）。
     var activeHelpMode: TerminalHelpMode? {
         guard isInitialized, !hasExited,
-              let shellPid,
-              let foregroundPid = _terminalView?.foregroundPid,
-              foregroundPid > 0
+              isForegroundCommandRunning
         else { return nil }
 
-        let names = TerminalProcessIdentity.foregroundExecutableNames(
-            shellPid: shellPid,
-            foregroundPgid: foregroundPid
-        )
+        let names = foregroundJobExecutableNames
         for name in names {
             let lower = name.lowercased()
             let base = (lower as NSString).lastPathComponent
@@ -546,11 +589,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// 当前前台进程若在 `TerminalAppIcons/apps.json`（或用户配置）中有映射，
     /// 返回对应图标来源；空闲或未知程序为 nil。
     var foregroundAppIcon: TerminalAppIconSource? {
-        guard isForegroundCommandRunning,
-              let shellPid,
-              let foregroundPid = terminalView.foregroundPid,
-              foregroundPid > 0
-        else {
+        guard isForegroundCommandRunning, let shellPid else {
             if cachedForegroundAppIconPid != 0 {
                 cachedForegroundAppIconPid = 0
                 cachedForegroundAppIcon = nil
@@ -560,8 +599,19 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             return nil
         }
 
+        // 缓存键：优先 Ghostty 前台 pgid；PTY 代理下 pgid 无意义，改用 shell pid。
+        let cacheKey: pid_t = {
+            if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
+                return shellPid
+            }
+            if let fg = terminalView.foregroundPid, fg > 0 {
+                return fg
+            }
+            return shellPid
+        }()
+
         // 强命中（具体 CLI）可较长复用；弱命中 / 未命中约 0.25s 重试。
-        if cachedForegroundAppIconPid == foregroundPid,
+        if cachedForegroundAppIconPid == cacheKey,
            let resolvedAt = cachedForegroundAppIconResolvedAt
         {
             let age = ContinuousClock.now - resolvedAt
@@ -573,17 +623,14 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             }
         }
 
-        let names = TerminalProcessIdentity.foregroundExecutableNames(
-            shellPid: shellPid,
-            foregroundPgid: foregroundPid
-        )
+        let names = foregroundJobExecutableNames
         let source = TerminalAppIconCatalog.shared.source(forProcessNames: names)
         // 候选里若出现非 node/npm 的名字且成功匹配，视为强命中。
         let strong = source != nil && names.contains { name in
             !TerminalAppIconCatalog.isWeakRuntimeName(name)
                 && TerminalAppIconCatalog.shared.source(forProcessName: name) != nil
         }
-        cachedForegroundAppIconPid = foregroundPid
+        cachedForegroundAppIconPid = cacheKey
         cachedForegroundAppIcon = source
         cachedForegroundAppIconResolvedAt = ContinuousClock.now
         cachedForegroundAppIconIsStrong = strong
@@ -731,7 +778,8 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private static func surfaceEnvironment(
         shellPath: String,
         zshIntegrationDirectoryURL: URL?,
-        pendingCommandFile: URL?
+        pendingCommandFile: URL?,
+        shellPidFile: URL?
     ) -> [String: String] {
         var environment = [
             "TERM": "xterm-256color",
@@ -750,6 +798,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             // 告诉 zsh 集成待运行命令文件的位置（首个提示符时读取执行）。
             if let pendingCommandFile {
                 environment["QJIAO_PENDING_COMMAND_FILE"] = pendingCommandFile.path
+            }
+            // 内层真实 shell 回写 PID（兼容 ghost-complete 等 PTY 代理）。
+            if let shellPidFile {
+                environment["QJIAO_SHELL_PID_FILE"] = shellPidFile.path
             }
             // 只向本应用新建的 zsh 注入此变量；不会改动用户系统终端的环境。
             if let idleTitle = AppSettings.shared.zshIdleTitleStyle.environmentValue {

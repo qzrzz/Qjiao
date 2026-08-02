@@ -13,6 +13,9 @@
 - 当前环境使用的是 Xcode 是 beta 版， Xcode-beta.app
 - 界面中的数字要注意使用 monospacedDigit 字体
 
+
+- 为了不影响自动更新，绝对不要先改变 App 文件夹中内容，导致签名被破坏
+
 ## I18n
 
 - 用户可见文案必须走 `L10n.t("English source")`；带参数用 `L10n.format("… %@ …", arg)`

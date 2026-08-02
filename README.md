@@ -15,6 +15,7 @@
 
 ## 增加功能
 
+- **兼容系统安装的 ghost-complete（PTY 补全代理）**：用户通过 Homebrew / cargo 等自行安装 [ghost-complete](https://github.com/StanMarek/ghost-complete) 并 `ghost-complete install` 后，Qjiao 内终端可与其共存。修复点：① zsh 启动代理在 source 用户 `~/.zshrc` 期间**保持** `ZDOTDIR` 为 Qjiao 集成目录，使 mid-rc 的 `exec ghost-complete` 拉起的内层 shell 仍走 Qjiao bootstrap（否则会丢失 OSC 133 click-to-move、`qjiao-prompt-ready`、pending 命令与闲时标题）；② 集成脚本将真实登录 shell 的 `$$` 回写 `shell.pid`（`QJIAO_SHELL_PID_FILE`），宿主侧亦将 proxy PID 解析为内层 zsh；③ libghostty 的 `tcgetpgrp` 在代理下恒为 proxy，前台作业/Agent 识别/进程图标/前台 CWD 改为扫描登录 shell 子孙进程，不再误判为「永远空闲」或「永远忙碌」。
 - **Tabs 创建时异常尺寸/位置动画修复**：修复新建 Tab 时 Tab 自身出现尺寸变化与位置变化的异常动画。根因有二：① 新建 Tab 后 shell 初始化期间标题会多次变化（目录名→提示符→稳定标题），弹性模式下标题驱动 `recomputeElasticSlots` 重算，激活 Tab 宽度（=标题自然宽）随之 150→220→150 来回跳动，条带也反复滚动；现对**标题驱动的弹性重算加 400ms 防抖**，标题稳定后再重算一次，创建期间宽度保持稳定。② 溢出渐隐动画作用域过大——`.animation(value: overflow)` 挂在 ScrollView 上，溢出翻转时会把 Tab 插入/弹性重排/滚入视口一起包进 0.15s 插值；现已把动画收窄到两侧渐隐条（`LinearGradient`）本身。另外新建 Tab 的标题稳定窗口（0.8s）内不做宽度过渡动画，直接落到目标宽。
 
 - **无会话 / 无项目中心界面与 Tab 栏拖拽优化**：

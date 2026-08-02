@@ -158,20 +158,15 @@ final class AgentWatcher: ObservableObject {
             return publishNone(session: session, at: now)
         }
 
-        // 1) 廉价：前台进程识别
+        // 1) 廉价：前台进程识别（含 ghost-complete 等 PTY 代理下的子孙扫描）
         guard session.isForegroundCommandRunning,
-              let shellPid = session.shellPid,
-              let foregroundPid = session.terminalView.foregroundPid,
-              foregroundPid > 0
+              session.shellPid != nil
         else {
             knownAgentSessions.remove(sessionID)
             return publishNone(session: session, at: now)
         }
 
-        let names = TerminalProcessIdentity.foregroundExecutableNames(
-            shellPid: shellPid,
-            foregroundPgid: foregroundPid
-        )
+        let names = session.foregroundJobExecutableNames
         guard let kind = AgentKind.identify(processNames: names) else {
             knownAgentSessions.remove(sessionID)
             return publishNone(session: session, at: now)
