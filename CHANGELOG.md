@@ -10,6 +10,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
 set in the Xcode project.
 
+## [1.1.9]
+
+### Added
+
+- Support Coding Agent status monitoring (`working`, `blocked`, `done`) with active process inspection and terminal output detection, featuring unread notifications and badge indicators on tabs, sidebar, and Info panel.
+- Add Agent CLI launcher type for configuring and running preset AI CLI prompts directly from Project Launchers.
+- Support window dragging across the entire header when no session tabs are open, and Finder folder drop in empty workspace state to open or create projects.
+- Display Agent blocked state indicators with priority status management in sidebar rows and session tab labels.
+
+### Changed
+
+- Refine inactive terminal icon colors in tab strips to `Theme.secondaryColor` for better visual contrast across dark and light modes.
+- Automatically hide the `NPM SCRIPTS` panel section when `package.json` has no scripts configured.
+
+### Fixed
+
+- Fix tab dimension jitter and overflow animation scope during new tab creation.
+- Fix sidebar section header action disabled states for empty script lists.
+- Exclude `.zsh_history` from terminal integration directories to prevent corrupting app bundle signatures and release delta packages.
+
 ## [1.1.1]
 
 ### Added
