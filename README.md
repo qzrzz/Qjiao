@@ -16,7 +16,7 @@
 ## 增加功能
 
 - **音效支持（命令运行结束 / 失败、Agent 完成 / 待处理，可在设置中关闭）**：新增 `kero/SoundEffects.swift` 音效播放服务，内置支持 macOS 系统音效以及 WindowsXP / Windows7 自定义音效（存储于项目 `kero/Sounds/` 目录）：
-  - **命令运行结束 / 失败**：终端命令经 zsh 集成上报 OSC 133;D 完成状态时按退出码播放提示音——`exitCode == 0` 默认播放 macOS/Glass（成功），非零默认播放 macOS/Basso（失败，含 Ctrl+C 中断的 130 等）。
+  - **命令运行结束 / 失败**：与终端 Tab 角标判定完全对齐——仅由 UI 侧显式发起的 Task 任务（启动器 Launcher / 项目脚本 / 右侧栏命令）在执行结束、Tab 角标停止转圈显示成功 `✓` 勾号或失败 `!` 叹号的那一刻按结果播报音效；用户普通的交互式终端命令行不触发音效也不弹 Tab 角标，保持打字干扰为零。
   - **Agent 完成 / 待处理**：`AgentWatcher` 检测到 Agent 由 `working` 转为 `done` 时默认播放 macOS/Tink；转为 `blocked`（待用户交互/权限确认）时默认播放 macOS/Blow（无论终端是否可见）。
   - **设置开关与 2 级选择菜单**：`Settings → General` 新增「Sound Effects」分区——总开关 + 四个事件独立开关（Command succeeded / Command failed / Agent completed / Agent blocked）与 **2 级音效选择菜单 (`Menu`)**（第一级分类：macOS / WindowsXP / Windows7；第二级为对应音效列表），各事件可在 2 级菜单中自由挑选并实时点击喇叭按钮预览；配置写入 `config.toml` 的 `ui.sound-effects` 及各音效标识。同一事件 0.4s 防抖，避免大量命令同时结束时音效叠爆。
 
