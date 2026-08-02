@@ -1490,7 +1490,8 @@ final class TerminalManager: nonisolated ObservableObject {
                         projectDirectory: project.projectDirectory,
                         launchCommands: project.launchCommands,
                         isArchived: project.isArchived,
-                        aiWritingLanguage: project.aiWritingLanguage?.rawValue
+                        aiWritingLanguage: project.aiWritingLanguage?.rawValue,
+                        customGitPath: project.customGitPath
                     ),
                     for: project.id
                 )
