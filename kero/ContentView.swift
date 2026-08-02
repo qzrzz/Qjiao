@@ -1708,8 +1708,8 @@ struct TaskStatusOverlayView: View {
                 ProgressView()
                     .controlSize(.mini)
                     .tint(tint)
-                    .scaleEffect(0.7)
-                    .frame(width: 11, height: 11)
+                    .scaleEffect(0.95)
+                    .frame(width: 13, height: 13)
             } else if hasError {
                 ZStack {
                     Circle()

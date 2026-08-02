@@ -419,6 +419,7 @@ final class TerminalManager: nonisolated ObservableObject {
                     if let aiLangStr = config.aiWritingLanguage {
                         project.aiWritingLanguage = AIWritingLanguage(rawValue: aiLangStr)
                     }
+                    project.customGitPath = config.customGitPath
                 }
                 projects.append(project)
             }
@@ -1618,6 +1619,7 @@ final class TerminalManager: nonisolated ObservableObject {
             project.isArchived = config?.isArchived ?? saved.isArchived ?? false
             project.aiWritingLanguage = config?.aiWritingLanguage
                 .flatMap(AIWritingLanguage.init(rawValue:))
+            project.customGitPath = config?.customGitPath
             let targetTabIndex = saved.selectedTabIndex ?? 0
             for (tabIndex, tab) in saved.tabs.enumerated() {
                 let isSelectedActiveTab = (projectIndex == targetProjectIndex && tabIndex == targetTabIndex)
