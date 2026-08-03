@@ -195,7 +195,10 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        process.standardInput = FileHandle.nullDevice
+        // 独立 EOF pipe，避免 FileHandle.nullDevice 被 Process 关闭后全局 EBADF。
+        let stdinPipe = Pipe()
+        try? stdinPipe.fileHandleForWriting.close()
+        process.standardInput = stdinPipe
 
         do {
             try process.run()

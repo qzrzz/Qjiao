@@ -67,6 +67,12 @@ actor GitScanner {
     private var bypassFsmonitorUntil = Date.distantPast
     private static let fsmonitorBypassCooldown: TimeInterval = 60
 
+    /// 常规 git 子进程超时。fsmonitor 坏 socket 上 `git status` 可能永久阻塞；
+    /// 无超时会把整个 actor 队列卡死，表现为 Retry 一直 Recovering / 无效。
+    private static let gitCommandTimeout: TimeInterval = 45
+    /// Retry 恢复路径用更短超时，尽快失败并给出诊断信息。
+    private static let gitRecoveryTimeout: TimeInterval = 20
+
     // MARK: Status pipeline
 
     /// 完整状态流水线：rev-parse → status → 详情命令 → 解析 → 预处理。
@@ -82,51 +88,111 @@ actor GitScanner {
     ) -> StatusLoadResult {
         let inCooldown = Date() < bypassFsmonitorUntil
         let bypass = recovery || inCooldown
-        let result = loadStatusOnce(
+        let result = Self.loadStatusOnce(
             in: root,
             includeIgnoredPaths: includeIgnoredPaths,
-            bypassFsmonitor: bypass
+            bypassFsmonitor: bypass,
+            timeout: recovery ? Self.gitRecoveryTimeout : Self.gitCommandTimeout,
+            diagnosticContext: recovery ? "recovery scan" : "status scan"
         )
-        // 撞上 Bad file descriptor / 失效 IPC：heal + 进入 cooldown + bypass 再扫。
-        // cooldown 内的常规轮询只 bypass、不再每次 stop/start daemon；
-        // 仅当本次结果仍是 EBADF 时才 heal（已 bypass 的成功扫描不进这里）。
+        // 撞上 Bad file descriptor / 超时 / 失效 IPC：heal + cooldown + bypass 再扫。
+        // cooldown 内的常规轮询只 bypass、不再每次 stop/start daemon。
         if case .failed(let message) = result,
-           Self.looksLikeStaleFileDescriptor(message) {
+           Self.looksLikeRecoverableGitFailure(message) {
             Self.recoverFilesystemMonitor(in: root)
             bypassFsmonitorUntil = Date().addingTimeInterval(Self.fsmonitorBypassCooldown)
-            return loadStatusOnce(
+            let retry = Self.loadStatusOnce(
                 in: root,
                 includeIgnoredPaths: includeIgnoredPaths,
-                bypassFsmonitor: true
+                bypassFsmonitor: true,
+                timeout: Self.gitRecoveryTimeout,
+                diagnosticContext: "auto-heal scan (fsmonitor bypassed)"
             )
+            return Self.annotateRecoveryFailure(retry, priorMessage: message, root: root)
         }
         return result
     }
 
+    /// Retry 专用：不经过 actor 串行队列，避免被卡在坏 socket 上的常规扫描挡住。
+    /// 调用方须先 `recoverFilesystemMonitor`，再以 bypass 全量重扫。
+    nonisolated static func loadStatusForRecovery(
+        in root: String,
+        includeIgnoredPaths: Bool
+    ) -> StatusLoadResult {
+        let result = loadStatusOnce(
+            in: root,
+            includeIgnoredPaths: includeIgnoredPaths,
+            bypassFsmonitor: true,
+            timeout: gitRecoveryTimeout,
+            diagnosticContext: "Retry recovery (fsmonitor bypassed, independent of scan queue)"
+        )
+        if case .failed(let message) = result {
+            // 再试一次：不用 currentDirectoryURL，改 git -C，规避 cwd fd 类故障。
+            let second = loadStatusOnce(
+                in: root,
+                includeIgnoredPaths: includeIgnoredPaths,
+                bypassFsmonitor: true,
+                timeout: gitRecoveryTimeout,
+                diagnosticContext: "Retry recovery (git -C, no process cwd)",
+                preferGitDashC: true
+            )
+            return annotateRecoveryFailure(second, priorMessage: message, root: root)
+        }
+        return result
+    }
+
+    /// 进入 fsmonitor bypass cooldown（Retry 成功/失败后都延长，避免 thrash）。
+    func noteFilesystemMonitorBypassCooldown() {
+        bypassFsmonitorUntil = Date().addingTimeInterval(Self.fsmonitorBypassCooldown)
+    }
+
     /// 单次扫描（无自愈递归）。`bypassFsmonitor` 时对所有 git 子进程注入
     /// `-c core.fsmonitor=false`，避免再碰残留 IPC。
-    private func loadStatusOnce(
+    ///
+    /// `nonisolated`：Retry 恢复路径可在 actor 外直接调用，不被卡住的扫描阻塞。
+    nonisolated private static func loadStatusOnce(
         in root: String,
         includeIgnoredPaths: Bool,
-        bypassFsmonitor: Bool
+        bypassFsmonitor: Bool,
+        timeout: TimeInterval,
+        diagnosticContext: String,
+        preferGitDashC: Bool = false
     ) -> StatusLoadResult {
         let config: [String: String] = bypassFsmonitor ? ["core.fsmonitor": "false"] : [:]
-        let top = Self.runGit(["rev-parse", "--show-toplevel"], in: root, config: config)
+        let top = runGit(
+            ["rev-parse", "--show-toplevel"],
+            in: root,
+            config: config,
+            timeout: timeout,
+            preferGitDashC: preferGitDashC
+        )
         guard top.status == 0 else {
-            let failure = Self.gitFailureMessage(top, fallback: "Unable to locate the Git repository.")
+            let failure = gitFailureMessage(
+                top,
+                command: "rev-parse --show-toplevel",
+                directory: root,
+                context: diagnosticContext,
+                fallback: "Unable to locate the Git repository."
+            )
             if top.status == 128,
                failure.localizedCaseInsensitiveContains("not a git repository"),
-               !Self.containsGitMetadata(atOrAbove: root) {
+               !containsGitMetadata(atOrAbove: root) {
                 return .notRepository
             }
             return .failed(failure)
         }
-        let rawRoot = Self.strippingTrailingLineEnding(top.stdout)
+        let rawRoot = strippingTrailingLineEnding(top.stdout)
         guard !rawRoot.isEmpty else {
-            return .failed("Git returned an empty repository path.")
+            return .failed(formatDiagnostic(
+                summary: "Git returned an empty repository path.",
+                command: "rev-parse --show-toplevel",
+                directory: root,
+                context: diagnosticContext,
+                detail: top.stderr
+            ))
         }
         let resolvedRoot = URL(fileURLWithPath: rawRoot).resolvingSymlinksInPath().path
-        let status = Self.runGit(
+        let status = runGit(
             [
                 "status", "--porcelain=v2", "--branch", "-z",
                 // VS Code `git.untrackedFiles: mixed` 语义：完全未跟踪目录折叠为
@@ -136,65 +202,87 @@ actor GitScanner {
                 includeIgnoredPaths ? "--ignored=matching" : "--ignored=no",
             ],
             in: resolvedRoot,
-            config: config
+            config: config,
+            timeout: timeout,
+            preferGitDashC: preferGitDashC
         )
         guard status.status == 0 else {
-            return .failed(Self.gitFailureMessage(status, fallback: "Unable to read Git status."))
+            return .failed(gitFailureMessage(
+                status,
+                command: "status --porcelain=v2",
+                directory: resolvedRoot,
+                context: diagnosticContext,
+                fallback: "Unable to read Git status."
+            ))
         }
-        var result = Self.parseStatus(status.stdout)
+        var result = parseStatus(status.stdout)
         result.topLevel = resolvedRoot
 
         result.loadedDetails = true
         let repoRoot = resolvedRoot
 
-        let refs = Self.runGit(
+        let refs = runGit(
             ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
             in: repoRoot,
-            config: config
+            config: config,
+            timeout: timeout,
+            preferGitDashC: preferGitDashC
         )
         if refs.status == 0 {
             result.branches = refs.stdout.split(separator: "\n").map(String.init).sorted()
         }
 
-        let remoteRun = Self.runGit(["remote"], in: repoRoot, config: config)
+        let remoteRun = runGit(
+            ["remote"],
+            in: repoRoot,
+            config: config,
+            timeout: timeout,
+            preferGitDashC: preferGitDashC
+        )
         if remoteRun.status == 0 {
             result.remotes = remoteRun.stdout.split(separator: "\n").map(String.init).sorted()
         }
 
-        let log = Self.runGit(
+        let log = runGit(
             ["log", "-n", "8", "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%ar%x1e"],
             in: repoRoot,
-            config: config
+            config: config,
+            timeout: timeout,
+            preferGitDashC: preferGitDashC
         )
-        if log.status == 0 { result.recentCommits = Self.parseRecentCommits(log.stdout) }
+        if log.status == 0 { result.recentCommits = parseRecentCommits(log.stdout) }
 
-        let stash = Self.runGit(
+        let stash = runGit(
             ["rev-list", "--walk-reflogs", "--count", "refs/stash"],
             in: repoRoot,
-            config: config
+            config: config,
+            timeout: timeout,
+            preferGitDashC: preferGitDashC
         )
         if stash.status == 0 {
             result.stashCount = Int(stash.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         }
 
-        let gitDir = Self.runGit(
+        let gitDir = runGit(
             ["rev-parse", "--absolute-git-dir"],
             in: repoRoot,
-            config: config
+            config: config,
+            timeout: timeout,
+            preferGitDashC: preferGitDashC
         )
         if gitDir.status == 0 {
-            let path = Self.strippingTrailingLineEnding(gitDir.stdout)
-            result.repositoryOperation = Self.detectRepositoryOperation(gitDirectory: path)
+            let path = strippingTrailingLineEnding(gitDir.stdout)
+            result.repositoryOperation = detectRepositoryOperation(gitDirectory: path)
         }
-        return .repository(Self.preprocess(result))
+        return .repository(preprocess(result))
     }
 
     // MARK: Preprocess
 
     /// 把原始条目切分为 merge / staged / changed 三组，并构建文件级与
-    /// 目录级装饰字典。所有 O(n) 计算都发生在 actor 执行器上，主线程
+    /// 目录级装饰字典。所有 O(n) 计算都发生在扫描线程上，主线程
     /// 的 `applyRepository` 只做 `@Published` 赋值。
-    private static func preprocess(_ result: StatusResult) -> StatusResult {
+    nonisolated private static func preprocess(_ result: StatusResult) -> StatusResult {
         var result = result
         let entries = result.entries.map { entry in
             var entry = entry
@@ -245,7 +333,7 @@ actor GitScanner {
         return result
     }
 
-    private static func fileDecoration(for entry: GitStatusModel.Entry) -> GitStatusModel.FileDecoration {
+    nonisolated private static func fileDecoration(for entry: GitStatusModel.Entry) -> GitStatusModel.FileDecoration {
         let statuses = [entry.staged, entry.unstaged]
         if entry.isConflict || statuses.contains("U") { return .conflict }
         if statuses.contains("?") { return .untracked }
@@ -276,12 +364,25 @@ actor GitScanner {
     /// **始终**尝试 stop + 删除 IPC（即使 `core.fsmonitor` 不是 `true`），
     /// 避免残留 socket 继续污染后续 git 调用；仅在确认启用了内建 daemon
     /// 时才 `start`，避免给 hook 路径 / 未启用仓库多起无用进程。
-    /// stop / start 失败均忽略。
+    /// stop / start 失败均忽略。恢复路径用短超时，避免 stop 自身挂死。
     nonisolated static func recoverFilesystemMonitor(in root: String) {
-        _ = runGit(["fsmonitor--daemon", "stop"], in: root)
+        let timeout = gitRecoveryTimeout
+        // 强制 bypass，避免 stop/rev-parse 再撞上坏 IPC。
+        let bypass = ["core.fsmonitor": "false"]
+        _ = runGit(
+            ["fsmonitor--daemon", "stop"],
+            in: root,
+            config: bypass,
+            timeout: timeout
+        )
 
         var gitDirectory: String?
-        let gitDir = runGit(["rev-parse", "--absolute-git-dir"], in: root)
+        let gitDir = runGit(
+            ["rev-parse", "--absolute-git-dir"],
+            in: root,
+            config: bypass,
+            timeout: timeout
+        )
         if gitDir.status == 0 {
             gitDirectory = strippingTrailingLineEnding(gitDir.stdout)
         } else {
@@ -293,13 +394,45 @@ actor GitScanner {
             let socketPath = (gitDirectory as NSString)
                 .appendingPathComponent("fsmonitor--daemon.ipc")
             try? FileManager.default.removeItem(atPath: socketPath)
+            // 个别 git 版本把 socket 放在 git common dir；再清一次 common 路径。
+            let common = runGit(
+                ["rev-parse", "--git-common-dir"],
+                in: root,
+                config: bypass,
+                timeout: timeout
+            )
+            if common.status == 0 {
+                let commonPath = strippingTrailingLineEnding(common.stdout)
+                let resolvedCommon: String
+                if (commonPath as NSString).isAbsolutePath {
+                    resolvedCommon = commonPath
+                } else {
+                    resolvedCommon = (root as NSString).appendingPathComponent(commonPath)
+                }
+                let commonSocket = (resolvedCommon as NSString)
+                    .appendingPathComponent("fsmonitor--daemon.ipc")
+                if commonSocket != socketPath {
+                    try? FileManager.default.removeItem(atPath: commonSocket)
+                }
+            }
         }
 
-        let config = runGit(["config", "--get", "core.fsmonitor"], in: root)
+        let config = runGit(
+            ["config", "--get", "core.fsmonitor"],
+            in: root,
+            config: bypass,
+            timeout: timeout
+        )
         let usesBuiltinDaemon = config.status == 0
             && strippingTrailingLineEnding(config.stdout) == "true"
         if usesBuiltinDaemon {
-            _ = runGit(["fsmonitor--daemon", "start"], in: root)
+            // 恢复扫描不依赖 daemon；延后 start 失败也不影响 Retry。
+            _ = runGit(
+                ["fsmonitor--daemon", "start"],
+                in: root,
+                config: bypass,
+                timeout: timeout
+            )
         }
     }
 
@@ -308,6 +441,41 @@ actor GitScanner {
         let lower = message.lowercased()
         return lower.contains("bad file descriptor")
             || lower.contains("ebadf")
+    }
+
+    /// 可通过 stop daemon + bypass 自愈的失败（含超时——常为坏 IPC 挂死）。
+    nonisolated static func looksLikeRecoverableGitFailure(_ message: String) -> Bool {
+        if looksLikeStaleFileDescriptor(message) { return true }
+        let lower = message.lowercased()
+        return lower.contains("timed out")
+            || lower.contains("timeout")
+            || lower.contains("fsmonitor")
+            || lower.contains("broken pipe")
+            || lower.contains("connection refused")
+            || lower.contains("socket")
+    }
+
+    /// 恢复扫描仍失败时，把先前错误与已采取的恢复步骤附到诊断文案。
+    nonisolated private static func annotateRecoveryFailure(
+        _ result: StatusLoadResult,
+        priorMessage: String,
+        root: String
+    ) -> StatusLoadResult {
+        guard case .failed(let message) = result else { return result }
+        if message.contains("Recovery steps:") { return result }
+        let note = [
+            message,
+            "",
+            "Recovery steps:",
+            "• Stopped git fsmonitor--daemon (if running)",
+            "• Removed .git/fsmonitor--daemon.ipc socket residue",
+            "• Retried with core.fsmonitor=false",
+            "Directory: \(root)",
+            priorMessage == message
+                ? nil
+                : "Earlier error: \(priorMessage.split(separator: "\n").first.map(String.init) ?? priorMessage)",
+        ].compactMap { $0 }.joined(separator: "\n")
+        return .failed(note)
     }
 
     /// rev-parse 失败时解析 `root/.git`：目录仓库直接用；worktree 的
@@ -348,38 +516,78 @@ actor GitScanner {
     ///
     /// - Parameter config: 注入 `git -c key=value` 临时配置（不写磁盘），
     ///   例如 recovery 路径的 `core.fsmonitor=false`。
+    /// - Parameter timeout: 子进程最长等待秒数；超时 SIGTERM→SIGKILL。
+    /// - Parameter preferGitDashC: 为 true 时用 `git -C dir` 而不设置
+    ///   `Process.currentDirectoryURL`，规避 cwd 相关 fd 故障。
     nonisolated static func runGit(
         _ args: [String],
         in dir: String,
-        config: [String: String] = [:]
+        config: [String: String] = [:],
+        timeout: TimeInterval = gitCommandTimeout,
+        preferGitDashC: Bool = false
     ) -> (status: Int32, stdout: String, stderr: String) {
         var fullArgs: [String] = []
+        if preferGitDashC {
+            fullArgs.append(contentsOf: ["-C", dir])
+        }
         for (key, value) in config {
             fullArgs.append(contentsOf: ["-c", "\(key)=\(value)"])
         }
         fullArgs.append(contentsOf: args)
 
-        // 启动失败且像 EBADF 时重试一次（换新 pipe /dev/null），避免共享
-        // FileHandle.nullDevice 被其它 Process 关闭后整段 Git 面板永久失效。
-        let first = launchGit(fullArgs, in: dir)
-        if first.launched {
+        // 启动失败（尤其 EBADF）时换新 pipe / stdin 再试；第二次改用 git -C。
+        let first = launchGit(
+            fullArgs,
+            in: preferGitDashC ? nil : dir,
+            timeout: timeout
+        )
+        if first.launched && first.result.status != -1 {
             return first.result
         }
-        if looksLikeStaleFileDescriptor(first.result.stderr) {
-            let second = launchGit(fullArgs, in: dir)
+        if first.launched && !looksLikeStaleFileDescriptor(first.result.stderr)
+            && !first.result.stderr.localizedCaseInsensitiveContains("timed out") {
+            return first.result
+        }
+        // 第二次：强制 git -C + 全新 IO，不设 process cwd。
+        var retryArgs: [String] = []
+        if !preferGitDashC {
+            retryArgs.append(contentsOf: ["-C", dir])
+        }
+        // fullArgs 在 preferGitDashC 时已含 -C；否则补上。
+        if preferGitDashC {
+            retryArgs = fullArgs
+        } else {
+            for (key, value) in config {
+                retryArgs.append(contentsOf: ["-c", "\(key)=\(value)"])
+            }
+            retryArgs.append(contentsOf: args)
+        }
+        let second = launchGit(retryArgs, in: nil, timeout: timeout)
+        if second.launched {
             return second.result
         }
-        return first.result
+        // 两次都启动失败：合并诊断。
+        let detail = [
+            second.result.stderr,
+            first.result.stderr != second.result.stderr ? "First attempt: \(first.result.stderr)" : nil,
+        ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+        return (-1, "", detail.isEmpty ? first.result.stderr : detail)
     }
 
-    /// 实际拉起 git 子进程；`launched == false` 表示 `Process.run()` 抛错。
+    /// 实际拉起 git 子进程。
+    /// - `in` 为 nil 时不设置 `currentDirectoryURL`（配合 `git -C`）。
+    /// - `launched == false` 表示 `Process.run()` 抛错。
     private nonisolated static func launchGit(
-        _ args: [String], in dir: String
+        _ args: [String],
+        in dir: String?,
+        timeout: TimeInterval
     ) -> (launched: Bool, result: (status: Int32, stdout: String, stderr: String)) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: dir, isDirectory: true)
+        if let dir, !dir.isEmpty {
+            process.currentDirectoryURL = URL(fileURLWithPath: dir, isDirectory: true)
+        }
         var env = ProcessInfo.processInfo.environment
         env["GIT_OPTIONAL_LOCKS"] = "0"
         // Fail rather than hanging on a credential prompt behind the app.
@@ -394,22 +602,17 @@ actor GitScanner {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        // 每次打开独立 /dev/null，避免复用 FileHandle.nullDevice：
-        // Process 退出时会 close 传入的 handle，共享 nullDevice 被关掉后
-        // 后续 Process.run 会稳定抛出 Bad file descriptor。
-        if let devNull = FileHandle(forReadingAtPath: "/dev/null") {
-            process.standardInput = devNull
-        } else {
-            let nullPipe = Pipe()
-            try? nullPipe.fileHandleForWriting.close()
-            process.standardInput = nullPipe
-        }
+        // 绝不用 FileHandle.nullDevice：Process 退出时会 close 传入 handle，
+        // 共享 nullDevice 被关掉后后续 Process.run 可稳定 EBADF，且可能
+        // 误关已复用的 fd。每次用独立 EOF pipe 作 stdin。
+        process.standardInput = makeEOFStdinPipe()
 
         do {
             try process.run()
         } catch {
-            return (false, (-1, "", error.localizedDescription))
+            return (false, (-1, "", formatLaunchError(error, args: args, directory: dir)))
         }
+
         let outData = PipeData()
         let errData = PipeData()
         let readers = DispatchGroup()
@@ -423,16 +626,96 @@ actor GitScanner {
             errData.value = (try? stderr.fileHandleForReading.readToEnd()) ?? Data()
             readers.leave()
         }
-        process.waitUntilExit()
+
+        // 超时终止：坏 fsmonitor socket 上 git 可能永久阻塞，拖死 actor 队列。
+        let timedOut = waitForProcess(process, timeout: timeout)
         readers.wait()
+
+        var stderrText = String(data: errData.value, encoding: .utf8) ?? ""
+        if timedOut {
+            let timeoutNote = "git timed out after \(Int(timeout))s"
+            stderrText = stderrText.isEmpty
+                ? timeoutNote
+                : timeoutNote + "\n" + stderrText
+            return (
+                true,
+                (-1, String(data: outData.value, encoding: .utf8) ?? "", stderrText)
+            )
+        }
         return (
             true,
             (
                 process.terminationStatus,
                 String(data: outData.value, encoding: .utf8) ?? "",
-                String(data: errData.value, encoding: .utf8) ?? ""
+                stderrText
             )
         )
+    }
+
+    /// 独立 stdin：写端立即关闭 → 读端 EOF。不碰共享 nullDevice。
+    private nonisolated static func makeEOFStdinPipe() -> Pipe {
+        let pipe = Pipe()
+        try? pipe.fileHandleForWriting.close()
+        return pipe
+    }
+
+    /// 等待子进程结束；超时则 SIGTERM，仍不退则 SIGKILL。返回是否超时。
+    private nonisolated static func waitForProcess(
+        _ process: Process,
+        timeout: TimeInterval
+    ) -> Bool {
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            group.leave()
+        }
+        let result = group.wait(timeout: .now() + max(timeout, 0.5))
+        if result == .success {
+            return false
+        }
+        if process.isRunning {
+            process.terminate()
+        }
+        // 给优雅退出一点时间，再强杀。
+        let grace = group.wait(timeout: .now() + 1.5)
+        if grace != .success, process.isRunning {
+            let pid = process.processIdentifier
+            if pid > 0 {
+                kill(pid, SIGKILL)
+            }
+            process.waitUntilExit()
+        } else if grace != .success {
+            // terminate 后可能已退；再等一次避免僵尸。
+            process.waitUntilExit()
+        }
+        return true
+    }
+
+    /// 把 `Process.run` 的 Error 展开为可读诊断（domain / code / underlying）。
+    private nonisolated static func formatLaunchError(
+        _ error: Error,
+        args: [String],
+        directory: String?
+    ) -> String {
+        let ns = error as NSError
+        var lines: [String] = [
+            error.localizedDescription,
+            "Launch failed: \(ns.domain) code \(ns.code)",
+        ]
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+            lines.append(
+                "Underlying: \(underlying.domain) code \(underlying.code) — \(underlying.localizedDescription)"
+            )
+        }
+        let command = args.prefix(4).joined(separator: " ")
+        if !command.isEmpty {
+            lines.append("Command: git \(command)\(args.count > 4 ? " …" : "")")
+        }
+        if let directory, !directory.isEmpty {
+            lines.append("Directory: \(directory)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private nonisolated final class PipeData: @unchecked Sendable {
@@ -462,13 +745,50 @@ actor GitScanner {
         return value
     }
 
+    /// 组合 git 失败诊断：摘要 + 命令 + 目录 + 上下文 + 原始输出。
     private nonisolated static func gitFailureMessage(
-        _ run: (status: Int32, stdout: String, stderr: String), fallback: String
+        _ run: (status: Int32, stdout: String, stderr: String),
+        command: String,
+        directory: String,
+        context: String,
+        fallback: String
     ) -> String {
-        let message = [run.stderr, run.stdout]
+        let body = [run.stderr, run.stdout]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
-        return message ?? fallback
+        return formatDiagnostic(
+            summary: body ?? fallback,
+            command: command,
+            directory: directory,
+            context: context,
+            detail: body == nil ? nil : "exit \(run.status)",
+            exitCode: run.status
+        )
+    }
+
+    private nonisolated static func formatDiagnostic(
+        summary: String,
+        command: String,
+        directory: String,
+        context: String,
+        detail: String? = nil,
+        exitCode: Int32? = nil
+    ) -> String {
+        var lines: [String] = [summary]
+        if let detail, !detail.isEmpty, !summary.contains(detail) {
+            lines.append(detail)
+        }
+        lines.append("Command: git \(command)")
+        if let exitCode {
+            lines.append("Exit code: \(exitCode)")
+        }
+        if !directory.isEmpty {
+            lines.append("Directory: \(directory)")
+        }
+        if !context.isEmpty {
+            lines.append("Context: \(context)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Parses NUL-delimited porcelain v2. Unlike Git's default quoted output,
