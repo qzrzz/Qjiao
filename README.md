@@ -15,6 +15,11 @@
 
 ## 增加功能
 
+- **Short Directory Path 默认开启**：将 `Settings → Appearance → Short Directory Path` (`appearance.short-directory-path`) 配置项默认值由 `false` 修改为 `true`，面板与底栏中显示用户 Home 路径时默认收缩缩短为 `~`。
+- **设置面板与空状态应用图标 Retina 高清适配**：移除由 `resizedHighQuality` 强制离屏位图缩放导致的图层降采样，直接使用 AppKit / Cocoa 原生包含多分辨率 Representation 的 `applicationIconImage` 渲染 SwiftUI `Image`，在 2×/3× Retina 高分屏下自动挑选高分辨率点阵与矢量图层，彻底消除图标边沿模糊问题。
+- **新建项目按钮逻辑修复（支持选择与创建项目文件夹）**：修复原先「新建项目 (⌘N)」直接生成无关联目录的虚拟项目的问题，现触发「新建项目」时调起系统原生文件夹选择面板（开启 `canCreateDirectories = true`），支持在面板中直接点「新建文件夹」建立新项目目录或选择既有文件夹加入工作区。
+- **设置面板左侧栏底部应用卡片交互优化**：为版本号检查更新按钮和前往官网（地球图标）按钮添加 hover 悬浮高亮效果（微亮背景与前景色 hover 动画），并将前往网页的目标 URL 更新为官方网站 `https://qzrzz.github.io/Qjiao`。
+
 - **npm script / 项目任务重新运行保留分屏位置**：再次运行或「重新运行」NPM Scripts、Gradle / Cargo / Makefile 等项目任务时，若原先终端仍挂在某个 pane 上，会在该 pane **原地替换**会话，而不再 `close + newSession` 新建整页 Tab——分屏树、分隔比例与 pane 位置保持不变；仅当旧会话已不在布局中时才新建 Tab。Files 底栏 Script Runner 分屏重跑同样优先原地替换（用户拖成左右/嵌套分屏后也会回到原位置）。
 
 - **修复 ghost-complete + oh-my-zsh 下每次回车 Tab 图标闪 Git**：PTY 代理模式下「前台有作业」原先用「是否有非 shell 子孙」判定，oh-my-zsh precmd 的 `git config --get oh-my-zsh.hide-info` 会被当成前台命令并匹配 Git 图标。现将提示符 / VCS 主题常用的短命探测（`git config`、`rev-parse`、`symbolic-ref`、porcelain `status` 等）排除出前台作业与图标候选，并为图标展示增加 350ms 持续防抖，真实长时间运行的 `git log` / `vim` 等仍正常换图标。
@@ -44,7 +49,7 @@
 
 - **无会话 / 无项目中心界面与 Tab 栏拖拽优化**：
   - **Tab 栏拖动窗口**：在无 open tabs（如无打开会话）时，Tabs 顶栏不再渲染空 `ScrollView`，标签栏全域自动转为可拖拽热区（`HeaderWindowDragBand`），支持鼠标点按拖动移动窗口。
-  - **256pt 应用图标与高亮「New Project」主按钮**：优化无会话空状态界面（`EmptyStatePromptView`），将居中实例图标替换为 256pt 高清 macOS 应用图标，调整按钮高亮顺序，将「New Project (⌘N)」作为高亮主按钮呈现，并将「New Session (⌘T)」作为次要按钮。
+  - **128pt 高清应用图标与高亮「New Project」主按钮**：优化无会话空状态界面（`EmptyStatePromptView`），将居中实例图标替换为 128pt 高清 Retina 适配的 macOS 应用图标（使用 `NSWorkspace` 高 DPI representation 结合 `.interpolation(.high)`），调整按钮高亮顺序，将「New Project (⌘N)」作为高亮主按钮呈现，并将「New Session (⌘T)」作为次要按钮。
   - **统一背景色**：去除原本带有 0.65 透明度的中心局部半透明遮罩卡片，使中心空状态界面与全局主题背景色（`Theme.background`）融为一体，提升视觉连贯度。
   - **拖入文件夹打开项目**：中心区域支持 Finder 文件夹拖入（`.onDrop`），拖入时高亮虚线框与卡片反馈，松开后自动解析目标路径并在应用中打开/创建对应项目。
 - **内容视图 Tabs 非激活终端图标颜色优化**：将内容视图标签页（`TabStripIconView` 与 `TerminalAppIconView`）中默认终端图标在非激活模式下的颜色由过暗的 `.tertiary` / `Color.secondary` 优化为主题感知次要色 `Theme.secondaryColor`，使其与非激活状态下的标签页标题文字及周围 UI 元素在深浅外观下保持视觉对比度协调一致。
@@ -54,6 +59,7 @@
   - **新增 Agent CLI 启动器类型**：启动器任务类型新增 **Agent CLI**（`ProjectLaunchCommandType.agentCLI`），支持从系统中已检测到或预置的本地 AI CLI 工具（如 `agy`、`claude`、`codex`、`opencode`、`ollama` 等）中选择，并可配置预置提示词（Prompt）。点击运行或一键全部运行时，自动在项目终端窗口/分栏中拉起该 AI CLI 并带入格式化好的预置提示词执行。
   - **启动器分组体验优化**：在 Project 面板中，若当前项目未配置任何启动器，Launcher 分组默认初始化为收起状态；同时修复了空状态下 Header 添加按钮被误禁用的问题，使得 `+`（添加启动器）按钮在空状态下始终可用，点击即自动展开分组并新建启动器。
 - **Project 面板无 NPM Script 自动隐藏分组**：在 Project 面板与 Info 面板中，若未检测到 `package.json` 或 `package.json` 中无任何 scripts 脚本，自动隐藏 `NPM SCRIPTS` 分组，避免展示无意义的空行。
+- **Project 面板无 Gradle Task 自动隐藏分组**：在 Project 面板与 Info 面板中，若项目无 Gradle 任务（`gradleScripts` 为空），自动隐藏 `GRADLE TASKS` 分组，避免展示无意义的空行。
 - **标签切换先反馈 UI 再切内容**：点击 / 快捷键 / Tab Switcher 切换主标签时，顶栏选中态（`chromeSelectedTabID`）立即更新；终端挂载、侧栏跟随等重活推迟到下一 runloop 再应用 `selectedTabID`，避免点击后顶栏长时间无响应。新建、关闭、恢复会话仍同步切换内容。
 - **主内容 Tabs 布局模式（滚动 / 弹性）**：Settings → General → Appearance 新增 **Tabs Layout**（`ui.tabs-layout`，默认 `elastic`）。
   - **弹性（Elastic）**（默认）：左对齐；空间不足时**先从最左侧**连续压缩激活 Tab 左侧的非激活标签，仍不够再从最右侧压缩激活 Tab 右侧；宽度连续变短，低于阈值后变为**仅图标**（显示该 Tab 自身图标，保留 Task/dirty 状态指示，无关闭按钮）；激活 Tab 保持可读全宽（仍受 max 限制）。极端情况下（全压到仅图标仍溢出）保留横向 ScrollView。
