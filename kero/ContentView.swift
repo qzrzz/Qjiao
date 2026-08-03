@@ -187,11 +187,18 @@ struct ContentView: View {
     }
 }
 
-/// 无会话 / 无项目时的中心空白状态视图：包含 256pt 应用图标、支持拖入文件夹打开项目、高亮「新建项目」主按钮及「新建会话」次要按钮，统一全局背景色。
+/// 无会话 / 无项目时的中心空白状态视图：包含 128pt 高清应用图标、支持拖入文件夹打开项目、高亮「新建项目」主按钮及「新建会话」次要按钮，统一全局背景色。
 private struct EmptyStatePromptView: View {
     @ObservedObject var manager: TerminalManager
     let title: String
     @State private var isDropTargeted = false
+
+    /// 适配 Retina 高清屏的高分辨率应用图标 (128pt 逻辑尺寸，自动关联匹配最高物理分辨率)
+    private var highDpiAppIcon: NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+        icon.size = NSSize(width: 128, height: 128)
+        return icon
+    }
 
     var body: some View {
         ZStack {
@@ -199,11 +206,12 @@ private struct EmptyStatePromptView: View {
             WindowDragArea()
 
             VStack(spacing: 20) {
-                // 应用图标 (256pt)
-                Image(nsImage: NSApplication.shared.applicationIconImage)
+                // 应用图标 (128pt 高清适配)
+                Image(nsImage: highDpiAppIcon)
                     .resizable()
+                    .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 256, height: 256)
+                    .frame(width: 128, height: 128)
                     .scaleEffect(isDropTargeted ? 1.05 : 1.0)
                     .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isDropTargeted)
 
