@@ -96,7 +96,7 @@ private actor LocalAIProcessBox {
             }
             try? stdin.fileHandleForWriting.close()
         } else {
-            process.standardInput = FileHandle.nullDevice
+            process.standardInput = SubprocessRunner.makeEOFStdinPipe()
         }
 
         do {
@@ -115,17 +115,24 @@ private actor LocalAIProcessBox {
 
             readers.enter()
             DispatchQueue.global(qos: .utility).async {
-                outBox.data = stdout.fileHandleForReading.readDataToEndOfFile()
+                outBox.data = (try? stdout.fileHandleForReading.readToEnd()) ?? Data()
                 readers.leave()
             }
             readers.enter()
             DispatchQueue.global(qos: .utility).async {
-                errBox.data = stderr.fileHandleForReading.readDataToEndOfFile()
+                errBox.data = (try? stderr.fileHandleForReading.readToEnd()) ?? Data()
                 readers.leave()
             }
 
             process.waitUntilExit()
-            readers.wait()
+
+            // 读端兜底：进程树可能残留持有写端的孙进程，drain 无法 EOF；
+            // 超时后强制关闭读端，保证读取线程与 fd 必然回收。
+            if readers.wait(timeout: .now() + 5) == .timedOut {
+                try? stdout.fileHandleForReading.close()
+                try? stderr.fileHandleForReading.close()
+                _ = readers.wait(timeout: .now() + 2)
+            }
 
             let result = LocalAIProcessResult(
                 exitCode: process.terminationStatus,
@@ -172,7 +179,7 @@ private actor LocalAIProcessBox {
         }
         kill(pid, SIGTERM)
         // 尝试清掉直接子进程（agent CLI 常再 fork）
-        Self.killDescendants(of: pid, signal: SIGTERM)
+        SubprocessRunner.killDescendants(of: pid, signal: SIGTERM)
 
         guard escalating else { return }
         let capturedPID = pid
@@ -180,40 +187,15 @@ private actor LocalAIProcessBox {
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.4) {
             if let capturedProcess, capturedProcess.isRunning {
                 kill(capturedPID, SIGKILL)
-                Self.killDescendants(of: capturedPID, signal: SIGKILL)
+                SubprocessRunner.killDescendants(of: capturedPID, signal: SIGKILL)
                 capturedProcess.interrupt()
             } else {
                 var status: Int32 = 0
                 if waitpid(capturedPID, &status, WNOHANG) == 0 {
                     kill(capturedPID, SIGKILL)
-                    Self.killDescendants(of: capturedPID, signal: SIGKILL)
+                    SubprocessRunner.killDescendants(of: capturedPID, signal: SIGKILL)
                 }
             }
-        }
-    }
-
-    /// 用 `pgrep -P` 找直接子进程并发信号（尽力而为）。
-    nonisolated private static func killDescendants(of pid: Int32, signal: Int32) {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        task.arguments = ["-P", "\(pid)"]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-        do {
-            try task.run()
-            task.waitUntilExit()
-        } catch {
-            return
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let text = String(data: data, encoding: .utf8) else { return }
-        for line in text.split(separator: "\n") {
-            guard let child = Int32(line.trimmingCharacters(in: .whitespacesAndNewlines)), child > 1 else {
-                continue
-            }
-            kill(child, signal)
-            killDescendants(of: child, signal: signal)
         }
     }
 

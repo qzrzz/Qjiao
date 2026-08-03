@@ -1119,49 +1119,47 @@ private enum EditorFormatter: Identifiable {
 
     /// 在项目本地依赖之外，继续检测用户 PATH 中全局安装的格式化工具。
     private static func executable(named name: String) -> URL? {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [name]
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0,
-                  let path = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !path.isEmpty
-            else { return nil }
-            return URL(fileURLWithPath: path)
-        } catch {
-            return nil
-        }
+        let run = SubprocessRunner.run(
+            SubprocessRunner.Config(
+                executable: "/usr/bin/which",
+                arguments: [name],
+                timeout: 10
+            )
+        )
+        guard run.launched, !run.timedOut, run.exitCode == 0 else { return nil }
+        guard let path = String(data: run.stdout, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !path.isEmpty
+        else { return nil }
+        return URL(fileURLWithPath: path)
     }
 
     /// 在目标文件所在目录运行工具，让格式化器按项目上下文解析配置、插件与忽略文件。
     func format(_ path: String) -> FormatterResult {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = executable
-        // 文件参数放在 --write 前，兼容 Prettier 文档中的标准调用形式。
-        process.arguments = [path, "--write"]
-        process.currentDirectoryURL = URL(fileURLWithPath: path).deletingLastPathComponent()
-        process.environment = Self.formatterEnvironment()
-        process.standardOutput = output
-        process.standardError = output
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                let outputText = (String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8))?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                return .failure(outputText?.isEmpty == false ? outputText! : "\(title) exited with code \(process.terminationStatus).")
-            }
-            return .success
-        } catch {
-            return .failure(error.localizedDescription)
+        let run = SubprocessRunner.run(
+            SubprocessRunner.Config(
+                executable: executable.path,
+                arguments: [path, "--write"],
+                workingDirectory: (path as NSString).deletingLastPathComponent,
+                environment: Self.formatterEnvironment(),
+                timeout: 60
+            )
+        )
+        guard run.launched else {
+            return .failure(run.launchError ?? "\(title) failed to launch.")
         }
+        guard !run.timedOut, run.exitCode == 0 else {
+            let combined = [String(data: run.stdout, encoding: .utf8) ?? "",
+                            String(data: run.stderr, encoding: .utf8) ?? ""]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            let outputText = combined.isEmpty ? nil : combined
+            return .failure(
+                outputText?.isEmpty == false ? outputText! : "\(title) exited with code \(run.exitCode)."
+            )
+        }
+        return .success
     }
 
     /// GUI 应用从 Finder 启动时通常没有终端 PATH；本地 npm 二进制的 shebang
@@ -1178,27 +1176,22 @@ private enum EditorFormatter: Identifiable {
 
     /// 从用户的交互式 zsh 中读取 Node 位置，以兼容 nvm、fnm、Volta 与自定义安装目录。
     private static func interactiveShellNodeDirectory() -> URL? {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-ic", "command -v node"]
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
+        let run = SubprocessRunner.run(
+            SubprocessRunner.Config(
+                executable: "/bin/zsh",
+                arguments: ["-ic", "command -v node"],
+                timeout: 20
+            )
+        )
+        guard run.launched, !run.timedOut, run.exitCode == 0 else { return nil }
+        guard let text = String(data: run.stdout, encoding: .utf8) else { return nil }
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0,
-                  let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
-            else { return nil }
-
-            // shell 初始化脚本可能输出提示信息，从后向前选择实际存在的 Node 可执行文件。
-            for line in text.split(whereSeparator: \.isNewline).reversed() {
-                let path = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) else { continue }
-                return URL(fileURLWithPath: path).deletingLastPathComponent()
-            }
-        } catch {}
+        // shell 初始化脚本可能输出提示信息，从后向前选择实际存在的 Node 可执行文件。
+        for line in text.split(whereSeparator: \.isNewline).reversed() {
+            let path = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) else { continue }
+            return URL(fileURLWithPath: path).deletingLastPathComponent()
+        }
         return nil
     }
 }

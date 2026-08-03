@@ -584,7 +584,7 @@ final class AppSettings: nonisolated ObservableObject {
             ?? toml["appearance.display-short-dir-path"]?.bool
             ?? toml["appearance.display-sort-dir-path"]?.bool
             ?? toml["display-sort-dir-path"]?.bool
-            ?? false
+            ?? true
         filesFontFamily = toml["files.font-family"]?.string ?? ""
         let filesSize = toml["files.font-size"]?.double ?? Self.defaultFilesFontSize
         filesFontSize = Self.filesFontSizeRange.contains(filesSize) ? filesSize : Self.defaultFilesFontSize
@@ -734,7 +734,7 @@ final class AppSettings: nonisolated ObservableObject {
         editorThemeDark = ""
         displayFileSize = true
         filesGitDecorations = false
-        displayShortDirPath = false
+        displayShortDirPath = true
         filesFontFamily = ""
         filesFontSize = Self.defaultFilesFontSize
         restoreTerminalHistory = false
@@ -850,8 +850,8 @@ final class AppSettings: nonisolated ObservableObject {
         if filesGitDecorations {
             lines.append("files.git-decorations = true")
         }
-        if displayShortDirPath {
-            lines.append("appearance.short-directory-path = true")
+        if !displayShortDirPath {
+            lines.append("appearance.short-directory-path = false")
         }
         if !filesFontFamily.isEmpty {
             lines.append("files.font-family = \(TOML.quote(filesFontFamily))")

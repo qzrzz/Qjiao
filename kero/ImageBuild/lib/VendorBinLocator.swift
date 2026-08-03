@@ -178,21 +178,15 @@ enum VendorBinLocator {
     // MARK: - Private
 
     private static func resolveViaWhich(_ name: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [name]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        guard process.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let path = String(data: data, encoding: .utf8)?
+        let run = SubprocessRunner.run(
+            SubprocessRunner.Config(
+                executable: "/usr/bin/which",
+                arguments: [name],
+                timeout: 10
+            )
+        )
+        guard run.launched, !run.timedOut, run.exitCode == 0 else { return nil }
+        let path = String(data: run.stdout, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let path, !path.isEmpty else { return nil }
         return path

@@ -155,7 +155,7 @@ final class TerminalManager: nonisolated ObservableObject {
             if let existing = previousManagers.first(where: { !$0.projects.isEmpty }) {
                 synchronizeProjectList(with: existing.projects.map(\.id))
             } else {
-                startupProjectID = newProject().id
+                startupProjectID = newBlankProject().id
             }
         } else if !restored {
             if let existing = previousManagers.first(where: { !$0.projects.isEmpty }) {
@@ -257,12 +257,35 @@ final class TerminalManager: nonisolated ObservableObject {
 
     // MARK: - Projects
 
+    /// 创建未绑定目录的默认空白项目（内部兜底使用）。
     @discardableResult
-    func newProject() -> Project {
+    func newBlankProject() -> Project {
         let project = makeProject()
         project.saveConfig()
         insert(project)
         return project
+    }
+
+    /// 弹出文件夹选择面板：支持选择现有文件夹或在面板中新建文件夹来建立/打开项目。
+    func promptOpenProjectFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = L10n.t("Select")
+        panel.title = L10n.t("New Project")
+
+        if panel.runModal() == .OK {
+            for url in panel.urls {
+                addProject(at: url)
+            }
+        }
+    }
+
+    /// 用户操作的「新建项目」（⌘N / 按钮点击）：调起文件夹选择器（可选择现有或新建文件夹）。
+    func newProject() {
+        promptOpenProjectFolder()
     }
 
     /// Creates a project rooted at `directory`, with its first terminal
@@ -596,7 +619,8 @@ final class TerminalManager: nonisolated ObservableObject {
     /// - Parameter directory: 终端会话初始工作目录路径，传 nil 时默认使用项目目录或当前会话目录。
     func newSession(directory: String? = nil) {
         guard let project = selectedProject else {
-            newProject()
+            let project = newBlankProject()
+            project.newSession(directory: directory)
             return
         }
         project.newSession(directory: directory)
@@ -604,7 +628,7 @@ final class TerminalManager: nonisolated ObservableObject {
 
     /// 在当前项目中新建浏览器 Tab；无项目时先建立正常项目上下文。
     func newBrowserTab(initialURL: String? = nil) {
-        let project = selectedProject ?? newProject()
+        let project = selectedProject ?? newBlankProject()
         project.newBrowserTab(
             initialURL: initialURL,
             initialFocus: initialURL == nil ? .addressBar : .webContent

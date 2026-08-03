@@ -712,6 +712,7 @@ extension L10n {
         "Pull remote commits, then push local ones": "リモートのコミットをプルしてからローカルをプッシュ",
         "Push": "プッシュ",
         "Qjiao GitHub": "Qjiao GitHub",
+        "Qjiao Website": "Qjiao Webサイト",
         "Quality": "Quality",
         "Quantize": "Quantize",
         "Quit Without Saving": "Quit Without Saving",

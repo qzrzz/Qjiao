@@ -507,6 +507,8 @@ enum SidebarProbe {
             process.arguments = ["tag", tagName]
             process.currentDirectoryURL = URL(fileURLWithPath: directory)
             try? process.run()
+            // 等待退出并回收，避免僵尸进程累积（git tag 毫秒级完成）
+            process.waitUntilExit()
         }
     }
 
@@ -570,7 +572,7 @@ enum SidebarProbe {
             try? FileManager.default.removeItem(at: outputURL)
         }
         process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
+        process.standardError = Pipe()
 
         let finished = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in finished.signal() }

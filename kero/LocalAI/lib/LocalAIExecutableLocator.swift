@@ -90,13 +90,6 @@ enum LocalAIExecutableLocator {
     // MARK: - Private
 
     private static func resolveViaWhich(_ name: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [name]
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = FileHandle.nullDevice
-        process.standardInput = FileHandle.nullDevice
         var env = ProcessInfo.processInfo.environment
         // which 需要合理 PATH
         let pathValue = searchDirectories.joined(separator: ":")
@@ -105,16 +98,17 @@ enum LocalAIExecutableLocator {
         } else {
             env["PATH"] = pathValue
         }
-        process.environment = env
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        guard process.terminationStatus == 0 else { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        let text = String(data: data, encoding: .utf8)?
+
+        let run = SubprocessRunner.run(
+            SubprocessRunner.Config(
+                executable: "/usr/bin/which",
+                arguments: [name],
+                environment: env,
+                timeout: 10
+            )
+        )
+        guard run.launched, !run.timedOut, run.exitCode == 0 else { return nil }
+        let text = String(data: run.stdout, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !text.isEmpty, FileManager.default.isExecutableFile(atPath: text) else {
             return nil
