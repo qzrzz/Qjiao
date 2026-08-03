@@ -44,7 +44,8 @@
 
 - **无会话 / 无项目中心界面与 Tab 栏拖拽优化**：
   - **Tab 栏拖动窗口**：在无 open tabs（如无打开会话）时，Tabs 顶栏不再渲染空 `ScrollView`，标签栏全域自动转为可拖拽热区（`HeaderWindowDragBand`），支持鼠标点按拖动移动窗口。
-  - **大尺寸主按钮与「新建项目」次要按钮**：优化中心空白提示区（`EmptyStatePromptView`），放大图标与文字排版，将「新建会话 ⌘T」调整为高亮加大主按钮，并新增「新建项目 ⌘N」次要按钮（`manager.newProject()`）。
+  - **256pt 应用图标与高亮「New Project」主按钮**：优化无会话空状态界面（`EmptyStatePromptView`），将居中实例图标替换为 256pt 高清 macOS 应用图标，调整按钮高亮顺序，将「New Project (⌘N)」作为高亮主按钮呈现，并将「New Session (⌘T)」作为次要按钮。
+  - **统一背景色**：去除原本带有 0.65 透明度的中心局部半透明遮罩卡片，使中心空状态界面与全局主题背景色（`Theme.background`）融为一体，提升视觉连贯度。
   - **拖入文件夹打开项目**：中心区域支持 Finder 文件夹拖入（`.onDrop`），拖入时高亮虚线框与卡片反馈，松开后自动解析目标路径并在应用中打开/创建对应项目。
 - **内容视图 Tabs 非激活终端图标颜色优化**：将内容视图标签页（`TabStripIconView` 与 `TerminalAppIconView`）中默认终端图标在非激活模式下的颜色由过暗的 `.tertiary` / `Color.secondary` 优化为主题感知次要色 `Theme.secondaryColor`，使其与非激活状态下的标签页标题文字及周围 UI 元素在深浅外观下保持视觉对比度协调一致。
 
