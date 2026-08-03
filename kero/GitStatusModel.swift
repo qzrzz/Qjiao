@@ -248,37 +248,45 @@ final class GitStatusModel: nonisolated ObservableObject {
     /// Retry 的「从头刷新」：先修复失效的 Git fsmonitor daemon（停止 →
     /// 清理残留 IPC socket → 按需重新拉起），再以 `core.fsmonitor=false`
     /// 强制全量重扫。用于「Bad file descriptor」这类 daemon / IPC / 进程
-    /// 启动失效——普通 `refresh()` 会被 2s 轮询的 `isRefreshing` 挡住或
-    /// 继续撞上坏 socket，表现为 Retry 点了没反应。
+    /// 启动失效——普通 `refresh()` 会被 2s 轮询的 `isRefreshing` 挡住、
+    /// 卡在 actor 队列上的挂死扫描之后，或继续撞上坏 socket，表现为
+    /// Retry 点了没反应。
     ///
     /// 行为要点：
-    /// - **不**因 `isRefreshing` 静默 return：先 `invalidateStatusRefresh`
-    ///   作废进行中的扫描，保证按钮一定推进；
-    /// - 用户 Git 操作（`runningOperationID != nil`）或已在 recovery 中拒绝介入；
+    /// - **不**因 `isRefreshing` / 已在 recovery 静默 return：先作废进行中的
+    ///   扫描，并**抢占**上一次未完成的 recovery（换新 `recoveryID`），保证
+    ///   按钮每次点击都推进；
+    /// - 用户 Git 操作（`runningOperationID != nil`）时拒绝介入，避免与
+    ///   stage/commit 交错；
     /// - 用 `recoveryID` + `isRecovering` 记账 busy，cwd 切换时
-    ///   `clearRepositoryState` 可安全作废 recovery，不会把 busy 卡死或
-    ///   被 `isBusy = runningOperationID != nil` 误清；
-    /// - 扫描走 `recovery: true`，全程绕过 fsmonitor。
+    ///   `clearRepositoryState` 可安全作废 recovery；
+    /// - 扫描走 **actor 外** 的 `loadStatusForRecovery`，不被卡在坏 IPC 上的
+    ///   常规 `loadStatus` 堵住；全程 bypass fsmonitor，失败时再试 `git -C`。
     func retryRecovery() {
         let root = rootPath
         let generation = contextGeneration
         guard !root.isEmpty else { return }
-        // 真实 git 操作或已在 recovery 时不要重叠启动。
-        if runningOperationID != nil || recoveryID != nil { return }
+        // 真实 git 操作进行中不要重叠；已在 recovery 时允许用户再次 Retry 抢占。
+        if runningOperationID != nil { return }
         invalidateStatusRefresh()
         let id = UUID()
         recoveryID = id
         isRecovering = true
         isBusy = true
+        // 立刻清掉旧错误，避免 Recovering 时仍显示上一轮同一句 EBADF，
+        // 看起来像「点了没反应」。
+        statusError = nil
         let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
         Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
+                // 1) 停 daemon + 删 IPC（短超时，不经 actor）
                 GitScanner.recoverFilesystemMonitor(in: root)
-                return await GitScanner.shared.loadStatus(
+                // 2) 独立于 actor 串行队列的 bypass 扫描（含超时 / git -C 回退）
+                let loaded = GitScanner.loadStatusForRecovery(
                     in: root,
-                    includeIgnoredPaths: includeIgnoredPaths,
-                    recovery: true
+                    includeIgnoredPaths: includeIgnoredPaths
                 )
+                return loaded
             }.value
             guard let self else { return }
             let stillOurs = self.recoveryID == id
@@ -289,15 +297,18 @@ final class GitStatusModel: nonisolated ObservableObject {
                     self.isBusy = false
                 }
             }
-            // cwd / root 已变，或 recovery 被 clearRepositoryState 作废：丢弃结果。
+            // cwd / root 已变，或 recovery 被更新的 Retry / clearRepositoryState 抢占：丢弃。
             guard stillOurs,
                   self.contextGeneration == generation,
                   self.rootPath == root else { return }
             self.isRefreshing = false
             self.hasResolvedStatus = true
-            self.apply(result)
+            // recovery 结果必须落盘：ignoreBusy 防止与其它 busy 竞态时静默丢弃。
+            self.apply(result, ignoreBusy: true)
+            // 成功或失败都拉长 fsmonitor bypass cooldown，避免 2s 轮询立刻再撞 daemon。
+            Task { await GitScanner.shared.noteFilesystemMonitorBypassCooldown() }
             // 恢复期间 timer 可能堆积了 refreshPending；状态已是最新时清掉即可，
-            // 若仍失败则再走一次普通 refresh 给后续自愈机会。
+            // 若仍失败则再走一次普通 refresh（cooldown 内会自动 bypass）。
             if self.refreshPending {
                 self.refreshPending = false
                 if self.statusError != nil {
@@ -984,12 +995,14 @@ final class GitStatusModel: nonisolated ObservableObject {
         if !preserveIdentity { repositoryIdentity = "" }
     }
 
-    private func apply(_ loadResult: StatusLoadResult) {
+    /// - Parameter ignoreBusy: Retry recovery 完成时为 true，避免 `isBusy`
+    ///   竞态导致失败/成功结果被静默丢弃（表现为 Retry 无效）。
+    private func apply(_ loadResult: StatusLoadResult, ignoreBusy: Bool = false) {
         switch loadResult {
         case .notRepository:
             // A refresh can finish after a user action starts. Do not let a
             // transient status failure erase the active operation/result.
-            if isBusy { return }
+            if isBusy && !ignoreBusy { return }
             let preserveFailure: Bool
             if let operation, case .failed = operation.state {
                 preserveFailure = true
@@ -999,7 +1012,7 @@ final class GitStatusModel: nonisolated ObservableObject {
             clearRepositoryState(preserveFailedOperation: preserveFailure)
             return
         case .failed(let message):
-            if isBusy { return }
+            if isBusy && !ignoreBusy { return }
             let preserveFailure: Bool
             if let operation, case .failed = operation.state {
                 preserveFailure = true
@@ -1010,6 +1023,8 @@ final class GitStatusModel: nonisolated ObservableObject {
                 preserveIdentity: true,
                 preserveFailedOperation: preserveFailure
             )
+            // clearRepositoryState 会清 statusError；写回完整诊断文案。
+            // recovery 路径（ignoreBusy）在调用方已清 isRecovering / recoveryID。
             statusError = message
             return
         case .repository(let result):

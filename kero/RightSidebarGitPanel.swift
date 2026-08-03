@@ -69,7 +69,10 @@ struct GitPanel: View {
             header
             operationBanner
 
-            if let statusError = model.statusError {
+            if model.isRecovering {
+                // Retry 会先清 statusError，单独展示恢复中，避免闪回「非仓库」空态。
+                statusFailure(nil)
+            } else if let statusError = model.statusError {
                 statusFailure(statusError)
             } else if !model.isRepo {
                 if model.isResolvingInitialStatus {
@@ -1251,21 +1254,37 @@ struct GitPanel: View {
         model.sync(root: project.gitRoot(followingSessionAt: session?.currentDirectoryPath ?? ""))
     }
 
-    private func statusFailure(_ message: String) -> some View {
+    private func statusFailure(_ message: String?) -> some View {
         VStack(spacing: 9) {
-            Spacer()
+            Spacer(minLength: 8)
             Image(systemName: "exclamationmark.triangle")
                 .font(SidebarTypography.emptyIcon())
                 .foregroundStyle(Color(red: 0.88, green: 0.42, blue: 0.36))
-            VStack(spacing: 3) {
-                Text(L10n.t("Git Status Unavailable"))
-                    .font(SidebarTypography.body(.medium))
-                Text(message)
-                    .font(SidebarTypography.caption(design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(5)
-                    .textSelection(.enabled)
+            VStack(spacing: 6) {
+                Text(
+                    model.isRecovering
+                        ? L10n.t("Recovering Git Status…")
+                        : L10n.t("Git Status Unavailable")
+                )
+                .font(SidebarTypography.body(.medium))
+                if let message, !message.isEmpty {
+                    // 诊断文案可能含多行（命令 / 目录 / exit / recovery steps）；
+                    // 可滚动 + 可选中复制，避免截断后无法排查。
+                    ScrollView {
+                        Text(message)
+                            .font(SidebarTypography.caption(design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 160)
+                } else if model.isRecovering {
+                    Text(L10n.t("Repairing fsmonitor and rescanning the repository…"))
+                        .font(SidebarTypography.caption())
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
             }
             Button {
                 model.retryRecovery()
@@ -1280,8 +1299,14 @@ struct GitPanel: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(model.isBusy || model.isResolvingInitialStatus)
-            Spacer()
+            // 恢复中允许再次点击以抢占卡住的 recovery；仅真实 git 操作时禁用。
+            .disabled(model.isBusy && !model.isRecovering)
+            .help(
+                model.isRecovering
+                    ? L10n.t("Recovering Git status… Click again to restart recovery.")
+                    : L10n.t("Retry from scratch: repair fsmonitor and rescan.")
+            )
+            Spacer(minLength: 8)
         }
         .padding(.horizontal, 18)
         .frame(maxWidth: .infinity)
