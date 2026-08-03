@@ -6,6 +6,7 @@
       "name": "kero-release",
       "devDependencies": {
         "@types/bun": "latest",
+        "chalk": "6.0.0",
         "woff2": "^1.0.0",
       },
     },

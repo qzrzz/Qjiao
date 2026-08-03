@@ -7,6 +7,8 @@
   ],
   "type": "module",
   "scripts": {
+    "dev": "bun run scripts/dev.ts",
+    "version+": "bun run scripts/bump-version.ts",
     "release": "bun run scripts/release.ts",
     "web:build": "cd ./web && npm run build",
     "web:update-latest": "cd ./web && bun run update-latest",
@@ -18,6 +20,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "chalk": "6.0.0",
     "woff2": "^1.0.0"
   }
 }

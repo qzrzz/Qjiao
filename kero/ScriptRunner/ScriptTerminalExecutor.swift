@@ -39,16 +39,16 @@ final class ScriptTerminalExecutor {
             ? command.workingDirectory
             : (!project.projectDirectory.isEmpty ? project.projectDirectory : NSHomeDirectory())
 
+        // 首次运行：分屏走当前 Tab 下方；非分屏新建独立 Tab。
+        // 再次运行时的「原地替换」由 ScriptRunner / TerminalManager 在调用前处理。
         let session: TerminalSession
         if splitPane {
-            // 使用上下分屏 (.bottom) 在当前标签页下方打开终端
             if let splitSession = project.newSplitSession(directory: workingDir, toward: .bottom) {
                 session = splitSession
             } else {
                 session = project.newSession(directory: workingDir)
             }
         } else {
-            // 在新建独立 Terminal Tab 中打开
             session = project.newSession(directory: workingDir)
         }
 

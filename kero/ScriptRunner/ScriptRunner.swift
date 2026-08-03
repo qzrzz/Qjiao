@@ -115,14 +115,27 @@ final class ScriptRunner: ObservableObject {
         }
 
         let projectID = project.id
+        let workingDir = !command.workingDirectory.isEmpty
+            ? command.workingDirectory
+            : (!project.projectDirectory.isEmpty ? project.projectDirectory : NSHomeDirectory())
 
-        // 1. 如果已有之前创建的运行分屏终端，直接关闭它
+        // 已有运行终端时优先原地替换，保留当前分屏位置（用户可能已拖成左右/嵌套布局）。
+        if let existingSession = activeSplitSessionsByProject[projectID],
+           let replaced = project.replaceSession(
+               id: existingSession.id,
+               directory: workingDir
+           ) {
+            replaced.sendCommandWhenReady(command.shellString + "\n")
+            trackSession(replaced, for: filePath, projectID: projectID)
+            return
+        }
+
+        // 旧会话已不在布局中：清理引用后新建上下分屏
         if let existingSession = activeSplitSessionsByProject[projectID] {
             project.closeContent(.session(existingSession), terminate: true)
             activeSplitSessionsByProject.removeValue(forKey: projectID)
         }
 
-        // 2. 新建一个标准的上下分屏终端 (.bottom) 运行代码
         let session = try ScriptTerminalExecutor.shared.execute(
             command: command,
             targetPath: filePath,

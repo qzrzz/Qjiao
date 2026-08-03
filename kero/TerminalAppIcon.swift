@@ -167,34 +167,124 @@ final class TerminalAppIconCatalog {
         return isTemplate(source)
     }
 
+    /// 单名匹配结果（含原因，供调试日志）。
+    struct ProcessNameMatch: Sendable {
+        let processName: String
+        let normalized: String
+        let source: TerminalAppIconSource
+        /// `exact` / `stem:<stem>` / `prefix:<prefix>`
+        let reason: String
+        let isWeakRuntime: Bool
+    }
+
+    /// 多名匹配汇总。
+    struct ProcessNamesMatchResult: Sendable {
+        let source: TerminalAppIconSource?
+        /// 最终采用的候选（若有）。
+        let winner: ProcessNameMatch?
+        /// 扫描过程中跳过/命中的逐步说明。
+        let steps: [String]
+    }
+
     /// 按进程可执行文件 basename 查找图标来源；未配置时返回 nil。
     /// 支持精确名、配置的 `matchPrefix`，以及版本化二进制（`grok-0.2.1-macos-…` → `grok`）。
     func source(forProcessName processName: String) -> TerminalAppIconSource? {
+        match(forProcessName: processName)?.source
+    }
+
+    /// 单名匹配（带原因）。
+    func match(forProcessName processName: String) -> ProcessNameMatch? {
         let key = Self.normalizeProcessName(processName)
         if key.isEmpty { return nil }
-        if let rule = exactMap[key] { return rule.source }
+        let weak = Self.isWeakRuntimeName(processName)
+        if let rule = exactMap[key] {
+            return ProcessNameMatch(
+                processName: processName,
+                normalized: key,
+                source: rule.source,
+                reason: "exact",
+                isWeakRuntime: weak
+            )
+        }
         // 版本化 / 平台后缀：`grok-0.2.112-macos-aarch64`、`codex-aarch64-apple-darwin`
         if let stem = Self.commandStem(key), let rule = exactMap[stem] {
-            return rule.source
+            return ProcessNameMatch(
+                processName: processName,
+                normalized: key,
+                source: rule.source,
+                reason: "stem:\(stem)",
+                isWeakRuntime: weak
+            )
         }
         for item in prefixRules where key.hasPrefix(item.prefix) {
-            return item.rule.source
+            return ProcessNameMatch(
+                processName: processName,
+                normalized: key,
+                source: item.rule.source,
+                reason: "prefix:\(item.prefix)",
+                isWeakRuntime: weak
+            )
         }
         return nil
     }
 
     /// 对多个候选名匹配图标。优先具体 CLI（rsbuild），弱化 node/npm 等运行时。
     func source(forProcessNames processNames: [String]) -> TerminalAppIconSource? {
-        var weakRuntimeSource: TerminalAppIconSource?
-        for name in processNames {
-            guard let source = source(forProcessName: name) else { continue }
-            if Self.isWeakRuntimeName(name) {
-                if weakRuntimeSource == nil { weakRuntimeSource = source }
+        match(forProcessNames: processNames).source
+    }
+
+    /// 多名匹配（带逐步原因）。
+    func match(forProcessNames processNames: [String]) -> ProcessNamesMatchResult {
+        var weakRuntimeWinner: ProcessNameMatch?
+        var steps: [String] = []
+        for (index, name) in processNames.enumerated() {
+            guard let hit = match(forProcessName: name) else {
+                steps.append("[\(index)] \(name) → no rule")
                 continue
             }
-            return source
+            if hit.isWeakRuntime {
+                if weakRuntimeWinner == nil {
+                    weakRuntimeWinner = hit
+                    steps.append(
+                        "[\(index)] \(name) → \(Self.describeSource(hit.source)) (\(hit.reason), weak runtime, deferred)"
+                    )
+                } else {
+                    steps.append(
+                        "[\(index)] \(name) → \(Self.describeSource(hit.source)) (\(hit.reason), weak runtime, skipped)"
+                    )
+                }
+                continue
+            }
+            steps.append(
+                "[\(index)] \(name) → \(Self.describeSource(hit.source)) (\(hit.reason), strong WINNER)"
+            )
+            return ProcessNamesMatchResult(source: hit.source, winner: hit, steps: steps)
         }
-        return weakRuntimeSource
+        if let weakRuntimeWinner {
+            steps.append(
+                "fallback weak → \(Self.describeSource(weakRuntimeWinner.source)) from \(weakRuntimeWinner.processName)"
+            )
+            return ProcessNamesMatchResult(
+                source: weakRuntimeWinner.source,
+                winner: weakRuntimeWinner,
+                steps: steps
+            )
+        }
+        steps.append("no match")
+        return ProcessNamesMatchResult(source: nil, winner: nil, steps: steps)
+    }
+
+    nonisolated static func describeSource(_ source: TerminalAppIconSource) -> String {
+        switch source {
+        case .material(let name):
+            return "material:\(name)"
+        case .imageFile(let path, let darkPath):
+            let base = (path as NSString).lastPathComponent
+            if let darkPath {
+                return "file:\(base)+dark:\((darkPath as NSString).lastPathComponent)"
+            }
+            return "file:\(base)"
+        }
     }
 
     /// node/npm 等：仅在没有更具体 CLI 名时才作为图标。
@@ -662,11 +752,12 @@ enum TerminalProcessIdentity {
     }
 
     /// 登录 shell 下是否有非 shell 子孙（PTY 代理场景下替代 `tcgetpgrp` 判断前台作业）。
+    /// 忽略 shell 提示符主题的短暂探测进程（如 oh-my-zsh 的 `git config --get`）。
     nonisolated static func hasNonShellDescendants(of rootPid: pid_t) -> Bool {
         firstNonShellDescendant(of: rootPid) != nil
     }
 
-    /// BFS 找到第一个非 shell / 非 proxy 的子孙 PID（用于代理场景下的 CWD / 作业探测）。
+    /// BFS 找到第一个非 shell / 非 proxy / 非提示符探测 的子孙 PID（用于代理场景下的 CWD / 作业探测）。
     nonisolated static func firstNonShellDescendant(of rootPid: pid_t) -> pid_t? {
         var queue = directChildPids(of: rootPid)
         var seen = Set<pid_t>([rootPid])
@@ -678,7 +769,10 @@ enum TerminalProcessIdentity {
             if let base = executableBaseName(pid: pid)?.lowercased() {
                 let name = base.hasPrefix("-") ? String(base.dropFirst()) : base
                 if !shellNames.contains(name), !ptyProxyNames.contains(name) {
-                    return pid
+                    // 提示符探测（oh-my-zsh / p10k 等）不当作前台作业。
+                    if !isShellPromptHelper(execBase: base, argv: processArguments(pid: pid)) {
+                        return pid
+                    }
                 }
             }
             queue.append(contentsOf: directChildPids(of: pid))
@@ -686,35 +780,53 @@ enum TerminalProcessIdentity {
         return nil
     }
 
+    /// Shell 提示符 / VCS 主题常用的短命探测命令，不应驱动 Tab 图标或「前台忙碌」态。
+    /// 例如 oh-my-zsh：`git config --get oh-my-zsh.hide-info`。
+    nonisolated static func isShellPromptHelper(execBase: String?, argv: [String]) -> Bool {
+        guard var base = execBase?.trimmingCharacters(in: .whitespacesAndNewlines), !base.isEmpty else {
+            return false
+        }
+        base = base.lowercased()
+        if base.hasPrefix("-") { base.removeFirst() }
+        if base.contains("/") {
+            base = (base as NSString).lastPathComponent
+        }
+
+        // 去掉 argv0 后的参数（兼容 argv0 为绝对路径）。
+        let args: [String] = {
+            if argv.isEmpty { return [] }
+            if argv.count == 1 { return [] }
+            return Array(argv.dropFirst())
+        }()
+
+        if base == "git" {
+            guard let sub = args.first?.lowercased() else { return false }
+            // 读配置 / 解析仓库元数据：提示符与主题几乎必跑；用户很少需要为此换 Tab 图标。
+            switch sub {
+            case "config", "rev-parse", "symbolic-ref", "name-rev", "describe",
+                 "diff-index", "ls-files", "var", "hash-object":
+                return true
+            case "diff":
+                // `git diff --quiet` / `--exit-code` 常见于 dirty 检测
+                return args.contains("--quiet") || args.contains("--exit-code")
+            case "status":
+                // 仅过滤提示符常用的 porcelain 短查询；用户手敲 `git status` 仍显示图标
+                return args.contains("--porcelain") || args.contains("--porcelain=v1")
+                    || args.contains("--porcelain=v2") || args.contains("-z")
+            default:
+                return false
+            }
+        }
+        return false
+    }
+
     /// PTY 代理下无法依赖 Ghostty 的前台 pgid；改为枚举 shell 子孙的可执行名。
     nonisolated static func descendantExecutableNames(of rootPid: pid_t) -> [String] {
-        var ordered: [String] = []
-        var seenNames = Set<String>()
-        var seenPids = Set<pid_t>([rootPid])
-        var queue = directChildPids(of: rootPid)
-        var index = 0
-
-        func appendName(_ raw: String) {
-            let key = raw.lowercased()
-            let normalized = key.hasPrefix("-") ? String(key.dropFirst()) : key
-            if normalized.isEmpty || shellNames.contains(normalized) || ptyProxyNames.contains(normalized) {
-                return
-            }
-            if seenNames.insert(normalized).inserted {
-                ordered.append(raw)
-            }
-        }
-
-        while index < queue.count {
-            let pid = queue[index]
-            index += 1
-            guard seenPids.insert(pid).inserted else { continue }
-            for name in identityCandidates(pid: pid) {
-                appendName(name)
-            }
-            queue.append(contentsOf: directChildPids(of: pid))
-        }
-        return ordered
+        debugForegroundJobSnapshot(
+            shellPid: rootPid,
+            foregroundPgid: nil,
+            nestedUnderPtyProxy: true
+        ).aggregatedNames
     }
 
     /// `proc_pidinfo(PROC_PIDT_SHORTBSDINFO)` 取父 PID。
@@ -771,6 +883,27 @@ enum TerminalProcessIdentity {
         return nil
     }
 
+    /// 调试用：单个进程的可执行路径、argv、图标候选。
+    struct DebugProcessSnapshot: Sendable {
+        let pid: pid_t
+        let pgid: pid_t
+        let execPath: String?
+        let execBase: String?
+        let argv: [String]
+        let identityCandidates: [String]
+    }
+
+    /// 调试用：前台作业探测快照（进程组或 PTY 代理子孙）。
+    struct DebugForegroundJobSnapshot: Sendable {
+        let mode: String
+        let shellPid: pid_t
+        let shellPgid: pid_t
+        let foregroundPgid: pid_t?
+        let nestedUnderPtyProxy: Bool
+        let processes: [DebugProcessSnapshot]
+        let aggregatedNames: [String]
+    }
+
     /// 收集前台进程组内所有进程的可执行名 / 脚本名，用于图标匹配。
     ///
     /// `foregroundPgid` 来自 Ghostty 的 `tcgetpgrp`（进程组 ID，不等于业务 PID）。
@@ -780,6 +913,22 @@ enum TerminalProcessIdentity {
         shellPid: pid_t,
         foregroundPgid: pid_t
     ) -> [String] {
+        debugForegroundJobSnapshot(
+            shellPid: shellPid,
+            foregroundPgid: foregroundPgid,
+            nestedUnderPtyProxy: false
+        ).aggregatedNames
+    }
+
+    /// 生成前台作业调试快照（含每 PID 的 argv）。
+    nonisolated static func debugForegroundJobSnapshot(
+        shellPid: pid_t,
+        foregroundPgid: pid_t?,
+        nestedUnderPtyProxy: Bool
+    ) -> DebugForegroundJobSnapshot {
+        let shellPgidRaw = getpgid(shellPid)
+        let shellPgid = shellPgidRaw > 0 ? shellPgidRaw : shellPid
+        var processes: [DebugProcessSnapshot] = []
         var ordered: [String] = []
         var seenNames = Set<String>()
         var seenPids = Set<pid_t>()
@@ -787,30 +936,80 @@ enum TerminalProcessIdentity {
         func appendName(_ raw: String) {
             let key = raw.lowercased()
             let normalized = key.hasPrefix("-") ? String(key.dropFirst()) : key
-            if normalized.isEmpty || shellNames.contains(normalized) { return }
+            if normalized.isEmpty || shellNames.contains(normalized) || ptyProxyNames.contains(normalized) {
+                return
+            }
             if seenNames.insert(normalized).inserted {
                 ordered.append(raw)
             }
         }
 
+        func snapshot(for pid: pid_t) -> DebugProcessSnapshot {
+            let pgidRaw = getpgid(pid)
+            return DebugProcessSnapshot(
+                pid: pid,
+                pgid: pgidRaw > 0 ? pgidRaw : pid,
+                execPath: executablePath(pid: pid),
+                execBase: executableBaseName(pid: pid),
+                argv: processArguments(pid: pid),
+                identityCandidates: identityCandidates(pid: pid)
+            )
+        }
+
         func consider(_ pid: pid_t) {
             guard pid > 1, !seenPids.contains(pid) else { return }
             seenPids.insert(pid)
-            for name in identityCandidates(pid: pid) {
+            let row = snapshot(for: pid)
+            processes.append(row)
+            // 提示符探测进程不参与图标候选（避免 oh-my-zsh 的 git config 抢走 Git 图标）。
+            if isShellPromptHelper(execBase: row.execBase, argv: row.argv) {
+                return
+            }
+            for name in row.identityCandidates {
                 appendName(name)
             }
         }
 
-        // 1) 前台进程组内全部 PID（含 npm 拉起的 node/rsbuild）
-        for pid in pids(inProcessGroup: foregroundPgid) {
-            consider(pid)
+        let mode: String
+        if nestedUnderPtyProxy {
+            mode = "pty-proxy-descendants"
+            var queue = directChildPids(of: shellPid)
+            var index = 0
+            while index < queue.count {
+                let pid = queue[index]
+                index += 1
+                consider(pid)
+                queue.append(contentsOf: directChildPids(of: pid))
+            }
+        } else if let foregroundPgid, foregroundPgid > 0 {
+            mode = "foreground-process-group"
+            for pid in pids(inProcessGroup: foregroundPgid) {
+                consider(pid)
+            }
+            consider(foregroundPgid)
+        } else {
+            mode = "empty"
         }
-        // 2) 组 leader 兜底（组查询失败时）
-        consider(foregroundPgid)
-        // 3) shell 自身（一般无业务意义，忽略）
-        _ = shellPid
 
-        return ordered
+        return DebugForegroundJobSnapshot(
+            mode: mode,
+            shellPid: shellPid,
+            shellPgid: shellPgid,
+            foregroundPgid: foregroundPgid,
+            nestedUnderPtyProxy: nestedUnderPtyProxy,
+            processes: processes,
+            aggregatedNames: ordered
+        )
+    }
+
+    /// 读取进程可执行绝对路径。
+    nonisolated static func executablePath(pid: pid_t) -> String? {
+        guard pid > 0 else { return nil }
+        var pathBuffer = [CChar](repeating: 0, count: Int(4 * MAXPATHLEN))
+        let pathLen = proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count))
+        guard pathLen > 0 else { return nil }
+        let path = String(cString: pathBuffer)
+        return path.isEmpty ? nil : path
     }
 
     /// `KERN_PROC_PGRP`：枚举同一进程组的全部 PID。

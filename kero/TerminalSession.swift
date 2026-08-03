@@ -505,17 +505,26 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
     /// 前台作业的可执行名（含 argv 脚本名）。兼容 PTY 代理：代理场景下改扫 shell 子孙。
     var foregroundJobExecutableNames: [String] {
-        guard let shellPid else { return [] }
-        if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
-            return TerminalProcessIdentity.descendantExecutableNames(of: shellPid)
-        }
-        if let foregroundPid = _terminalView?.foregroundPid, foregroundPid > 0 {
-            return TerminalProcessIdentity.foregroundExecutableNames(
+        foregroundJobDebugSnapshot()?.aggregatedNames ?? []
+    }
+
+    /// 前台作业调试快照（进程组 / PTY 代理子孙 + 每 PID argv）。
+    func foregroundJobDebugSnapshot() -> TerminalProcessIdentity.DebugForegroundJobSnapshot? {
+        guard let shellPid else { return nil }
+        let nested = TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid)
+        if nested {
+            return TerminalProcessIdentity.debugForegroundJobSnapshot(
                 shellPid: shellPid,
-                foregroundPgid: foregroundPid
+                foregroundPgid: _terminalView?.foregroundPid,
+                nestedUnderPtyProxy: true
             )
         }
-        return []
+        let foregroundPid = _terminalView?.foregroundPid
+        return TerminalProcessIdentity.debugForegroundJobSnapshot(
+            shellPid: shellPid,
+            foregroundPgid: (foregroundPid ?? 0) > 0 ? foregroundPid : nil,
+            nestedUnderPtyProxy: false
+        )
     }
 
     /// 当前终端处于需要辅助工具栏的特定交互模式（如 Vi/Vim/Neovim）。
@@ -585,28 +594,78 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private var cachedForegroundAppIcon: TerminalAppIconSource?
     private var cachedForegroundAppIconResolvedAt: ContinuousClock.Instant?
     private var cachedForegroundAppIconIsStrong = false
+    /// 连续判定为「前台有作业」的起点；用于图标展示防抖，滤掉 precmd 短命进程。
+    private var foregroundIconRunningSince: ContinuousClock.Instant?
+
+    /// 临时调试：前台图标识别日志。控制台过滤 `[FgIcon]`。
+    private static let debugForegroundAppIconLog = false
+    /// 图标至少持续这么久才展示，避免 oh-my-zsh 等提示符探测闪一下。
+    private static let foregroundAppIconShowDebounce: Duration = .milliseconds(350)
+    private var lastLoggedForegroundAppIconSummary: String = "<init>"
+    private var lastLoggedForegroundRunning: Bool?
 
     /// 当前前台进程若在 `TerminalAppIcons/apps.json`（或用户配置）中有映射，
     /// 返回对应图标来源；空闲或未知程序为 nil。
     var foregroundAppIcon: TerminalAppIconSource? {
-        guard isForegroundCommandRunning, let shellPid else {
-            if cachedForegroundAppIconPid != 0 {
+        let running = isForegroundCommandRunning
+        guard running, let shellPid else {
+            foregroundIconRunningSince = nil
+            if cachedForegroundAppIconPid != 0 || lastLoggedForegroundRunning == true {
+                let previous = cachedForegroundAppIcon.map(TerminalAppIconCatalog.describeSource) ?? "nil"
+                if Self.debugForegroundAppIconLog {
+                    let idleShellPid = self.shellPid
+                    let fg = _terminalView?.foregroundPid
+                    let shellPgid: pid_t? = idleShellPid.map { p in
+                        let g = getpgid(p)
+                        return g > 0 ? g : p
+                    }
+                    print(
+                        """
+                        [FgIcon] ── IDLE / clear ── session=\(id.uuidString.prefix(8))
+                          wasRunning=\(lastLoggedForegroundRunning.map(String.init(describing:)) ?? "nil") → false
+                          shellPid=\(idleShellPid.map(String.init) ?? "nil") shellPgid=\(shellPgid.map(String.init) ?? "nil")
+                          ghosttyForegroundPgid=\(fg.map(String.init) ?? "nil")
+                          clearedIcon=\(previous)
+                          title=\(title)
+                        """
+                    )
+                }
                 cachedForegroundAppIconPid = 0
                 cachedForegroundAppIcon = nil
                 cachedForegroundAppIconResolvedAt = nil
                 cachedForegroundAppIconIsStrong = false
+                lastLoggedForegroundRunning = false
+                lastLoggedForegroundAppIconSummary = "idle"
+            } else if lastLoggedForegroundRunning == nil {
+                lastLoggedForegroundRunning = false
+            }
+            return nil
+        }
+
+        // 防抖：前台作业需持续一段时间再换图标（precmd 的 git config 等通常 <100ms）。
+        if foregroundIconRunningSince == nil {
+            foregroundIconRunningSince = .now
+        }
+        if let since = foregroundIconRunningSince,
+           ContinuousClock.now - since < Self.foregroundAppIconShowDebounce
+        {
+            if Self.debugForegroundAppIconLog,
+               lastLoggedForegroundAppIconSummary != "debounce"
+            {
+                print(
+                    "[FgIcon] debounce (<\(Self.foregroundAppIconShowDebounce)) session=\(id.uuidString.prefix(8)) title=\(title)"
+                )
+                lastLoggedForegroundAppIconSummary = "debounce"
             }
             return nil
         }
 
         // 缓存键：优先 Ghostty 前台 pgid；PTY 代理下 pgid 无意义，改用 shell pid。
+        let nestedProxy = TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid)
+        let ghosttyFg = terminalView.foregroundPid
         let cacheKey: pid_t = {
-            if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
-                return shellPid
-            }
-            if let fg = terminalView.foregroundPid, fg > 0 {
-                return fg
-            }
+            if nestedProxy { return shellPid }
+            if let fg = ghosttyFg, fg > 0 { return fg }
             return shellPid
         }()
 
@@ -616,25 +675,141 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         {
             let age = ContinuousClock.now - resolvedAt
             if cachedForegroundAppIconIsStrong, age < .seconds(2) {
+                if Self.debugForegroundAppIconLog {
+                    logForegroundAppIconCacheHit(
+                        kind: "strong≤2s",
+                        cacheKey: cacheKey,
+                        age: age,
+                        shellPid: shellPid,
+                        ghosttyFg: ghosttyFg,
+                        nestedProxy: nestedProxy
+                    )
+                }
                 return cachedForegroundAppIcon
             }
             if !cachedForegroundAppIconIsStrong, age < .milliseconds(250) {
+                if Self.debugForegroundAppIconLog {
+                    logForegroundAppIconCacheHit(
+                        kind: "weak/miss≤250ms",
+                        cacheKey: cacheKey,
+                        age: age,
+                        shellPid: shellPid,
+                        ghosttyFg: ghosttyFg,
+                        nestedProxy: nestedProxy
+                    )
+                }
                 return cachedForegroundAppIcon
             }
         }
 
-        let names = foregroundJobExecutableNames
-        let source = TerminalAppIconCatalog.shared.source(forProcessNames: names)
+        let job = foregroundJobDebugSnapshot()
+        let names = job?.aggregatedNames ?? []
+        let matchResult = TerminalAppIconCatalog.shared.match(forProcessNames: names)
+        let source = matchResult.source
         // 候选里若出现非 node/npm 的名字且成功匹配，视为强命中。
-        let strong = source != nil && names.contains { name in
-            !TerminalAppIconCatalog.isWeakRuntimeName(name)
-                && TerminalAppIconCatalog.shared.source(forProcessName: name) != nil
-        }
+        let strong = matchResult.winner.map { !$0.isWeakRuntime } ?? false
         cachedForegroundAppIconPid = cacheKey
         cachedForegroundAppIcon = source
         cachedForegroundAppIconResolvedAt = ContinuousClock.now
         cachedForegroundAppIconIsStrong = strong
+
+        if Self.debugForegroundAppIconLog {
+            logForegroundAppIconResolve(
+                shellPid: shellPid,
+                ghosttyFg: ghosttyFg,
+                nestedProxy: nestedProxy,
+                cacheKey: cacheKey,
+                job: job,
+                matchResult: matchResult,
+                strong: strong
+            )
+        }
+        lastLoggedForegroundRunning = true
+        lastLoggedForegroundAppIconSummary = source.map(TerminalAppIconCatalog.describeSource) ?? "nil"
         return source
+    }
+
+    private func logForegroundAppIconCacheHit(
+        kind: String,
+        cacheKey: pid_t,
+        age: ContinuousClock.Duration,
+        shellPid: pid_t,
+        ghosttyFg: pid_t?,
+        nestedProxy: Bool
+    ) {
+        let summary = cachedForegroundAppIcon.map(TerminalAppIconCatalog.describeSource) ?? "nil"
+        // 缓存命中极频繁（TimelineView 0.3s）：仅在结果变化或从 idle 进入 running 时打印。
+        let ageMs: Int = {
+            let parts = age.components
+            return Int(parts.seconds * 1000 + parts.attoseconds / 1_000_000_000_000_000)
+        }()
+        let line = "cacheHit \(kind) icon=\(summary) ageMs≈\(ageMs) key=\(cacheKey)"
+        if lastLoggedForegroundAppIconSummary != summary || lastLoggedForegroundRunning != true {
+            print(
+                """
+                [FgIcon] ── CACHE HIT ── session=\(id.uuidString.prefix(8))
+                  \(line)
+                  shellPid=\(shellPid) ghosttyFgPgid=\(ghosttyFg.map(String.init) ?? "nil") proxy=\(nestedProxy)
+                  title=\(title)
+                """
+            )
+            lastLoggedForegroundAppIconSummary = summary
+            lastLoggedForegroundRunning = true
+        }
+    }
+
+    private func logForegroundAppIconResolve(
+        shellPid: pid_t,
+        ghosttyFg: pid_t?,
+        nestedProxy: Bool,
+        cacheKey: pid_t,
+        job: TerminalProcessIdentity.DebugForegroundJobSnapshot?,
+        matchResult: TerminalAppIconCatalog.ProcessNamesMatchResult,
+        strong: Bool
+    ) {
+        let icon = matchResult.source.map(TerminalAppIconCatalog.describeSource) ?? "nil"
+        var lines: [String] = []
+        lines.append("[FgIcon] ── RESOLVE ── session=\(id.uuidString.prefix(8))")
+        lines.append("  title=\(title)")
+        lines.append(
+            "  shellPid=\(shellPid) shellPgid=\(job.map { String($0.shellPgid) } ?? "?") ghosttyFgPgid=\(ghosttyFg.map(String.init) ?? "nil") cacheKey=\(cacheKey) proxy=\(nestedProxy)"
+        )
+        lines.append(
+            "  isForegroundCommandRunning=true idlePgidWouldBe=\(job.map { String($0.shellPgid) } ?? "?") mode=\(job?.mode ?? "nil")"
+        )
+        if let job {
+            lines.append("  aggregatedNames=\(job.aggregatedNames)")
+            if job.processes.isEmpty {
+                lines.append("  processes: (none)")
+            } else {
+                lines.append("  processes (\(job.processes.count)):")
+                for (i, p) in job.processes.enumerated() {
+                    let helper = TerminalProcessIdentity.isShellPromptHelper(
+                        execBase: p.execBase, argv: p.argv
+                    )
+                    lines.append(
+                        "    #\(i) pid=\(p.pid) pgid=\(p.pgid) exec=\(p.execBase ?? "?") path=\(p.execPath ?? "?") promptHelper=\(helper)"
+                    )
+                    lines.append("       argv=\(p.argv)")
+                    lines.append("       candidates=\(p.identityCandidates)")
+                }
+            }
+        } else {
+            lines.append("  job snapshot: nil")
+        }
+        lines.append("  match steps:")
+        for step in matchResult.steps {
+            lines.append("    \(step)")
+        }
+        if let winner = matchResult.winner {
+            lines.append(
+                "  winner name=\(winner.processName) normalized=\(winner.normalized) reason=\(winner.reason) weak=\(winner.isWeakRuntime) → \(icon)"
+            )
+        } else {
+            lines.append("  winner: none → icon=nil (terminal SF Symbol)")
+        }
+        lines.append("  cacheStrong=\(strong) result=\(icon)")
+        print(lines.joined(separator: "\n"))
     }
 
     /// 终端 shell 自会话创建以来的运行时长。

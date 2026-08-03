@@ -30,9 +30,48 @@ struct TerminalHostView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         let container = TerminalContainerView()
-        container.terminal = session.terminalView
         container.focusOnAppear = isFocused
         container.updateCornerRadius(hasMultiplePanes: hasMultiplePanes)
+        mount(session: session, into: container)
+        context.coordinator.mountedSessionID = session.id
+        context.coordinator.isFocused = isFocused
+        return container
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard let container = view as? TerminalContainerView else { return }
+
+        // 任务重跑会在同一 pane 原地替换 Session；若不 remount，容器仍挂着
+        // 已 terminate 的旧 terminal（“Process exited…”），新会话永远看不见。
+        if context.coordinator.mountedSessionID != session.id {
+            mount(session: session, into: container)
+            context.coordinator.mountedSessionID = session.id
+            // 会话身份变了：视为重新获得焦点边沿，便于聚焦新 terminal。
+            context.coordinator.isFocused = false
+        }
+
+        session.terminalView.setSurfaceVisible(true)
+        session.terminalView.onBecomeFirstResponder = onFocused
+        session.terminalView.splitTarget.onSplit = onSplit
+        session.terminalView.splitTarget.onNewBrowserTab = onNewBrowserTab
+        session.terminalView.splitTarget.onNewBrowserPane = onNewBrowserPane
+        session.terminalView.splitTarget.onClose = onClose
+        container.focusOnAppear = isFocused
+        container.updateCornerRadius(hasMultiplePanes: hasMultiplePanes)
+        // Take focus only on the unfocused→focused edge (keyboard navigation,
+        // a split landing here), never on every render — that would fight the
+        // user for focus and make sidebar text fields untypable.
+        if isFocused, !context.coordinator.isFocused {
+            container.requestTerminalFocus()
+        }
+        context.coordinator.isFocused = isFocused
+    }
+
+    /// 将 `session` 的 terminal + 覆盖滚动条挂入容器；会先清空旧子视图。
+    private func mount(session: TerminalSession, into container: TerminalContainerView) {
+        for subview in container.subviews {
+            subview.removeFromSuperview()
+        }
         let terminal = session.terminalView
         // 从后台停车区回到前台时恢复 GPU surface 合成。
         terminal.setSurfaceVisible(true)
@@ -44,6 +83,7 @@ struct TerminalHostView: NSViewRepresentable {
         let scrollbar = session.overlayScrollbar
         terminal.translatesAutoresizingMaskIntoConstraints = false
         scrollbar.translatesAutoresizingMaskIntoConstraints = false
+        container.terminal = terminal
         container.addSubview(terminal)
         container.addSubview(scrollbar, positioned: .above, relativeTo: terminal)
         NSLayoutConstraint.activate([
@@ -56,31 +96,12 @@ struct TerminalHostView: NSViewRepresentable {
             scrollbar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             scrollbar.widthAnchor.constraint(equalToConstant: OverlayScrollbarView.stripWidth),
         ])
-        context.coordinator.isFocused = isFocused
-        return container
-    }
-
-    func updateNSView(_ view: NSView, context: Context) {
-        session.terminalView.setSurfaceVisible(true)
-        session.terminalView.onBecomeFirstResponder = onFocused
-        session.terminalView.splitTarget.onSplit = onSplit
-        session.terminalView.splitTarget.onNewBrowserTab = onNewBrowserTab
-        session.terminalView.splitTarget.onNewBrowserPane = onNewBrowserPane
-        session.terminalView.splitTarget.onClose = onClose
-        let container = view as? TerminalContainerView
-        container?.focusOnAppear = isFocused
-        container?.updateCornerRadius(hasMultiplePanes: hasMultiplePanes)
-        // Take focus only on the unfocused→focused edge (keyboard navigation,
-        // a split landing here), never on every render — that would fight the
-        // user for focus and make sidebar text fields untypable.
-        if isFocused, !context.coordinator.isFocused, let container {
-            container.requestTerminalFocus()
-        }
-        context.coordinator.isFocused = isFocused
     }
 
     final class Coordinator {
         var isFocused = false
+        /// 当前挂载在 NSView 上的 session；用于检测原地替换。
+        var mountedSessionID: UUID?
     }
 }
 

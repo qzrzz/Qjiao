@@ -15,6 +15,10 @@
 
 ## 增加功能
 
+- **npm script / 项目任务重新运行保留分屏位置**：再次运行或「重新运行」NPM Scripts、Gradle / Cargo / Makefile 等项目任务时，若原先终端仍挂在某个 pane 上，会在该 pane **原地替换**会话，而不再 `close + newSession` 新建整页 Tab——分屏树、分隔比例与 pane 位置保持不变；仅当旧会话已不在布局中时才新建 Tab。Files 底栏 Script Runner 分屏重跑同样优先原地替换（用户拖成左右/嵌套分屏后也会回到原位置）。
+
+- **修复 ghost-complete + oh-my-zsh 下每次回车 Tab 图标闪 Git**：PTY 代理模式下「前台有作业」原先用「是否有非 shell 子孙」判定，oh-my-zsh precmd 的 `git config --get oh-my-zsh.hide-info` 会被当成前台命令并匹配 Git 图标。现将提示符 / VCS 主题常用的短命探测（`git config`、`rev-parse`、`symbolic-ref`、porcelain `status` 等）排除出前台作业与图标候选，并为图标展示增加 350ms 持续防抖，真实长时间运行的 `git log` / `vim` 等仍正常换图标。
+
 - **内容视图 Tabs 拖拽分屏**：主标签条拖拽在原有**排序**之外支持**拖入内容区分屏**——与终端内 Pane 拖拽分屏同一套四象限落点（上/下/左/右半屏高亮）。拖到其它 Tab 上仍即时改序；拖到当前内容区某个 pane 边缘松手后，将源 Tab 整棵布局树（含其已有分屏）并入目标 Tab 形成分屏，源 Tab 关闭且会话/文件/浏览器保持挂载。约束：**当前内容 Tab 不能拖到自己的终端里分屏**（禁止光标）；目标已分屏时按具体 pane 命中；diff 独占单 pane 的 Tab 不可作为源或落点。
 
 - **音效支持（命令运行结束 / 失败、Agent 完成 / 待处理，可在设置中关闭）**：新增 `kero/SoundEffects.swift` 音效播放服务，内置支持 macOS 系统音效以及 WindowsXP / Windows7 自定义音效（存储于项目 `kero/Sounds/` 目录）：

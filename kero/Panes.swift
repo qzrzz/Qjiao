@@ -93,8 +93,13 @@ enum PaneSplitAxis: String, Codable {
 /// One tile in a tab's layout. The content object is long-lived while the pane
 /// itself is a value inside the split tree.
 struct Pane: nonisolated Identifiable {
-    let id = UUID()
+    let id: UUID
     var content: PaneContent
+
+    init(id: UUID = UUID(), content: PaneContent) {
+        self.id = id
+        self.content = content
+    }
 }
 
 /// A binary split in the pane tree. `fraction` is the first child's share of
@@ -157,6 +162,20 @@ indirect enum PaneNode {
             } else if split.second.contains(target) {
                 split.second = split.second.inserting(node, toward: edge, beside: target)
             }
+            return .split(split)
+        }
+    }
+
+    /// 将指定 pane 的 content 替换为新内容，保留 pane id 与整棵分屏树（兄弟 pane、分隔比例不变）。
+    func replacingContent(in paneID: UUID, with content: PaneContent) -> PaneNode {
+        switch self {
+        case .pane(var pane):
+            guard pane.id == paneID else { return self }
+            pane.content = content
+            return .pane(pane)
+        case .split(var split):
+            split.first = split.first.replacingContent(in: paneID, with: content)
+            split.second = split.second.replacingContent(in: paneID, with: content)
             return .split(split)
         }
     }
@@ -587,6 +606,13 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
         } else if let first = incoming.allPanes.first {
             focusedPaneID = first.id
         }
+    }
+
+    /// 在指定 pane 内替换 content，保留分屏布局与 pane id，并把焦点落到该 pane。
+    func replaceContent(in paneID: UUID, with content: PaneContent) {
+        guard layout.contains(paneID) else { return }
+        layout = layout.replacingContent(in: paneID, with: content)
+        focusedPaneID = paneID
     }
 
     /// Removes the pane with `id`, collapsing the empty split branch and moving
