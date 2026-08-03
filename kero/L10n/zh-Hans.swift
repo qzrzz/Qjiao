@@ -801,6 +801,7 @@ extension L10n {
         "Restore session history on relaunch": "重新启动时恢复会话历史",
         "Restored %@.": "已恢复 %@。",
         "Restored %lld tracked paths.": "已恢复 %lld 个已跟踪路径。",
+        "Recovering…": "正在恢复…",
         "Retry": "重试",
         "Return to normal command mode (Esc)": "返回 Normal 命令模式 (Esc)",
         "Reveal": "显示",

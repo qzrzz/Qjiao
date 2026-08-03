@@ -774,6 +774,7 @@ extension L10n {
         "Restore session history on relaunch": "再起動時にセッション履歴を復元",
         "Restored %@.": "%@を復元しました。",
         "Restored %lld tracked paths.": "追跡対象のパスを%lld件復元しました。",
+        "Recovering…": "復旧中…",
         "Retry": "再試行",
         "Return to normal command mode (Esc)": "Return to normal command mode (Esc)",
         "Reveal": "Reveal",

@@ -210,11 +210,12 @@ struct SidebarRefreshButton: View {
     }
 }
 
-/// 分组标题行内操作按钮：行 hover 时提高不透明度，自身 hover 时浅底高亮 + Tooltip。
+/// 分组标题行内操作按钮：行 hover 时提高不透明度，自身 hover 时浅底高亮 + Tooltip；支持工作中转圈。
 private struct SidebarSectionHeaderActionButton: View {
     let systemImage: String
     let help: String
     let disabled: Bool
+    var showsProgress: Bool = false
     let rowHovering: Bool
     let action: () -> Void
 
@@ -222,27 +223,36 @@ private struct SidebarSectionHeaderActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(SidebarTypography.micro())
-                .foregroundStyle(
-                    disabled
-                        ? Theme.secondaryColor.opacity(0.35)
-                        : (isHovering ? Theme.primaryColor : Theme.secondaryColor)
-                )
-                .frame(width: 18, height: 18)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(
-                            isHovering && !disabled
-                                ? Theme.primaryColor.opacity(0.1)
-                                : Color.clear
-                        )
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 4))
+            Group {
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.65)
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(SidebarTypography.micro())
+                }
+            }
+            .foregroundStyle(
+                (disabled || showsProgress)
+                    ? Theme.secondaryColor.opacity(0.35)
+                    : (isHovering ? Theme.primaryColor : Theme.secondaryColor)
+            )
+            .frame(width: 18, height: 18)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(
+                        isHovering && !disabled && !showsProgress
+                            ? Theme.primaryColor.opacity(0.1)
+                            : Color.clear
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
-        .disabled(disabled)
-        .opacity(disabled ? 0.3 : (rowHovering || isHovering ? 1 : 0.55))
+        .disabled(disabled || showsProgress)
+        .opacity((disabled || showsProgress) ? 0.45 : (rowHovering || isHovering ? 1 : 0.55))
         .onHover { isHovering = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovering)
         .macTooltip(help, position: .top)
@@ -252,11 +262,13 @@ private struct SidebarSectionHeaderActionButton: View {
 
 /** 右侧栏各面板共用的可折叠分组标题。 */
 struct SidebarSectionHeader: View {
+    /// 分组标题上的行内操作项定义
     struct Action: Identifiable {
         let id = UUID()
         let systemImage: String
         let help: String
         var disabled: Bool = false
+        var showsProgress: Bool = false
         let perform: () -> Void
     }
 
@@ -310,6 +322,7 @@ struct SidebarSectionHeader: View {
                         systemImage: action.systemImage,
                         help: action.help,
                         disabled: action.disabled || actionsDisabled,
+                        showsProgress: action.showsProgress,
                         rowHovering: isHovering,
                         action: action.perform
                     )

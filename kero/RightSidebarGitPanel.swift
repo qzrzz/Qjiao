@@ -8,6 +8,18 @@ import SwiftUI
 
 // MARK: - Git panel
 
+/// Git 操作目标指示，用于在按钮上展示转圈中状态并进行交互锁死
+private enum GitActionTarget: Equatable {
+    case stageAll
+    case unstageAll
+    case discardAll
+    case stage(path: String)
+    case unstage(path: String)
+    case discard(path: String)
+    case commit
+    case sync
+}
+
 struct GitPanel: View {
     private struct FileFingerprint: Equatable {
         let exists: Bool
@@ -49,6 +61,7 @@ struct GitPanel: View {
     @State private var newBranchName = ""
     @State private var operationExpanded = false
     @State private var isPendingAICommit = false
+    @State private var activeActionTarget: GitActionTarget?
     @FocusState private var branchFieldFocused: Bool
 
     var body: some View {
@@ -87,7 +100,9 @@ struct GitPanel: View {
                    role: .destructive) {
                 if let pendingDiscard {
                     if discardSnapshotIsCurrent(pendingDiscard) {
-                        model.discard(pendingDiscard.entry)
+                        beginGitAction(.discard(path: pendingDiscard.entry.path)) {
+                            model.discard(pendingDiscard.entry)
+                        }
                     } else {
                         model.cancelStaleDiscard()
                     }
@@ -110,7 +125,9 @@ struct GitPanel: View {
             Button(L10n.t("Discard All Changes"), role: .destructive) {
                 let snapshot = pendingDiscardAll
                 if !snapshot.isEmpty && snapshot.allSatisfy(discardSnapshotIsCurrent) {
-                    model.discardChanges(snapshot.map(\.entry))
+                    beginGitAction(.discardAll) {
+                        model.discardChanges(snapshot.map(\.entry))
+                    }
                 } else {
                     model.cancelStaleDiscard()
                 }
@@ -118,6 +135,11 @@ struct GitPanel: View {
                 confirmDiscardAll = false
             }
             .disabled(model.isBusy)
+        }
+        .onChange(of: model.isBusy) { _, isBusy in
+            if !isBusy {
+                activeActionTarget = nil
+            }
         }
         .onChange(of: model.rootPath) {
             // A dialog must never carry a destructive file target across cwd.
@@ -127,6 +149,7 @@ struct GitPanel: View {
             showBranchCreator = false
             newBranchName = ""
             isPendingAICommit = false
+            activeActionTarget = nil
         }
         .onChange(of: model.repositoryIdentity) {
             resetRepositoryDrafts()
@@ -492,6 +515,7 @@ struct GitPanel: View {
                     enabled: canCommit(includeAll: false),
                     help: L10n.t("Commit staged changes"),
                     shortcut: "⌘↩",
+                    showsProgress: activeActionTarget == .commit,
                     action: performPrimaryAction
                 )
                 commitMenu
@@ -503,7 +527,8 @@ struct GitPanel: View {
                     title: syncButtonTitle,
                     enabled: !model.isBusy,
                     help: L10n.t("Pull remote commits, then push local ones"),
-                    action: model.syncChanges
+                    showsProgress: activeActionTarget == .sync,
+                    action: performSync
                 )
             }
         }
@@ -624,18 +649,33 @@ struct GitPanel: View {
     private func performAICompleteChangesCommit() {
         guard canAICompleteChangesCommit else { return }
         isPendingAICommit = true
-        model.stageAll { success in
-            guard success else {
-                isPendingAICommit = false
-                return
+        beginGitAction(.stageAll) {
+            model.stageAll { success in
+                guard success else {
+                    isPendingAICommit = false
+                    activeActionTarget = nil
+                    return
+                }
+                startAICommitMessage()
             }
-            startAICommitMessage()
+        }
+    }
+
+    /// 设置操作进度 target 后调用 model；若 model 早退（校验失败 / isBusy /
+    /// failImmediately）从未进入 busy，立刻清掉 target，避免 spinner 永久卡住。
+    /// 正常进入 busy 时仍由 `.onChange(of: model.isBusy)` 在结束时清除。
+    private func beginGitAction(_ target: GitActionTarget, _ work: () -> Void) {
+        activeActionTarget = target
+        work()
+        if !model.isBusy {
+            activeActionTarget = nil
         }
     }
 
     private func actionButton(
         icon: String, title: String, enabled: Bool, help: String,
         shortcut: String? = nil,
+        showsProgress: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         GitPrimaryActionButton(
@@ -644,8 +684,16 @@ struct GitPanel: View {
             enabled: enabled,
             help: help,
             shortcut: shortcut,
+            showsProgress: showsProgress,
             action: action
         )
+    }
+
+    private func performSync() {
+        guard !model.isBusy else { return }
+        beginGitAction(.sync) {
+            model.syncChanges()
+        }
     }
 
     private var commitFieldPlaceholder: String {
@@ -708,8 +756,10 @@ struct GitPanel: View {
     private func performCommit(includeAll: Bool, amend: Bool = false) {
         guard amend ? canAmend(includeAll: includeAll) : canCommit(includeAll: includeAll) else { return }
         let submittedMessage = commitMessage
-        model.commit(message: submittedMessage, includeAll: includeAll, amend: amend) { success in
-            if success, commitMessage == submittedMessage { commitMessage = "" }
+        beginGitAction(.commit) {
+            model.commit(message: submittedMessage, includeAll: includeAll, amend: amend) { success in
+                if success, commitMessage == submittedMessage { commitMessage = "" }
+            }
         }
     }
 
@@ -793,8 +843,15 @@ struct GitPanel: View {
                                 count: staged.count,
                                 isCollapsed: $stagedCollapsed,
                                 actions: filterText.isEmpty ? [
-                                    .init(systemImage: "minus", help: L10n.t("Unstage All Changes")) {
-                                        model.unstageAll()
+                                    .init(
+                                        systemImage: "minus",
+                                        help: L10n.t("Unstage All Changes"),
+                                        disabled: model.isBusy,
+                                        showsProgress: activeActionTarget == .unstageAll
+                                    ) {
+                                        beginGitAction(.unstageAll) {
+                                            model.unstageAll()
+                                        }
                                     }
                                 ] : [],
                                 actionsDisabled: model.isBusy
@@ -812,11 +869,23 @@ struct GitPanel: View {
                                 count: changed.count,
                                 isCollapsed: $changesCollapsed,
                                 actions: filterText.isEmpty ? [
-                                    .init(systemImage: "arrow.uturn.backward", help: L10n.t("Discard All Changes")) {
+                                    .init(
+                                        systemImage: "arrow.uturn.backward",
+                                        help: L10n.t("Discard All Changes"),
+                                        disabled: model.isBusy,
+                                        showsProgress: activeActionTarget == .discardAll
+                                    ) {
                                         requestDiscardAll()
                                     },
-                                    .init(systemImage: "plus", help: L10n.t("Stage All Changes")) {
-                                        model.stageAll()
+                                    .init(
+                                        systemImage: "plus",
+                                        help: L10n.t("Stage All Changes"),
+                                        disabled: model.isBusy,
+                                        showsProgress: activeActionTarget == .stageAll
+                                    ) {
+                                        beginGitAction(.stageAll) {
+                                            model.stageAll()
+                                        }
                                     },
                                 ] : [],
                                 actionsDisabled: model.isBusy
@@ -907,6 +976,7 @@ struct GitPanel: View {
             status: status,
             kind: kind,
             disabled: model.isBusy,
+            activeTarget: activeActionTarget,
             openDiff: {
                 guard model.isCurrent(entry) else { return }
                 if entry.isDirectoryEntry {
@@ -938,8 +1008,16 @@ struct GitPanel: View {
                 }
                 openIfPossible(entry, toSide: true)
             },
-            stage: { model.stage(entry) },
-            unstage: { model.unstage(entry) },
+            stage: {
+                beginGitAction(.stage(path: entry.path)) {
+                    model.stage(entry)
+                }
+            },
+            unstage: {
+                beginGitAction(.unstage(path: entry.path)) {
+                    model.unstage(entry)
+                }
+            },
             discard: { pendingDiscard = makePendingDiscard(entry) },
             absolutePath: model.absolutePath(for: entry),
             copyRelativePath: { copyToPasteboard(entry.path) },
@@ -1189,10 +1267,20 @@ struct GitPanel: View {
                     .lineLimit(5)
                     .textSelection(.enabled)
             }
-            Button(L10n.t("Retry")) { model.retryRecovery() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(model.isBusy || model.isResolvingInitialStatus)
+            Button {
+                model.retryRecovery()
+            } label: {
+                HStack(spacing: 6) {
+                    if model.isRecovering {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(model.isRecovering ? L10n.t("Recovering…") : L10n.t("Retry"))
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(model.isBusy || model.isResolvingInitialStatus)
             Spacer()
         }
         .padding(.horizontal, 18)
@@ -1245,13 +1333,14 @@ struct GitPanel: View {
 
 // MARK: - Git chrome controls (hover + Tooltip)
 
-/// Git 面板主操作按钮（Commit / Sync）：hover 提亮，并显示 macTooltip。
+/// Git 面板主操作按钮（Commit / Sync）：hover 提亮，并显示 macTooltip，支持工作中转圈。
 private struct GitPrimaryActionButton: View {
     let icon: String
     let title: String
     let enabled: Bool
     let help: String
     var shortcut: String? = nil
+    var showsProgress: Bool = false
     let action: () -> Void
 
     @State private var isHovering = false
@@ -1259,8 +1348,13 @@ private struct GitPrimaryActionButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(SidebarTypography.caption(.semibold))
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: icon)
+                        .font(SidebarTypography.caption(.semibold))
+                }
                 Text(title)
                     .font(SidebarTypography.secondary(.medium))
                     .lineLimit(1)
@@ -1271,20 +1365,20 @@ private struct GitPrimaryActionButton: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color(nsColor: Theme.cursor).opacity(fillOpacity))
             )
-            .foregroundStyle(.white.opacity(enabled ? 1 : 0.85))
+            .foregroundStyle(.white.opacity((enabled && !showsProgress) ? 1 : 0.85))
             .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .disabled(!enabled)
+        .disabled(!enabled || showsProgress)
         .onHover { isHovering = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovering)
-        .macTooltip(enabled ? help : nil, shortcut: shortcut, position: .top)
+        .macTooltip((enabled && !showsProgress) ? help : nil, shortcut: shortcut, position: .top)
         .accessibilityLabel(title)
         .accessibilityHint(help)
     }
 
     private var fillOpacity: Double {
-        guard enabled else { return 0.3 }
+        guard enabled && !showsProgress else { return 0.3 }
         return isHovering ? 1.0 : 0.85
     }
 }
@@ -1533,6 +1627,7 @@ private struct GitEntryRow: View {
     let status: Character
     let kind: Kind
     let disabled: Bool
+    var activeTarget: GitActionTarget? = nil
     let openDiff: () -> Void
     let openFile: () -> Void
     let openToSide: () -> Void
@@ -1583,9 +1678,9 @@ private struct GitEntryRow: View {
             .accessibilityLabel("\(entry.fileName), \(statusName)")
             .accessibilityHint(kind == .merge ? "Opens conflict changes" : "Opens changes")
 
-            if !disabled {
+            if !disabled || hasProgressInRow {
                 hoverActions
-                    .opacity(isHovering || isFocused ? 1 : 0.55)
+                    .opacity(isHovering || isFocused || hasProgressInRow ? 1 : 0.55)
             }
         }
         // Fixed height so action buttons do not grow the dense file row.
@@ -1601,29 +1696,58 @@ private struct GitEntryRow: View {
         .contextMenu { menu }
     }
 
+    /// 当前行是否有任何动作正在工作中（转圈中）
+    private var hasProgressInRow: Bool {
+        activeTarget == .stage(path: entry.path)
+            || activeTarget == .unstage(path: entry.path)
+            || activeTarget == .discard(path: entry.path)
+    }
+
     private var hoverActions: some View {
         HStack(spacing: 4) {
             switch kind {
             case .merge:
-                rowButton("plus", help: L10n.t("Mark Resolved (Stage)"), action: stage)
+                rowButton(
+                    "plus",
+                    help: L10n.t("Mark Resolved (Stage)"),
+                    showsProgress: activeTarget == .stage(path: entry.path),
+                    action: stage
+                )
             case .staged:
-                rowButton("minus", help: L10n.t("Unstage Changes"), action: unstage)
+                rowButton(
+                    "minus",
+                    help: L10n.t("Unstage Changes"),
+                    showsProgress: activeTarget == .unstage(path: entry.path),
+                    action: unstage
+                )
             case .unstaged:
-                rowButton("arrow.uturn.backward", help: L10n.t("Discard Changes"), action: discard)
-                rowButton("plus", help: L10n.t("Stage Changes"), action: stage)
+                rowButton(
+                    "arrow.uturn.backward",
+                    help: L10n.t("Discard Changes"),
+                    showsProgress: activeTarget == .discard(path: entry.path),
+                    action: discard
+                )
+                rowButton(
+                    "plus",
+                    help: L10n.t("Stage Changes"),
+                    showsProgress: activeTarget == .stage(path: entry.path),
+                    action: stage
+                )
             }
         }
     }
 
     private func rowButton(
-        _ systemImage: String, help: String, action: @escaping () -> Void
+        _ systemImage: String, help: String, showsProgress: Bool = false, action: @escaping () -> Void
     ) -> some View {
         GitChromeIconButton(
             systemImage: systemImage,
             help: help,
+            disabled: disabled || showsProgress,
             side: 18,
             cornerRadius: 4,
             font: SidebarTypography.micro(.semibold),
+            showsProgress: showsProgress,
             tooltipPosition: .top
         ) {
             action()

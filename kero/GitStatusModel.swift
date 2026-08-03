@@ -148,6 +148,10 @@ final class GitStatusModel: nonisolated ObservableObject {
     @Published private(set) var statusError: String?
     /// True while a user-initiated Git operation runs.
     @Published private(set) var isBusy = false
+    /// True while Retry recovery（fsmonitor 自愈 + 强制重扫）进行中。
+    /// 与 `runningOperationID` 分开记账，避免 `clearRepositoryState` 仅按
+    /// 操作 id 重算 `isBusy` 时把 recovery 的 busy 清掉。
+    @Published private(set) var isRecovering = false
     @Published private(set) var operation: Operation?
     @Published var lastError: String?
 
@@ -164,6 +168,8 @@ final class GitStatusModel: nonisolated ObservableObject {
     /// Keeps a mutation globally exclusive even if the terminal changes cwd
     /// while its Git process is still running.
     private var runningOperationID: UUID?
+    /// 当前 in-flight Retry recovery；完成后按 id 匹配再清 busy。
+    private var recoveryID: UUID?
 
     var totalChangeCount: Int {
         mergeEntries.count + stagedEntries.count + changedEntries.count
@@ -240,23 +246,64 @@ final class GitStatusModel: nonisolated ObservableObject {
     }
 
     /// Retry 的「从头刷新」：先修复失效的 Git fsmonitor daemon（停止 →
-    /// 清理残留 IPC socket → 重新拉起，见 `GitScanner.recoverFilesystemMonitor`），
-    /// 再全量重扫仓库状态。用于「Bad file descriptor」这类 daemon / IPC
-    /// 失效错误——仅重新扫描无法自愈。修复期间置 `isBusy` 禁用 UI，
-    /// 完成后恢复并走正常 `refresh()` 流程。
+    /// 清理残留 IPC socket → 按需重新拉起），再以 `core.fsmonitor=false`
+    /// 强制全量重扫。用于「Bad file descriptor」这类 daemon / IPC / 进程
+    /// 启动失效——普通 `refresh()` 会被 2s 轮询的 `isRefreshing` 挡住或
+    /// 继续撞上坏 socket，表现为 Retry 点了没反应。
+    ///
+    /// 行为要点：
+    /// - **不**因 `isRefreshing` 静默 return：先 `invalidateStatusRefresh`
+    ///   作废进行中的扫描，保证按钮一定推进；
+    /// - 用户 Git 操作（`runningOperationID != nil`）或已在 recovery 中拒绝介入；
+    /// - 用 `recoveryID` + `isRecovering` 记账 busy，cwd 切换时
+    ///   `clearRepositoryState` 可安全作废 recovery，不会把 busy 卡死或
+    ///   被 `isBusy = runningOperationID != nil` 误清；
+    /// - 扫描走 `recovery: true`，全程绕过 fsmonitor。
     func retryRecovery() {
         let root = rootPath
         let generation = contextGeneration
-        guard !root.isEmpty, !isRefreshing, !isBusy else { return }
+        guard !root.isEmpty else { return }
+        // 真实 git 操作或已在 recovery 时不要重叠启动。
+        if runningOperationID != nil || recoveryID != nil { return }
+        invalidateStatusRefresh()
+        let id = UUID()
+        recoveryID = id
+        isRecovering = true
         isBusy = true
+        let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
         Task { [weak self] in
-            await Task.detached(priority: .utility) {
+            let result = await Task.detached(priority: .utility) {
                 GitScanner.recoverFilesystemMonitor(in: root)
+                return await GitScanner.shared.loadStatus(
+                    in: root,
+                    includeIgnoredPaths: includeIgnoredPaths,
+                    recovery: true
+                )
             }.value
             guard let self else { return }
-            self.isBusy = false
-            guard self.contextGeneration == generation, self.rootPath == root else { return }
-            self.refresh()
+            let stillOurs = self.recoveryID == id
+            if stillOurs {
+                self.recoveryID = nil
+                self.isRecovering = false
+                if self.runningOperationID == nil {
+                    self.isBusy = false
+                }
+            }
+            // cwd / root 已变，或 recovery 被 clearRepositoryState 作废：丢弃结果。
+            guard stillOurs,
+                  self.contextGeneration == generation,
+                  self.rootPath == root else { return }
+            self.isRefreshing = false
+            self.hasResolvedStatus = true
+            self.apply(result)
+            // 恢复期间 timer 可能堆积了 refreshPending；状态已是最新时清掉即可，
+            // 若仍失败则再走一次普通 refresh 给后续自愈机会。
+            if self.refreshPending {
+                self.refreshPending = false
+                if self.statusError != nil {
+                    self.refresh()
+                }
+            }
         }
     }
 
@@ -925,6 +972,10 @@ final class GitStatusModel: nonisolated ObservableObject {
         repositoryOperation = nil
         stashCount = 0
         isRefreshing = false
+        // 作废 in-flight recovery 记账：async 任务仍会跑完，但 completion
+        // 用 recoveryID 匹配失败后不再清/改 busy，避免与新 root 交错。
+        recoveryID = nil
+        isRecovering = false
         isBusy = runningOperationID != nil
         operation = failedOperation
         lastError = failedError
