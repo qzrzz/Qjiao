@@ -187,7 +187,7 @@ struct ContentView: View {
     }
 }
 
-/// 无会话 / 无项目时的中心空白状态视图：包含精致大图标、支持拖入文件夹打开项目、加大「新建会话」主按钮及增设「新建项目」次要按钮。
+/// 无会话 / 无项目时的中心空白状态视图：包含 256pt 应用图标、支持拖入文件夹打开项目、高亮「新建项目」主按钮及「新建会话」次要按钮，统一全局背景色。
 private struct EmptyStatePromptView: View {
     @ObservedObject var manager: TerminalManager
     let title: String
@@ -199,26 +199,13 @@ private struct EmptyStatePromptView: View {
             WindowDragArea()
 
             VStack(spacing: 20) {
-                // 图标高亮卡片
-                ZStack {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(
-                            isDropTargeted
-                                ? Color(nsColor: Theme.cursor).opacity(0.15)
-                                : Color(nsColor: Theme.secondaryForeground).opacity(0.08)
-                        )
-                        .frame(width: 84, height: 84)
-
-                    Image(systemName: isDropTargeted ? "arrow.down.doc.fill" : "terminal")
-                        .font(.system(size: 40, weight: .regular))
-                        .foregroundStyle(
-                            isDropTargeted
-                                ? Color(nsColor: Theme.cursor)
-                                : Theme.secondaryColor
-                        )
-                        .scaleEffect(isDropTargeted ? 1.15 : 1.0)
-                        .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isDropTargeted)
-                }
+                // 应用图标 (256pt)
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 256, height: 256)
+                    .scaleEffect(isDropTargeted ? 1.05 : 1.0)
+                    .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isDropTargeted)
 
                 VStack(spacing: 6) {
                     Text(isDropTargeted ? L10n.t("Drop folder here to open project") : title)
@@ -230,22 +217,16 @@ private struct EmptyStatePromptView: View {
                         .foregroundStyle(Theme.secondaryColor.opacity(0.75))
                 }
 
-                // 按钮组：新建会话（加大主按钮）与新建项目（次要按钮）
+                // 按钮组：新建项目（高亮主按钮）与新建会话（次要按钮）
                 HStack(spacing: 12) {
-                    // 主按钮：新建会话 ⌘T（若已有所选项目优先 newSession，无项目时新建项目）
-                    Button(action: {
-                        if manager.selectedProject != nil {
-                            manager.newSession()
-                        } else {
-                            manager.newProject()
-                        }
-                    }) {
+                    // 高亮主按钮：新建项目 ⌘N
+                    Button(action: { manager.newProject() }) {
                         HStack(spacing: 6) {
-                            Image(systemName: "plus.square")
+                            Image(systemName: "folder.badge.plus")
                                 .font(.system(size: 13, weight: .semibold))
-                            Text(L10n.t("New Session"))
+                            Text(L10n.t("New Project"))
                                 .font(SidebarTypography.body(.semibold))
-                            Text("⌘T")
+                            Text("⌘N")
                                 .font(SidebarTypography.micro(.medium))
                                 .opacity(0.75)
                         }
@@ -259,14 +240,20 @@ private struct EmptyStatePromptView: View {
                     }
                     .buttonStyle(.plain)
 
-                    // 次要按钮：新建项目 ⌘N
-                    Button(action: { manager.newProject() }) {
+                    // 次要按钮：新建会话 ⌘T（若已有所选项目优先 newSession，无项目时新建项目）
+                    Button(action: {
+                        if manager.selectedProject != nil {
+                            manager.newSession()
+                        } else {
+                            manager.newProject()
+                        }
+                    }) {
                         HStack(spacing: 6) {
-                            Image(systemName: "folder.badge.plus")
+                            Image(systemName: "plus.square")
                                 .font(.system(size: 13, weight: .medium))
-                            Text(L10n.t("New Project"))
+                            Text(L10n.t("New Session"))
                                 .font(SidebarTypography.body(.medium))
-                            Text("⌘N")
+                            Text("⌘T")
                                 .font(SidebarTypography.micro(.medium))
                                 .opacity(0.75)
                         }
@@ -284,8 +271,8 @@ private struct EmptyStatePromptView: View {
             .padding(.horizontal, 40)
             .padding(.vertical, 36)
             .background {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(nsColor: Theme.background).opacity(0.65))
+                // 背景保持与全局 Theme.background 完全一致，消除多余的半透明卡片色差
+                Color(nsColor: Theme.background)
                     .overlay {
                         if isDropTargeted {
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -299,6 +286,7 @@ private struct EmptyStatePromptView: View {
             .animation(.easeInOut(duration: 0.16), value: isDropTargeted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: Theme.background))
         .contentShape(Rectangle())
         .onDrop(
             of: [UTType.fileURL],
