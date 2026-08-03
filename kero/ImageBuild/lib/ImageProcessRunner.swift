@@ -50,10 +50,6 @@ enum ImageProcessRunner {
         extraEnvironment: [String: String],
         timeoutSeconds: TimeInterval
     ) throws -> ImageProcessCommandResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-
         var env = ProcessInfo.processInfo.environment
         // 合并额外环境；DYLD_* 等需在此设置
         for (key, value) in extraEnvironment {
@@ -63,40 +59,31 @@ enum ImageProcessRunner {
                 env[key] = value
             }
         }
-        process.environment = env
 
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        process.standardInput = FileHandle.nullDevice
-
-        try process.run()
-
-        // 超时轮询
-        let deadline = Date().addingTimeInterval(max(timeoutSeconds, 0.1))
-        while process.isRunning {
-            if Date() > deadline {
-                process.terminate()
-                // 给子进程一点时间退出
-                Thread.sleep(forTimeInterval: 0.2)
-                if process.isRunning {
-                    process.interrupt()
-                }
-                throw ImageBuildError.vendorToolFailed(
-                    tool: (executable as NSString).lastPathComponent,
-                    detail: "Timed out after \(Int(timeoutSeconds))s"
-                )
-            }
-            Thread.sleep(forTimeInterval: 0.05)
+        let run = SubprocessRunner.run(
+            SubprocessRunner.Config(
+                executable: executable,
+                arguments: arguments,
+                environment: env,
+                timeout: max(timeoutSeconds, 0.1)
+            )
+        )
+        guard run.launched else {
+            throw ImageBuildError.vendorToolFailed(
+                tool: (executable as NSString).lastPathComponent,
+                detail: run.launchError ?? "Unknown launch error"
+            )
         }
-
-        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+        if run.timedOut {
+            throw ImageBuildError.vendorToolFailed(
+                tool: (executable as NSString).lastPathComponent,
+                detail: "Timed out after \(Int(timeoutSeconds))s"
+            )
+        }
         return ImageProcessCommandResult(
-            exitCode: process.terminationStatus,
-            stdout: String(data: outData, encoding: .utf8) ?? "",
-            stderr: String(data: errData, encoding: .utf8) ?? ""
+            exitCode: run.exitCode,
+            stdout: String(data: run.stdout, encoding: .utf8) ?? "",
+            stderr: String(data: run.stderr, encoding: .utf8) ?? ""
         )
     }
 

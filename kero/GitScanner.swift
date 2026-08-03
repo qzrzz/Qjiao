@@ -574,7 +574,7 @@ actor GitScanner {
         return (-1, "", detail.isEmpty ? first.result.stderr : detail)
     }
 
-    /// 实际拉起 git 子进程。
+    /// 实际拉起 git 子进程（统一走 SubprocessRunner，含进程树终止与读端兜底）。
     /// - `in` 为 nil 时不设置 `currentDirectoryURL`（配合 `git -C`）。
     /// - `launched == false` 表示 `Process.run()` 抛错。
     private nonisolated static func launchGit(
@@ -582,12 +582,6 @@ actor GitScanner {
         in dir: String?,
         timeout: TimeInterval
     ) -> (launched: Bool, result: (status: Int32, stdout: String, stderr: String)) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
-        if let dir, !dir.isEmpty {
-            process.currentDirectoryURL = URL(fileURLWithPath: dir, isDirectory: true)
-        }
         var env = ProcessInfo.processInfo.environment
         env["GIT_OPTIONAL_LOCKS"] = "0"
         // Fail rather than hanging on a credential prompt behind the app.
@@ -596,118 +590,53 @@ actor GitScanner {
         // from a broken repository. Pinning the locale makes that safe and
         // also keeps relative dates stable in the compact history list.
         env["LC_ALL"] = "C"
-        process.environment = env
 
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        // 绝不用 FileHandle.nullDevice：Process 退出时会 close 传入 handle，
-        // 共享 nullDevice 被关掉后后续 Process.run 可稳定 EBADF，且可能
-        // 误关已复用的 fd。每次用独立 EOF pipe 作 stdin。
-        process.standardInput = makeEOFStdinPipe()
+        let run = SubprocessRunner.run(
+            SubprocessRunner.Config(
+                executable: "/usr/bin/git",
+                arguments: args,
+                workingDirectory: dir,
+                environment: env,
+                timeout: timeout
+            )
+        )
 
-        do {
-            try process.run()
-        } catch {
-            return (false, (-1, "", formatLaunchError(error, args: args, directory: dir)))
+        if !run.launched {
+            return (
+                false,
+                (-1, "", formatLaunchError(run.launchError ?? "Unknown launch error", args: args, directory: dir))
+            )
         }
 
-        let outData = PipeData()
-        let errData = PipeData()
-        let readers = DispatchGroup()
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
-            outData.value = (try? stdout.fileHandleForReading.readToEnd()) ?? Data()
-            readers.leave()
-        }
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
-            errData.value = (try? stderr.fileHandleForReading.readToEnd()) ?? Data()
-            readers.leave()
-        }
-
-        // 超时终止：坏 fsmonitor socket 上 git 可能永久阻塞，拖死 actor 队列。
-        let timedOut = waitForProcess(process, timeout: timeout)
-        readers.wait()
-
-        var stderrText = String(data: errData.value, encoding: .utf8) ?? ""
-        if timedOut {
+        var stderrText = String(data: run.stderr, encoding: .utf8) ?? ""
+        if run.timedOut {
+            // 超时终止：坏 fsmonitor socket 上 git 可能永久阻塞，拖死 actor 队列。
             let timeoutNote = "git timed out after \(Int(timeout))s"
             stderrText = stderrText.isEmpty
                 ? timeoutNote
                 : timeoutNote + "\n" + stderrText
             return (
                 true,
-                (-1, String(data: outData.value, encoding: .utf8) ?? "", stderrText)
+                (-1, String(data: run.stdout, encoding: .utf8) ?? "", stderrText)
             )
         }
         return (
             true,
             (
-                process.terminationStatus,
-                String(data: outData.value, encoding: .utf8) ?? "",
+                run.exitCode,
+                String(data: run.stdout, encoding: .utf8) ?? "",
                 stderrText
             )
         )
     }
 
-    /// 独立 stdin：写端立即关闭 → 读端 EOF。不碰共享 nullDevice。
-    private nonisolated static func makeEOFStdinPipe() -> Pipe {
-        let pipe = Pipe()
-        try? pipe.fileHandleForWriting.close()
-        return pipe
-    }
-
-    /// 等待子进程结束；超时则 SIGTERM，仍不退则 SIGKILL。返回是否超时。
-    private nonisolated static func waitForProcess(
-        _ process: Process,
-        timeout: TimeInterval
-    ) -> Bool {
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            process.waitUntilExit()
-            group.leave()
-        }
-        let result = group.wait(timeout: .now() + max(timeout, 0.5))
-        if result == .success {
-            return false
-        }
-        if process.isRunning {
-            process.terminate()
-        }
-        // 给优雅退出一点时间，再强杀。
-        let grace = group.wait(timeout: .now() + 1.5)
-        if grace != .success, process.isRunning {
-            let pid = process.processIdentifier
-            if pid > 0 {
-                kill(pid, SIGKILL)
-            }
-            process.waitUntilExit()
-        } else if grace != .success {
-            // terminate 后可能已退；再等一次避免僵尸。
-            process.waitUntilExit()
-        }
-        return true
-    }
-
-    /// 把 `Process.run` 的 Error 展开为可读诊断（domain / code / underlying）。
+    /// 把启动失败诊断（来自 SubprocessRunner）拼上命令与目录信息。
     private nonisolated static func formatLaunchError(
-        _ error: Error,
+        _ description: String,
         args: [String],
         directory: String?
     ) -> String {
-        let ns = error as NSError
-        var lines: [String] = [
-            error.localizedDescription,
-            "Launch failed: \(ns.domain) code \(ns.code)",
-        ]
-        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
-            lines.append(
-                "Underlying: \(underlying.domain) code \(underlying.code) — \(underlying.localizedDescription)"
-            )
-        }
+        var lines: [String] = [description]
         let command = args.prefix(4).joined(separator: " ")
         if !command.isEmpty {
             lines.append("Command: git \(command)\(args.count > 4 ? " …" : "")")
@@ -716,10 +645,6 @@ actor GitScanner {
             lines.append("Directory: \(directory)")
         }
         return lines.joined(separator: "\n")
-    }
-
-    private nonisolated final class PipeData: @unchecked Sendable {
-        var value = Data()
     }
 
     /// A malformed `.git` directory/file can produce the same rev-parse text

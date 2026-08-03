@@ -295,6 +295,8 @@ final class AIToolRegistry: nonisolated ObservableObject {
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
                 process.arguments = ["-a", "Terminal", path]
                 try? process.run()
+                // 等待退出并回收，避免僵尸进程累积（open 自身毫秒级退出）
+                process.waitUntilExit()
             }
         }
     }

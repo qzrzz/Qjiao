@@ -56,7 +56,7 @@ struct SessionInfoPanel: View {
                                     openPackageJSON: openPackageJSON
                                 )
                             }
-                            if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.cwdPath) {
+                            if !model.gradleScripts.isEmpty {
                                 UniversalTasksSection(
                                     configuration: .gradle,
                                     projectID: projectID,
@@ -235,7 +235,7 @@ struct SessionInfoPanel: View {
                 agentWatcher.refresh(session: session)
             }
             if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
-            if model.gradleScripts.isEmpty && !GradleScriptProvider.isGradleProject(at: model.cwdPath) {
+            if model.gradleScripts.isEmpty {
                 gradleTasksCollapsed = true
             }
             if model.justScripts.isEmpty && !JustScriptProvider.isJustProject(at: model.cwdPath) {

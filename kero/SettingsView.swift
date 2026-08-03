@@ -14,6 +14,8 @@ struct SettingsView: View {
     @ObservedObject private var updater = Updater.shared
     @ObservedObject private var l10n = L10n.shared
     @State private var selectedSection: SettingsSection = .general
+    @State private var isHoveringVersion = false
+    @State private var isHoveringWebsite = false
 
     /// Installed fixed-pitch families (bundled default first).
     private let families = TerminalFont.selectableFamilies()
@@ -120,7 +122,7 @@ struct SettingsView: View {
     /// 设置侧栏底部的应用身份卡片：版本号检查更新，地球按钮打开项目主页。
     private var sidebarAppCard: some View {
         HStack(spacing: 8) {
-            Image(nsImage: NSApplication.shared.applicationIconImage.resizedHighQuality(to: NSSize(width: 32, height: 32)))
+            Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .interpolation(.high)
                 .scaledToFit()
@@ -133,34 +135,50 @@ struct SettingsView: View {
                     .lineLimit(1)
 
                 Button {
-                    updater.checkForUpdates()
+                    if updater.canCheckForUpdates {
+                        updater.checkForUpdates()
+                    }
                 } label: {
                     Text("v\(appVersion)")
                         .font(.system(size: 11))
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .contentShape(Rectangle())
+                        .foregroundStyle(isHoveringVersion ? Color.primary : Color.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(isHoveringVersion ? Color.primary.opacity(0.12) : Color.clear)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()
-                .disabled(!updater.canCheckForUpdates)
+                .onHover { isHoveringVersion = $0 }
+                .macTooltip(L10n.t("Check for Updates…"), position: .top)
                 .help(L10n.t("Check for Updates…"))
             }
 
             Spacer(minLength: 0)
 
             Button {
-                guard let url = URL(string: "https://github.com/qzrzz/Qjiao") else { return }
+                guard let url = URL(string: "https://qzrzz.github.io/Qjiao") else { return }
                 NSWorkspace.shared.open(url)
             } label: {
                 Image(systemName: "globe")
                     .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isHoveringWebsite ? Color.primary : Color.secondary)
                     .frame(width: 26, height: 26)
-                    .contentShape(Rectangle())
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(isHoveringWebsite ? Color.primary.opacity(0.12) : Color.clear)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
             .buttonStyle(.plain)
             .focusEffectDisabled()
-            .help(L10n.t("Qjiao GitHub"))
+            .onHover { isHoveringWebsite = $0 }
+            .macTooltip(L10n.t("Qjiao Website"), position: .top)
+            .help(L10n.t("Qjiao Website"))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
@@ -760,7 +778,7 @@ struct SettingsView: View {
             Section {
                 Group {
                     VStack(spacing: 8) {
-                        Image(nsImage: NSApplication.shared.applicationIconImage.resizedHighQuality(to: NSSize(width: 54, height: 54)))
+                        Image(nsImage: NSApplication.shared.applicationIconImage)
                             .resizable()
                             .interpolation(.high)
                             .scaledToFit()

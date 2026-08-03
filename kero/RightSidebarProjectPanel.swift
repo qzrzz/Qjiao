@@ -263,7 +263,7 @@ struct ProjectPanel: View {
                                     openPackageJSON: openPackageJSON
                                 )
                             }
-                            if !model.gradleScripts.isEmpty || GradleScriptProvider.isGradleProject(at: model.rootPath) {
+                            if !model.gradleScripts.isEmpty {
                                 UniversalTasksSection(
                                     configuration: .gradle,
                                     projectID: project.id,
@@ -439,7 +439,7 @@ struct ProjectPanel: View {
         .onAppear {
             if project.launchCommands.isEmpty { launchersCollapsed = true }
             if model.packageScripts.isEmpty { packageScriptsCollapsed = true }
-            if model.gradleScripts.isEmpty && !GradleScriptProvider.isGradleProject(at: model.rootPath) {
+            if model.gradleScripts.isEmpty {
                 gradleTasksCollapsed = true
             }
             if model.justScripts.isEmpty && !JustScriptProvider.isJustProject(at: model.rootPath) {

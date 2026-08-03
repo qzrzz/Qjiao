@@ -737,6 +737,7 @@ extension L10n {
         "Pull remote commits, then push local ones": "先拉取远程提交，再推送本地提交",
         "Push": "推送",
         "Qjiao GitHub": "Qjiao GitHub",
+        "Qjiao Website": "Qjiao 官网",
         "Quality": "质量",
         "Quantize": "量化",
         "Quit Without Saving": "不保存退出",

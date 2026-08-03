@@ -4,7 +4,6 @@
 //
 
 import Foundation
-import os
 
 /// 命令执行结果；业务层只解析 stdout，与本地/SSH 传输无关。
 struct SystemCommandResult: Sendable, Equatable {
@@ -33,21 +32,8 @@ enum SystemCommandError: Error, LocalizedError {
     }
 }
 
-/// 线程安全的单次 Claim 记录器，确保 Continuation 只被 resume 一次
-private final class ExecutionTracker: @unchecked Sendable {
-    private var lock = os_unfair_lock_s()
-    private var claimed = false
-
-    func tryClaim() -> Bool {
-        os_unfair_lock_lock(&lock)
-        defer { os_unfair_lock_unlock(&lock) }
-        if claimed { return false }
-        claimed = true
-        return true
-    }
-}
-
 /// 本机 `Foundation.Process` 实现；强制 `LANG=C` 以便解析英文输出。
+/// 实际执行统一走 `SubprocessRunner`（含超时终止进程树与读端兑底）。
 struct LocalProcessRunner: SystemCommandRunner {
     func run(argv: [String], timeout: Duration) async throws -> SystemCommandResult {
         guard let executable = argv.first, !executable.isEmpty else {
@@ -56,59 +42,35 @@ struct LocalProcessRunner: SystemCommandRunner {
         let arguments = Array(argv.dropFirst())
         let path = Self.resolvedPath(executable)
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-
         var env = ProcessInfo.processInfo.environment
         env["LANG"] = "C"
         env["LC_ALL"] = "C"
-        process.environment = env
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        do {
-            try process.run()
-        } catch {
-            throw SystemCommandError.launchFailed(error.localizedDescription)
-        }
 
         let seconds = Double(timeout.components.seconds)
             + Double(timeout.components.attoseconds) / 1e18
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let tracker = ExecutionTracker()
+        let result = await Task.detached(priority: .utility) {
+            SubprocessRunner.run(
+                SubprocessRunner.Config(
+                    executable: path,
+                    arguments: arguments,
+                    environment: env,
+                    timeout: seconds
+                )
+            )
+        }.value
 
-            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
-            timer.schedule(deadline: .now() + max(seconds, 0.05))
-            timer.setEventHandler {
-                if tracker.tryClaim() {
-                    if process.isRunning { process.terminate() }
-                    timer.cancel()
-                    continuation.resume(throwing: SystemCommandError.timedOut)
-                }
-            }
-            timer.resume()
-
-            DispatchQueue.global().async {
-                let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-                let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                timer.cancel()
-
-                if tracker.tryClaim() {
-                    let result = SystemCommandResult(
-                        stdout: String(data: outData, encoding: .utf8) ?? "",
-                        stderr: String(data: errData, encoding: .utf8) ?? "",
-                        exitCode: process.terminationStatus
-                    )
-                    continuation.resume(returning: result)
-                }
-            }
+        guard result.launched else {
+            throw SystemCommandError.launchFailed(result.launchError ?? "Unknown launch error")
         }
+        if result.timedOut {
+            throw SystemCommandError.timedOut
+        }
+        return SystemCommandResult(
+            stdout: String(data: result.stdout, encoding: .utf8) ?? "",
+            stderr: String(data: result.stderr, encoding: .utf8) ?? "",
+            exitCode: result.exitCode
+        )
     }
 
     /// 将短命令名映射到 macOS 常见绝对路径，便于无 PATH 的场景。
