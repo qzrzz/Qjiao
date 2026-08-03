@@ -62,15 +62,56 @@ enum StatusLoadResult: Equatable, Sendable {
 actor GitScanner {
     static let shared = GitScanner()
 
+    /// EBADF 自愈后一段时间内默认 bypass fsmonitor，避免 2s 轮询反复
+    /// fail → stop/start daemon → bypass 双倍扫描 thrash。
+    private var bypassFsmonitorUntil = Date.distantPast
+    private static let fsmonitorBypassCooldown: TimeInterval = 60
+
     // MARK: Status pipeline
 
     /// 完整状态流水线：rev-parse → status → 详情命令 → 解析 → 预处理。
     /// actor 隔离保证串行；阻塞子进程等待发生在全局执行器线程上，
     /// 不占用主线程。返回的结果已切分好三组变更并构建完装饰字典。
+    ///
+    /// - Parameter recovery: 为 true 时全程 `-c core.fsmonitor=false`，绕过
+    ///   失效的 fsmonitor daemon / IPC（Retry 与 EBADF 自愈路径使用）。
     func loadStatus(
-        in root: String, includeIgnoredPaths: Bool
+        in root: String,
+        includeIgnoredPaths: Bool,
+        recovery: Bool = false
     ) -> StatusLoadResult {
-        let top = Self.runGit(["rev-parse", "--show-toplevel"], in: root)
+        let inCooldown = Date() < bypassFsmonitorUntil
+        let bypass = recovery || inCooldown
+        let result = loadStatusOnce(
+            in: root,
+            includeIgnoredPaths: includeIgnoredPaths,
+            bypassFsmonitor: bypass
+        )
+        // 撞上 Bad file descriptor / 失效 IPC：heal + 进入 cooldown + bypass 再扫。
+        // cooldown 内的常规轮询只 bypass、不再每次 stop/start daemon；
+        // 仅当本次结果仍是 EBADF 时才 heal（已 bypass 的成功扫描不进这里）。
+        if case .failed(let message) = result,
+           Self.looksLikeStaleFileDescriptor(message) {
+            Self.recoverFilesystemMonitor(in: root)
+            bypassFsmonitorUntil = Date().addingTimeInterval(Self.fsmonitorBypassCooldown)
+            return loadStatusOnce(
+                in: root,
+                includeIgnoredPaths: includeIgnoredPaths,
+                bypassFsmonitor: true
+            )
+        }
+        return result
+    }
+
+    /// 单次扫描（无自愈递归）。`bypassFsmonitor` 时对所有 git 子进程注入
+    /// `-c core.fsmonitor=false`，避免再碰残留 IPC。
+    private func loadStatusOnce(
+        in root: String,
+        includeIgnoredPaths: Bool,
+        bypassFsmonitor: Bool
+    ) -> StatusLoadResult {
+        let config: [String: String] = bypassFsmonitor ? ["core.fsmonitor": "false"] : [:]
+        let top = Self.runGit(["rev-parse", "--show-toplevel"], in: root, config: config)
         guard top.status == 0 else {
             let failure = Self.gitFailureMessage(top, fallback: "Unable to locate the Git repository.")
             if top.status == 128,
@@ -94,7 +135,8 @@ actor GitScanner {
                 "--untracked-files=normal",
                 includeIgnoredPaths ? "--ignored=matching" : "--ignored=no",
             ],
-            in: resolvedRoot
+            in: resolvedRoot,
+            config: config
         )
         guard status.status == 0 else {
             return .failed(Self.gitFailureMessage(status, fallback: "Unable to read Git status."))
@@ -106,29 +148,40 @@ actor GitScanner {
         let repoRoot = resolvedRoot
 
         let refs = Self.runGit(
-            ["for-each-ref", "--format=%(refname:short)", "refs/heads"], in: repoRoot
+            ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+            in: repoRoot,
+            config: config
         )
         if refs.status == 0 {
             result.branches = refs.stdout.split(separator: "\n").map(String.init).sorted()
         }
 
-        let remoteRun = Self.runGit(["remote"], in: repoRoot)
+        let remoteRun = Self.runGit(["remote"], in: repoRoot, config: config)
         if remoteRun.status == 0 {
             result.remotes = remoteRun.stdout.split(separator: "\n").map(String.init).sorted()
         }
 
         let log = Self.runGit(
             ["log", "-n", "8", "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%ar%x1e"],
-            in: repoRoot
+            in: repoRoot,
+            config: config
         )
         if log.status == 0 { result.recentCommits = Self.parseRecentCommits(log.stdout) }
 
-        let stash = Self.runGit(["rev-list", "--walk-reflogs", "--count", "refs/stash"], in: repoRoot)
+        let stash = Self.runGit(
+            ["rev-list", "--walk-reflogs", "--count", "refs/stash"],
+            in: repoRoot,
+            config: config
+        )
         if stash.status == 0 {
             result.stashCount = Int(stash.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         }
 
-        let gitDir = Self.runGit(["rev-parse", "--absolute-git-dir"], in: repoRoot)
+        let gitDir = Self.runGit(
+            ["rev-parse", "--absolute-git-dir"],
+            in: repoRoot,
+            config: config
+        )
         if gitDir.status == 0 {
             let path = Self.strippingTrailingLineEnding(gitDir.stdout)
             result.repositoryOperation = Self.detectRepositoryOperation(gitDirectory: path)
@@ -214,32 +267,115 @@ actor GitScanner {
         return path.isEmpty ? nil : URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     }
 
-    /// 修复失效的 Git fsmonitor daemon：停止 → 删除残留 IPC socket → 重新拉起。
-    /// 「Bad file descriptor」类错误多由 daemon 崩溃或 git 版本切换后残留的
-    /// socket 引起，仅重新扫描无法自愈。只对启用了内建 fsmonitor
-    /// （`core.fsmonitor = true`）的仓库执行；hook 路径模式与未启用仓库跳过，
-    /// 避免多启动无用 daemon 进程。stop / start 失败均忽略，git 在下次
-    /// status 时会自动回退全量扫描或按需拉起 daemon。
+    /// 修复失效的 Git fsmonitor daemon：停止 → 删除残留 IPC socket →
+    /// （若仓库启用了内建 fsmonitor）重新拉起。
+    ///
+    /// 「Bad file descriptor」类错误多由 daemon 崩溃、git 版本切换或
+    /// Xcode / 命令行 Git 混用后残留的 socket 引起，仅重新扫描无法自愈。
+    ///
+    /// **始终**尝试 stop + 删除 IPC（即使 `core.fsmonitor` 不是 `true`），
+    /// 避免残留 socket 继续污染后续 git 调用；仅在确认启用了内建 daemon
+    /// 时才 `start`，避免给 hook 路径 / 未启用仓库多起无用进程。
+    /// stop / start 失败均忽略。
     nonisolated static func recoverFilesystemMonitor(in root: String) {
-        let config = runGit(["config", "--get", "core.fsmonitor"], in: root)
-        guard config.status == 0,
-              strippingTrailingLineEnding(config.stdout) == "true" else { return }
         _ = runGit(["fsmonitor--daemon", "stop"], in: root)
+
+        var gitDirectory: String?
         let gitDir = runGit(["rev-parse", "--absolute-git-dir"], in: root)
         if gitDir.status == 0 {
-            let dir = strippingTrailingLineEnding(gitDir.stdout)
-            let socketPath = (dir as NSString)
+            gitDirectory = strippingTrailingLineEnding(gitDir.stdout)
+        } else {
+            // rev-parse 本身也可能因坏 socket 失败；回退到 .git 目录或
+            // worktree 的 `gitdir:` 指针文件，再删残留 IPC。
+            gitDirectory = resolveGitDirectoryFallback(in: root)
+        }
+        if let gitDirectory {
+            let socketPath = (gitDirectory as NSString)
                 .appendingPathComponent("fsmonitor--daemon.ipc")
             try? FileManager.default.removeItem(atPath: socketPath)
         }
-        _ = runGit(["fsmonitor--daemon", "start"], in: root)
+
+        let config = runGit(["config", "--get", "core.fsmonitor"], in: root)
+        let usesBuiltinDaemon = config.status == 0
+            && strippingTrailingLineEnding(config.stdout) == "true"
+        if usesBuiltinDaemon {
+            _ = runGit(["fsmonitor--daemon", "start"], in: root)
+        }
+    }
+
+    /// Cocoa / POSIX 风格的失效 fd 文案（Process 启动失败或 git 读写坏 socket）。
+    nonisolated static func looksLikeStaleFileDescriptor(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("bad file descriptor")
+            || lower.contains("ebadf")
+    }
+
+    /// rev-parse 失败时解析 `root/.git`：目录仓库直接用；worktree 的
+    /// `.git` 文件形如 `gitdir: /path/to/real/gitdir`。
+    nonisolated private static func resolveGitDirectoryFallback(in root: String) -> String? {
+        let candidate = (root as NSString).appendingPathComponent(".git")
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: candidate, isDirectory: &isDirectory) else {
+            return nil
+        }
+        if isDirectory.boolValue {
+            return candidate
+        }
+        guard let content = try? String(contentsOfFile: candidate, encoding: .utf8) else {
+            return nil
+        }
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.lowercased().hasPrefix("gitdir:") else { continue }
+            let raw = trimmed.dropFirst("gitdir:".count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty else { return nil }
+            let url: URL
+            if (raw as NSString).isAbsolutePath {
+                url = URL(fileURLWithPath: raw)
+            } else {
+                url = URL(fileURLWithPath: candidate)
+                    .deletingLastPathComponent()
+                    .appendingPathComponent(raw)
+            }
+            return url.resolvingSymlinksInPath().path
+        }
+        return nil
     }
 
     /// Runs Git while draining stdout and stderr concurrently. Reading either
     /// pipe only after the process exits can deadlock when the other fills.
+    ///
+    /// - Parameter config: 注入 `git -c key=value` 临时配置（不写磁盘），
+    ///   例如 recovery 路径的 `core.fsmonitor=false`。
     nonisolated static func runGit(
-        _ args: [String], in dir: String
+        _ args: [String],
+        in dir: String,
+        config: [String: String] = [:]
     ) -> (status: Int32, stdout: String, stderr: String) {
+        var fullArgs: [String] = []
+        for (key, value) in config {
+            fullArgs.append(contentsOf: ["-c", "\(key)=\(value)"])
+        }
+        fullArgs.append(contentsOf: args)
+
+        // 启动失败且像 EBADF 时重试一次（换新 pipe /dev/null），避免共享
+        // FileHandle.nullDevice 被其它 Process 关闭后整段 Git 面板永久失效。
+        let first = launchGit(fullArgs, in: dir)
+        if first.launched {
+            return first.result
+        }
+        if looksLikeStaleFileDescriptor(first.result.stderr) {
+            let second = launchGit(fullArgs, in: dir)
+            return second.result
+        }
+        return first.result
+    }
+
+    /// 实际拉起 git 子进程；`launched == false` 表示 `Process.run()` 抛错。
+    private nonisolated static func launchGit(
+        _ args: [String], in dir: String
+    ) -> (launched: Bool, result: (status: Int32, stdout: String, stderr: String)) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = args
@@ -258,12 +394,21 @@ actor GitScanner {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        process.standardInput = FileHandle.nullDevice
+        // 每次打开独立 /dev/null，避免复用 FileHandle.nullDevice：
+        // Process 退出时会 close 传入的 handle，共享 nullDevice 被关掉后
+        // 后续 Process.run 会稳定抛出 Bad file descriptor。
+        if let devNull = FileHandle(forReadingAtPath: "/dev/null") {
+            process.standardInput = devNull
+        } else {
+            let nullPipe = Pipe()
+            try? nullPipe.fileHandleForWriting.close()
+            process.standardInput = nullPipe
+        }
 
         do {
             try process.run()
         } catch {
-            return (-1, "", error.localizedDescription)
+            return (false, (-1, "", error.localizedDescription))
         }
         let outData = PipeData()
         let errData = PipeData()
@@ -281,9 +426,12 @@ actor GitScanner {
         process.waitUntilExit()
         readers.wait()
         return (
-            process.terminationStatus,
-            String(data: outData.value, encoding: .utf8) ?? "",
-            String(data: errData.value, encoding: .utf8) ?? ""
+            true,
+            (
+                process.terminationStatus,
+                String(data: outData.value, encoding: .utf8) ?? "",
+                String(data: errData.value, encoding: .utf8) ?? ""
+            )
         )
     }
 
