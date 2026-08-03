@@ -506,6 +506,8 @@ private struct PaneView: View {
                         { focus(); close(pane.content) }
                     }
                 )
+                // 按 session 身份区分：重跑原地替换会话时强制重建宿主，避免沿用旧 PTY 视图。
+                .id(session.id)
                 .overlay(alignment: .topTrailing) {
                     TerminalFindOverlay(find: session.find)
                 }

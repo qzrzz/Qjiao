@@ -552,6 +552,28 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         return session
     }
 
+    /// 在原 pane 位置用新终端会话替换旧会话，保留分屏布局、分隔比例与 pane id。
+    /// 旧会话已不在任何 tab 的布局树中时返回 nil（调用方应回退到 `newSession`）。
+    @discardableResult
+    func replaceSession(
+        id sessionID: UUID,
+        directory: String? = nil
+    ) -> TerminalSession? {
+        for tab in tabs {
+            guard let paneID = tab.paneID(forContent: sessionID) else { continue }
+            // terminate 不会触发 onExited，因此 pane 不会被自动摘除，可安全原地替换。
+            if let old = tab.sessions.first(where: { $0.id == sessionID }) {
+                old.terminate()
+                sessionObservations[sessionID] = nil
+            }
+            let session = makeSession(directory: directory)
+            tab.replaceContent(in: paneID, with: .session(session))
+            selectedTabID = tab.id
+            return session
+        }
+        return nil
+    }
+
     func addLaunchCommand(_ command: ProjectLaunchCommand) {
         launchCommands.append(command)
     }

@@ -819,10 +819,24 @@ final class TerminalManager: nonisolated ObservableObject {
             scriptDescription: script.scriptDescription
         )
         let scriptKey = trackedScript.executionKey(projectID: project.id)
-        // 如果该任务之前启动过终端窗口（无论运行中还是已运行结束），再次运行时都关闭原来的窗口
-        closeExistingPackageScriptTerminal(executionKey: scriptKey)
 
-        let session = project.newSession(directory: resolvedDirectory)
+        // 再次运行：优先在原终端 pane 原地替换会话，保留分屏位置与分隔比例；
+        // 仅当旧会话已不在布局中时，才关闭残留记录并新建 Tab。
+        // 注意：本地变量名 `project` 会遮蔽 `project(containingSessionID:)`，故用 self. 显式调用。
+        let session: TerminalSession
+        if let existing = packageScriptRecords[scriptKey],
+           let host = self.project(containingSessionID: existing.sessionID),
+           let replaced = host.replaceSession(
+               id: existing.sessionID,
+               directory: resolvedDirectory
+           ) {
+            rightSidebarCommandStartedAt.removeValue(forKey: existing.sessionID)
+            session = replaced
+        } else {
+            closeExistingPackageScriptTerminal(executionKey: scriptKey)
+            session = project.newSession(directory: resolvedDirectory)
+        }
+
         let tabTitle = script.category.buildTabTitle(scriptName: script.name, directory: script.directory)
         project.selectedTab?.customName = tabTitle
         session.title = tabTitle
@@ -940,7 +954,8 @@ final class TerminalManager: nonisolated ObservableObject {
         )
     }
 
-    /// 重新运行指定的 package script（先停止，再启动）
+    /// 重新运行指定的 package script。
+    /// 直接走 `runPackageScript`：会在原 pane 位置替换会话（保留分屏），无需先 close 再 newTab。
     func restartPackageScript(
         _ scriptName: String,
         mode: PackageScriptRunMode = .normal,
@@ -951,20 +966,11 @@ final class TerminalManager: nonisolated ObservableObject {
             ?? (!project.projectDirectory.isEmpty
                 ? project.projectDirectory
                 : (selectedSession?.currentDirectoryPath ?? ""))
-        let executionKey = UniversalProjectScript.executionKey(
-            projectID: project.id,
-            category: .npm,
-            name: scriptName,
+        runPackageScript(
+            scriptName,
+            mode: mode,
             directory: resolvedDirectory
         )
-        stopPackageScript(executionKey)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.runPackageScript(
-                scriptName,
-                mode: mode,
-                directory: resolvedDirectory
-            )
-        }
     }
 
     /// 查找脚本 Session 所属项目；脚本运行状态不能依赖当前选中的项目。
