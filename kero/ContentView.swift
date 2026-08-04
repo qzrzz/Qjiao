@@ -35,10 +35,12 @@ struct ContentView: View {
                 ZStack {
                     // Diff 面板在未选中时保持挂载：避免其 NSHostingView 从窗口移除
                     // 导致内部 WKWebView 被销毁和重新创建（丢失已渲染的 diff 和滚动位置）。
+                    // 访问过（已挂载）的项目在切换后仍保留其 diff 栈；未访问的恢复项目保持惰性。
                     // 未选中的 Diff 需要将透明度设为 0，防止终端开启透明背景时透出显示。
-                    if let project = manager.selectedProject {
+                    ForEach(manager.projectsWithMountedDiffs) { project in
                         ForEach(project.diffPlacements, id: \.diff.id) { placement in
-                            let isSelected = project.selectedTabID == placement.tabID
+                            let isSelected = manager.selectedProjectID == project.id
+                                && project.selectedTabID == placement.tabID
                             DiffViewerView(
                                 diff: placement.diff,
                                 isSelected: isSelected
@@ -949,7 +951,10 @@ private struct SessionTabsView: View {
     @ObservedObject var tabSplitDrag: TabSplitDragController
     @ObservedObject private var settings = AppSettings.shared
     let maxStripWidth: CGFloat
+    private let fadeWidth: CGFloat = 20
     @State private var overflow = StripOverflow()
+    /// Scroll 几何完整快照（含 offset），用于选中 Tab 避让边缘渐隐的精调滚动。
+    @State private var stripGeometry = StripGeometry()
     /// 标签内容固有宽度（未裁切），用于条带收窄到内容。
     @State private var contentWidth: CGFloat = 0
     /// 标签条已挤满时压低单 Tab 最小/最大宽度，腾出可见数量（仅滚动模式）。
@@ -977,6 +982,7 @@ private struct SessionTabsView: View {
         var overflow = StripOverflow()
         var contentWidth: CGFloat = 0
         var containerWidth: CGFloat = 0
+        var contentOffsetX: CGFloat = 0
     }
 
     private var isElastic: Bool {
@@ -1084,9 +1090,11 @@ private struct SessionTabsView: View {
                         right: geo.contentOffset.x + geo.containerSize.width < geo.contentSize.width - 0.5
                     ),
                     contentWidth: geo.contentSize.width,
-                    containerWidth: geo.containerSize.width
+                    containerWidth: geo.containerSize.width,
+                    contentOffsetX: geo.contentOffset.x
                 )
             } action: { _, new in
+                stripGeometry = new
                 overflow = new.overflow
                 // contentSize 亦同步内容宽，避免仅依赖 preference 时的首帧空档。
                 if new.contentWidth > 0 {
@@ -1158,7 +1166,7 @@ private struct SessionTabsView: View {
                         colors: [overflow.left ? .clear : .black, .black],
                         startPoint: .leading, endPoint: .trailing
                     )
-                    .frame(width: 20)
+                    .frame(width: fadeWidth)
                     // 动画只作用于渐隐条本身。不能挂在 ScrollView 上：
                     // 溢出翻转（新建 Tab 恰好撑满条带时）会把新 Tab 插入、
                     // 弹性宽度重排和滚入视口一起包进 0.15s 插值，
@@ -1169,7 +1177,7 @@ private struct SessionTabsView: View {
                         colors: [.black, overflow.right ? .clear : .black],
                         startPoint: .leading, endPoint: .trailing
                     )
-                    .frame(width: 20)
+                    .frame(width: fadeWidth)
                     .animation(.easeInOut(duration: 0.15), value: overflow.right)
                 }
             }
@@ -1248,11 +1256,62 @@ private struct SessionTabsView: View {
     }
 
     /// 仅滚动到足以完整显示当前 Tab 的位置；已在视口内时保持现有偏移。
-    private func scrollToSelectedTab(using proxy: ScrollViewProxy) {
+    private func scrollToSelectedTab(using proxy: ScrollViewProxy, animated: Bool = false) {
         guard let id = chromeSelectedID,
-              project.tabs.contains(where: { $0.id == id })
+              let selectedIndex = project.tabs.firstIndex(where: { $0.id == id })
         else { return }
-        proxy.scrollTo(id)
+
+        guard stripGeometry.containerWidth > 0,
+              let selectedSize = tabSizes[id] else {
+            performScroll(to: id, anchor: nil, using: proxy, animated: animated)
+            return
+        }
+
+        var tabMinX = CGFloat(selectedIndex) * TabStripMetrics.interTabSpacing
+        for tab in project.tabs[..<selectedIndex] {
+            guard let size = tabSizes[tab.id] else {
+                performScroll(to: id, anchor: nil, using: proxy, animated: animated)
+                return
+            }
+            tabMinX += size.width
+        }
+
+        let tabMaxX = tabMinX + selectedSize.width
+        let safeMinX = stripGeometry.contentOffsetX + (overflow.left ? fadeWidth : 0)
+        let safeMaxX = stripGeometry.contentOffsetX + stripGeometry.containerWidth
+            - (overflow.right ? fadeWidth : 0)
+        let anchor: UnitPoint
+        let availableSpace = max(1, stripGeometry.containerWidth - selectedSize.width)
+
+        if tabMinX < safeMinX - 0.5 {
+            anchor = UnitPoint(x: min(1, fadeWidth / availableSpace), y: 0.5)
+        } else if tabMaxX > safeMaxX + 0.5 {
+            anchor = UnitPoint(x: max(0, 1 - fadeWidth / availableSpace), y: 0.5)
+        } else {
+            return
+        }
+
+        performScroll(to: id, anchor: anchor, using: proxy, animated: animated)
+    }
+
+    private func performScroll(
+        to id: UUID,
+        anchor: UnitPoint?,
+        using proxy: ScrollViewProxy,
+        animated: Bool
+    ) {
+        let reveal = {
+            if let anchor {
+                proxy.scrollTo(id, anchor: anchor)
+            } else {
+                proxy.scrollTo(id)
+            }
+        }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.2), reveal)
+        } else {
+            reveal()
+        }
     }
 
     /// 内容超出可视宽度 → 压缩；仅当按宽松最大宽度也一定放得下时才恢复，避免 140/220 来回抖。
@@ -1422,6 +1481,11 @@ private struct SessionTabsView: View {
             .disabled(project.tabs.count <= 1)
         Button(L10n.t("Close Tabs to the Right")) { project.closeToRight(of: tab) }
             .disabled(project.tabs.last?.id == tab.id)
+        Divider()
+        Button(L10n.t("Close Files")) { project.closeFiles() }
+            .disabled(!project.hasFiles)
+        Button(L10n.t("Close Diffs")) { project.closeDiffs() }
+            .disabled(!project.hasDiffs)
         Divider()
         Button(L10n.t("Close All")) { project.closeAll() }
     }

@@ -57,6 +57,16 @@ extension Notification.Name {
 final class TerminalManager: nonisolated ObservableObject {
     @Published var projects: [Project] = []
     @Published var selectedProjectID: UUID? {
+        willSet {
+            // Diff hosts are expensive WebKit trees. Once a project has put
+            // them in this window, keep that project's stack mounted across
+            // project switches just as ContentView already does across tab
+            // switches. Reattaching every open diff can otherwise block the
+            // main thread while AppKit rebuilds the window/view hierarchy.
+            if let selectedProjectID, selectedProjectID != newValue {
+                retainedDiffProjectIDs.insert(selectedProjectID)
+            }
+        }
         didSet {
             guard selectedProjectID != oldValue else { return }
             reloadActiveProjectTheme()
@@ -74,6 +84,10 @@ final class TerminalManager: nonisolated ObservableObject {
     /// re-publish them so views observing the manager stay current.
     private var projectObservations: [UUID: AnyCancellable] = [:]
     private var projectThemeObservations: [UUID: AnyCancellable] = [:]
+    /// Projects whose diff stacks have already been mounted in this window.
+    /// Unvisited restored projects stay lazy so launch does not instantiate all
+    /// of their WKWebViews at once.
+    private var retainedDiffProjectIDs: Set<UUID> = []
     private var projectCounter = 0
     private var settingsObservation: AnyCancellable?
     private var zshIdleTitleObservation: AnyCancellable?
@@ -241,6 +255,16 @@ final class TerminalManager: nonisolated ObservableObject {
 
     var selectedSession: TerminalSession? {
         selectedProject?.selectedSession
+    }
+
+    /// Diff stacks that should remain in the window hierarchy. The selected
+    /// project is included immediately; previously selected projects remain
+    /// only when they actually own a diff.
+    var projectsWithMountedDiffs: [Project] {
+        projects.filter {
+            $0.id == selectedProjectID
+                || (retainedDiffProjectIDs.contains($0.id) && $0.hasDiffs)
+        }
     }
 
     /// 当 AppSettings 的 zshIdleTitleStyle 发生变化时，即时刷新全部打开终端 Session 的 UI 标签标题。
@@ -464,6 +488,7 @@ final class TerminalManager: nonisolated ObservableObject {
         projects.remove(at: index)
         projectObservations[project.id] = nil
         projectThemeObservations[project.id] = nil
+        retainedDiffProjectIDs.remove(project.id)
         if selectedProjectID == project.id {
             let neighbor = min(index, projects.count - 1)
             selectedProjectID = neighbor >= 0 ? projects[neighbor].id : nil
@@ -508,6 +533,7 @@ final class TerminalManager: nonisolated ObservableObject {
         projects.remove(at: index)
         projectObservations[project.id] = nil
         projectThemeObservations[project.id] = nil
+        retainedDiffProjectIDs.remove(project.id)
         if selectedProjectID == project.id {
             let neighbor = min(index, projects.count - 1)
             selectedProjectID = neighbor >= 0 ? projects[neighbor].id : nil
@@ -1113,6 +1139,26 @@ final class TerminalManager: nonisolated ObservableObject {
         }
     }
 
+    /// Activates Qjiao and reveals the session that emitted a desktop
+    /// notification. Searches every open window; if the session is gone,
+    /// still brings the app forward so the click isn't a dead end.
+    static func revealSession(id: UUID) {
+        NSApp.activate()
+        for manager in registry {
+            for project in manager.projects {
+                for session in project.sessions where session.id == id {
+                    manager.revealSession(session)
+                    manager.window?.makeKeyAndOrderFront(nil)
+                    return
+                }
+            }
+        }
+        // Session closed since the banner was posted — surface any live window.
+        if let manager = registry.first(where: { $0.window != nil }) {
+            manager.window?.makeKeyAndOrderFront(nil)
+        }
+    }
+
     /// Whether ⌘K has a terminal on screen to act on right now.
     var canClearActiveTerminal: Bool {
         if case .session? = selectedProject?.focusedContent { return true }
@@ -1496,6 +1542,7 @@ final class TerminalManager: nonisolated ObservableObject {
         var histories: [String: String] = [:]
         let snapshot = SessionSnapshot(
             projects: projects.map { project in
+                let projectSessions = project.sessions
                 let tabs = project.tabs.map { tab -> ProjectSnapshot.TabSnapshot in
                     let layout = Self.layoutSnapshot(
                         tab.layout,
@@ -1507,7 +1554,10 @@ final class TerminalManager: nonisolated ObservableObject {
                     } ?? 0
                     return ProjectSnapshot.TabSnapshot(
                         layout: layout, focusedPaneIndex: focusedPaneIndex,
-                        customName: tab.customName
+                        customName: tab.customName,
+                        contextSessionIndex: tab.contextSession.flatMap { context in
+                            projectSessions.firstIndex { $0.id == context.id }
+                        }
                     )
                 }
                 ProjectConfigStore.save(
@@ -1664,16 +1714,25 @@ final class TerminalManager: nonisolated ObservableObject {
                 .flatMap(AIWritingLanguage.init(rawValue:))
             project.customGitPath = config?.customGitPath
             let targetTabIndex = saved.selectedTabIndex ?? 0
+            var restoredContexts: [(tab: PaneTab, sessionIndex: Int)] = []
             for (tabIndex, tab) in saved.tabs.enumerated() {
                 let isSelectedActiveTab = (projectIndex == targetProjectIndex && tabIndex == targetTabIndex)
-                project.restoreTab(
+                guard let restoredTab = project.restoreTab(
                     from: tab,
                     histories: Self.pendingHistories,
                     sessionDirectory: project.projectDirectory.isEmpty
                         ? nil
                         : project.projectDirectory,
                     isLazy: !isSelectedActiveTab
-                )
+                ) else { continue }
+                if let sessionIndex = tab.contextSessionIndex {
+                    restoredContexts.append((restoredTab, sessionIndex))
+                }
+            }
+            let restoredSessions = project.sessions
+            for context in restoredContexts
+            where restoredSessions.indices.contains(context.sessionIndex) {
+                context.tab.contextSession = restoredSessions[context.sessionIndex]
             }
             if project.projectDirectory.isEmpty {
                 project.projectDirectory = project.sessions.first?.currentDirectoryPath ?? ""

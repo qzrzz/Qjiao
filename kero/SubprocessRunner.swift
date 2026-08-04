@@ -21,9 +21,9 @@
 import Foundation
 
 /// 统一子进程执行器。
-enum SubprocessRunner {
+nonisolated enum SubprocessRunner {
     /// 一次执行的完整配置。
-    struct Config {
+    struct Config: Sendable {
         /// 可执行文件绝对路径（不做 PATH 解析）。
         var executable: String
         var arguments: [String] = []
@@ -59,7 +59,7 @@ enum SubprocessRunner {
     }
 
     /// 一次执行的完整结果（Data 原样返回，编码由调用方决定）。
-    struct Result {
+    struct Result: Sendable {
         /// `Process.run()` 是否成功（false 表示启动失败，见 `launchError`）。
         var launched: Bool
         /// 退出码；未启动为 -1。
@@ -75,7 +75,8 @@ enum SubprocessRunner {
     /// 同步执行一次子进程。阻塞调用线程直到进程退出或超时。
     ///
     /// 调用方应确保在后台线程 / actor 执行器上调用（勿在主线程）。
-    static func run(_ config: Config) -> Result {
+    nonisolated static func run(_ config: Config) -> Result {
+        ensureStandardFileDescriptorsOpen()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: config.executable)
         process.arguments = config.arguments
@@ -219,11 +220,30 @@ enum SubprocessRunner {
 
     // MARK: - 工具
 
+    /// 确保标准文件描述符（0: stdin, 1: stdout, 2: stderr）在当前进程中保持打开状态。
+    ///
+    /// 在 macOS GUI 应用中，若标准句柄被意外关闭，新创建的 Pipe 会被分配到 0/1/2 号句柄。
+    /// 随后 Cocoa Process.run() 的 posix_spawn file actions 在重定向并关闭句柄时，会把 Pipe 的读写端误关，
+    /// 抛出 EBADF (NSPOSIXErrorDomain code 9)。此函数确保 0/1/2 描述符始终有效。
+    nonisolated static func ensureStandardFileDescriptorsOpen() {
+        for fd in Int32(0)...Int32(2) {
+            if fcntl(fd, F_GETFD) == -1 {
+                let flags = (fd == 0) ? O_RDONLY : O_WRONLY
+                let devNull = open("/dev/null", flags)
+                if devNull != -1 && devNull != fd {
+                    dup2(devNull, fd)
+                    close(devNull)
+                }
+            }
+        }
+    }
+
     /// 在应用启动时提升当前进程的 open file descriptor 软限制（rlimit）。
     ///
     /// macOS 默认给 GUI App 设置的软限制较小（通常为 256 或 1024）。提升至 10240 可为
     /// 多项目、多终端 Tab 及并发 Git 扫描提供巨大的安全缓冲，杜绝 EMFILE / EBADF 连锁反应。
     nonisolated static func boostFileDescriptorLimit() {
+        ensureStandardFileDescriptorsOpen()
         var rl = rlimit()
         if getrlimit(RLIMIT_NOFILE, &rl) == 0 {
             let targetLimit = rlim_t(10240)

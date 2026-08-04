@@ -40,6 +40,8 @@ struct StatusResult: Equatable, Sendable {
     var ignoredPaths: Set<String> = []
     var branches: [String] = []
     var remotes: [String] = []
+    /// 仓库默认分支（clone 的 origin/HEAD 指向；非 clone 仓库用 main/master 惯例降级）。
+    var defaultBranch: String?
     var recentCommits: [GitStatusModel.RecentCommit] = []
     var repositoryOperation: String?
     var stashCount = 0
@@ -339,6 +341,7 @@ actor GitScanner {
             var remotes: [String] = []
             var recentCommits: [GitStatusModel.RecentCommit] = []
             var stashCount = 0
+            var defaultBranch: String?
 
             group.enter()
             detailQueue.async {
@@ -406,11 +409,60 @@ actor GitScanner {
                 stashCount = count
                 lock.unlock()
             }
+            group.enter()
+            detailQueue.async {
+                defer { group.leave() }
+                // 一条命令列出所有 remote 的 symbolic HEAD（如 `origin/HEAD origin/main`）。
+                // 普通 ref 的 symref 为空会被过滤；origin 优先，其余 remote 兜底，
+                // 无需先知道 remotes 列表，且与其它详情并行不增加尾部延迟。
+                let remoteHeads = runGit(
+                    ["for-each-ref", "--format=%(refname:short) %(symref)", "refs/remotes"],
+                    in: repoRoot,
+                    config: config,
+                    timeout: timeout,
+                    preferGitDashC: preferGitDashC
+                )
+                var parsed: String?
+                if remoteHeads.status == 0 {
+                    for line in remoteHeads.stdout.split(separator: "\n") {
+                        let parts = line.split(separator: " ", maxSplits: 1)
+                        guard parts.count == 2 else { continue }
+                        let refName = parts[0]
+                        let symref = parts[1]
+                        guard refName.hasSuffix("/HEAD") else { continue }
+                        let prefix = String(refName.dropLast("/HEAD".count)) + "/"
+                        guard symref.hasPrefix(prefix) else { continue }
+                        let branch = String(symref.dropFirst(prefix.count))
+                        if refName.hasPrefix("origin/") {
+                            parsed = branch
+                            break
+                        }
+                        if parsed == nil { parsed = branch }
+                    }
+                }
+                lock.lock()
+                defaultBranch = parsed
+                lock.unlock()
+            }
             group.wait()
             result.branches = branches
             result.remotes = remotes
             result.recentCommits = recentCommits
             result.stashCount = stashCount
+            // 非 clone 仓库（git remote add）没有 remote HEAD symbolic ref，
+            // 按 main > master 惯例降级；两者都必须存在于本地分支列表。
+            var resolvedDefaultBranch = defaultBranch
+            if resolvedDefaultBranch == nil {
+                if branches.contains("main") {
+                    resolvedDefaultBranch = "main"
+                } else if branches.contains("master") {
+                    resolvedDefaultBranch = "master"
+                }
+            }
+            if let db = resolvedDefaultBranch, !branches.contains(db) {
+                resolvedDefaultBranch = nil
+            }
+            result.defaultBranch = resolvedDefaultBranch
         } else {
             result.loadedDetails = false
         }

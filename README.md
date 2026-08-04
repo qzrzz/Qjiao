@@ -29,16 +29,18 @@
 ### 终端与分屏
 
 - 递归分屏树：任意方向嵌套；标签可拖入内容区边缘分屏；任务「重新运行」优先在原 pane 替换会话，不打散分屏布局。
-- 标签布局可选弹性压缩（默认）或横向滚动；Ctrl+1–9 切标签；Ctrl-Tab 预览（可选 MRU）。
+- 标签布局可选弹性压缩（默认）或横向滚动；Ctrl+1–9 切标签；Ctrl-Tab 预览（可选 MRU）；溢出滚动时选中 Tab 自动避让边缘渐隐，不被遮挡；右键可「关闭全部文件 / 关闭全部 Diff」。
 - 终端默认点击移动光标、OSC 133 语义提示符；闲时标签标题可配置；可开关 Option-as-Alt、Vim 帮助条、字体加粗。
 - 粘贴安全确认（OSC 52 / 可疑内容）；Finder 文件粘贴为 shell 路径；`TERM_PROGRAM=ghostty`，不强制注入 `LANG`。
+- 终端桌面通知带声音；点击通知自动激活窗口并跳转到发出通知的会话。
 - 兼容用户安装的 ghost-complete 等 PTY 补全代理；前台进程驱动 Tab 应用图标（含深浅色变体）。
-- 多 Tab 惰性启动 Shell，后台 Tab 降低 GPU 占用。
+- 多 Tab 惰性启动 Shell，后台 Tab 降低 GPU 占用；访问过的项目其 Diff 视图保持挂载，切换项目不重建 WebKit（提速），恢复会话时保留文件/Diff 标签的上下文终端指向。
 
 ### Git
 
 - **操作逻辑可配置（简单 vs 传统）**：设置中新增 Git 分类与操作逻辑切换，默认使用简单模式（GitHub Desktop 风格，统一 CHANGES 单列表 + 复选框提交，点击提交按钮批量打包暂存并 commit；传统模式保持 VS Code 已暂存/变更分立列表）。
-- 事件驱动刷新（仓库元数据 + 工作区监听）加低频心跳兜底，替代固定短间隔轮询；切换仓库时保留旧内容直至新结果就绪，减少闪烁。
+- 事件驱动刷新（仓库元数据 + 工作区监听）加低频心跳兜底，替代固定短间隔轮询；切换仓库时保留旧内容直至新结果就绪，减少闪烁；两仓库来回切换时立即恢复上次解析的内容（单槽快照），不再显示上一个仓库的旧状态。
+- Git 操作进度反馈：更多操作菜单（Fetch/Pull/Push/Stash 等）、分支切换、提交选项菜单、初始化仓库按钮均有进行中指示；发起新操作自动折叠上一条操作输出。
 - **操作中切换项目立刻跟新**：root 变化时脱离旧 commit/stage 的 `isBusy`，高优先级扫描新仓库，Git 面板不再等旧操作跑完才切换。
 - **Commit Staged 加速**：操作前 HEAD/branch 校验改为轻量 `rev-parse`（不再全量 `git status`）；mutation 后先快路径更新变更列表（跳过 log/stash 等详情，空闲再补全）；全量扫描详情命令并行。
 - **对齐 VS Code 的乐观更新与刷新策略**：
@@ -60,7 +62,7 @@
 - 单文件 Script Runner（Run / Run with…）与底栏运行/停止分屏。
 - 图片查看器：缩放平移、标尺参考线、双图对比、背景模式；SVG 上下分屏代码+预览。
 - **Image Build**：缩放与转 PNG / JPG / WebP / JXL（内置 oxipng、cwebp、cjxl 等）；支持 Suffix（添加后缀）与 File Name（重命名）两种导出命名模式，预置 10 种尺寸全套 macOS Icon 图标模板。
-- 内置浏览器 Tab/分屏（WKWebView）：地址栏、前进后退、快照恢复标题与 favicon。
+- 内置浏览器 Tab/分屏（WKWebView）：地址栏、前进后退、快照恢复标题与 favicon；使用新版 Safari User-Agent，修复 B 站等站点识别为旧浏览器的问题。
 
 ### 右侧栏
 
@@ -92,6 +94,14 @@
 
 ## 上游移植记录
 
+- 移植上游 Kero `main` `3f0cdd8`（add toolbar）的 GitStatusModel 增量（2026-08-04）：`defaultBranch` 采用优化实现——`for-each-ref --format="%(refname:short) %(symref)" refs/remotes` 单命令并行解析所有 remote 的 symbolic HEAD（origin 优先），非 clone 仓库按 main > master 惯例降级，均校验必须存在于本地分支列表；替代上游串行 `symbolic-ref` 实现。`cachedStatusByRoot` 未直接移植，改为单槽 root 快照优化本地 `isSwitchingRoot`：`apply` 时保存最近一次成功解析结果，`sync(root:)` 切回同一 root 时立即 `apply` 恢复正确内容（不锁交互、后台刷新纠偏），多 root 循环退化为原路径。未移植：`lineAdditions`/`lineDeletions`/numstat 行数统计与未跟踪行数计数（用户不需要）、底部工具栏 UI 与 `toolbarVisibility` 设置（与本地右侧栏 Git 面板重叠）、`defaultBranch` 目前无 UI 消费方。
+- 移植上游 Kero `main` `dae03e9`（Improve Git operation progress and error feedback，2026-08-04）的增量部分：本地已有同构的 `GitActionTarget` + `beginGitAction` 机制（覆盖 stage/unstage/discard/commit/sync），本轮补充更多菜单、分支菜单、提交选项菜单与初始化仓库的 spinner 触发源，`beginGitAction` 发起新操作时折叠旧操作输出，主操作按钮 accessibility 进度标签（L10n 三语）；保留本地全状态操作横幅（running/succeeded/failed）与内联分支创建输入框，未跟随上游失败横幅与 NSAlert 改造。
+- 本轮移植上游 Kero `main` `90cd6bf` 之前的 unrelease 提交（2026-08-04，`2163068` 之后）：
+  - `90cd6bf` 选中 Tab 滚动避让边缘渐隐：适配本地弹性布局（保留无动画滚动策略与 chrome 抢先选中），新增 `StripGeometry.contentOffsetX` 与 fade-aware 滚动算法。
+  - `1da3345` 访问过的项目 Diff 保持挂载（切换提速）：`webHostView` 改为可选并延迟 materialize、`retainedDiffProjectIDs` 保留集合、`TabSnapshot` 新增 `contextSessionIndex`（含旧快照兼容解码）与 `restoreTab` 返回 `PaneTab?`；上游新增的 AppKit 加载骨架 `DiffControlsSkeletonBar` 未移植（本地 controlBar 为 SwiftUI 轻量版，维持基线视觉）。
+  - `9ea40a6` + `31d09ed` 通知点击跳转会话与通知声音：重写 `TerminalNotificationService`（settings 重构 + sound 升级授权 + userInfo 携带 sessionID），`TerminalManager` 新增静态 `revealSession(id:)`；保留本地 Qjiao 标题。
+  - `567ab96` 浏览器 Safari User-Agent；`628dee2` 标签右键「关闭全部文件 / 关闭全部 Diff」（L10n 三语词条）。`8d4b0f2`（新终端优先钉住的项目目录）已回退：上游 `customDirectory` 默认 nil、仅显式钉住时非空，而 Qjiao 的 `projectDirectory` 在项目创建时自动填充（所有项目都有值），移植会改变所有项目的新终端默认目录，故恢复原有「跟随当前会话目录」行为。
+  - 未移植：`01566f9`（QoS 修复针对上游 Thread 读取实现，本地已统一走 `SubprocessRunner`）、`ac4ca58` / `db0da69`（Alacritty 后端相关）。
 - 移植上游 Kero `main` commit [`e08729b`](https://github.com/egoist/kero/commit/e08729bb19dd54d9355f269851209e96f7c0905f)（Files 面板 Git 状态装饰，v0.1.35 之后 unrelease）：适配 Qjiao 的 `GitStatusModel`（`Character` 状态位）、`FileTreeRow` 定制与 `L10n` 三语词表，并按要求默认关闭、在 `Settings → Files` 新增 `files.git-decorations` 开关。
 - 移植上游 Kero `main` commit [`2163068`](https://github.com/egoist/kero/commit/216306845d24484600f3ac8e57c8191eb4f01bde)（Ctrl+1–9 切换标签）：主 Tab 快捷键由 `Ctrl+Shift+1–9` 改为 `Ctrl+1–9`；上游官网快捷键文案因 Qjiao 官网组件化重构无对应文案表，未跟随。
 - 移植上游 Kero commit [`285fb66`](https://github.com/egoist/kero/commit/285fb6655b4d1284af62bb0b647b94c83849aeff)（Refine terminal workspace behavior，v0.1.35）：递归 split 树布局重构，覆盖 `Panes.swift`、`PaneLayoutView.swift`、`SessionStore.swift`、`TabSwitcher.swift`、`TerminalManager.swift` 与 `Project.swift`；保留本地定制（`materialFileName`、`isTaskRunning` / `taskHasError`、`showPaneHeaders` 开关、`onClosePane`、`TerminalHelpBar`、`Theme.cursor` 焦点色），会话快照兼容旧 column 与单内容格式并自动迁移。
