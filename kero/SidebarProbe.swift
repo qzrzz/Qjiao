@@ -502,13 +502,13 @@ enum SidebarProbe {
     ///   - tagName: 目标 Tag 标签名（如 "v1.0.0"）
     nonisolated static func createGitTag(directory: String, tagName: String) {
         Task.detached(priority: .utility) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["tag", tagName]
-            process.currentDirectoryURL = URL(fileURLWithPath: directory)
-            try? process.run()
-            // 等待退出并回收，避免僵尸进程累积（git tag 毫秒级完成）
-            process.waitUntilExit()
+            _ = SubprocessRunner.run(
+                SubprocessRunner.Config(
+                    executable: "/usr/bin/git",
+                    arguments: ["tag", tagName],
+                    workingDirectory: directory
+                )
+            )
         }
     }
 

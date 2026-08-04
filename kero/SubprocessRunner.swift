@@ -92,18 +92,17 @@ enum SubprocessRunner {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        if let data = config.stdinData {
-            let stdin = Pipe()
-            process.standardInput = stdin
-            try? stdin.fileHandleForWriting.write(data)
-            try? stdin.fileHandleForWriting.close()
-        } else {
-            process.standardInput = makeEOFStdinPipe()
-        }
+        // 必须为子进程创建独立的 stdin Pipe，避免继承父进程 terminal fd。
+        // 关键点：绝对不可在 process.run() 之前关闭 fileHandleForWriting！
+        // posix_spawn 会自动对 Pipe 的句柄进行重定向；如果在 posix_spawn 前就 close 写端 fd，
+        // 系统在 posix_spawn file actions 处理已关闭的描述符时会直接抛出 EBADF (NSPOSIXErrorDomain code 9)。
+        let stdin = Pipe()
+        process.standardInput = stdin
 
         do {
             try process.run()
         } catch {
+            try? stdin.fileHandleForWriting.close()
             return Result(
                 launched: false,
                 exitCode: -1,
@@ -113,6 +112,12 @@ enum SubprocessRunner {
                 launchError: describeLaunchError(error)
             )
         }
+
+        // 进程拉起成功后，写完 stdin 内容（若有）并关闭写端，向子进程发送 EOF
+        if let data = config.stdinData {
+            try? stdin.fileHandleForWriting.write(data)
+        }
+        try? stdin.fileHandleForWriting.close()
 
         // 并行 drain stdout / stderr：避免一侧写满管道缓冲导致子进程阻塞死锁。
         let outRead = stdout.fileHandleForReading
@@ -214,14 +219,17 @@ enum SubprocessRunner {
 
     // MARK: - 工具
 
-    /// 独立 stdin：写端立即关闭 → 读端 EOF。
+    /// 在应用启动时提升当前进程的 open file descriptor 软限制（rlimit）。
     ///
-    /// 绝不用共享 `FileHandle.nullDevice`：旧系统上 Process 退出时会关闭其
-    /// 底层 fd，导致后续 `Process.run` 稳定 EBADF，且可能误关已复用的 fd。
-    nonisolated static func makeEOFStdinPipe() -> Pipe {
-        let pipe = Pipe()
-        try? pipe.fileHandleForWriting.close()
-        return pipe
+    /// macOS 默认给 GUI App 设置的软限制较小（通常为 256 或 1024）。提升至 10240 可为
+    /// 多项目、多终端 Tab 及并发 Git 扫描提供巨大的安全缓冲，杜绝 EMFILE / EBADF 连锁反应。
+    nonisolated static func boostFileDescriptorLimit() {
+        var rl = rlimit()
+        if getrlimit(RLIMIT_NOFILE, &rl) == 0 {
+            let targetLimit = rlim_t(10240)
+            rl.rlim_cur = min(targetLimit, rl.rlim_max)
+            setrlimit(RLIMIT_NOFILE, &rl)
+        }
     }
 
     /// 把 `Process.run` 的 Error 展开为可读诊断（domain / code / underlying）。
@@ -237,5 +245,35 @@ enum SubprocessRunner {
             )
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// 在 Debug 模式下启动 FD 句柄泄漏巡检任务（每 30s 检查一次）。
+    /// 当打开的 File Descriptors 超过阈值（300）时，控制台输出警报。
+    nonisolated static func startDebugFDMonitor(warningThreshold: Int32 = 300) {
+        #if DEBUG
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 10) {
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .background))
+            timer.schedule(deadline: .now(), repeating: .seconds(30))
+            timer.setEventHandler {
+                let count = currentOpenFileDescriptorCount()
+                if count >= warningThreshold {
+                    print("⚠️ [FD Monitor] 句柄预警: 当前进程已打开 \(count) 个 File Descriptors (阈值: \(warningThreshold))")
+                }
+            }
+            timer.resume()
+        }
+        #endif
+    }
+
+    /// 获取当前进程打开的文件描述符数量（仅在统计与巡检时使用）。
+    nonisolated static func currentOpenFileDescriptorCount() -> Int32 {
+        var count: Int32 = 0
+        let tableSize = getdtablesize()
+        for fd in 0..<tableSize {
+            if fcntl(fd, F_GETFD) != -1 {
+                count += 1
+            }
+        }
+        return count
     }
 }

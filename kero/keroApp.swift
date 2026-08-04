@@ -16,6 +16,8 @@ struct keroApp: App {
     @ObservedObject private var l10n = L10n.shared
 
     init() {
+        SubprocessRunner.boostFileDescriptorLimit()
+        SubprocessRunner.startDebugFDMonitor()
         DisplayCycleLayoutProtection.install()
         TerminalFont.registerBundledFonts()
         TerminalNotificationService.shared.configure()

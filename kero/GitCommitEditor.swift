@@ -295,36 +295,19 @@ public enum GitCommitEditor {
         environment: [String: String]? = nil
     ) async -> (status: Int32, stdout: String, stderr: String) {
         await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = args
-            process.currentDirectoryURL = URL(fileURLWithPath: directory, isDirectory: true)
-
-            var env = ProcessInfo.processInfo.environment
-            if let environment {
-                for (k, v) in environment {
-                    env[k] = v
-                }
-            }
-            process.environment = env
-
-            let outPipe = Pipe()
-            let errPipe = Pipe()
-            process.standardOutput = outPipe
-            process.standardError = errPipe
-
-            do {
-                try process.run()
-                let outData = (try? outPipe.fileHandleForReading.readToEnd()) ?? Data()
-                let errData = (try? errPipe.fileHandleForReading.readToEnd()) ?? Data()
-                process.waitUntilExit()
-
-                let stdout = String(data: outData, encoding: .utf8) ?? ""
-                let stderr = String(data: errData, encoding: .utf8) ?? ""
-                return (process.terminationStatus, stdout, stderr)
-            } catch {
-                return (-1, "", error.localizedDescription)
-            }
+            let res = SubprocessRunner.run(
+                SubprocessRunner.Config(
+                    executable: "/usr/bin/git",
+                    arguments: args,
+                    workingDirectory: directory,
+                    environment: environment ?? [:]
+                )
+            )
+            let stdout = String(data: res.stdout, encoding: .utf8) ?? ""
+            let stderr = res.launched
+                ? (String(data: res.stderr, encoding: .utf8) ?? "")
+                : (res.launchError ?? "")
+            return (res.launched ? res.exitCode : -1, stdout, stderr)
         }.value
     }
 }
