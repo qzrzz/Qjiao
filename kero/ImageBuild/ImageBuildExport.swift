@@ -10,13 +10,32 @@ import Foundation
 
 // MARK: - 导出变体行
 
-/// 导出配置表一行：`[尺寸][后缀名称]`。
+/// 导出文件名命名模式：Suffix（后缀模式）或 File Name（重命名文件名）
+enum ImageExportNamingMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case suffix
+    case fileName
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .suffix:
+            return L10n.t("Suffix")
+        case .fileName:
+            return L10n.t("File Name")
+        }
+    }
+}
+
+/// 导出配置表一行：`[尺寸][后缀/文件名]`。
 struct ImageExportVariant: Identifiable, Equatable, Hashable, Sendable {
     var id: UUID
     /// 尺寸描述：`1x` / `512w` / `100x200`（宽×高）等
     var sizeText: String
-    /// 文件名后缀（扩展名前）：空 / `@2x` / `_512`
+    /// 文件名后缀（Suffix 模式）或自定义文件名（File Name 模式）
     var suffix: String
+    /// 命名模式：Suffix（后缀）/ File Name（重新起文件名）
+    var namingMode: ImageExportNamingMode
 
     /// 尺寸下拉预置（可输入任意值，菜单快速填入）。
     static let sizePresets: [String] = [
@@ -24,10 +43,16 @@ struct ImageExportVariant: Identifiable, Equatable, Hashable, Sendable {
         "16w", "32w", "128w", "256w", "512w", "1024x1024",
     ]
 
-    init(id: UUID = UUID(), sizeText: String = "1x", suffix: String = "") {
+    init(
+        id: UUID = UUID(),
+        sizeText: String = "1x",
+        suffix: String = "",
+        namingMode: ImageExportNamingMode = .suffix
+    ) {
         self.id = id
         self.sizeText = sizeText
         self.suffix = suffix
+        self.namingMode = namingMode
     }
 
     /// 解析尺寸为缩放模式；失败返回 nil。
@@ -39,12 +64,18 @@ struct ImageExportVariant: Identifiable, Equatable, Hashable, Sendable {
         )
     }
 
-    /// 生成输出文件名（不含目录）：`base + suffix + .ext`。
+    /// 生成输出文件名（不含目录）：
+    /// - Suffix 模式：`baseName + suffix + .ext`
+    /// - File Name 模式：`suffix (as fileName) + .ext`（若为空则使用 baseName）
     func outputFileName(baseName: String, format: ImageOutputFormat) -> String {
         let raw = suffix.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 避免重复扩展名
-        let cleanSuffix = raw
-        return "\(baseName)\(cleanSuffix).\(format.pathExtension)"
+        switch namingMode {
+        case .suffix:
+            return "\(baseName)\(raw).\(format.pathExtension)"
+        case .fileName:
+            let name = raw.isEmpty ? baseName : raw
+            return "\(name).\(format.pathExtension)"
+        }
     }
 
     /// 尺寸字符串解析。
@@ -118,6 +149,13 @@ struct ImageExportVariant: Identifiable, Equatable, Hashable, Sendable {
 struct ImageExportTemplateRow: Sendable, Equatable {
     let sizeText: String
     let suffix: String
+    let namingMode: ImageExportNamingMode
+
+    init(sizeText: String, suffix: String, namingMode: ImageExportNamingMode = .suffix) {
+        self.sizeText = sizeText
+        self.suffix = suffix
+        self.namingMode = namingMode
+    }
 }
 
 /// 变体表预设模板（macOS / Android 等）。应用时整表替换当前导出设置。
@@ -132,15 +170,18 @@ struct ImageExportTemplate: Identifiable, Sendable {
         ImageExportTemplate(
             id: "macos-appicon",
             title: L10n.t("macOS App Icon"),
-            detail: L10n.t("16w…512w, 1024×1024"),
+            detail: L10n.t("16x16…512x512@2x"),
             rows: [
-                .init(sizeText: "16w", suffix: "_16"),
-                .init(sizeText: "32w", suffix: "_32"),
-                .init(sizeText: "64w", suffix: "_64"),
-                .init(sizeText: "128w", suffix: "_128"),
-                .init(sizeText: "256w", suffix: "_256"),
-                .init(sizeText: "512w", suffix: "_512"),
-                .init(sizeText: "1024x1024", suffix: "_1024"),
+                .init(sizeText: "16x16", suffix: "icon_16x16", namingMode: .fileName),
+                .init(sizeText: "32x32", suffix: "icon_16x16@2x", namingMode: .fileName),
+                .init(sizeText: "32x32", suffix: "icon_32x32", namingMode: .fileName),
+                .init(sizeText: "64x64", suffix: "icon_32x32@2x", namingMode: .fileName),
+                .init(sizeText: "128x128", suffix: "icon_128x128", namingMode: .fileName),
+                .init(sizeText: "256x256", suffix: "icon_128x128@2x", namingMode: .fileName),
+                .init(sizeText: "256x256", suffix: "icon_256x256", namingMode: .fileName),
+                .init(sizeText: "512x512", suffix: "icon_256x256@2x", namingMode: .fileName),
+                .init(sizeText: "512x512", suffix: "icon_512x512", namingMode: .fileName),
+                .init(sizeText: "1024x1024", suffix: "icon_512x512@2x", namingMode: .fileName),
             ]
         ),
         ImageExportTemplate(
@@ -211,7 +252,7 @@ enum ImageBuildExportPreferences {
 
     /// 出厂默认：原尺寸，后缀 `_build` → 如 `icon_build.png`
     static var factoryDefaultVariants: [ImageExportVariant] {
-        [ImageExportVariant(sizeText: "1x", suffix: "_build")]
+        [ImageExportVariant(sizeText: "1x", suffix: "_build", namingMode: .suffix)]
     }
 
     /// 读取上次记住的导出行；无记录或损坏则回落默认。
@@ -222,7 +263,11 @@ enum ImageBuildExportPreferences {
         do {
             let rows = try JSONDecoder().decode([DExportRow].self, from: data)
             let variants = rows.map {
-                ImageExportVariant(sizeText: $0.sizeText, suffix: $0.suffix)
+                ImageExportVariant(
+                    sizeText: $0.sizeText,
+                    suffix: $0.suffix,
+                    namingMode: $0.namingMode ?? .suffix
+                )
             }
             return variants.isEmpty ? factoryDefaultVariants : variants
         } catch {
@@ -230,10 +275,10 @@ enum ImageBuildExportPreferences {
         }
     }
 
-    /// 持久化当前导出行（只存尺寸与后缀，id 每次加载重新生成）。
+    /// 持久化当前导出行（只存尺寸与后缀/文件名及命名模式，id 每次加载重新生成）。
     static func saveVariants(_ variants: [ImageExportVariant]) {
         let rows = variants.map {
-            DExportRow(sizeText: $0.sizeText, suffix: $0.suffix)
+            DExportRow(sizeText: $0.sizeText, suffix: $0.suffix, namingMode: $0.namingMode)
         }
         guard !rows.isEmpty else {
             UserDefaults.standard.removeObject(forKey: storageKey)
@@ -248,6 +293,7 @@ enum ImageBuildExportPreferences {
     private struct DExportRow: Codable, Equatable {
         var sizeText: String
         var suffix: String
+        var namingMode: ImageExportNamingMode?
     }
 }
 
