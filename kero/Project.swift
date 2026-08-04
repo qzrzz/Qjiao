@@ -1155,6 +1155,11 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             beside: targetPaneID,
             focusing: focusing
         )
+        // 上游 93b2b34 同款语义：目标标签没有上下文终端时，继承源标签的，
+        // 保证拖入的文件/浏览器标签继续跟踪正确的项目目录。
+        if targetTab.contextSession == nil {
+            targetTab.contextSession = sourceTab.contextSession
+        }
     }
 
     /// 用户驱动的标签切换：先更新顶栏选中态，下一 runloop 再切换内容。
