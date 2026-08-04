@@ -951,6 +951,7 @@ struct FileSaveErrorBar: View {
 
 /// 源码编辑器底部状态栏：保存状态、文件大小、选择摘要、语法与可用格式化工具。
 private struct EditorStatusBar: View {
+    @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject var file: FileTab
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var scriptRunner = ScriptRunner.shared
@@ -978,7 +979,7 @@ private struct EditorStatusBar: View {
                 Image(systemName: "text.line.3.summary")
             }
             .buttonStyle(.plain)
-            .foregroundStyle(settings.wrapLines ? Color.accentColor : .secondary)
+            .foregroundStyle(settings.wrapLines ? Color(nsColor: Theme.accent) : .secondary)
             .macTooltip(settings.wrapLines ? L10n.t("Disable Line Wrapping") : L10n.t("Enable Line Wrapping"), shortcut: "⌥Z", position: .top)
             .accessibilityLabel(L10n.t("Toggle line wrapping"))
 
@@ -1011,7 +1012,7 @@ private struct EditorStatusBar: View {
                             .font(.system(size: 11))
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Color(nsColor: Theme.accent))
                     .macTooltip(L10n.t("Run File (Split Bottom)"), shortcut: "⌥R", position: .top)
                     .accessibilityLabel(L10n.t("Run File (Split Bottom)"))
                 }
@@ -1081,7 +1082,7 @@ private struct EditorStatusBar: View {
             }
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Color.accentColor)
+        .foregroundStyle(Color(nsColor: Theme.accent))
         .disabled(formattingID != nil)
         .macTooltip(formatter.id == formatters.first?.id ? L10n.format("Format Document (%@)", formatter.title) : L10n.t("Format Document"), shortcut: formatter.id == formatters.first?.id ? "⌥⌘P" : nil, position: .top)
     }
