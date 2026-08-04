@@ -72,6 +72,7 @@
 ### AI 与 Agent
 
 - 统一 LocalAI：本地 CLI（grok / codex / claude / agy / opencode / pi）或云端 API（OpenAI / DeepSeek / Anthropic / Gemini / OpenRouter / xAI / 兼容端点）；Key 存 Keychain。
+- **AI API 配置独立记录机制**：每个供应商各自的 Model、Base URL 与 API Key 独立保存与复用，切换供应商时自动恢复上一次的自定义参数，无需重复输入。
 - 能力：AI 选图标、AI 生成名称/描述/图标、AI Commit Message（语言与 Gitmoji 可配；上下文优先 staged）。
 - AgentWatcher：识别常见 Coding Agent 的 working / blocked / done，Tab 绿点、未读蓝点与项目角标；可配完成/阻塞音效。
 - Project / Info 可一键用已安装的 AI 桌面应用或 CLI 打开当前目录。
