@@ -67,8 +67,27 @@ extension PaneContent {
     }
 
     @MainActor var isDirty: Bool {
-        if case .file(let file) = self { return file.isDirty }
-        return false
+        switch self {
+        case .file(let file): return file.isDirty
+        case .diff(let diff): return diff.isDirty
+        case .session, .browser: return false
+        }
+    }
+
+    @MainActor var saveError: String? {
+        switch self {
+        case .file(let file): return file.saveError
+        case .diff(let diff): return diff.saveError
+        case .session, .browser: return nil
+        }
+    }
+
+    @MainActor func save() {
+        switch self {
+        case .file(let file): file.save()
+        case .diff(let diff): diff.save()
+        case .session, .browser: break
+        }
     }
 }
 

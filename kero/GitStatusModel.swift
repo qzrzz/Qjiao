@@ -96,12 +96,33 @@ final class GitStatusModel: nonisolated ObservableObject {
     }
 
     nonisolated struct RecentCommit: Identifiable, Equatable, Sendable {
+        nonisolated struct FileChange: Identifiable, Equatable, Sendable {
+            let status: Character
+            let path: String
+            let originalPath: String?
+
+            var id: String {
+                "\(status)\u{0}\(originalPath ?? "")\u{0}\(path)"
+            }
+            var fileName: String { (path as NSString).lastPathComponent }
+            var directory: String {
+                let dir = (path as NSString).deletingLastPathComponent
+                return dir.isEmpty ? "" : dir
+            }
+        }
+
         var id: String { hash }
         let hash: String
         let shortHash: String
         let subject: String
         let author: String
         let relativeDate: String
+        /// 首个父提交（合并提交取第一个），用于打开父→提交的历史 diff。
+        let parentHash: String?
+        /// `--decorate=short` 的引用装饰（如 `HEAD -> main, tag: v1.0`）。
+        let references: [String]
+        /// 该提交改动的文件列表（`--name-status -z`）。
+        let files: [FileChange]
     }
 
     /// stage / commit 前的列表快照；失败时回滚乐观更新。
@@ -167,6 +188,14 @@ final class GitStatusModel: nonisolated ObservableObject {
     @Published private(set) var defaultBranch: String?
     @Published private(set) var remotes: [String] = []
     @Published private(set) var recentCommits: [RecentCommit] = []
+    /// 提交历史是否还有更多（分页）；UI 显示「加载更多」。
+    @Published private(set) var hasMoreRecentCommits = false
+    @Published private(set) var isLoadingMoreCommits = false
+    /// 提交历史分页：每页条数，及每个 root 已展开到的上限。
+    static let defaultRecentCommitPageSize = 8
+    static let recentCommitPageSize = 8
+    private var recentCommitLimit = GitStatusModel.defaultRecentCommitPageSize
+    private var recentCommitLimitByRoot: [String: Int] = [:]
     @Published private(set) var repositoryOperation: String?
     @Published private(set) var stashCount = 0
     @Published private(set) var isRefreshing = false
@@ -292,6 +321,10 @@ final class GitStatusModel: nonisolated ObservableObject {
         if root != rootPath {
             contextGeneration &+= 1
             rootPath = root
+            // 每个 root 记住已展开的分页上限，切回时继续从上次位置加载。
+            recentCommitLimit = recentCommitLimitByRoot[root]
+                ?? Self.defaultRecentCommitPageSize
+            isLoadingMoreCommits = false
             // 切换项目 / cwd 时立刻脱离旧 root 上的 commit/stage：后台进程可继续跑完，
             // 但 UI 与结果全部作废，避免 isBusy 挡住新 root 的刷新（表现为面板不切换）。
             abandonInFlightWorkForContextChange()
@@ -374,6 +407,33 @@ final class GitStatusModel: nonisolated ObservableObject {
         }
     }
 
+    /// 分页加载更多提交：调大 limit 后触发刷新；刷新中则排队等下一轮。
+    @discardableResult
+    func loadMoreCommits() -> Bool {
+        guard isRepo, hasMoreRecentCommits,
+              !isLoadingMoreCommits, !isBusy else { return false }
+        recentCommitLimit += Self.recentCommitPageSize
+        recentCommitLimitByRoot[rootPath] = recentCommitLimit
+        isLoadingMoreCommits = true
+        if isRefreshing {
+            // The active worker captured the previous limit. Queue a second
+            // refresh instead of dropping the request made as the section is
+            // opened near the end of the viewport.
+            refreshPending = true
+        } else {
+            refresh()
+        }
+        return true
+    }
+
+    /// 清除当前仓库的提交历史分页记忆（如历史被外部大幅改写时）。
+    func resetRecentCommitPagination() {
+        recentCommitLimitByRoot.removeValue(forKey: rootPath)
+        recentCommitLimit = Self.defaultRecentCommitPageSize
+        hasMoreRecentCommits = false
+        isLoadingMoreCommits = false
+    }
+
     func refresh() {
         let root = rootPath
         let generation = contextGeneration
@@ -389,10 +449,15 @@ final class GitStatusModel: nonisolated ObservableObject {
         // 忽略路径数据只服务于 Files 面板的 Git 装饰（默认关闭）；
         // 关闭时跳过 --ignored=matching，避免大仓库每 2s 全量枚举被忽略文件。
         let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
+        let commitLimit = recentCommitLimit
 
         Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
-                await GitScanner.shared.loadStatus(in: root, includeIgnoredPaths: includeIgnoredPaths)
+                await GitScanner.shared.loadStatus(
+                    in: root,
+                    includeIgnoredPaths: includeIgnoredPaths,
+                    recentCommitLimit: commitLimit
+                )
             }.value
             guard let self else { return }
             guard self.contextGeneration == generation,
@@ -406,6 +471,9 @@ final class GitStatusModel: nonisolated ObservableObject {
                 return
             }
             self.isRefreshing = false
+            // 分页请求可能已把 limit 调大：保持加载态直到携带更大 limit 的
+            // 刷新（refreshPending 队列中的下一次）完成，避免按钮闪回。
+            self.isLoadingMoreCommits = commitLimit < self.recentCommitLimit
             self.apply(result)
             self.hasResolvedStatus = true
             if self.refreshPending {
@@ -1442,7 +1510,10 @@ final class GitStatusModel: nonisolated ObservableObject {
                 shortHash: "·······",
                 subject: message,
                 author: "",
-                relativeDate: "just now"
+                relativeDate: "just now",
+                parentHash: nil,
+                references: [],
+                files: []
             )
             recentCommits = [placeholder] + recentCommits.filter { $0.hash != "optimistic" }
             if recentCommits.count > 8 {
@@ -1625,6 +1696,8 @@ final class GitStatusModel: nonisolated ObservableObject {
         defaultBranch = nil
         remotes = []
         recentCommits = []
+        hasMoreRecentCommits = false
+        isLoadingMoreCommits = false
         repositoryOperation = nil
         stashCount = 0
         isRefreshing = false
@@ -1716,6 +1789,7 @@ final class GitStatusModel: nonisolated ObservableObject {
             defaultBranch = result.defaultBranch
             remotes = result.remotes
             recentCommits = result.recentCommits
+            hasMoreRecentCommits = result.hasMoreRecentCommits
             repositoryOperation = result.repositoryOperation
             stashCount = result.stashCount
         }

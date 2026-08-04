@@ -47,6 +47,11 @@ struct GitPanel: View {
     let openFile: (String) -> Void
     let openToSide: (String) -> Void
     let openDiff: (_ entry: GitStatusModel.Entry, _ staged: Bool) -> Void
+    /// 打开某个历史提交中一个文件的父→提交 diff。
+    let openCommitDiff: (
+        _ commit: GitStatusModel.RecentCommit,
+        _ file: GitStatusModel.RecentCommit.FileChange
+    ) -> Void
 
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var aiCommitTasks = LocalAIGitCommitTaskStore.shared
@@ -69,6 +74,8 @@ struct GitPanel: View {
     @State private var activeActionTarget: GitActionTarget?
     @State private var checkedPaths: Set<String> = []
     @State private var knownPaths: Set<String> = []
+    /// 提交历史中展开（显示文件列表）的 commit hash 集合。
+    @State private var expandedCommitIDs: Set<String> = []
     @FocusState private var branchFieldFocused: Bool
 
     var body: some View {
@@ -1108,6 +1115,17 @@ struct GitPanel: View {
                                         canAICommitMessage: LocalAI.isEnabled
                                             && canGenerateAICommitMessage,
                                         isAICommitRunning: aiCommitTasks.isRunning(model.repoRoot),
+                                        isExpanded: expandedCommitIDs.contains(commit.hash),
+                                        onToggleExpand: {
+                                            if expandedCommitIDs.contains(commit.hash) {
+                                                expandedCommitIDs.remove(commit.hash)
+                                            } else {
+                                                expandedCommitIDs.insert(commit.hash)
+                                            }
+                                        },
+                                        onOpenCommitDiff: { file in
+                                            openCommitDiff(commit, file)
+                                        },
                                         onAICommitMessage: {
                                             startAICommitMessage()
                                         },
@@ -1119,6 +1137,28 @@ struct GitPanel: View {
                                         }
                                     )
                                     .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+                                }
+                                if model.hasMoreRecentCommits {
+                                    Button {
+                                        model.loadMoreCommits()
+                                    } label: {
+                                        HStack(spacing: 5) {
+                                            if model.isLoadingMoreCommits {
+                                                ProgressView()
+                                                    .controlSize(.mini)
+                                                    .accessibilityHidden(true)
+                                            }
+                                            Text(L10n.t("Load More"))
+                                                .font(SidebarTypography.section(.medium))
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 8)
+                                    .contentShape(Rectangle())
+                                    .disabled(model.isLoadingMoreCommits || model.isInteractionLocked)
                                 }
                             }
                         }
@@ -1828,6 +1868,11 @@ private struct GitCommitRow: View {
     /// 当前是否可生成 AI Commit Message（LocalAI 已启用且有变更）。
     let canAICommitMessage: Bool
     let isAICommitRunning: Bool
+    /// 展开显示该提交改动的文件列表。
+    let isExpanded: Bool
+    let onToggleExpand: () -> Void
+    /// 点击展开列表中的某个文件：打开父→提交的历史 diff。
+    let onOpenCommitDiff: (GitStatusModel.RecentCommit.FileChange) -> Void
     let onAICommitMessage: () -> Void
     let onCancelAICommitMessage: () -> Void
     let onRefreshNeeded: () -> Void
@@ -1836,34 +1881,45 @@ private struct GitCommitRow: View {
     @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(commit.subject)
-                .font(SidebarTypography.body())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 4) {
-                Text(commit.shortHash)
-                    .font(SidebarTypography.section(design: .monospaced))
-                    .foregroundStyle(Color(nsColor: Theme.cursor).opacity(0.85))
-                Text("·")
-                Text(commit.author)
-                Text("·")
-                Text(commit.relativeDate)
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(SidebarTypography.micro(.semibold))
+                    .foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(commit.subject)
+                        .font(SidebarTypography.body())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(commit.shortHash)
+                            .font(SidebarTypography.section(design: .monospaced))
+                            .foregroundStyle(Color(nsColor: Theme.cursor).opacity(0.85))
+                        Text("·")
+                        Text(commit.author)
+                        Text("·")
+                        Text(commit.relativeDate)
+                    }
+                    .font(SidebarTypography.section())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                }
             }
-            .font(SidebarTypography.section())
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onToggleExpand)
+
+            if isExpanded {
+                commitFiles
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .contentShape(RoundedRectangle(cornerRadius: 4))
         .background(
             RoundedRectangle(cornerRadius: 4)
                 .fill(isHovering ? Color.primary.opacity(0.05) : Color.clear)
         )
         .onHover { isHovering = $0 }
-        .textSelection(.enabled)
         .contextMenu {
             Button(L10n.t("Edit Commit…")) {
                 showEditSheet = true
@@ -1934,6 +1990,69 @@ private struct GitCommitRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(commit.subject), \(commit.shortHash), by \(commit.author), \(commit.relativeDate)")
+    }
+
+    /// 展开后的文件变更列表：每行一个文件，点击打开父→提交的历史 diff。
+    private var commitFiles: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(commit.files) { file in
+                Button {
+                    onOpenCommitDiff(file)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: statusIcon(file.status))
+                            .font(SidebarTypography.micro(.medium))
+                            .foregroundStyle(statusColor(file.status))
+                        Text(file.fileName)
+                            .font(SidebarTypography.section())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if !file.directory.isEmpty {
+                            Text(file.directory)
+                                .font(SidebarTypography.micro())
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(disabled)
+                .help(file.path)
+            }
+            if commit.files.isEmpty {
+                Text(L10n.t("No file changes"))
+                    .font(SidebarTypography.section())
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+            }
+        }
+        .padding(.leading, 10)
+        .padding(.bottom, 4)
+    }
+
+    private func statusIcon(_ status: Character) -> String {
+        switch status {
+        case "A": return "plus.circle"
+        case "D": return "minus.circle"
+        case "R": return "arrow.triangle.2.circlepath"
+        case "C": return "doc.on.doc"
+        case "U": return "exclamationmark.circle"
+        default: return "pencil.circle"
+        }
+    }
+
+    private func statusColor(_ status: Character) -> Color {
+        switch status {
+        case "A": return Color(red: 0.25, green: 0.73, blue: 0.31)
+        case "D": return Color(red: 1.0, green: 0.48, blue: 0.45)
+        default: return Color(nsColor: Theme.cursor)
+        }
     }
 
     private func copy(_ text: String) {

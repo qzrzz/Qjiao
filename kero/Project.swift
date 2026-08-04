@@ -882,7 +882,9 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     func openDiff(
         repoRoot: String, path: String, staged: Bool, untracked: Bool, origPath: String?
     ) {
-        if let (tab, pane) = findDiffPane(repoRoot: repoRoot, path: path, staged: staged),
+        if let (tab, pane) = findDiffPane(
+            repoRoot: repoRoot, path: path, staged: staged, commitHash: nil
+        ),
            case .diff(let diff) = pane.content {
             diff.untracked = untracked
             diff.origPath = origPath
@@ -902,13 +904,52 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         selectedTabID = tab.id
     }
 
+    /// Opens one file as it changed in a historical commit, comparing the
+    /// commit's first parent with the selected commit.
+    func openCommitDiff(
+        repoRoot: String,
+        path: String,
+        commitHash: String,
+        parentHash: String?,
+        status: Character,
+        origPath: String?
+    ) {
+        if let (tab, pane) = findDiffPane(
+            repoRoot: repoRoot, path: path, staged: false, commitHash: commitHash
+        ), case .diff(let diff) = pane.content {
+            diff.origPath = origPath
+            diff.reload()
+            selectedTabID = tab.id
+            tab.focusedPaneID = pane.id
+            return
+        }
+        let context = selectedSession
+        let diff = DiffTab(
+            repoRoot: repoRoot,
+            path: path,
+            staged: false,
+            untracked: false,
+            origPath: origPath,
+            commitHash: commitHash,
+            commitParentHash: parentHash,
+            commitStatus: status
+        )
+        let tab = makeTab(content: .diff(diff))
+        tab.contextSession = context
+        insertNextToSelected(tab)
+        selectedTabID = tab.id
+    }
+
     private func findDiffPane(
-        repoRoot: String, path: String, staged: Bool
+        repoRoot: String, path: String, staged: Bool, commitHash: String?
     ) -> (tab: PaneTab, pane: Pane)? {
         for tab in tabs {
             if let pane = tab.allPanes.first(where: {
                 if case .diff(let diff) = $0.content {
-                    return diff.repoRoot == repoRoot && diff.path == path && diff.staged == staged
+                    return diff.repoRoot == repoRoot
+                        && diff.path == path
+                        && diff.staged == staged
+                        && diff.commitHash == commitHash
                 }
                 return false
             }) {
@@ -936,12 +977,19 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             }
             let window = NSApp.keyWindow ?? NSApp.mainWindow
             Task { @MainActor in
-                _ = await confirmCloseUnsaved(file, in: window)
+                _ = await confirmCloseUnsaved(content, in: window)
             }
         case .browser:
             removePaneWithContent(content.id)
-        case .diff:
-            removePaneWithContent(content.id)
+        case .diff(let diff):
+            guard diff.isDirty else {
+                removePaneWithContent(content.id)
+                return
+            }
+            let window = NSApp.keyWindow ?? NSApp.mainWindow
+            Task { @MainActor in
+                _ = await confirmCloseUnsaved(content, in: window)
+            }
         }
     }
 
@@ -996,10 +1044,12 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// This is `async` on purpose: awaiting the sheet means each prompt in a
     /// batch is presented only after the previous one has fully dismissed.
     @discardableResult
-    private func confirmCloseUnsaved(_ file: FileTab, in window: NSWindow?) async -> Bool {
+    private func confirmCloseUnsaved(_ content: PaneContent, in window: NSWindow?) async -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Do you want to save the changes you made to \(file.name)?"
+        alert.messageText = L10n.format(
+            "Do you want to save the changes you made to %@?", content.title
+        )
         alert.informativeText = L10n.t("Your changes will be lost if you don't save them.")
         alert.addButton(withTitle: L10n.t("Save"))
         let dontSave = alert.addButton(withTitle: L10n.t("Don't Save"))
@@ -1017,13 +1067,13 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
 
         switch response {
         case .alertFirstButtonReturn: // Save
-            file.save()
+            content.save()
             // Keep the pane open if the write failed; the error bar shows why.
-            guard file.saveError == nil else { return true }
-            removePaneWithContent(file.id)
+            guard content.saveError == nil else { return true }
+            removePaneWithContent(content.id)
             return false
         case .alertSecondButtonReturn: // Don't Save
-            removePaneWithContent(file.id)
+            removePaneWithContent(content.id)
             return false
         default: // Cancel
             return true
@@ -1035,26 +1085,20 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// is only torn down once every prompt has been answered — so cancelling
     /// out of a save prompt leaves the saved panes open too.
     private func closeBatch(_ targets: [PaneContent]) {
-        let dirtyFiles = targets.compactMap { content -> FileTab? in
-            if case .file(let file) = content, file.isDirty { return file }
-            return nil
-        }
-        let cleanContents = targets.filter { content in
-            if case .file(let file) = content { return !file.isDirty }
-            return true
-        }
+        let dirtyContents = targets.filter(\.isDirty)
+        let cleanContents = targets.filter { !$0.isDirty }
 
-        guard !dirtyFiles.isEmpty else {
+        guard !dirtyContents.isEmpty else {
             cleanContents.forEach { closeContent($0) }
             return
         }
 
         let window = NSApp.keyWindow ?? NSApp.mainWindow
         Task { @MainActor in
-            for file in dirtyFiles where file.isDirty {
+            for content in dirtyContents where content.isDirty {
                 // Bail the moment the user backs out — the clean panes, and any
                 // files not yet prompted, stay open.
-                if await confirmCloseUnsaved(file, in: window) { return }
+                if await confirmCloseUnsaved(content, in: window) { return }
             }
             cleanContents.forEach { closeContent($0) }
         }
@@ -1261,6 +1305,19 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             return .diff(DiffTab(
                 repoRoot: repoRoot, path: path, staged: staged,
                 untracked: untracked, origPath: origPath
+            ))
+        case .commitDiff(
+            let repoRoot, let path, let commitHash, let parentHash, let status, let origPath
+        ):
+            return .diff(DiffTab(
+                repoRoot: repoRoot,
+                path: path,
+                staged: false,
+                untracked: false,
+                origPath: origPath,
+                commitHash: commitHash,
+                commitParentHash: parentHash,
+                commitStatus: status.first
             ))
         }
     }

@@ -1592,6 +1592,7 @@ private struct PaneTabItem: View {
                     manualTitle: tab.customName,
                     paneCount: paneCount,
                     isSelected: isSelected,
+                    isDirty: diff.isDirty,
                     minWidth: minWidth,
                     maxWidth: maxWidth,
                     iconOnly: iconOnly,
