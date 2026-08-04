@@ -10,6 +10,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
 set in the Xcode project.
 
+## [1.1.31]
+
+### Added
+
+- Add event-driven Git file watcher (`GitFileWatcher`) with stale-while-revalidate status refresh.
+- Preserve terminal split-pane layout when re-running project tasks.
+- Support native directory creation in New Project dialog.
+
+### Changed
+
+- Adopt unified `SubprocessRunner` for process lifecycle management and leak prevention.
+- Optimize Retina icon crispness in settings and empty state views.
+
+### Fixed
+
+- Fix Git fsmonitor socket crashes and `Bad file descriptor` errors.
+
 ## [1.1.25]
 
 ### Added
