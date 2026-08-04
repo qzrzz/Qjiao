@@ -88,22 +88,20 @@ private actor LocalAIProcessBox {
         process.standardOutput = stdout
         process.standardError = stderr
 
-        if let stdinText = command.stdinText {
-            let stdin = Pipe()
-            process.standardInput = stdin
-            if let data = stdinText.data(using: .utf8) {
-                stdin.fileHandleForWriting.write(data)
-            }
-            try? stdin.fileHandleForWriting.close()
-        } else {
-            process.standardInput = SubprocessRunner.makeEOFStdinPipe()
-        }
+        let stdin = Pipe()
+        process.standardInput = stdin
 
         do {
             try process.run()
         } catch {
+            try? stdin.fileHandleForWriting.close()
             throw LocalAIError.launchFailed(error.localizedDescription)
         }
+
+        if let stdinText = command.stdinText, let data = stdinText.data(using: .utf8) {
+            stdin.fileHandleForWriting.write(data)
+        }
+        try? stdin.fileHandleForWriting.close()
         self.process = process
         self.processIdentifier = process.processIdentifier
 

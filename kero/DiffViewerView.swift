@@ -196,13 +196,15 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
         process.standardOutput = stdout
         process.standardError = stderr
         // 独立 EOF pipe，避免 FileHandle.nullDevice 被 Process 关闭后全局 EBADF。
+        // 注意：不可在 process.run() 之前 close 写端，否则 posix_spawn file actions 会抛 NSPOSIXErrorDomain code 9。
         let stdinPipe = Pipe()
-        try? stdinPipe.fileHandleForWriting.close()
         process.standardInput = stdinPipe
 
         do {
             try process.run()
+            try? stdinPipe.fileHandleForWriting.close()
         } catch {
+            try? stdinPipe.fileHandleForWriting.close()
             return (-1, Data(), error.localizedDescription)
         }
 
