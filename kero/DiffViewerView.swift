@@ -17,27 +17,37 @@ private nonisolated final class DiffPipeData: @unchecked Sendable {
 
 /// Lightweight UI state that should follow Qjiao across launches without
 /// becoming a user-facing TOML setting.
-private enum DiffViewPreferences {
+@MainActor
+private final class DiffViewPreferences: ObservableObject {
+    static let shared = DiffViewPreferences()
+
     private static let layoutKey = "diffView.layout"
     private static let modeKey = "diffView.mode"
 
-    static var diffStyle: DiffStyle {
-        get {
-            guard let rawValue = UserDefaults.standard.string(forKey: layoutKey),
-                  let style = DiffStyle(rawValue: rawValue)
-            else { return .unified }
-            return style
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: layoutKey)
+    @Published var diffStyle: DiffStyle {
+        didSet {
+            UserDefaults.standard.set(diffStyle.rawValue, forKey: Self.layoutKey)
         }
     }
 
-    static var prefersEditing: Bool {
-        get { UserDefaults.standard.string(forKey: modeKey) == "edit" }
-        set {
-            UserDefaults.standard.set(newValue ? "edit" : "review", forKey: modeKey)
+    @Published var prefersEditing: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                prefersEditing ? "edit" : "review",
+                forKey: Self.modeKey
+            )
         }
+    }
+
+    private init() {
+        let defaults = UserDefaults.standard
+        if let rawValue = defaults.string(forKey: Self.layoutKey),
+           let style = DiffStyle(rawValue: rawValue) {
+            diffStyle = style
+        } else {
+            diffStyle = .unified
+        }
+        prefersEditing = defaults.string(forKey: Self.modeKey) == "edit"
     }
 }
 
@@ -50,14 +60,25 @@ final class DiffWebModel: nonisolated ObservableObject {
     @Published var oldContent = ""
     @Published var newContent = ""
     @Published var fileName = ""
-    @Published var diffStyle: DiffStyle = DiffViewPreferences.diffStyle
-    @Published var isEditing = false
+    @Published var canEdit = false
+    /// Explicit appearance for the long-lived, separately hosted diff root.
+    /// Its NSHostingView is re-parented between SwiftUI containers, so relying
+    /// on an implicitly inherited colorScheme can leave WebKit one appearance
+    /// behind after macOS changes between light and dark.
+    @Published private(set) var usesDarkAppearance = false
     var onFileEditChange: ((String, String) -> Void)?
     var onFileEditComplete: ((String, String) -> Void)?
     @Published var overflowMode: OverflowMode = .scroll
     /// The WKWebView renders blank until its JS bundle has drawn the diff;
     /// a skeleton covers it until the bridge reports ready.
     @Published var isReady = false
+
+    /// 记录宿主视图当前的 AppKit 外观，驱动 WebKit diff 的 colorScheme。
+    func updateAppearance(_ appearance: NSAppearance) {
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        guard usesDarkAppearance != isDark else { return }
+        usesDarkAppearance = isDark
+    }
 }
 
 /// A git diff opened as a tab from the git panel. Loads both sides of the
@@ -173,7 +194,7 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
 
         // Keep the editor's document and undo history stable until the user
         // leaves edit mode, and never replace an unsaved buffer from disk.
-        guard !web.isEditing, !isDirty else { return }
+        guard !isEditing, !isDirty else { return }
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -224,7 +245,7 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
             self.error = result.failure
             self.isUnmerged = result.unmerged
             self.isEditable = result.editable && result.failure == nil
-            self.web.isEditing = self.isEditable && DiffViewPreferences.prefersEditing
+            self.web.canEdit = self.isEditable
             self.savedNewContent = result.new
             self.editedNewContent = result.new
             self.isDirty = false
@@ -255,14 +276,17 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
     }
 
     func setDiffStyle(_ style: DiffStyle) {
-        web.diffStyle = style
-        DiffViewPreferences.diffStyle = style
+        DiffViewPreferences.shared.diffStyle = style
     }
 
     func setEditing(_ isEditing: Bool) {
         guard isEditable else { return }
-        web.isEditing = isEditing
-        DiffViewPreferences.prefersEditing = isEditing
+        DiffViewPreferences.shared.prefersEditing = isEditing
+    }
+
+    /// 编辑意图来自全局偏好（所有 diff 标签共享）；是否实际可编辑由 isEditable 决定。
+    private var isEditing: Bool {
+        isEditable && DiffViewPreferences.shared.prefersEditing
     }
 
     func save() {
@@ -306,7 +330,8 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
         guard webHostView == nil else { return }
         await Task.yield()
         guard !Task.isCancelled, webHostView == nil else { return }
-        webHostView = NSHostingView(rootView: DiffWebRoot(model: web))
+        web.updateAppearance(NSApp.effectiveAppearance)
+        webHostView = DiffWebHostingView(model: web)
     }
 
     private nonisolated enum GitContent {
@@ -578,13 +603,29 @@ private final class DiffControlsNSView: NSView {
     ) {
         self.onDiffStyleChange = onDiffStyleChange
         self.onEditingChange = onEditingChange
-        layer?.backgroundColor = Theme.background.cgColor
-        divider.layer?.backgroundColor = Theme.divider.cgColor
+        updateAppearanceColors()
 
         layoutControl.selectedSegment = diffStyle == .split ? 1 : 0
         modeControl.isHidden = !canEdit
         modeControl.setEnabled(canEdit, forSegment: 1)
         modeControl.selectedSegment = canEdit && isEditing ? 1 : 0
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateAppearanceColors()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearanceColors()
+    }
+
+    private func updateAppearanceColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Theme.background.cgColor
+            divider.layer?.backgroundColor = Theme.divider.cgColor
+        }
     }
 
     @objc private func modeChanged() {
@@ -637,6 +678,7 @@ private enum DiffViewerFont {
 private struct DiffWebRoot: View {
     @ObservedObject var model: DiffWebModel
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var preferences = DiffViewPreferences.shared
 
     var body: some View {
         PierreMultiDiffView(
@@ -646,10 +688,10 @@ private struct DiffWebRoot: View {
                     name: model.fileName,
                     oldContents: model.oldContent,
                     newContents: model.newContent,
-                    isEditable: model.isEditing
+                    isEditable: model.canEdit && preferences.prefersEditing
                 )
             ],
-            diffStyle: $model.diffStyle,
+            diffStyle: $preferences.diffStyle,
             overflowMode: $model.overflowMode,
             renderOptions: DiffViewerFont.renderOptions(settings: settings),
             onFileEditChange: { fileID, contents in
@@ -664,6 +706,45 @@ private struct DiffWebRoot: View {
                 }
             }
         )
+        // Pierre derives its JavaScript theme from this environment value.
+        // Make it follow the host view's effective AppKit appearance instead
+        // of a colorScheme captured while the detached host was constructed.
+        .environment(
+            \.colorScheme,
+            model.usesDarkAppearance ? ColorScheme.dark : ColorScheme.light
+        )
+    }
+}
+
+/// Bridges the actual AppKit appearance into the detached SwiftUI diff root.
+/// AppKit sends this callback only after the view's effective appearance has
+/// changed, avoiding the old/new ordering race of a global system notification.
+private final class DiffWebHostingView: NSHostingView<DiffWebRoot> {
+    private let model: DiffWebModel
+
+    init(model: DiffWebModel) {
+        self.model = model
+        super.init(rootView: DiffWebRoot(model: model))
+    }
+
+    @available(*, unavailable)
+    required init(rootView: DiffWebRoot) {
+        fatalError("init(rootView:) has not been implemented")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        model.updateAppearance(effectiveAppearance)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        model.updateAppearance(effectiveAppearance)
     }
 }
 
@@ -703,6 +784,7 @@ struct DiffViewerView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject var diff: DiffTab
     @ObservedObject private var web: DiffWebModel
+    @ObservedObject private var preferences = DiffViewPreferences.shared
     /// The view stays mounted while other tabs are selected (see
     /// ContentView); this flags when it is the frontmost tab so content
     /// refreshes on each re-visit, not just on first mount.
@@ -800,11 +882,11 @@ struct DiffViewerView: View {
     private var controlBar: some View {
         DiffControlsBar(
             diffStyle: Binding(
-                get: { web.diffStyle },
+                get: { preferences.diffStyle },
                 set: { diff.setDiffStyle($0) }
             ),
             isEditing: Binding(
-                get: { web.isEditing },
+                get: { diff.isEditable && preferences.prefersEditing },
                 set: { diff.setEditing($0) }
             ),
             canEdit: diff.isEditable

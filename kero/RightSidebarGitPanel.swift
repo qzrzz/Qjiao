@@ -1105,10 +1105,11 @@ struct GitPanel: View {
                                 actionsDisabled: model.isInteractionLocked
                             )
                             if !historyCollapsed {
-                                ForEach(model.recentCommits) { commit in
+                                ForEach(Array(model.recentCommits.enumerated()), id: \.element.id) { index, commit in
                                     GitCommitRow(
                                         commit: commit,
-                                        isHead: commit.hash == model.recentCommits.first?.hash,
+                                        isHead: index == 0,
+                                        isLastCommit: index == model.recentCommits.count - 1,
                                         repoRoot: model.repoRoot,
                                         disabled: model.isInteractionLocked,
                                         hasStagedChanges: !model.stagedEntries.isEmpty,
@@ -1159,6 +1160,13 @@ struct GitPanel: View {
                                     .padding(.horizontal, 8)
                                     .contentShape(Rectangle())
                                     .disabled(model.isLoadingMoreCommits || model.isInteractionLocked)
+                                    // 滚动自动加载：LazyVStack 中按钮进入视口时触发；
+                                    // 每次加载完成（commits 数量变化）后若仍可见则继续，
+                                    // 直到填满视口或没有更多。loadMoreCommits 内部有幂等守卫。
+                                    .task(id: model.recentCommits.count) {
+                                        guard model.hasMoreRecentCommits else { return }
+                                        model.loadMoreCommits()
+                                    }
                                 }
                             }
                         }
@@ -1862,6 +1870,8 @@ private struct GitChromeMenuButton<Content: View>: View {
 private struct GitCommitRow: View {
     let commit: GitStatusModel.RecentCommit
     let isHead: Bool
+    /// 是否为当前列表的最后一条（决定提交图竖线是否延续到行底）。
+    let isLastCommit: Bool
     let repoRoot: String
     let disabled: Bool
     let hasStagedChanges: Bool
@@ -1882,23 +1892,38 @@ private struct GitCommitRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(SidebarTypography.micro(.semibold))
-                    .foregroundStyle(.tertiary)
+            HStack(spacing: 6) {
+                CommitGraphColumn(
+                    isFirst: isHead,
+                    continuesBelow: isExpanded || !isLastCommit,
+                    isExpanded: isExpanded
+                )
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(commit.subject)
-                        .font(SidebarTypography.body())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                     HStack(spacing: 4) {
-                        Text(commit.shortHash)
-                            .font(SidebarTypography.section(design: .monospaced))
-                            .foregroundStyle(Color(nsColor: Theme.cursor).opacity(0.85))
-                        Text("·")
+                        Text(commit.subject)
+                            .font(SidebarTypography.body())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        if let reference = primaryReference {
+                            referenceBadge(reference)
+                        }
+                        // 展开 / 收起指示：位于第一行（标题行）右侧。
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(SidebarTypography.micro(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 8)
+                    }
+                    HStack(spacing: 4) {
                         Text(commit.author)
                         Text("·")
                         Text(commit.relativeDate)
+                        Spacer(minLength: 8)
+                        // hash 右对齐到行尾，使用次级文本色。
+                        Text(commit.shortHash)
+                            .font(SidebarTypography.section(design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                     .font(SidebarTypography.section())
                     .foregroundStyle(.tertiary)
@@ -1906,7 +1931,7 @@ private struct GitCommitRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 6)
             .padding(.vertical, 4)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggleExpand)
@@ -1995,11 +2020,14 @@ private struct GitCommitRow: View {
     /// 展开后的文件变更列表：每行一个文件，点击打开父→提交的历史 diff。
     private var commitFiles: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(commit.files) { file in
+            ForEach(Array(commit.files.enumerated()), id: \.element.id) { fileIndex, file in
                 Button {
                     onOpenCommitDiff(file)
                 } label: {
                     HStack(spacing: 5) {
+                        FileRailColumn(
+                            continuesBelow: fileIndex < commit.files.count - 1 || !isLastCommit
+                        )
                         Image(systemName: statusIcon(file.status))
                             .font(SidebarTypography.micro(.medium))
                             .foregroundStyle(statusColor(file.status))
@@ -2016,7 +2044,7 @@ private struct GitCommitRow: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
                 }
@@ -2025,15 +2053,37 @@ private struct GitCommitRow: View {
                 .help(file.path)
             }
             if commit.files.isEmpty {
-                Text(L10n.t("No file changes"))
-                    .font(SidebarTypography.section())
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
+                HStack(spacing: 5) {
+                    FileRailColumn(continuesBelow: !isLastCommit)
+                    Text(L10n.t("No file changes"))
+                        .font(SidebarTypography.section())
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
             }
         }
-        .padding(.leading, 10)
-        .padding(.bottom, 4)
+    }
+
+    /// 主要引用徽章：优先带斜杠的分支引用（如 `origin/main`），其次 HEAD 指向；
+    /// 与上游 RecentCommitsView 的 primaryReference 同规则。
+    private var primaryReference: String? {
+        commit.references.first {
+            $0.contains("/") && !$0.hasPrefix("HEAD -> ") && !$0.contains("/HEAD")
+        } ?? commit.references.first.map {
+            $0.hasPrefix("HEAD -> ") ? String($0.dropFirst("HEAD -> ".count)) : $0
+        }
+    }
+
+    private func referenceBadge(_ reference: String) -> some View {
+        Text(reference)
+            .font(SidebarTypography.micro(.medium))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color(nsColor: Theme.cursor)))
+            .frame(maxWidth: 104)
     }
 
     private func statusIcon(_ status: Character) -> String {
@@ -2058,6 +2108,73 @@ private struct GitCommitRow: View {
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// 提交图列：垂直线 + 圆点。线与上游 RecentCommitsView 同规则——
+/// 首行线从圆点开始，末行（不续）线到圆点为止，否则贯穿整行。
+private struct CommitGraphColumn: View {
+    let isFirst: Bool
+    let continuesBelow: Bool
+    let isExpanded: Bool
+
+    private static let lineX: CGFloat = 10
+    private static let lineWidth: CGFloat = 1.5
+    /// 图列在头部 HStack 内部（垂直 padding 之外），线底距下一行内容顶的实际
+    /// 空隙：本行 padding 下 4 + LazyVStack spacing 1 + 下行 padding 上 4 = 9pt；
+    /// 展开时头部→文件区为 4 + 0 + 2 = 6pt。统一向下延伸 9pt 覆盖两种情况，
+    /// 与下方起点重叠多画无影响（同色）。
+    private static let rowGap: CGFloat = 9
+
+    var body: some View {
+        GeometryReader { geo in
+            let height = geo.size.height
+            let top = isFirst ? height / 2 : 0
+            let bottom = continuesBelow ? height : height / 2
+            let lineHeight = max(0, bottom - top) + (continuesBelow ? Self.rowGap : 0)
+            ZStack {
+                Rectangle()
+                    .fill(Color(nsColor: Theme.cursor).opacity(0.72))
+                    .frame(width: Self.lineWidth, height: lineHeight)
+                    .position(x: Self.lineX, y: top + lineHeight / 2)
+                Circle()
+                    .fill(Color(nsColor: Theme.cursor))
+                    .frame(width: (isExpanded ? 10 : 8), height: (isExpanded ? 10 : 8))
+                    .position(x: Self.lineX, y: height / 2)
+            }
+            .frame(width: 20, height: height)
+        }
+        .frame(width: 20)
+    }
+}
+
+/// 文件行缩进 rail：嵌套在提交图右侧的延续线。
+private struct FileRailColumn: View {
+    let continuesBelow: Bool
+
+    private static let lineX: CGFloat = 10
+    private static let lineWidth: CGFloat = 1.5
+    /// 文件行 rail 在文件行 HStack 内部（垂直 padding 之外）：文件行间空隙
+    /// 2 + 0 + 2 = 4pt；最后文件行→下一提交行内容顶 2 + 1 + 4 = 7pt。
+    /// 统一向下延伸 7pt 覆盖两种情况（重叠多画无影响）。
+    private static let rowGap: CGFloat = 7
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                if continuesBelow {
+                    Rectangle()
+                        .fill(Color(nsColor: Theme.cursor).opacity(0.4))
+                        .frame(
+                            width: Self.lineWidth,
+                            height: geo.size.height + Self.rowGap
+                        )
+                        .position(x: Self.lineX, y: (geo.size.height + Self.rowGap) / 2)
+                }
+            }
+            .frame(width: 20, height: geo.size.height)
+        }
+        .frame(width: 20)
     }
 }
 

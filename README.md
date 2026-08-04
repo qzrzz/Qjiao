@@ -48,7 +48,7 @@
   - 文件事件：操作中 / 失焦 / 大仓库（status 上限）跳过自动扫；1s 防抖合并；mutation 后 5s 冷却避免 index 自触发扫。
   - Stage 类操作跳过 HEAD 稳定校验（与 VS Code 一样只跑 `git add`/`restore`）。
 - 大仓库友好：变更上限、未跟踪目录折叠展示、列表惰性渲染；可指定项目级 Git 仓库路径。
-- 提交历史：可展开查看每次提交改动的文件列表（点击打开父→提交的历史 diff），支持分页加载更多。
+- 提交历史：可展开查看每次提交改动的文件列表（点击打开父→提交的历史 diff），支持分页加载更多；提交图（垂直线 + 圆点）、引用徽章（HEAD/main/tag）、滚动接近底部自动加载更多。
 - stage / commit / discard、历史提交编辑（Reword / Amend / Drop 等）、大 Diff 虚拟化渲染；右侧 Git 标签显示变更数角标。
 - 多语言（L10n）完整覆盖 Git 操作完成提示（Commit/Push/Pull/Fetch/Stage/Discard/Stash 等状态与输出消息），支持中文与日文实时切换。
 - 扫描失败可强制刷新并自愈 fsmonitor；子进程统一超时与回收，避免句柄泄漏导致状态卡死。
@@ -95,6 +95,9 @@
 
 ## 上游移植记录
 
+- 补全上游 `212ea0a` Recent Commits 视图的剩余 UI 差距（SwiftUI 实现，保留本地 GitCommitRow 定制）：提交图（`CommitGraphColumn` 垂直线 + 圆点，展开放大，首行/续线规则与上游一致；`FileRailColumn` 文件行延续线）、引用徽章（`primaryReference` 同上游规则：优先带斜杠分支、其次 HEAD 指向，accent 胶囊白字）、滚动自动加载（`LazyVStack` 中 Load More 按钮 `.task(id: commits.count)` 进入视口即加载，连续加载至填满或没有更多）。未跟随：AppKit 绘制（保持 SwiftUI）。
+- 移植上游 Kero `main` `db9a061` + `0a253ba`（v0.1.40–v0.1.41，2026-08-04）：`DiffViewPreferences` 从静态 enum 重构为 `@MainActor ObservableObject` 单例（`@Published diffStyle`/`prefersEditing` 落盘 UserDefaults，多标签/多窗口同步编辑与布局偏好；`DiffWebModel.isEditing` 改为 `canEdit`，编辑意图统一读偏好）；diff 外观跟随系统主题——`DiffWebHostingView`（NSHostingView 子类）在 `viewDidChangeEffectiveAppearance` 时经 `DiffWebModel.usesDarkAppearance` 驱动 WebKit 的 `colorScheme` 环境值，`DiffControlsNSView` 颜色改为 `effectiveAppearance.performAsCurrentDrawingAppearance` 内更新。
+- 上游 `93b2b34`（Support dragging tabs into split panes，v0.1.42）**无需移植**：对比确认本地 `TabSplitDragController` + `Project.mergeTab` 已实现等价能力（拖标签到任意 pane 四象限分屏、保留源标签完整分屏树 `absorb`、diff 标签不可并入、不能拖到自身终端），且本地另有光标反馈与落点预览。唯一缺口：上游在 `moveTab` 中把源标签的 `contextSession` 迁移给目标标签（目标为空时），本地 `mergeTab` 未处理——已按上游语义补齐。
 - 移植上游 Kero `main` `212ea0a`（Improve the Recent Commits view in git panel，2026-08-04）：提交历史支持展开显示文件变更列表（`--name-status -z` + `--decorate=short` 单命令解析，RecentCommit 增加 `parentHash`/`references`/`files`）、分页加载（每页 8 条、`loadMoreCommits`、按 root 记忆分页位置）、打开历史提交 diff（`openCommitDiff`：父→提交比较，DiffTab 增加 `commitHash`/`commitParentHash`/`commitStatus`，会话快照新增 `commitDiff` 兼容解码）。本地保留 SwiftUI `GitCommitRow`（含 Reword/Amend/Drop/AI Commit 定制）并叠加展开与分页，未跟随上游 AppKit `RecentCommitsView` 重写；未移植上游 `runGit` timeout 参数（本地已统一 SubprocessRunner 超时）。
 - 移植上游 Kero `main` `17bb787` + `dd14529`（Enable direct editing for live worktree diffs，2026-08-04）：PierreDiffsSwift 1.4.1 → 1.5.0；DiffWebModel 增加 fileID/编辑状态/编辑回调，DiffTab 增加 `isEditable`/`isDirty`/`saveError` 编辑状态机（`save`/`updateEditedContent`/`completeEditing`/`setDiffStyle`/`setEditing`，符号链接与 staged diff 不可编辑），`DiffViewPreferences` 记忆布局与编辑偏好；controlBar 替换为 AppKit `DiffControlsBar`（Review/Edit + Unified/Split，L10n 适配，新增 Split Layout 专用词条避免与分屏语义冲突）；关闭未保存确认泛化为 PaneContent（支持 diff），Tab 标签显示 dirty 标记。未移植：上游 `runGit` 的 timeout 参数与 10s 全局 deadline（本地已统一走 SubprocessRunner 超时/回收）。
 - 移植上游 Kero `main` `3f0cdd8`（add toolbar）的 GitStatusModel 增量（2026-08-04）：`defaultBranch` 采用优化实现——`for-each-ref --format="%(refname:short) %(symref)" refs/remotes` 单命令并行解析所有 remote 的 symbolic HEAD（origin 优先），非 clone 仓库按 main > master 惯例降级，均校验必须存在于本地分支列表；替代上游串行 `symbolic-ref` 实现。`cachedStatusByRoot` 未直接移植，改为单槽 root 快照优化本地 `isSwitchingRoot`：`apply` 时保存最近一次成功解析结果，`sync(root:)` 切回同一 root 时立即 `apply` 恢复正确内容（不锁交互、后台刷新纠偏），多 root 循环退化为原路径。未移植：`lineAdditions`/`lineDeletions`/numstat 行数统计与未跟踪行数计数（用户不需要）、底部工具栏 UI 与 `toolbarVisibility` 设置（与本地右侧栏 Git 面板重叠）、`defaultBranch` 目前无 UI 消费方。
