@@ -126,6 +126,8 @@ struct SidebarMenuIconButton<Content: View>: View {
     var shortcut: String? = nil
     var active: Bool = false
     var disabled: Bool = false
+    /// 进行中时用 spinner 替换图标（如 Git 更多操作菜单）。
+    var showsProgress: Bool = false
     var tooltipPosition: MacTooltipPosition = .bottom
     @ViewBuilder let menuContent: () -> Content
 
@@ -135,23 +137,32 @@ struct SidebarMenuIconButton<Content: View>: View {
         Menu {
             menuContent()
         } label: {
-            Image(systemName: systemImage)
-                .font(SidebarTypography.caption(.medium))
-                .foregroundStyle(
-                    active
-                        ? Color(nsColor: Theme.cursor)
-                        : (disabled ? Theme.secondaryColor.opacity(0.4) : (isHovering ? Theme.primaryColor : Theme.secondaryColor))
-                )
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(
+            ZStack {
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .frame(width: 11, height: 11)
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(SidebarTypography.caption(.medium))
+                        .foregroundStyle(
                             active
-                                ? Color(nsColor: Theme.cursor).opacity(0.12)
-                                : (isHovering && !disabled ? Theme.primaryColor.opacity(0.08) : Color.clear)
+                                ? Color(nsColor: Theme.cursor)
+                                : (disabled ? Theme.secondaryColor.opacity(0.4) : (isHovering ? Theme.primaryColor : Theme.secondaryColor))
                         )
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 5))
+                }
+            }
+            .frame(width: 22, height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(
+                        active
+                            ? Color(nsColor: Theme.cursor).opacity(0.12)
+                            : (isHovering && !disabled ? Theme.primaryColor.opacity(0.08) : Color.clear)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)
         .menuStyle(.button)

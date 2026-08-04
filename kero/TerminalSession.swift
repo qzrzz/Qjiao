@@ -1230,7 +1230,10 @@ extension TerminalSession: TerminalSurfaceBellDelegate {
     func terminalDidRingBell() {
         NSSound.beep()
         guard !terminalView.hasEffectiveTerminalFocus else { return }
-        TerminalNotificationService.shared.post(message: "Terminal bell")
+        TerminalNotificationService.shared.post(
+            message: "Terminal bell",
+            sessionID: id
+        )
         if !NSApp.isActive {
             NSApp.requestUserAttention(.informationalRequest)
         }
@@ -1251,7 +1254,7 @@ extension TerminalSession: TerminalSurfaceDesktopNotificationDelegate {
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
-        TerminalNotificationService.shared.post(message: message)
+        TerminalNotificationService.shared.post(message: message, sessionID: id)
     }
 }
 

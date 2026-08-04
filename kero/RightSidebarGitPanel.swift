@@ -18,6 +18,10 @@ private enum GitActionTarget: Equatable {
     case discard(path: String)
     case commit
     case sync
+    case branchMenu
+    case moreMenu
+    case commitMenu
+    case initializeRepository
 }
 
 struct GitPanel: View {
@@ -219,7 +223,9 @@ struct GitPanel: View {
             if !model.branches.isEmpty {
                 ForEach(model.branches, id: \.self) { branch in
                     Button {
-                        model.switchBranch(to: branch)
+                        beginGitAction(.branchMenu) {
+                            model.switchBranch(to: branch)
+                        }
                     } label: {
                         if branch == model.branch {
                             Label(branch, systemImage: "checkmark")
@@ -236,11 +242,21 @@ struct GitPanel: View {
                 showBranchCreator = true
                 DispatchQueue.main.async { branchFieldFocused = true }
             }
+            .disabled(model.isInteractionLocked)
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(SidebarTypography.secondary(.medium))
-                    .foregroundStyle(Color(nsColor: Theme.cursor))
+                ZStack {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(SidebarTypography.secondary(.medium))
+                        .foregroundStyle(Color(nsColor: Theme.cursor))
+                        .opacity(activeActionTarget == .branchMenu ? 0 : 1)
+                    if activeActionTarget == .branchMenu {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .frame(width: 11, height: 11)
+                            .accessibilityHidden(true)
+                    }
+                }
                 PanelHeader(title: model.branch ?? "Detached HEAD", subtitle: model.rootPath, isSubtitlePath: true)
             }
             .contentShape(Rectangle())
@@ -257,37 +273,52 @@ struct GitPanel: View {
     private var moreMenu: some View {
         SidebarMenuIconButton(
             systemImage: "ellipsis",
-            help: L10n.t("More Actions…")
+            help: L10n.t("More Actions…"),
+            showsProgress: activeActionTarget == .moreMenu
         ) {
-            Button(L10n.t("Fetch")) { model.fetch() }
-                .disabled(model.isInteractionLocked || model.remotes.isEmpty)
-            Button(L10n.t("Pull (Fast-forward Only)")) { model.pull() }
-                .disabled(model.isInteractionLocked || !model.hasUpstream)
+            Button(L10n.t("Fetch")) {
+                beginGitAction(.moreMenu) { model.fetch() }
+            }
+            .disabled(model.isInteractionLocked || model.remotes.isEmpty)
+            Button(L10n.t("Pull (Fast-forward Only)")) {
+                beginGitAction(.moreMenu) { model.pull() }
+            }
+            .disabled(model.isInteractionLocked || !model.hasUpstream)
             if model.hasUpstream {
-                Button(L10n.t("Push")) { model.push() }
-                    .disabled(model.isInteractionLocked)
+                Button(L10n.t("Push")) {
+                    beginGitAction(.moreMenu) { model.push() }
+                }
+                .disabled(model.isInteractionLocked)
             } else if model.remotes.count > 1 {
                 Menu(L10n.t("Publish Branch to")) {
                     ForEach(model.remotes, id: \.self) { remote in
-                        Button(remote) { model.publish(to: remote) }
+                        Button(remote) {
+                            beginGitAction(.moreMenu) { model.publish(to: remote) }
+                        }
                     }
                 }
                 .disabled(model.isInteractionLocked || model.branch == "detached HEAD")
             } else {
-                Button(L10n.t("Publish Branch")) { model.push() }
-                    .disabled(model.isInteractionLocked || model.remotes.isEmpty || model.branch == "detached HEAD")
+                Button(L10n.t("Publish Branch")) {
+                    beginGitAction(.moreMenu) { model.push() }
+                }
+                .disabled(model.isInteractionLocked || model.remotes.isEmpty || model.branch == "detached HEAD")
             }
-            Button(L10n.t("Sync Changes")) { model.syncChanges() }
-                .disabled(
-                    model.isInteractionLocked || model.remotes.isEmpty
-                        || (!model.hasUpstream && model.remotes.count != 1)
-                        || model.branch == "detached HEAD"
-                )
+            Button(L10n.t("Sync Changes")) {
+                beginGitAction(.moreMenu) { model.syncChanges() }
+            }
+            .disabled(
+                model.isInteractionLocked || model.remotes.isEmpty
+                    || (!model.hasUpstream && model.remotes.count != 1)
+                    || model.branch == "detached HEAD"
+            )
             Divider()
-            Button(L10n.t("Stash All Changes")) { model.stash(includeUntracked: true) }
-                .disabled(model.isInteractionLocked || model.totalChangeCount == 0)
+            Button(L10n.t("Stash All Changes")) {
+                beginGitAction(.moreMenu) { model.stash(includeUntracked: true) }
+            }
+            .disabled(model.isInteractionLocked || model.totalChangeCount == 0)
             Button(model.stashCount == 1 ? L10n.t("Pop Stash") : L10n.format("Pop Stash (%d)", model.stashCount)) {
-                model.stashPop()
+                beginGitAction(.moreMenu) { model.stashPop() }
             }
             .disabled(model.isInteractionLocked || model.stashCount == 0)
             Divider()
@@ -654,29 +685,30 @@ struct GitPanel: View {
             help: L10n.t("Commit Options"),
             side: 28,
             cornerRadius: 6,
-            idleBackgroundOpacity: 0.06
+            idleBackgroundOpacity: 0.06,
+            showsProgress: activeActionTarget == .commitMenu
         ) {
             if settings.gitOperationMode == .simple {
-                Button(L10n.t("Commit Selected")) { performSimpleCommit(amend: false) }
+                Button(L10n.t("Commit Selected")) { performSimpleCommit(amend: false, trigger: .commitMenu) }
                     .disabled(!canCommit(includeAll: false))
                 Divider()
                 Button(L10n.t("AI Complete Changes Commit")) { performAICompleteChangesCommit() }
                     .disabled(!canAICompleteChangesCommit)
                 Divider()
-                Button(L10n.t("Amend Last Commit")) { performSimpleCommit(amend: true) }
+                Button(L10n.t("Amend Last Commit")) { performSimpleCommit(amend: true, trigger: .commitMenu) }
                     .disabled(!canAmend(includeAll: false))
             } else {
-                Button(L10n.t("Commit Staged")) { performCommit(includeAll: false) }
+                Button(L10n.t("Commit Staged")) { performCommit(includeAll: false, trigger: .commitMenu) }
                     .disabled(!canCommit(includeAll: false))
-                Button(L10n.t("Stage All & Commit")) { performCommit(includeAll: true) }
+                Button(L10n.t("Stage All & Commit")) { performCommit(includeAll: true, trigger: .commitMenu) }
                     .disabled(!canCommit(includeAll: true))
                 Divider()
                 Button(L10n.t("AI Complete Changes Commit")) { performAICompleteChangesCommit() }
                     .disabled(!canAICompleteChangesCommit)
                 Divider()
-                Button(L10n.t("Amend Last Commit")) { performCommit(includeAll: false, amend: true) }
+                Button(L10n.t("Amend Last Commit")) { performCommit(includeAll: false, amend: true, trigger: .commitMenu) }
                     .disabled(!canAmend(includeAll: false))
-                Button(L10n.t("Stage All & Amend")) { performCommit(includeAll: true, amend: true) }
+                Button(L10n.t("Stage All & Amend")) { performCommit(includeAll: true, amend: true, trigger: .commitMenu) }
                     .disabled(!canAmend(includeAll: true))
             }
         }
@@ -719,7 +751,9 @@ struct GitPanel: View {
     /// 设置操作进度 target 后调用 model；若 model 早退（校验失败 / isBusy /
     /// failImmediately）从未进入 busy，立刻清掉 target，避免 spinner 永久卡住。
     /// 正常进入 busy 时仍由 `.onChange(of: model.isBusy)` 在结束时清除。
+    /// 发起新操作时折叠上一个操作的输出展开区。
     private func beginGitAction(_ target: GitActionTarget, _ work: () -> Void) {
+        operationExpanded = false
         activeActionTarget = target
         work()
         if !model.isBusy {
@@ -840,11 +874,11 @@ struct GitPanel: View {
         }
     }
 
-    private func performSimpleCommit(amend: Bool = false) {
+    private func performSimpleCommit(amend: Bool = false, trigger: GitActionTarget = .commit) {
         let all = allSimpleEntries
         let checked = all.filter { checkedPaths.contains($0.path) }
         let unchecked = all.filter { !checkedPaths.contains($0.path) }
-        beginGitAction(.commit) {
+        beginGitAction(trigger) {
             model.commitSimple(
                 message: commitMessage,
                 checkedEntries: checked,
@@ -858,10 +892,10 @@ struct GitPanel: View {
         }
     }
 
-    private func performCommit(includeAll: Bool, amend: Bool = false) {
+    private func performCommit(includeAll: Bool, amend: Bool = false, trigger: GitActionTarget = .commit) {
         guard amend ? canAmend(includeAll: includeAll) : canCommit(includeAll: includeAll) else { return }
         let submittedMessage = commitMessage
-        beginGitAction(.commit) {
+        beginGitAction(trigger) {
             model.commit(message: submittedMessage, includeAll: includeAll, amend: amend) { success in
                 if success, commitMessage == submittedMessage { commitMessage = "" }
             }
@@ -1421,8 +1455,19 @@ struct GitPanel: View {
                 }
             }
             VStack(spacing: 8) {
-                Button(L10n.t("Initialize Repository")) {
-                    model.initializeRepository()
+                Button {
+                    beginGitAction(.initializeRepository) {
+                        model.initializeRepository()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        if activeActionTarget == .initializeRepository {
+                            ProgressView()
+                                .controlSize(.small)
+                                .accessibilityHidden(true)
+                        }
+                        Text(L10n.t("Initialize Repository"))
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
@@ -1639,7 +1684,9 @@ private struct GitPrimaryActionButton: View {
         .onHover { isHovering = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovering)
         .macTooltip((enabled && !showsProgress) ? help : nil, shortcut: shortcut, position: .top)
-        .accessibilityLabel(title)
+        .accessibilityLabel(
+            showsProgress ? L10n.format("%@, in progress", title) : title
+        )
         .accessibilityHint(help)
     }
 
@@ -1725,6 +1772,8 @@ private struct GitChromeMenuButton<Content: View>: View {
     var side: CGFloat = 28
     var cornerRadius: CGFloat = 6
     var idleBackgroundOpacity: Double = 0.06
+    /// 进行中时用 spinner 替换图标（如提交选项菜单）。
+    var showsProgress: Bool = false
     var tooltipPosition: MacTooltipPosition = .top
     @ViewBuilder let menuContent: () -> Content
 
@@ -1734,21 +1783,30 @@ private struct GitChromeMenuButton<Content: View>: View {
         Menu {
             menuContent()
         } label: {
-            Image(systemName: systemImage)
-                .font(SidebarTypography.compact())
-                .foregroundStyle(isHovering ? .primary : .secondary)
-                .frame(width: side, height: side)
-                .background(
-                    RoundedRectangle(cornerRadius: cornerRadius)
-                        .fill(
-                            Color.primary.opacity(
-                                isHovering
-                                    ? max(idleBackgroundOpacity + 0.06, 0.1)
-                                    : idleBackgroundOpacity
-                            )
+            ZStack {
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .frame(width: 11, height: 11)
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(SidebarTypography.compact())
+                        .foregroundStyle(isHovering ? .primary : .secondary)
+                }
+            }
+            .frame(width: side, height: side)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(
+                        Color.primary.opacity(
+                            isHovering
+                                ? max(idleBackgroundOpacity + 0.06, 0.1)
+                                : idleBackgroundOpacity
                         )
-                )
-                .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
         }
         .buttonStyle(.plain)
         .menuStyle(.button)

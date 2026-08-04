@@ -164,6 +164,7 @@ final class GitStatusModel: nonisolated ObservableObject {
     @Published private(set) var stagedEntries: [Entry] = []
     @Published private(set) var changedEntries: [Entry] = []
     @Published private(set) var branches: [String] = []
+    @Published private(set) var defaultBranch: String?
     @Published private(set) var remotes: [String] = []
     @Published private(set) var recentCommits: [RecentCommit] = []
     @Published private(set) var repositoryOperation: String?
@@ -197,6 +198,12 @@ final class GitStatusModel: nonisolated ObservableObject {
     /// Invalidates an in-flight status refresh when a mutation begins, so its
     /// pre-operation snapshot cannot overwrite the post-operation state.
     private var statusRequestID: UInt = 0
+    /// 单槽 root 快照：最近一次成功解析的完整结果（repository / notRepository）。
+    /// 两仓库来回切换时，切回上次解析过的 root 立即恢复其正确内容（而非显示
+    /// 上一个 root 的旧 UI），后台刷新纠偏。只保留一个槽，内存恒定；多 root
+    /// 循环时退化为现有 `isSwitchingRoot` 路径。
+    private var lastResolvedRoot = ""
+    private var lastResolvedStatus: StatusLoadResult?
     /// 合并刷新期间到达的新事件，避免取消轮询后丢事件导致状态长期陈旧。
     private var refreshPending = false
     /// Keeps a mutation globally exclusive even if the terminal changes cwd
@@ -288,7 +295,12 @@ final class GitStatusModel: nonisolated ObservableObject {
             // 切换项目 / cwd 时立刻脱离旧 root 上的 commit/stage：后台进程可继续跑完，
             // 但 UI 与结果全部作废，避免 isBusy 挡住新 root 的刷新（表现为面板不切换）。
             abandonInFlightWorkForContextChange()
-            if hasResolvedStatus {
+            if root == lastResolvedRoot, let cached = lastResolvedStatus {
+                // 切回上次解析过的 root：立即恢复其正确内容（而非上一个 root 的旧 UI），
+                // 数据完整所以不锁交互；后台刷新纠偏新鲜度。
+                apply(cached, ignoreBusy: true)
+                hasResolvedStatus = true
+            } else if hasResolvedStatus {
                 // stale-while-revalidate：保留已解析的 UI（仓库内容或非仓库视图），
                 // 仅作废在飞扫描；新结果 apply 后整体替换，不再闪「Finding repository…」。
                 // 保留 topLevel / fileDecorations，避免 Files 树 Git 角标在切换期间闪空；
@@ -1610,6 +1622,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         directoryDecorations = [:]
         ignoredPaths = []
         branches = []
+        defaultBranch = nil
         remotes = []
         recentCommits = []
         repositoryOperation = nil
@@ -1633,6 +1646,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         switch loadResult {
         case .notRepository:
             if isBusy && !ignoreBusy { return }
+            rememberResolved(loadResult)
             isSwitchingRoot = false
             let preserveFailure: Bool
             if let operation, case .failed = operation.state {
@@ -1668,10 +1682,18 @@ final class GitStatusModel: nonisolated ObservableObject {
             }
             return
         case .repository(let result):
+            rememberResolved(loadResult)
             isSwitchingRoot = false
             statusError = nil
             applyRepository(result)
         }
+    }
+
+    /// 成功解析（仓库 / 非仓库）后更新单槽快照；failed 不缓存，避免切回时
+    /// 恢复错误态。快照供 `sync(root:)` 切换回同一 root 时立即恢复。
+    private func rememberResolved(_ loadResult: StatusLoadResult) {
+        lastResolvedRoot = rootPath
+        lastResolvedStatus = loadResult
     }
 
     /// 扫描 / 解析 / 预处理都已在 `GitScanner` actor 内完成，
@@ -1691,6 +1713,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         statusLimitHit = result.didHitLimit
         if result.loadedDetails {
             branches = result.branches
+            defaultBranch = result.defaultBranch
             remotes = result.remotes
             recentCommits = result.recentCommits
             repositoryOperation = result.repositoryOperation

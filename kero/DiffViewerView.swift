@@ -57,9 +57,10 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
     /// The web view lives on the tab (not in the SwiftUI view) so switching
     /// tabs re-parents the same rendered view instead of booting a fresh
     /// WKWebView — same pattern as `TerminalSession.terminalView`.
-    private(set) lazy var webHostView: NSView = NSHostingView(
-        rootView: DiffWebRoot(model: web)
-    )
+    ///
+    /// It starts nil so project selection can commit its skeleton before the
+    /// selected diff creates WebKit's AppKit hierarchy on the main actor.
+    @Published private(set) var webHostView: NSView?
 
     private nonisolated static let maxBytes = 5 << 20
     private var reloadGeneration: UInt = 0
@@ -130,6 +131,25 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
             self.web.oldContent = result.old
             self.web.newContent = result.new
         }
+    }
+
+    /// Refreshes a live diff when navigation brings it back on screen.
+    /// An initial live load also stays in flight rather than being duplicated
+    /// by the view's first mount.
+    func refreshWhenSelected() {
+        guard !isLoading else { return }
+        reload()
+    }
+
+    /// WebKit views are main-actor objects, but their creation does not need to
+    /// be part of the project-selection transaction. Yielding lets SwiftUI
+    /// display the existing skeleton first and avoids materializing every
+    /// hidden diff in a project at once.
+    func materializeWebHostView() async {
+        guard webHostView == nil else { return }
+        await Task.yield()
+        guard !Task.isCancelled, webHostView == nil else { return }
+        webHostView = NSHostingView(rootView: DiffWebRoot(model: web))
     }
 
     private nonisolated enum GitContent {
@@ -443,26 +463,38 @@ struct DiffViewerView: View {
                 } else {
                     VStack(spacing: 0) {
                         controlBar
-                        DiffWebHostView(view: diff.webHostView)
-                            // Cover (never hide) the webview while it boots:
-                            // making it invisible lets WebKit throttle rendering
-                            // and the initial diff render can be dropped entirely.
-                            .overlay {
-                                if !web.isReady {
-                                    DiffSkeletonView()
-                                        .background(Color(nsColor: Theme.background.withAlphaComponent(settings.terminalBackgroundOpacity)))
-                                        .transition(.opacity)
+                        if let webHostView = diff.webHostView {
+                            DiffWebHostView(view: webHostView)
+                                // Cover (never hide) the webview while it boots:
+                                // making it invisible lets WebKit throttle rendering
+                                // and the initial diff render can be dropped entirely.
+                                .overlay {
+                                    if !web.isReady {
+                                        DiffSkeletonView()
+                                            .background(Color(nsColor: Theme.background.withAlphaComponent(settings.terminalBackgroundOpacity)))
+                                            .transition(.opacity)
+                                    }
                                 }
-                            }
+                        } else {
+                            DiffSkeletonView()
+                                .task(id: isSelected) {
+                                    guard isSelected else { return }
+                                    await diff.materializeWebHostView()
+                                }
+                        }
                     }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear { diff.reload() }
+        .onAppear {
+            if isSelected {
+                diff.refreshWhenSelected()
+            }
+        }
         .onChange(of: isSelected) {
             if isSelected {
-                diff.reload()
+                diff.refreshWhenSelected()
             }
         }
     }

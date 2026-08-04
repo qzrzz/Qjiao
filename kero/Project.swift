@@ -508,6 +508,14 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         tabs.flatMap { tab in tab.diffs.map { (diff: $0, tabID: tab.id) } }
     }
 
+    var hasFiles: Bool {
+        tabs.contains { $0.allContents.contains { $0.isFile } }
+    }
+
+    var hasDiffs: Bool {
+        tabs.contains { $0.allContents.contains { $0.isDiff } }
+    }
+
     /// The focused terminal session; while a file, browser, or diff pane is focused it
     /// has no directory of its own, so panels that need a working directory
     /// (file tree, git, info) track a terminal that does: one sharing the
@@ -964,6 +972,16 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         closeBatch(Array(tabs[(index + 1)...]).flatMap(\.allContents))
     }
 
+    /// Closes every file pane while leaving other content in split tabs open.
+    func closeFiles() {
+        closeBatch(tabs.flatMap(\.allContents).filter { $0.isFile })
+    }
+
+    /// Closes every diff pane while leaving other content in split tabs open.
+    func closeDiffs() {
+        closeBatch(tabs.flatMap(\.allContents).filter { $0.isDiff })
+    }
+
     /// Closes every tab, leaving the project open but empty.
     func closeAll() {
         closeBatch(tabs.flatMap(\.allContents))
@@ -1163,22 +1181,24 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// Rebuilds a saved tab's pane layout — recreating its sessions (wired for
     /// exit + observation), files and diffs — then registers and appends it.
     /// Skips panes whose content can't be rebuilt; a tab with none is dropped.
+    @discardableResult
     func restoreTab(
         from snap: SessionSnapshot.ProjectSnapshot.TabSnapshot,
         histories: [String: String] = [:],
         sessionDirectory: String? = nil,
         isLazy: Bool = false
-    ) {
+    ) -> PaneTab? {
         let layout = restoreLayout(
             from: snap.layout, histories: histories,
             sessionDirectory: sessionDirectory, isLazy: isLazy
         )
         let panes = layout.allPanes
-        guard !panes.isEmpty else { return }
+        guard !panes.isEmpty else { return nil }
         let focusedIndex = min(max(0, snap.focusedPaneIndex), panes.count - 1)
         let tab = PaneTab(layout: layout, focusedPaneID: panes[focusedIndex].id)
         tab.customName = snap.customName
         append(tab)
+        return tab
     }
 
     private func restoreLayout(
