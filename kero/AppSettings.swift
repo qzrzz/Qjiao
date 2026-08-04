@@ -445,14 +445,38 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
-    /// 云端 API 模型 ID，由用户按供应商账号可用模型编辑。
-    @Published var aiAPIModel: String {
+    /// 各 AI API 供应商独立保存的模型 ID 字典。
+    @Published var aiAPIModels: [AIAPIProviderID: String] = [:] {
         didSet { save() }
     }
 
-    /// 云端 API 根地址；API Key 独立存放在 macOS Keychain。
-    @Published var aiAPIBaseURL: String {
+    /// 各 AI API 供应商独立保存的根地址 Base URL 字典。
+    @Published var aiAPIBaseURLs: [AIAPIProviderID: String] = [:] {
         didSet { save() }
+    }
+
+    /// 云端 API 模型 ID，自动对应当前选中供应商的配置，由用户按供应商账号可用模型编辑。
+    var aiAPIModel: String {
+        get {
+            aiAPIModels[aiAPIProvider] ?? aiAPIProvider.defaultModel
+        }
+        set {
+            objectWillChange.send()
+            aiAPIModels[aiAPIProvider] = newValue
+            save()
+        }
+    }
+
+    /// 云端 API 根地址，自动对应当前选中供应商的配置；API Key 独立存放在 macOS Keychain。
+    var aiAPIBaseURL: String {
+        get {
+            aiAPIBaseURLs[aiAPIProvider] ?? aiAPIProvider.defaultBaseURL
+        }
+        set {
+            objectWillChange.send()
+            aiAPIBaseURLs[aiAPIProvider] = newValue
+            save()
+        }
     }
 
     /// AI 写作语言（Git Commit、描述等生成内容）；默认英文。
@@ -627,8 +651,25 @@ final class AppSettings: nonisolated ObservableObject {
         let apiProvider = toml["ai.api-provider"]?.string
             .flatMap(AIAPIProviderID.init(rawValue:)) ?? .openAI
         aiAPIProvider = apiProvider
-        aiAPIModel = toml["ai.api-model"]?.string ?? apiProvider.defaultModel
-        aiAPIBaseURL = toml["ai.api-base-url"]?.string ?? apiProvider.defaultBaseURL
+
+        var loadedModels: [AIAPIProviderID: String] = [:]
+        var loadedBaseURLs: [AIAPIProviderID: String] = [:]
+        for provider in AIAPIProviderID.allCases {
+            if let m = toml["ai.api.\(provider.rawValue).model"]?.string ?? toml["ai.api-model.\(provider.rawValue)"]?.string {
+                loadedModels[provider] = m
+            }
+            if let u = toml["ai.api.\(provider.rawValue).base-url"]?.string ?? toml["ai.api-base-url.\(provider.rawValue)"]?.string {
+                loadedBaseURLs[provider] = u
+            }
+        }
+        if loadedModels[apiProvider] == nil, let legacyModel = toml["ai.api-model"]?.string {
+            loadedModels[apiProvider] = legacyModel
+        }
+        if loadedBaseURLs[apiProvider] == nil, let legacyBaseURL = toml["ai.api-base-url"]?.string {
+            loadedBaseURLs[apiProvider] = legacyBaseURL
+        }
+        aiAPIModels = loadedModels
+        aiAPIBaseURLs = loadedBaseURLs
         aiWritingLanguage = toml["ai.writing-language"]?.string
             .flatMap(AIWritingLanguage.init(rawValue:)) ?? .english
         // 默认 true：缺省或非法值均视为开启 Gitmoji。
@@ -784,8 +825,8 @@ final class AppSettings: nonisolated ObservableObject {
         localAIHeadlessProvider = .disabled
         aiBackend = .cli
         aiAPIProvider = .openAI
-        aiAPIModel = AIAPIProviderID.openAI.defaultModel
-        aiAPIBaseURL = AIAPIProviderID.openAI.defaultBaseURL
+        aiAPIModels = [:]
+        aiAPIBaseURLs = [:]
         aiWritingLanguage = .english
         gitCommitMessageEmoji = true
         gitOperationMode = .simple
@@ -932,6 +973,14 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if aiAPIBaseURL != AIAPIProviderID.openAI.defaultBaseURL || aiAPIProvider != .openAI {
             lines.append("ai.api-base-url = \(TOML.quote(aiAPIBaseURL))")
+        }
+        for provider in AIAPIProviderID.allCases {
+            if let m = aiAPIModels[provider], m != provider.defaultModel {
+                lines.append("ai.api.\(provider.rawValue).model = \(TOML.quote(m))")
+            }
+            if let u = aiAPIBaseURLs[provider], u != provider.defaultBaseURL {
+                lines.append("ai.api.\(provider.rawValue).base-url = \(TOML.quote(u))")
+            }
         }
         // 默认英文：仅非默认时写回。
         if aiWritingLanguage != .english {

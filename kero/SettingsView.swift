@@ -1047,6 +1047,8 @@ struct SettingsView: View {
             && settings.aiAPIProvider == .openAI
             && settings.aiAPIModel == AIAPIProviderID.openAI.defaultModel
             && settings.aiAPIBaseURL == AIAPIProviderID.openAI.defaultBaseURL
+            && settings.aiAPIModels.isEmpty
+            && settings.aiAPIBaseURLs.isEmpty
             && settings.aiWritingLanguage == .english
             && settings.gitCommitMessageEmoji
             && settings.soundEffectsEnabled
@@ -1146,6 +1148,7 @@ private struct AIAPIProviderSettings: View {
     @ObservedObject private var registry = AIAPIRegistry.shared
     @State private var apiKey = ""
     @State private var keyStatus: String?
+    @State private var draftAPIKeys: [AIAPIProviderID: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1175,7 +1178,7 @@ private struct AIAPIProviderSettings: View {
 
             apiSettingRow(L10n.t("API Key")) {
                 HStack(spacing: 8) {
-                    SecureField("", text: $apiKey)
+                    SecureField("", text: apiKeyBinding)
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 194)
@@ -1233,30 +1236,47 @@ private struct AIAPIProviderSettings: View {
         }
     }
 
-    /// 切换供应商时恢复其默认模型与端点，并读取该供应商独立保存的密钥。
+    /// 当前供应商的 API Key 绑定，同步更新内存草稿字典。
+    private var apiKeyBinding: Binding<String> {
+        Binding(
+            get: { apiKey },
+            set: { newValue in
+                apiKey = newValue
+                draftAPIKeys[settings.aiAPIProvider] = newValue
+            }
+        )
+    }
+
+    /// 切换供应商时读取该供应商独立保存的配置与密钥，不重置自定义输入。
     private var providerBinding: Binding<AIAPIProviderID> {
         Binding(
             get: { settings.aiAPIProvider },
             set: { provider in
                 settings.aiAPIProvider = provider
-                settings.aiAPIModel = provider.defaultModel
-                settings.aiAPIBaseURL = provider.defaultBaseURL
                 loadKey()
             }
         )
     }
 
-    /// 从 Keychain 载入当前供应商密钥，SecureField 只显示掩码。
+    /// 优先使用草稿中的密钥输入，或从 Keychain 载入当前供应商密钥。
     private func loadKey() {
         let provider = settings.aiAPIProvider
-        do {
-            apiKey = try AIAPIKeyStore.load(for: provider)
+        if let draft = draftAPIKeys[provider] {
+            apiKey = draft
             keyStatus = nil
-            registry.recordKeyState(apiKey, for: provider)
-        } catch {
-            apiKey = ""
-            keyStatus = error.localizedDescription
-            registry.recordKeychainError(error, for: provider)
+            registry.recordKeyState(draft, for: provider)
+        } else {
+            do {
+                apiKey = try AIAPIKeyStore.load(for: provider)
+                draftAPIKeys[provider] = apiKey
+                keyStatus = nil
+                registry.recordKeyState(apiKey, for: provider)
+            } catch {
+                apiKey = ""
+                draftAPIKeys[provider] = ""
+                keyStatus = error.localizedDescription
+                registry.recordKeychainError(error, for: provider)
+            }
         }
     }
 
@@ -1264,6 +1284,7 @@ private struct AIAPIProviderSettings: View {
         let provider = settings.aiAPIProvider
         do {
             try AIAPIKeyStore.save(apiKey, for: provider)
+            draftAPIKeys[provider] = apiKey
             keyStatus = nil
             registry.recordKeyState(apiKey, for: provider)
         } catch {
@@ -1277,6 +1298,7 @@ private struct AIAPIProviderSettings: View {
         do {
             try AIAPIKeyStore.delete(for: provider)
             apiKey = ""
+            draftAPIKeys[provider] = ""
             keyStatus = nil
             registry.recordKeyState("", for: provider)
         } catch {
