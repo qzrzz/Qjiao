@@ -15,6 +15,21 @@
 
 ## 增加功能
 
+- **Git 事件驱动刷新自触发循环修复（根治「Git 状态不更新 / 变更列表卡死」）**：文件监听首次接入时存在两个自触发源，导致「扫描 → 事件 → 再扫描」无限循环，表现为 Git 面板状态永远停在旧值（扫描被循环占满 / fsmonitor daemon 被风暴打挂后 45s 超时自愈反复）：
+  - **DispatchSource 的 `.attrib` 事件**：`git status`（fsmonitor 模式）每次打开 `.git/index` 读取 stat 缓存都会更新 atime，触发 `NOTE_ATTRIB` → 事件 → 扫描 → 再读 index → 无限循环（mtime/ctime 均不变，难以察觉）。现 eventMask 仅保留 `.write / .delete / .rename / .extend / .link`，内容写入与原子替换仍即时捕获。
+  - **fsmonitor daemon cookie**：每次 `git status` 查询 daemon 都会写 `.git/fsmonitor--daemon/cookies/` 文件——工作区 FSEventStream 现过滤 `.git/` 下全部路径（.git 元数据变化由 DispatchSource 独立负责）；同时不再监听 `.git` 目录本身（目录级 vnode 事件同样会捕获 cookie 写入）。
+  - **适配 macOS 27 SDK 新签名**：`FSEventStreamCallback` 参数顺序由 (flags, ids, count, paths) 改为 (count, paths, flags, ids)，回调取用 `eventPaths` 时按新顺序解析。
+
+- **Git 面板事件驱动刷新 + stale-while-revalidate（消除「Finding repository…」闪烁与 2s 空转轮询，对齐 VS Code 刷新机制）**：
+  - **事件驱动文件监听**：新增 `kero/GitFileWatcher.swift` 双路监听——`.git` 元数据（`index` / `HEAD` / `refs` / `packed-refs`，DispatchSource vnode）覆盖 stage / commit / checkout / 分支操作（含终端内手动 git）；工作区递归（FSEventStream，FileEvents + 1s latency 聚合）覆盖外部编辑器与终端对工作区文件的增删改；事件 0.5s 防抖合并后触发刷新。防抖后先重建 vnode 监听（`index`/`HEAD` 原子 rename 会替换 inode，对齐 `SidebarProjectFileWatcher`），再通知 Model。非仓库目录挂工作区监听且**不过滤** `.git` 路径，终端内 `git init` 可被即时发现；已有仓库仍过滤 `.git/` 避免 fsmonitor cookie 自触发。
+  - **2s 全量轮询降为 10s 兜底心跳**：定时轮询不再驱动 Git 扫描（`RightSidebarView` 2s timer 仅保留其他面板轮询），改为 GitStatusModel 内部低频心跳保证 watcher 漏事件（网络盘等）时最终一致；空闲时不再每 2s 跑 7 个 git 子进程。`sync(root:)` 写入 `rootPath` 后重算心跳任务，避免侧栏 `onAppear` 先 `setAutoRefreshEnabled`（此时 root 仍空）导致心跳永不启动。
+  - **stale-while-revalidate（消灭「Finding repository…」）**：仓库根切换（cd / 项目切换 / Agent worktree 跟随）时**保留上一仓库内容继续展示**（新增 `isSwitchingRoot` 状态 + 切换提示条「正在刷新仓库…」），新扫描结果到达后整体替换，不再清空闪占位——「Finding repository…」仅在全应用首次解析时出现；切换期间保留 `topLevel` / 装饰字典（Files 树 Git 角标不闪空），`isCurrent` 在切换中返回 false + `isInteractionLocked` 锁定全部 Git 操作。
+  - **失败态仍保留监听**：status 扫描失败 `clearRepositoryState` 后重新挂工作区 watcher，可恢复错误可靠文件事件 / 心跳再扫，而不只依赖手动 forceRefresh。
+  - **mutation 后即时刷新**：stage / unstage / commit / discard 等操作完成后走 `refreshAfterMutation()`——作废在飞扫描并以高优先级**绕过** `GitScanner` actor 队列重扫（bypass fsmonitor 直读最新 index），避免排在操作前已启动的长扫描后面导致 UI 长时间停在旧列表。
+  - **大仓库保护**：变更条目上限 10,000（与 VS Code 一致），`parseStatus` 解析截断并标记 `didHitLimit`，面板显示「变更过多，仅显示前 N 条」提示（数字 monospacedDigit），自动刷新心跳自动降频至 30s。
+  - **失焦暂停**：应用退到后台时停止 Git 心跳与 watcher 刷新（与 System 面板同策略），期间文件变化记 pending，聚焦后立即补刷一次；侧边栏隐藏同理。
+  - **手动刷新按钮 = 兜底强制刷新**：Git 面板顶部刷新按钮与错误页 Retry 统一走 `forceRefresh()`——先作废在飞扫描（不排队等卡住的扫描）、（60s 节流）修复 fsmonitor daemon（stop → 删残留 IPC socket → 按需 start）、再绕开 actor 队列全量重扫（`core.fsmonitor=false` + `git -C` 回退），解决各种「普通刷新无效」的异常（坏 daemon / IPC 残留 / 扫描卡死 / 队列阻塞）；每次点击都可抢占上一次未完成的强制刷新。恢复中有已解析内容时保留内容区显示（不闪恢复页），仅按钮转圈；错误页状态下显示「Recovering Git Status…」。操作前快照校验的 `git status` 同样绕过 fsmonitor（校验只需 branch/HEAD 快照），避免坏 daemon 下操作按钮长时间转圈。
+
 - **统一子进程执行器 SubprocessRunner（根治 Bad file descriptor / 线程与 fd 泄漏）**：新增 `kero/SubprocessRunner.swift` 作为全应用唯一的 Process 启动 / 回收路径，GitScanner / SystemCommandRunner / LocalAIProcessRunner / LocalAIExecutableLocator / VendorBinLocator / ImageProcessRunner / FileViewerView 全部收敛至此，并全库清零 `readDataToEndOfFile`（统一 `try? readToEnd()`）：
   - **读端兜底（根治「使用一段时间后劣化」）**：子进程被超时 SIGKILL 后，若孙进程仍持有管道写端（git fsmonitor 挂起、AI CLI fork 子进程等），`readToEnd` 会永久阻塞并泄漏线程与 fd；现等待读端带超时，超时后强制关闭读端 FileHandle 制造 EOF，保证 drain 线程与 fd 必然回收，写端持有者随后收到 EPIPE 自行退出。
   - **超时终止整个进程树**：SIGTERM → 递归子孙（pgrep）→ SIGKILL，不再只杀直接子进程；终止后始终 `waitUntilExit` 回收避免僵尸累积。

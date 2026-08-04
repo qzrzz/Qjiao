@@ -215,6 +215,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         didSet {
             ProjectIconThumbnailCache.clearCache()
             saveConfig()
+            objectWillChange.send()
         }
     }
     /// 项目级 Light/Dark 配色覆盖；默认两侧都跟随全局。

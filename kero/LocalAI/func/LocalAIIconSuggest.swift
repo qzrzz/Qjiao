@@ -113,8 +113,7 @@ enum LocalAIIconSuggest {
         if case .file = project.icon {
             ProjectIconFileStore.removeManagedIcons(for: project.id)
         }
-        ProjectIconThumbnailCache.clearCache()
-        project.objectWillChange.send()
+        // icon.didSet：clearCache + saveConfig + objectWillChange（赋值后发送）。
         project.icon = suggestion.icon
         return suggestion
     }

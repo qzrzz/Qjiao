@@ -148,6 +148,12 @@ final class GitStatusModel: nonisolated ObservableObject {
     @Published private(set) var statusError: String?
     /// True while a user-initiated Git operation runs.
     @Published private(set) var isBusy = false
+    /// 软切换（stale-while-revalidate）标记：root 已变化、新扫描进行中，
+    /// UI 保留上一仓库内容但锁定交互，避免「Finding repository…」闪烁。
+    @Published private(set) var isSwitchingRoot = false
+    /// 变更条目数达到上限（超大仓库）：UI 提示「仅显示前 N 条」，
+    /// 并降低自动刷新频率避免空转。
+    @Published private(set) var statusLimitHit = false
     /// True while Retry recovery（fsmonitor 自愈 + 强制重扫）进行中。
     /// 与 `runningOperationID` 分开记账，避免 `clearRepositoryState` 仅按
     /// 操作 id 重算 `isBusy` 时把 recovery 的 busy 清掉。
@@ -170,6 +176,28 @@ final class GitStatusModel: nonisolated ObservableObject {
     private var runningOperationID: UUID?
     /// 当前 in-flight Retry recovery；完成后按 id 匹配再清 busy。
     private var recoveryID: UUID?
+    /// 手动强制刷新时修复 fsmonitor daemon 的节流：频繁点击刷新按钮不反复
+    /// stop/start daemon（每次重启都会重置 token，下一次 status 需全量扫描）。
+    private var lastManualRepairAt = Date.distantPast
+    private static let manualRepairInterval: TimeInterval = 60
+
+    /// 事件驱动文件监听（.git 元数据 + 工作区递归），替代高频定时轮询。
+    private let gitWatcher: GitFileWatcher
+    /// 兜底心跳：watcher / 事件可能漏掉变化（网络盘、外部进程替换文件），
+    /// 定期全量重扫保证最终一致；大仓库（条目达上限）时降频。
+    private var autoRefreshInterval: TimeInterval { statusLimitHit ? 30 : 10 }
+    private var autoRefreshTask: Task<Void, Never>?
+    private var autoRefreshEnabled = false
+    private var appActive = true
+    /// 失焦 / 面板隐藏期间到达的文件变化，恢复后补一次刷新。
+    private var pendingChangeWhileInactive = false
+
+    init() {
+        gitWatcher = GitFileWatcher()
+        gitWatcher.onChange = { [weak self] in
+            self?.handleFileChange()
+        }
+    }
 
     var totalChangeCount: Int {
         mergeEntries.count + stagedEntries.count + changedEntries.count
@@ -186,22 +214,41 @@ final class GitStatusModel: nonisolated ObservableObject {
         topLevel.isEmpty ? rootPath : topLevel
     }
 
+    /// UI 交互锁：真实 git 操作进行中，或仓库根切换中（旧内容保留展示、
+    /// 新扫描未完成，避免对旧仓库条目执行 stage / discard 等操作）。
+    var isInteractionLocked: Bool { isBusy || isSwitchingRoot }
+
     func absolutePath(for entry: Entry) -> String {
         let base = entry.repositoryRoot.isEmpty ? repoRoot : entry.repositoryRoot
         return (base as NSString).appendingPathComponent(entry.path)
     }
 
     func isCurrent(_ entry: Entry) -> Bool {
-        entry.repositoryRoot.isEmpty || entry.repositoryRoot == repoRoot
+        // 软切换期间保留 topLevel / 装饰用于展示，但禁止对旧仓库条目执行操作。
+        if isSwitchingRoot { return false }
+        return entry.repositoryRoot.isEmpty || entry.repositoryRoot == repoRoot
     }
 
     func sync(root: String) {
         if root != rootPath {
             contextGeneration &+= 1
             rootPath = root
-            hasResolvedStatus = false
-            clearRepositoryState(preserveIdentity: true)
+            if hasResolvedStatus {
+                // stale-while-revalidate：保留已解析的 UI（仓库内容或非仓库视图），
+                // 仅作废在飞扫描；新结果 apply 后整体替换，不再闪「Finding repository…」。
+                // 保留 topLevel / fileDecorations，避免 Files 树 Git 角标在切换期间闪空；
+                // isCurrent 在 isSwitchingRoot 时返回 false，配合 isInteractionLocked 锁交互。
+                isSwitchingRoot = true
+                invalidateStatusRefresh()
+            } else {
+                // 从未解析过（首次 / 恢复会话）：全清后显示首次解析占位。
+                hasResolvedStatus = false
+                clearRepositoryState(preserveIdentity: true)
+            }
         }
+        // onAppear 常先 setAutoRefreshEnabled（此时 rootPath 仍空，心跳不会创建），
+        // 再 sync 写入 root；此处必须重算，否则兜底心跳可能一直不跑。
+        updateAutoRefreshTask()
         refresh()
     }
 
@@ -225,16 +272,25 @@ final class GitStatusModel: nonisolated ObservableObject {
             let result = await Task.detached(priority: .utility) {
                 await GitScanner.shared.loadStatus(in: root, includeIgnoredPaths: includeIgnoredPaths)
             }.value
-            guard let self, self.contextGeneration == generation,
+            guard let self else { return }
+            guard self.contextGeneration == generation,
                   self.statusRequestID == requestID,
-                  self.rootPath == root else { return }
+                  self.rootPath == root else {
+                // 请求已作废时 isRefreshing 由 invalidate / 新 refresh 管理；
+                // 仅当仍是当前 requestID（例如 root 已变）时清标志，防卡死。
+                if self.statusRequestID == requestID {
+                    self.isRefreshing = false
+                }
+                return
+            }
             self.isRefreshing = false
             self.apply(result)
             self.hasResolvedStatus = true
             if self.refreshPending {
                 self.refreshPending = false
-                // 扫描耗时超过 2s 轮询间隔时，完成即再扫会形成无间隙连续轮询，
-                // git 子进程持续占满 CPU / IO；延迟一小段再补扫以留出呼吸窗口。
+                // 扫描进行中又收到文件事件 / 心跳时合并为 pending；完成后立即再扫
+                // 会形成无间隙连续扫描，git 子进程持续占满 CPU / IO。
+                // 延迟一小段再补扫，留出呼吸窗口（事件合并窗口的配套）。
                 Task { [weak self] in
                     try? await Task.sleep(nanoseconds: 800_000_000)
                     guard let self, !self.isRefreshing, !self.isBusy,
@@ -245,42 +301,90 @@ final class GitStatusModel: nonisolated ObservableObject {
         }
     }
 
-    /// Retry 的「从头刷新」：先修复失效的 Git fsmonitor daemon（停止 →
-    /// 清理残留 IPC socket → 按需重新拉起），再以 `core.fsmonitor=false`
-    /// 强制全量重扫。用于「Bad file descriptor」这类 daemon / IPC / 进程
-    /// 启动失效——普通 `refresh()` 会被 2s 轮询的 `isRefreshing` 挡住、
-    /// 卡在 actor 队列上的挂死扫描之后，或继续撞上坏 socket，表现为
-    /// Retry 点了没反应。
+    /// stage / unstage / commit / discard 等用户 mutation 完成后的即时刷新。
     ///
-    /// 行为要点：
-    /// - **不**因 `isRefreshing` / 已在 recovery 静默 return：先作废进行中的
-    ///   扫描，并**抢占**上一次未完成的 recovery（换新 `recoveryID`），保证
-    ///   按钮每次点击都推进；
-    /// - 用户 Git 操作（`runningOperationID != nil`）时拒绝介入，避免与
-    ///   stage/commit 交错；
-    /// - 用 `recoveryID` + `isRecovering` 记账 busy，cwd 切换时
-    ///   `clearRepositoryState` 可安全作废 recovery；
-    /// - 扫描走 **actor 外** 的 `loadStatusForRecovery`，不被卡在坏 IPC 上的
-    ///   常规 `loadStatus` 堵住；全程 bypass fsmonitor，失败时再试 `git -C`。
-    func retryRecovery() {
+    /// 与普通 `refresh()` 的区别：
+    /// - 先作废在飞扫描，避免吃到 mutation 前启动的陈旧结果；
+    /// - **绕过** `GitScanner` actor 串行队列（mutation 前的长扫描可能仍占着 actor），
+    ///   以 `.userInitiated` 立刻重扫，UI 不再长时间停在旧 staged/changed 列表；
+    /// - bypass fsmonitor，直接读最新 index，避免 daemon 瞬时缓存导致「点了没变」。
+    private func refreshAfterMutation() {
         let root = rootPath
         let generation = contextGeneration
         guard !root.isEmpty else { return }
-        // 真实 git 操作进行中不要重叠；已在 recovery 时允许用户再次 Retry 抢占。
+        // 作废在飞扫描（含仍占 actor 的旧结果）；ID 已在 invalidate 中递增。
+        invalidateStatusRefresh()
+        let requestID = statusRequestID
+        isRefreshing = true
+        let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                GitScanner.loadStatusNow(
+                    in: root,
+                    includeIgnoredPaths: includeIgnoredPaths,
+                    bypassFsmonitor: true
+                )
+            }.value
+            guard let self else { return }
+            guard self.contextGeneration == generation,
+                  self.statusRequestID == requestID,
+                  self.rootPath == root else {
+                if self.statusRequestID == requestID {
+                    self.isRefreshing = false
+                }
+                return
+            }
+            self.isRefreshing = false
+            self.hasResolvedStatus = true
+            // ignoreBusy：mutation 的 completion 链可能立刻又置 busy，结果仍须落盘。
+            self.apply(result, ignoreBusy: true)
+            if self.refreshPending {
+                self.refreshPending = false
+                self.refresh()
+            }
+        }
+    }
+
+    /// 强制刷新（手动刷新按钮与 Retry 共用）：兜底解决各种「普通 refresh 无效」
+    /// 的异常——坏 fsmonitor daemon / IPC socket 残留 / 卡在 actor 队列上的
+    /// 挂死扫描 / 排队阻塞。
+    ///
+    /// 与普通 `refresh()` 的区别：
+    /// - **不**因 `isRefreshing` / `isBusy` 静默 return：先作废进行中的扫描，并
+    ///   **抢占**上一次未完成的强制刷新（换新 `recoveryID`），每次点击都推进；
+    /// - （节流后）先修复失效的 Git fsmonitor daemon（stop → 删残留 IPC socket
+    ///   → 按需 start），再以 `core.fsmonitor=false` 强制全量重扫；
+    /// - 扫描走 **actor 外** 的 `loadStatusForRecovery`，不被卡在坏 IPC 上的
+    ///   常规 `loadStatus` 堵住；全程 bypass fsmonitor，失败时再试 `git -C`；
+    /// - 用户 Git 操作（`runningOperationID != nil`）时拒绝介入，避免与
+    ///   stage/commit 交错；`recoveryID` + `isRecovering` 记账 busy，cwd 切换
+    ///   时 `clearRepositoryState` 可安全作废。
+    func forceRefresh() {
+        let root = rootPath
+        let generation = contextGeneration
+        guard !root.isEmpty else { return }
+        // 真实 git 操作进行中不要重叠；强制刷新进行中时允许再次点击抢占。
         if runningOperationID != nil { return }
         invalidateStatusRefresh()
         let id = UUID()
         recoveryID = id
         isRecovering = true
         isBusy = true
-        // 立刻清掉旧错误，避免 Recovering 时仍显示上一轮同一句 EBADF，
-        // 看起来像「点了没反应」。
+        // 立刻清掉旧错误，避免刷新中仍显示上一轮同一句 EBADF，看起来像「点了没反应」。
         statusError = nil
         let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
+        // daemon 修复 60s 节流：上一轮刚修复过则跳过（bypass 重扫仍执行）。
+        let shouldRepair = Date().timeIntervalSince(lastManualRepairAt)
+            >= Self.manualRepairInterval
+        if shouldRepair {
+            lastManualRepairAt = Date()
+        }
         Task { [weak self] in
-            let result = await Task.detached(priority: .utility) {
-                // 1) 停 daemon + 删 IPC（短超时，不经 actor）
-                GitScanner.recoverFilesystemMonitor(in: root)
+            let result = await Task.detached(priority: .userInitiated) {
+                // 1) 停 daemon + 删 IPC（短超时，不经 actor）——兜底坏 daemon / socket 残留
+                if shouldRepair {
+                    GitScanner.recoverFilesystemMonitor(in: root)
+                }
                 // 2) 独立于 actor 串行队列的 bypass 扫描（含超时 / git -C 回退）
                 let loaded = GitScanner.loadStatusForRecovery(
                     in: root,
@@ -297,17 +401,17 @@ final class GitStatusModel: nonisolated ObservableObject {
                     self.isBusy = false
                 }
             }
-            // cwd / root 已变，或 recovery 被更新的 Retry / clearRepositoryState 抢占：丢弃。
+            // cwd / root 已变，或 recovery 被更新的刷新 / clearRepositoryState 抢占：丢弃。
             guard stillOurs,
                   self.contextGeneration == generation,
                   self.rootPath == root else { return }
             self.isRefreshing = false
             self.hasResolvedStatus = true
-            // recovery 结果必须落盘：ignoreBusy 防止与其它 busy 竞态时静默丢弃。
+            // 结果必须落盘：ignoreBusy 防止与其它 busy 竞态时静默丢弃。
             self.apply(result, ignoreBusy: true)
-            // 成功或失败都拉长 fsmonitor bypass cooldown，避免 2s 轮询立刻再撞 daemon。
+            // 成功或失败都拉长 fsmonitor bypass cooldown，避免后续轮询立刻再撞 daemon。
             Task { await GitScanner.shared.noteFilesystemMonitorBypassCooldown() }
-            // 恢复期间 timer 可能堆积了 refreshPending；状态已是最新时清掉即可，
+            // 刷新期间 timer 可能堆积了 refreshPending；状态已是最新时清掉即可，
             // 若仍失败则再走一次普通 refresh（cooldown 内会自动 bypass）。
             if self.refreshPending {
                 self.refreshPending = false
@@ -316,6 +420,62 @@ final class GitStatusModel: nonisolated ObservableObject {
                 }
             }
         }
+    }
+
+    /// 侧边栏可见性变化时调用（可见才允许自动刷新）。恢复可见时若期间
+    /// 有被抑制的文件变化，立即补刷一次。
+    func setAutoRefreshEnabled(_ enabled: Bool) {
+        autoRefreshEnabled = enabled
+        if enabled {
+            let pending = pendingChangeWhileInactive
+            pendingChangeWhileInactive = false
+            if pending, !rootPath.isEmpty {
+                refresh()
+            }
+        } else {
+            pendingChangeWhileInactive = false
+        }
+        updateAutoRefreshTask()
+    }
+
+    /// 应用前台 / 后台切换时调用。失焦暂停心跳与 watcher 刷新（与 System 面板
+    /// 同策略）；聚焦后若期间有变化立即补刷一次（面板隐藏时保留 pending，
+    /// 等面板重新可见时由 `setAutoRefreshEnabled` 补刷）。
+    func setAppActive(_ active: Bool) {
+        appActive = active
+        if active {
+            if pendingChangeWhileInactive, autoRefreshEnabled, !rootPath.isEmpty {
+                pendingChangeWhileInactive = false
+                refresh()
+            }
+        }
+        updateAutoRefreshTask()
+    }
+
+    /// 兜底心跳：低频全量重扫，保证 watcher 漏掉的变化最终一致。
+    private func updateAutoRefreshTask() {
+        autoRefreshTask?.cancel()
+        autoRefreshTask = nil
+        guard autoRefreshEnabled, appActive, !rootPath.isEmpty else { return }
+        autoRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let interval = self?.autoRefreshInterval ?? 10
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                guard let self, !Task.isCancelled else { return }
+                guard self.autoRefreshEnabled, self.appActive, !self.rootPath.isEmpty else { return }
+                self.refresh()
+            }
+        }
+    }
+
+    /// 文件 watcher 事件（主线程回调）：面板可见且应用聚焦时刷新，
+    /// 否则记 pending 等恢复后补刷。
+    private func handleFileChange() {
+        guard autoRefreshEnabled, appActive else {
+            pendingChangeWhileInactive = true
+            return
+        }
+        refresh()
     }
 
     func dismissOperation() {
@@ -727,9 +887,14 @@ final class GitStatusModel: nonisolated ObservableObject {
                         )
                     }
                     if requiresStableHead {
+                        // 校验 status 绕过 fsmonitor（-c core.fsmonitor=false）：
+                        // 快照校验只需要 branch / HEAD 信息，不需要 daemon 加速；
+                        // 坏 daemon / 多 daemon 环境下该校验会挂起 45s 超时，
+                        // 表现为操作按钮长时间转圈且操作被拒。
                         let liveStatus = GitScanner.runGit(
                             ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"],
-                            in: expectedRepositoryRoot
+                            in: expectedRepositoryRoot,
+                            config: ["core.fsmonitor": "false"]
                         )
                         let live = liveStatus.status == 0
                             ? GitScanner.parseStatus(liveStatus.stdout)
@@ -780,7 +945,7 @@ final class GitStatusModel: nonisolated ObservableObject {
                 // success-only follow-ups (for example moving a renamed file
                 // to Trash) must never continue in the newly selected context.
                 completion?(false)
-                self.refresh()
+                self.refreshAfterMutation()
                 return
             }
             let finishedAt = Date()
@@ -807,7 +972,8 @@ final class GitStatusModel: nonisolated ObservableObject {
                 )
                 completion?(true)
             }
-            self.refresh()
+            // 绕过 actor 队列即时重扫，避免 stage/unstage 后 UI 长时间停在旧列表。
+            self.refreshAfterMutation()
         }
     }
 
@@ -859,7 +1025,9 @@ final class GitStatusModel: nonisolated ObservableObject {
                 }
                 let liveStatus = GitScanner.runGit(
                     ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"],
-                    in: expectedRepositoryRoot
+                    in: expectedRepositoryRoot,
+                    // 同 perform：校验 status 绕过 fsmonitor，避免坏 daemon 挂起。
+                    config: ["core.fsmonitor": "false"]
                 )
                 let live = liveStatus.status == 0 ? GitScanner.parseStatus(liveStatus.stdout) : nil
                 guard let live,
@@ -891,7 +1059,7 @@ final class GitStatusModel: nonisolated ObservableObject {
             self.isBusy = false
             guard self.contextGeneration == generation,
                   self.operation?.id == operationID else {
-                self.refresh()
+                self.refreshAfterMutation()
                 return
             }
             let finishedAt = Date()
@@ -921,7 +1089,7 @@ final class GitStatusModel: nonisolated ObservableObject {
                     finishedAt: finishedAt
                 )
             }
-            self.refresh()
+            self.refreshAfterMutation()
         }
     }
 
@@ -964,6 +1132,9 @@ final class GitStatusModel: nonisolated ObservableObject {
         let failedError = preserveFailedOperation ? lastError : nil
         topLevel = ""
         isRepo = false
+        isSwitchingRoot = false
+        statusLimitHit = false
+        gitWatcher.stop()
         branch = nil
         headOID = nil
         hasHead = true
@@ -1000,9 +1171,8 @@ final class GitStatusModel: nonisolated ObservableObject {
     private func apply(_ loadResult: StatusLoadResult, ignoreBusy: Bool = false) {
         switch loadResult {
         case .notRepository:
-            // A refresh can finish after a user action starts. Do not let a
-            // transient status failure erase the active operation/result.
             if isBusy && !ignoreBusy { return }
+            isSwitchingRoot = false
             let preserveFailure: Bool
             if let operation, case .failed = operation.state {
                 preserveFailure = true
@@ -1010,9 +1180,13 @@ final class GitStatusModel: nonisolated ObservableObject {
                 preserveFailure = false
             }
             clearRepositoryState(preserveFailedOperation: preserveFailure)
+            // 非仓库目录也挂工作区监听：终端内 `git init` 可立即被发现，
+            // 无需等 10s 兜底心跳。
+            gitWatcher.watch(repositoryRoot: rootPath, gitDirectory: nil)
             return
         case .failed(let message):
             if isBusy && !ignoreBusy { return }
+            isSwitchingRoot = false
             let preserveFailure: Bool
             if let operation, case .failed = operation.state {
                 preserveFailure = true
@@ -1026,8 +1200,14 @@ final class GitStatusModel: nonisolated ObservableObject {
             // clearRepositoryState 会清 statusError；写回完整诊断文案。
             // recovery 路径（ignoreBusy）在调用方已清 isRecovering / recoveryID。
             statusError = message
+            // clear 会 stop watcher；失败态仍挂工作区监听，可恢复错误能靠文件事件
+            // / 心跳自动再扫，而不是只能等用户手动 forceRefresh。
+            if !rootPath.isEmpty {
+                gitWatcher.watch(repositoryRoot: rootPath, gitDirectory: nil)
+            }
             return
         case .repository(let result):
+            isSwitchingRoot = false
             statusError = nil
             applyRepository(result)
         }
@@ -1047,6 +1227,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         hasUpstream = result.upstream != nil
         topLevel = result.topLevel
         repositoryIdentity = result.topLevel
+        statusLimitHit = result.didHitLimit
         if result.loadedDetails {
             branches = result.branches
             remotes = result.remotes
@@ -1060,6 +1241,8 @@ final class GitStatusModel: nonisolated ObservableObject {
         mergeEntries = result.mergeEntries
         stagedEntries = result.stagedEntries
         changedEntries = result.changedEntries
+        // 挂载 / 更新文件 watcher（路径未变时内部直接跳过，零开销）。
+        gitWatcher.watch(repositoryRoot: result.topLevel, gitDirectory: result.gitDirectory)
     }
 
     /// 兼容旧调用点（命令面板 / Diff / LocalAI 的一次性同步查询）。

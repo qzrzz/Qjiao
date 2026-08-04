@@ -69,8 +69,10 @@ struct GitPanel: View {
             header
             operationBanner
 
-            if model.isRecovering {
-                // Retry 会先清 statusError，单独展示恢复中，避免闪回「非仓库」空态。
+            if model.isRecovering, !model.isRepo {
+                // Retry / 手动刷新在无仓库内容时的恢复中：单独展示恢复页，
+                // 避免闪回「非仓库」空态。有内容时（isRepo=true）保留内容区
+                // 显示，仅顶部刷新按钮转圈，刷新完成直接替换。
                 statusFailure(nil)
             } else if let statusError = model.statusError {
                 statusFailure(statusError)
@@ -112,7 +114,7 @@ struct GitPanel: View {
                 }
                 pendingDiscard = nil
             }
-            .disabled(model.isBusy)
+            .disabled(model.isInteractionLocked)
         }
         .confirmationDialog(
             "Discard the \(pendingDiscardAll.count) reviewed changes? Untracked and moved files go to the Trash.",
@@ -137,7 +139,7 @@ struct GitPanel: View {
                 pendingDiscardAll = []
                 confirmDiscardAll = false
             }
-            .disabled(model.isBusy)
+            .disabled(model.isInteractionLocked)
         }
         .onChange(of: model.isBusy) { _, isBusy in
             if !isBusy {
@@ -181,9 +183,11 @@ struct GitPanel: View {
                     if !showFilter { filterText = "" }
                 }
                 SidebarRefreshButton(
-                    isRefreshing: model.isBusy || model.isResolvingInitialStatus
+                    isRefreshing: model.isBusy || model.isResolvingInitialStatus || model.isSwitchingRoot
                 ) {
-                    model.refresh()
+                    // 手动刷新 = 兜底强制刷新：作废在飞扫描、修复 fsmonitor、
+                    // 绕开 actor 队列全量重扫，解决各种「普通刷新无效」的异常。
+                    model.forceRefresh()
                 }
                 moreMenu
             }
@@ -208,7 +212,7 @@ struct GitPanel: View {
                             Text(branch)
                         }
                     }
-                    .disabled(branch == model.branch || model.isBusy)
+                    .disabled(branch == model.branch || model.isInteractionLocked)
                 }
                 Divider()
             }
@@ -241,36 +245,36 @@ struct GitPanel: View {
             help: L10n.t("More Actions…")
         ) {
             Button(L10n.t("Fetch")) { model.fetch() }
-                .disabled(model.isBusy || model.remotes.isEmpty)
+                .disabled(model.isInteractionLocked || model.remotes.isEmpty)
             Button(L10n.t("Pull (Fast-forward Only)")) { model.pull() }
-                .disabled(model.isBusy || !model.hasUpstream)
+                .disabled(model.isInteractionLocked || !model.hasUpstream)
             if model.hasUpstream {
                 Button(L10n.t("Push")) { model.push() }
-                    .disabled(model.isBusy)
+                    .disabled(model.isInteractionLocked)
             } else if model.remotes.count > 1 {
                 Menu(L10n.t("Publish Branch to")) {
                     ForEach(model.remotes, id: \.self) { remote in
                         Button(remote) { model.publish(to: remote) }
                     }
                 }
-                .disabled(model.isBusy || model.branch == "detached HEAD")
+                .disabled(model.isInteractionLocked || model.branch == "detached HEAD")
             } else {
                 Button(L10n.t("Publish Branch")) { model.push() }
-                    .disabled(model.isBusy || model.remotes.isEmpty || model.branch == "detached HEAD")
+                    .disabled(model.isInteractionLocked || model.remotes.isEmpty || model.branch == "detached HEAD")
             }
             Button(L10n.t("Sync Changes")) { model.syncChanges() }
                 .disabled(
-                    model.isBusy || model.remotes.isEmpty
+                    model.isInteractionLocked || model.remotes.isEmpty
                         || (!model.hasUpstream && model.remotes.count != 1)
                         || model.branch == "detached HEAD"
                 )
             Divider()
             Button(L10n.t("Stash All Changes")) { model.stash(includeUntracked: true) }
-                .disabled(model.isBusy || model.totalChangeCount == 0)
+                .disabled(model.isInteractionLocked || model.totalChangeCount == 0)
             Button(model.stashCount == 1 ? "Pop Stash" : "Pop Stash (\(model.stashCount))") {
                 model.stashPop()
             }
-            .disabled(model.isBusy || model.stashCount == 0)
+            .disabled(model.isInteractionLocked || model.stashCount == 0)
             Divider()
             Button(L10n.t("Copy Changed Paths")) { copyChangedPaths() }
                 .disabled(model.totalChangeCount == 0)
@@ -449,7 +453,7 @@ struct GitPanel: View {
                 Button(L10n.t("Create"), action: createBranch)
                     .buttonStyle(.borderless)
                     .font(SidebarTypography.caption(.medium))
-                    .disabled(newBranchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
+                    .disabled(newBranchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isInteractionLocked)
                     .macTooltip(L10n.t("Create New Branch…"), position: .top)
                 GitChromeIconButton(
                     systemImage: "xmark",
@@ -528,7 +532,7 @@ struct GitPanel: View {
                 actionButton(
                     icon: "arrow.triangle.2.circlepath",
                     title: syncButtonTitle,
-                    enabled: !model.isBusy,
+                    enabled: !model.isInteractionLocked,
                     help: L10n.t("Pull remote commits, then push local ones"),
                     showsProgress: activeActionTarget == .sync,
                     action: performSync
@@ -567,7 +571,7 @@ struct GitPanel: View {
     private var canGenerateAICommitMessage: Bool {
         model.isRepo
             && !model.repoRoot.isEmpty
-            && !model.isBusy
+            && !model.isInteractionLocked
             && !aiCommitTasks.isRunning(model.repoRoot)
             && (model.totalChangeCount > 0 || !model.stagedEntries.isEmpty || !model.changedEntries.isEmpty)
     }
@@ -641,7 +645,7 @@ struct GitPanel: View {
     private var canAICompleteChangesCommit: Bool {
         model.isRepo
             && !model.repoRoot.isEmpty
-            && !model.isBusy
+            && !model.isInteractionLocked
             && LocalAI.isEnabled
             && !aiCommitTasks.isRunning(model.repoRoot)
             && (model.totalChangeCount > 0 || !model.stagedEntries.isEmpty || !model.changedEntries.isEmpty)
@@ -737,7 +741,7 @@ struct GitPanel: View {
         return !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && hasEligibleChanges
             && model.mergeEntries.isEmpty
-            && !model.isBusy
+            && !model.isInteractionLocked
     }
 
     private func canAmend(includeAll: Bool) -> Bool {
@@ -749,7 +753,7 @@ struct GitPanel: View {
             && hasCommit
             && hasEligibleChanges
             && model.mergeEntries.isEmpty
-            && !model.isBusy
+            && !model.isInteractionLocked
     }
 
     private func performPrimaryAction() {
@@ -819,6 +823,12 @@ struct GitPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     LazyVStack(alignment: .leading, spacing: 1) {
+                        if model.isSwitchingRoot {
+                            switchingBanner
+                        }
+                        if model.statusLimitHit {
+                            limitBanner
+                        }
                         if !hasChanges {
                             cleanState
                         } else if visibleCount == 0 {
@@ -830,7 +840,7 @@ struct GitPanel: View {
                                 count: merge.count,
                                 isCollapsed: $mergeCollapsed,
                                 actions: [],
-                                actionsDisabled: model.isBusy
+                                actionsDisabled: model.isInteractionLocked
                             )
                             if !mergeCollapsed {
                                 // 行直接挂在 LazyVStack 下，惰性渲染；左边距逐行施加
@@ -849,7 +859,7 @@ struct GitPanel: View {
                                     .init(
                                         systemImage: "minus",
                                         help: L10n.t("Unstage All Changes"),
-                                        disabled: model.isBusy,
+                                        disabled: model.isInteractionLocked,
                                         showsProgress: activeActionTarget == .unstageAll
                                     ) {
                                         beginGitAction(.unstageAll) {
@@ -857,7 +867,7 @@ struct GitPanel: View {
                                         }
                                     }
                                 ] : [],
-                                actionsDisabled: model.isBusy
+                                actionsDisabled: model.isInteractionLocked
                             )
                             if !stagedCollapsed {
                                 ForEach(staged, id: \.stagedRowID) { entry in
@@ -875,7 +885,7 @@ struct GitPanel: View {
                                     .init(
                                         systemImage: "arrow.uturn.backward",
                                         help: L10n.t("Discard All Changes"),
-                                        disabled: model.isBusy,
+                                        disabled: model.isInteractionLocked,
                                         showsProgress: activeActionTarget == .discardAll
                                     ) {
                                         requestDiscardAll()
@@ -883,7 +893,7 @@ struct GitPanel: View {
                                     .init(
                                         systemImage: "plus",
                                         help: L10n.t("Stage All Changes"),
-                                        disabled: model.isBusy,
+                                        disabled: model.isInteractionLocked,
                                         showsProgress: activeActionTarget == .stageAll
                                     ) {
                                         beginGitAction(.stageAll) {
@@ -891,7 +901,7 @@ struct GitPanel: View {
                                         }
                                     },
                                 ] : [],
-                                actionsDisabled: model.isBusy
+                                actionsDisabled: model.isInteractionLocked
                             )
                             if !changesCollapsed {
                                 ForEach(changed, id: \.changedRowID) { entry in
@@ -906,7 +916,7 @@ struct GitPanel: View {
                                 count: model.recentCommits.count,
                                 isCollapsed: $historyCollapsed,
                                 actions: [],
-                                actionsDisabled: model.isBusy
+                                actionsDisabled: model.isInteractionLocked
                             )
                             if !historyCollapsed {
                                 ForEach(model.recentCommits) { commit in
@@ -914,7 +924,7 @@ struct GitPanel: View {
                                         commit: commit,
                                         isHead: commit.hash == model.recentCommits.first?.hash,
                                         repoRoot: model.repoRoot,
-                                        disabled: model.isBusy,
+                                        disabled: model.isInteractionLocked,
                                         hasStagedChanges: !model.stagedEntries.isEmpty,
                                         canAICommitMessage: LocalAI.isEnabled
                                             && canGenerateAICommitMessage,
@@ -971,6 +981,44 @@ struct GitPanel: View {
         )
     }
 
+    /// 仓库根切换中（stale-while-revalidate）：旧内容保留展示，提示正在刷新。
+    private var switchingBanner: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.mini)
+            Text(L10n.t("Refreshing repository…"))
+                .font(SidebarTypography.caption())
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+    }
+
+    /// 超大仓库：变更条目达到上限，仅显示前 N 条。
+    private var limitBanner: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(SidebarTypography.caption())
+            Text(L10n.format(
+                "Too many changes. Only the first %d are shown.",
+                GitScanner.statusEntryLimit
+            ))
+            .font(SidebarTypography.caption().monospacedDigit())
+            .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(Color(red: 0.82, green: 0.60, blue: 0.13))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(red: 0.82, green: 0.60, blue: 0.13).opacity(0.08))
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func row(
         _ entry: GitStatusModel.Entry, status: Character, kind: GitEntryRow.Kind
     ) -> some View {
@@ -978,7 +1026,7 @@ struct GitPanel: View {
             entry: entry,
             status: status,
             kind: kind,
-            disabled: model.isBusy,
+            disabled: model.isInteractionLocked,
             activeTarget: activeActionTarget,
             openDiff: {
                 guard model.isCurrent(entry) else { return }
@@ -1186,14 +1234,14 @@ struct GitPanel: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
                 .tint(Color(nsColor: Theme.cursor))
-                .disabled(model.rootPath.isEmpty || model.isBusy)
+                .disabled(model.rootPath.isEmpty || model.isInteractionLocked)
 
                 Button(L10n.t("Specify Git Repository Directory…")) {
                     selectCustomGitRepositoryPath()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
-                .disabled(project == nil || model.isBusy)
+                .disabled(project == nil || model.isInteractionLocked)
 
                 if project?.customGitPath != nil {
                     Button(L10n.t("Clear Custom Git Repository Path")) {
@@ -1287,7 +1335,7 @@ struct GitPanel: View {
                 }
             }
             Button {
-                model.retryRecovery()
+                model.forceRefresh()
             } label: {
                 HStack(spacing: 6) {
                     if model.isRecovering {

@@ -31,6 +31,10 @@ struct StatusResult: Equatable, Sendable {
     var ahead = 0
     var behind = 0
     var topLevel = ""
+    /// 绝对 git 目录（worktree 场景为真实 gitdir），供文件 watcher 监听元数据变化。
+    var gitDirectory: String?
+    /// 变更条目数达到上限（超大仓库），UI 提示并降低自动刷新频率。
+    var didHitLimit = false
     /// 原始 porcelain 条目（已写入 repositoryRoot 规范根）。
     var entries: [GitStatusModel.Entry] = []
     var ignoredPaths: Set<String> = []
@@ -70,6 +74,9 @@ actor GitScanner {
     /// 常规 git 子进程超时。fsmonitor 坏 socket 上 `git status` 可能永久阻塞；
     /// 无超时会把整个 actor 队列卡死，表现为 Retry 一直 Recovering / 无效。
     private static let gitCommandTimeout: TimeInterval = 45
+    /// 单次扫描展示的变更条目上限（与 VS Code 的 10000 一致）。超过后停止解析并
+    /// 标记 `didHitLimit`，UI 提示「仅显示前 N 条」并降低自动刷新频率。
+    static let statusEntryLimit = 10_000
     /// Retry 恢复路径用更短超时，尽快失败并给出诊断信息。
     private static let gitRecoveryTimeout: TimeInterval = 20
 
@@ -139,6 +146,24 @@ actor GitScanner {
             return annotateRecoveryFailure(second, priorMessage: message, root: root)
         }
         return result
+    }
+
+    /// 即时扫描：不经过 actor 串行队列。用于 stage / unstage / commit 等用户
+    /// mutation 完成后的状态刷新——mutation 前已启动的 `loadStatus` 可能仍占着
+    /// actor（大仓库或坏 fsmonitor 上可长达数十秒），若仍排队则 UI 长时间停在旧列表。
+    /// 默认 bypass fsmonitor，直接读最新 index，避免 daemon 瞬时缓存陈旧。
+    nonisolated static func loadStatusNow(
+        in root: String,
+        includeIgnoredPaths: Bool,
+        bypassFsmonitor: Bool = true
+    ) -> StatusLoadResult {
+        loadStatusOnce(
+            in: root,
+            includeIgnoredPaths: includeIgnoredPaths,
+            bypassFsmonitor: bypassFsmonitor,
+            timeout: gitCommandTimeout,
+            diagnosticContext: "post-mutation scan"
+        )
     }
 
     /// 进入 fsmonitor bypass cooldown（Retry 成功/失败后都延长，避免 thrash）。
@@ -215,7 +240,7 @@ actor GitScanner {
                 fallback: "Unable to read Git status."
             ))
         }
-        var result = parseStatus(status.stdout)
+        var result = parseStatus(status.stdout, limit: Self.statusEntryLimit)
         result.topLevel = resolvedRoot
 
         result.loadedDetails = true
@@ -273,6 +298,7 @@ actor GitScanner {
         if gitDir.status == 0 {
             let path = strippingTrailingLineEnding(gitDir.stdout)
             result.repositoryOperation = detectRepositoryOperation(gitDirectory: path)
+            result.gitDirectory = path
         }
         return .repository(preprocess(result))
     }
@@ -718,11 +744,19 @@ actor GitScanner {
 
     /// Parses NUL-delimited porcelain v2. Unlike Git's default quoted output,
     /// this preserves spaces, quotes, tabs, and newlines in file names.
-    nonisolated static func parseStatus(_ output: String) -> StatusResult {
+    ///
+    /// - Parameter limit: 变更条目上限（超大仓库保护）。达到后停止解析并标记
+    ///   `didHitLimit`；porcelain v2 的 header 记录（`# branch.*`）都在条目之前，
+    ///   截断不影响分支 / 上下游信息。
+    nonisolated static func parseStatus(_ output: String, limit: Int? = nil) -> StatusResult {
         let records = output.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
         var result = StatusResult()
         var index = 0
         while index < records.count {
+            if let limit, limit > 0, result.entries.count >= limit {
+                result.didHitLimit = true
+                break
+            }
             let record = records[index]
             if record.hasPrefix("# branch.oid ") {
                 let oid = String(record.dropFirst("# branch.oid ".count))
