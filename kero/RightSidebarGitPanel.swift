@@ -62,6 +62,8 @@ struct GitPanel: View {
     @State private var operationExpanded = false
     @State private var isPendingAICommit = false
     @State private var activeActionTarget: GitActionTarget?
+    @State private var checkedPaths: Set<String> = []
+    @State private var knownPaths: Set<String> = []
     @FocusState private var branchFieldFocused: Bool
 
     var body: some View {
@@ -155,9 +157,21 @@ struct GitPanel: View {
             newBranchName = ""
             isPendingAICommit = false
             activeActionTarget = nil
+            checkedPaths.removeAll()
+            knownPaths.removeAll()
+            updateSimpleSelection()
         }
         .onChange(of: model.repositoryIdentity) {
             resetRepositoryDrafts()
+        }
+        .onChange(of: model.stagedEntries) { _, _ in
+            updateSimpleSelection()
+        }
+        .onChange(of: model.changedEntries) { _, _ in
+            updateSimpleSelection()
+        }
+        .onAppear {
+            updateSimpleSelection()
         }
     }
 
@@ -626,18 +640,29 @@ struct GitPanel: View {
             cornerRadius: 6,
             idleBackgroundOpacity: 0.06
         ) {
-            Button(L10n.t("Commit Staged")) { performCommit(includeAll: false) }
-                .disabled(!canCommit(includeAll: false))
-            Button(L10n.t("Stage All & Commit")) { performCommit(includeAll: true) }
-                .disabled(!canCommit(includeAll: true))
-            Divider()
-            Button(L10n.t("AI Complete Changes Commit")) { performAICompleteChangesCommit() }
-                .disabled(!canAICompleteChangesCommit)
-            Divider()
-            Button(L10n.t("Amend Last Commit")) { performCommit(includeAll: false, amend: true) }
-                .disabled(!canAmend(includeAll: false))
-            Button(L10n.t("Stage All & Amend")) { performCommit(includeAll: true, amend: true) }
-                .disabled(!canAmend(includeAll: true))
+            if settings.gitOperationMode == .simple {
+                Button(L10n.t("Commit Selected")) { performSimpleCommit(amend: false) }
+                    .disabled(!canCommit(includeAll: false))
+                Divider()
+                Button(L10n.t("AI Complete Changes Commit")) { performAICompleteChangesCommit() }
+                    .disabled(!canAICompleteChangesCommit)
+                Divider()
+                Button(L10n.t("Amend Last Commit")) { performSimpleCommit(amend: true) }
+                    .disabled(!canAmend(includeAll: false))
+            } else {
+                Button(L10n.t("Commit Staged")) { performCommit(includeAll: false) }
+                    .disabled(!canCommit(includeAll: false))
+                Button(L10n.t("Stage All & Commit")) { performCommit(includeAll: true) }
+                    .disabled(!canCommit(includeAll: true))
+                Divider()
+                Button(L10n.t("AI Complete Changes Commit")) { performAICompleteChangesCommit() }
+                    .disabled(!canAICompleteChangesCommit)
+                Divider()
+                Button(L10n.t("Amend Last Commit")) { performCommit(includeAll: false, amend: true) }
+                    .disabled(!canAmend(includeAll: false))
+                Button(L10n.t("Stage All & Amend")) { performCommit(includeAll: true, amend: true) }
+                    .disabled(!canAmend(includeAll: true))
+            }
         }
     }
 
@@ -704,6 +729,15 @@ struct GitPanel: View {
     }
 
     private var commitFieldPlaceholder: String {
+        if settings.gitOperationMode == .simple {
+            if checkedEntriesCount == 0 {
+                return L10n.t("Message (select changes to use ⌘⏎)")
+            }
+            if let branch = model.branch {
+                return L10n.format("Message (⌘⏎ to commit on \"%@\")", branch)
+            }
+            return L10n.t("Message (⌘⏎ to commit)")
+        }
         if model.stagedEntries.isEmpty {
             return model.recentCommits.isEmpty
                 ? L10n.t("Message (stage changes to use ⌘⏎)")
@@ -727,6 +761,14 @@ struct GitPanel: View {
     }
 
     private var commitButtonTitle: String {
+        if settings.gitOperationMode == .simple {
+            let count = checkedEntriesCount
+            if count == 1 { return L10n.t("Commit 1 File") }
+            if count > 1 {
+                return L10n.format("Commit %d Files", count)
+            }
+            return L10n.t("Commit")
+        }
         if model.stagedEntries.count == 1 { return L10n.t("Commit 1 Staged File") }
         if model.stagedEntries.count > 1 {
             return L10n.format("Commit %d Staged Files", model.stagedEntries.count)
@@ -735,6 +777,12 @@ struct GitPanel: View {
     }
 
     private func canCommit(includeAll: Bool) -> Bool {
+        if settings.gitOperationMode == .simple {
+            return !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && checkedEntriesCount > 0
+                && model.mergeEntries.isEmpty
+                && !model.isInteractionLocked
+        }
         let hasEligibleChanges = includeAll
             ? (!model.changedEntries.isEmpty || !model.stagedEntries.isEmpty)
             : !model.stagedEntries.isEmpty
@@ -746,9 +794,9 @@ struct GitPanel: View {
 
     private func canAmend(includeAll: Bool) -> Bool {
         let hasCommit = !model.recentCommits.isEmpty
-        let hasEligibleChanges = !includeAll
-            || !model.changedEntries.isEmpty
-            || !model.stagedEntries.isEmpty
+        let hasEligibleChanges = (settings.gitOperationMode == .simple)
+            ? !allSimpleEntries.isEmpty
+            : (!includeAll || !model.changedEntries.isEmpty || !model.stagedEntries.isEmpty)
         return !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && hasCommit
             && hasEligibleChanges
@@ -757,7 +805,34 @@ struct GitPanel: View {
     }
 
     private func performPrimaryAction() {
-        performCommit(includeAll: false)
+        guard !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if settings.gitOperationMode == .simple {
+            performSimpleCommit()
+            return
+        }
+        if !model.stagedEntries.isEmpty {
+            performCommit(includeAll: false)
+        } else if !model.changedEntries.isEmpty {
+            performCommit(includeAll: true)
+        }
+    }
+
+    private func performSimpleCommit(amend: Bool = false) {
+        let all = allSimpleEntries
+        let checked = all.filter { checkedPaths.contains($0.path) }
+        let unchecked = all.filter { !checkedPaths.contains($0.path) }
+        beginGitAction(.commit) {
+            model.commitSimple(
+                message: commitMessage,
+                checkedEntries: checked,
+                uncheckedEntries: unchecked,
+                amend: amend
+            ) { success in
+                if success {
+                    commitMessage = ""
+                }
+            }
+        }
     }
 
     private func performCommit(includeAll: Bool, amend: Bool = false) {
@@ -816,8 +891,10 @@ struct GitPanel: View {
         let merge = filteredMergeEntries
         let staged = filteredStagedEntries
         let changed = filteredChangedEntries
+        let simple = filteredSimpleEntries
+        let isSimpleMode = (settings.gitOperationMode == .simple)
         let hasChanges = model.totalChangeCount > 0
-        let visibleCount = merge.count + staged.count + changed.count
+        let visibleCount = isSimpleMode ? (merge.count + simple.count) : (merge.count + staged.count + changed.count)
 
         return GeometryReader { geo in
             ScrollView {
@@ -850,63 +927,108 @@ struct GitPanel: View {
                                 }
                             }
                         }
-                        if !staged.isEmpty {
-                            SidebarSectionHeader(
-                                title: L10n.t("STAGED CHANGES"),
-                                count: staged.count,
-                                isCollapsed: $stagedCollapsed,
-                                actions: filterText.isEmpty ? [
-                                    .init(
-                                        systemImage: "minus",
-                                        help: L10n.t("Unstage All Changes"),
-                                        disabled: model.isInteractionLocked,
-                                        showsProgress: activeActionTarget == .unstageAll
-                                    ) {
-                                        beginGitAction(.unstageAll) {
-                                            model.unstageAll()
+                        if isSimpleMode {
+                            if !simple.isEmpty {
+                                let allSelected = !simple.isEmpty && simple.allSatisfy { checkedPaths.contains($0.path) }
+                                SidebarSectionHeader(
+                                    title: L10n.t("CHANGES"),
+                                    count: simple.count,
+                                    isCollapsed: $changesCollapsed,
+                                    actions: filterText.isEmpty ? [
+                                        .init(
+                                            systemImage: "arrow.uturn.backward",
+                                            help: L10n.t("Discard All Changes"),
+                                            disabled: model.isInteractionLocked,
+                                            showsProgress: activeActionTarget == .discardAll
+                                        ) {
+                                            requestDiscardAll()
+                                        },
+                                        .init(
+                                            systemImage: allSelected ? "checkmark.square.fill" : "square",
+                                            help: allSelected ? L10n.t("Deselect All") : L10n.t("Select All"),
+                                            disabled: model.isInteractionLocked,
+                                            activeColor: allSelected ? Color(nsColor: Theme.cursor) : nil
+                                        ) {
+                                            if allSelected {
+                                                for entry in simple {
+                                                    checkedPaths.remove(entry.path)
+                                                }
+                                            } else {
+                                                for entry in simple {
+                                                    checkedPaths.insert(entry.path)
+                                                }
+                                            }
                                         }
+                                    ] : [],
+                                    actionsDisabled: model.isInteractionLocked
+                                )
+                                if !changesCollapsed {
+                                    ForEach(simple, id: \.changedRowID) { entry in
+                                        let statusChar: Character = (entry.staged != "." && entry.staged != "?") ? entry.staged : entry.unstaged
+                                        row(entry, status: statusChar, kind: .simple)
+                                            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                                     }
-                                ] : [],
-                                actionsDisabled: model.isInteractionLocked
-                            )
-                            if !stagedCollapsed {
-                                ForEach(staged, id: \.stagedRowID) { entry in
-                                    row(entry, status: entry.staged, kind: .staged)
-                                        .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
                                 }
                             }
-                        }
-                        if !changed.isEmpty {
-                            SidebarSectionHeader(
-                                title: L10n.t("CHANGES"),
-                                count: changed.count,
-                                isCollapsed: $changesCollapsed,
-                                actions: filterText.isEmpty ? [
-                                    .init(
-                                        systemImage: "arrow.uturn.backward",
-                                        help: L10n.t("Discard All Changes"),
-                                        disabled: model.isInteractionLocked,
-                                        showsProgress: activeActionTarget == .discardAll
-                                    ) {
-                                        requestDiscardAll()
-                                    },
-                                    .init(
-                                        systemImage: "plus",
-                                        help: L10n.t("Stage All Changes"),
-                                        disabled: model.isInteractionLocked,
-                                        showsProgress: activeActionTarget == .stageAll
-                                    ) {
-                                        beginGitAction(.stageAll) {
-                                            model.stageAll()
+                        } else {
+                            if !staged.isEmpty {
+                                SidebarSectionHeader(
+                                    title: L10n.t("STAGED CHANGES"),
+                                    count: staged.count,
+                                    isCollapsed: $stagedCollapsed,
+                                    actions: filterText.isEmpty ? [
+                                        .init(
+                                            systemImage: "minus",
+                                            help: L10n.t("Unstage All Changes"),
+                                            disabled: model.isInteractionLocked,
+                                            showsProgress: activeActionTarget == .unstageAll
+                                        ) {
+                                            beginGitAction(.unstageAll) {
+                                                model.unstageAll()
+                                            }
                                         }
-                                    },
-                                ] : [],
-                                actionsDisabled: model.isInteractionLocked
-                            )
-                            if !changesCollapsed {
-                                ForEach(changed, id: \.changedRowID) { entry in
-                                    row(entry, status: entry.unstaged, kind: .unstaged)
-                                        .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+                                    ] : [],
+                                    actionsDisabled: model.isInteractionLocked
+                                )
+                                if !stagedCollapsed {
+                                    ForEach(staged, id: \.stagedRowID) { entry in
+                                        row(entry, status: entry.staged, kind: .staged)
+                                            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+                                    }
+                                }
+                            }
+                            if !changed.isEmpty {
+                                SidebarSectionHeader(
+                                    title: L10n.t("CHANGES"),
+                                    count: changed.count,
+                                    isCollapsed: $changesCollapsed,
+                                    actions: filterText.isEmpty ? [
+                                        .init(
+                                            systemImage: "arrow.uturn.backward",
+                                            help: L10n.t("Discard All Changes"),
+                                            disabled: model.isInteractionLocked,
+                                            showsProgress: activeActionTarget == .discardAll
+                                        ) {
+                                            requestDiscardAll()
+                                        },
+                                        .init(
+                                            systemImage: "plus",
+                                            help: L10n.t("Stage All Changes"),
+                                            disabled: model.isInteractionLocked,
+                                            showsProgress: activeActionTarget == .stageAll
+                                        ) {
+                                            beginGitAction(.stageAll) {
+                                                model.stageAll()
+                                            }
+                                        },
+                                    ] : [],
+                                    actionsDisabled: model.isInteractionLocked
+                                )
+                                if !changesCollapsed {
+                                    ForEach(changed, id: \.changedRowID) { entry in
+                                        row(entry, status: entry.unstaged, kind: .unstaged)
+                                            .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+                                    }
                                 }
                             }
                         }
@@ -953,6 +1075,43 @@ struct GitPanel: View {
                         .frame(minHeight: 20)
                 }
                 .frame(minHeight: geo.size.height, alignment: .top)
+            }
+        }
+    }
+
+    private var allSimpleEntries: [GitStatusModel.Entry] {
+        var result: [GitStatusModel.Entry] = []
+        var seen = Set<String>()
+        for entry in model.stagedEntries {
+            if seen.insert(entry.path).inserted {
+                result.append(entry)
+            }
+        }
+        for entry in model.changedEntries {
+            if seen.insert(entry.path).inserted {
+                result.append(entry)
+            }
+        }
+        return result
+    }
+
+    private var filteredSimpleEntries: [GitStatusModel.Entry] {
+        allSimpleEntries.filter(matchesFilter)
+    }
+
+    private var checkedEntriesCount: Int {
+        allSimpleEntries.filter { checkedPaths.contains($0.path) }.count
+    }
+
+    private func updateSimpleSelection() {
+        let entries = allSimpleEntries
+        let currentPaths = Set(entries.map(\.path))
+        checkedPaths.formIntersection(currentPaths)
+        knownPaths.formIntersection(currentPaths)
+        for entry in entries {
+            if !knownPaths.contains(entry.path) {
+                knownPaths.insert(entry.path)
+                checkedPaths.insert(entry.path)
             }
         }
     }
@@ -1022,12 +1181,22 @@ struct GitPanel: View {
     private func row(
         _ entry: GitStatusModel.Entry, status: Character, kind: GitEntryRow.Kind
     ) -> some View {
-        GitEntryRow(
+        let isSimple = (kind == .simple)
+        return GitEntryRow(
             entry: entry,
             status: status,
             kind: kind,
             disabled: model.isInteractionLocked,
             activeTarget: activeActionTarget,
+            isCheckable: isSimple,
+            isChecked: checkedPaths.contains(entry.path),
+            onToggleCheck: {
+                if checkedPaths.contains(entry.path) {
+                    checkedPaths.remove(entry.path)
+                } else {
+                    checkedPaths.insert(entry.path)
+                }
+            },
             openDiff: {
                 guard model.isCurrent(entry) else { return }
                 if entry.isDirectoryEntry {
@@ -1171,7 +1340,8 @@ struct GitPanel: View {
     }
 
     private func requestDiscardAll() {
-        pendingDiscardAll = model.changedEntries.map(makePendingDiscard)
+        let entries = (settings.gitOperationMode == .simple) ? allSimpleEntries : model.changedEntries
+        pendingDiscardAll = entries.map(makePendingDiscard)
         confirmDiscardAll = !pendingDiscardAll.isEmpty
     }
 
@@ -1693,7 +1863,7 @@ private struct GitCommitRow: View {
 
 private struct GitEntryRow: View {
     enum Kind {
-        case merge, staged, unstaged
+        case merge, staged, unstaged, simple
     }
 
     let entry: GitStatusModel.Entry
@@ -1701,6 +1871,9 @@ private struct GitEntryRow: View {
     let kind: Kind
     let disabled: Bool
     var activeTarget: GitActionTarget? = nil
+    var isCheckable: Bool = false
+    var isChecked: Bool = false
+    var onToggleCheck: (() -> Void)? = nil
     let openDiff: () -> Void
     let openFile: () -> Void
     let openToSide: () -> Void
@@ -1715,7 +1888,7 @@ private struct GitEntryRow: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             Button(action: openDiff) {
                 HStack(spacing: 7) {
                     Text(String(status))
@@ -1755,6 +1928,25 @@ private struct GitEntryRow: View {
                 hoverActions
                     .opacity(isHovering || isFocused || hasProgressInRow ? 1 : 0.55)
             }
+
+            if isCheckable {
+                Button {
+                    onToggleCheck?()
+                } label: {
+                    Image(systemName: isChecked ? "checkmark.square.fill" : "square")
+                        .font(SidebarTypography.micro())
+                        .foregroundStyle(
+                            disabled
+                                ? Theme.secondaryColor.opacity(0.35)
+                                : (isChecked ? Color(nsColor: Theme.cursor) : Theme.secondaryColor)
+                        )
+                        .frame(width: 18, height: 18)
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .disabled(disabled)
+                .macTooltip(isChecked ? L10n.t("Deselect") : L10n.t("Select"), position: .top)
+            }
         }
         // Fixed height so action buttons do not grow the dense file row.
         .frame(minHeight: SidebarTypography.rowMinHeight)
@@ -1793,18 +1985,12 @@ private struct GitEntryRow: View {
                     showsProgress: activeTarget == .unstage(path: entry.path),
                     action: unstage
                 )
-            case .unstaged:
+            case .unstaged, .simple:
                 rowButton(
                     "arrow.uturn.backward",
                     help: L10n.t("Discard Changes"),
                     showsProgress: activeTarget == .discard(path: entry.path),
                     action: discard
-                )
-                rowButton(
-                    "plus",
-                    help: L10n.t("Stage Changes"),
-                    showsProgress: activeTarget == .stage(path: entry.path),
-                    action: stage
                 )
             }
         }
@@ -1848,6 +2034,9 @@ private struct GitEntryRow: View {
         case .unstaged:
             Button(L10n.t("Stage Changes")) { stage() }
                 .disabled(disabled)
+            Button(destructiveMenuTitle) { discard() }
+                .disabled(disabled)
+        case .simple:
             Button(destructiveMenuTitle) { discard() }
                 .disabled(disabled)
         }

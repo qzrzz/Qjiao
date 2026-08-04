@@ -256,6 +256,25 @@ final class GitStatusModel: nonisolated ObservableObject {
         return (base as NSString).appendingPathComponent(entry.path)
     }
 
+    func fileExistsOnDisk(for entry: Entry) -> Bool {
+        let cleanPath = entry.path.hasSuffix("/") ? String(entry.path.dropLast()) : entry.path
+        let base = entry.repositoryRoot.isEmpty ? repoRoot : entry.repositoryRoot
+        let fullPath = (base as NSString).appendingPathComponent(cleanPath)
+        return FileManager.default.fileExists(atPath: fullPath)
+    }
+
+    func canStage(_ entry: Entry) -> Bool {
+        if fileExistsOnDisk(for: entry) { return true }
+        // 磁盘上已无此文件：
+        // 只有当该文件属于 HEAD 中已追踪的历史文件（且处于工作区被删除状态 'D'），
+        // 或者是已在暂存区中且非纯新增 ('A') 的变动时，Git 才能记录其删除。
+        // 未追踪且磁盘不存在的文件、或尚在暂存区未提交到 HEAD 且磁盘已删除的文件，
+        // 传入 git add -A 会触发 fatal: pathspec did not match any files。
+        if entry.isUntracked { return false }
+        if entry.staged == "A" && !fileExistsOnDisk(for: entry) { return false }
+        return entry.unstaged == "D" || (entry.staged != "." && entry.staged != "?")
+    }
+
     func isCurrent(_ entry: Entry) -> Bool {
         // 软切换期间保留 topLevel / 装饰用于展示，但禁止对旧仓库条目执行操作。
         if isSwitchingRoot { return false }
@@ -674,13 +693,13 @@ final class GitStatusModel: nonisolated ObservableObject {
     // MARK: - File operations
 
     func stage(_ entry: Entry) {
-        guard validate(entry) else { return }
+        guard validate(entry), canStage(entry) else { return }
         let original = entry.unstaged == "R" ? entry.origPath.map { [$0] } ?? [] : []
         let paths = [entry.path] + original
         let pathSet = Set(paths)
         perform(
             label: "Stage \(entry.fileName)",
-            commands: [["--literal-pathspecs", "add", "--"] + paths],
+            commands: [["--literal-pathspecs", "add", "-A", "--"] + paths],
             // stage 不依赖 HEAD 稳定；跳过 rev-parse 校验加快按钮响应（对齐 VS Code）。
             requiresStableHead: false,
             optimisticUpdate: { [weak self] in
@@ -871,6 +890,74 @@ final class GitStatusModel: nonisolated ObservableObject {
             optimisticUpdate: { [weak self] in
                 self?.optimisticallyCommit(includeAll: includeAll, amend: amend, message: trimmed)
             }
+        )
+    }
+
+    /// 简单模式提交：将 `checkedEntries` 阶段包含路径提交暂存，将 `uncheckedEntries` 移出暂存区，而后执行 commit。
+    func commitSimple(
+        message: String,
+        checkedEntries: [Entry],
+        uncheckedEntries: [Entry],
+        amend: Bool = false,
+        completion: (@MainActor (Bool) -> Void)? = nil
+    ) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            failImmediately("Enter a commit message", completion: completion)
+            return
+        }
+        guard !checkedEntries.isEmpty || amend else {
+            failImmediately("Select changes before committing", completion: completion)
+            return
+        }
+
+        var commands: [[String]] = []
+
+        // 1. 未勾选且当前处于暂存区的路径 -> 移出暂存区
+        let pathsToUnstage = uncheckedEntries.filter { $0.staged != "." && $0.staged != "?" }
+        if !pathsToUnstage.isEmpty {
+            let unstagePaths = pathsToUnstage.flatMap { entry -> [String] in
+                let orig = (entry.staged == "R" || entry.staged == "C") ? entry.origPath.map { [$0] } ?? [] : []
+                return [entry.path] + orig
+            }
+            if !unstagePaths.isEmpty {
+                let unstageArgs = hasHead
+                    ? ["--literal-pathspecs", "restore", "--staged", "--"] + unstagePaths
+                    : ["--literal-pathspecs", "rm", "--cached", "-f", "--"] + unstagePaths
+                commands.append(unstageArgs)
+            }
+        }
+
+        // 2. 已勾选的路径 -> 加入暂存区
+        if !checkedEntries.isEmpty {
+            let entriesToStage = checkedEntries.filter { entry in
+                guard canStage(entry) else { return false }
+                // 如果已经 staged 且 worktree 无额外变动，不需要再跑 git add
+                if entry.staged != "." && entry.staged != "?" && (entry.unstaged == "." || entry.unstaged == "?") {
+                    return false
+                }
+                return true
+            }
+            let stagePaths = entriesToStage.flatMap { entry -> [String] in
+                let orig = (entry.unstaged == "R" || entry.unstaged == "C") ? entry.origPath.map { [$0] } ?? [] : []
+                return [entry.path] + orig
+            }
+            if !stagePaths.isEmpty {
+                commands.append(["--literal-pathspecs", "add", "-A", "--"] + stagePaths)
+            }
+        }
+
+        // 3. Commit
+        var commitArgs = ["commit"]
+        if amend { commitArgs.append("--amend") }
+        commitArgs += ["-m", trimmed]
+        commands.append(commitArgs)
+
+        let label = amend ? "Amend commit" : "Commit selected changes"
+        perform(
+            label: label,
+            commands: commands,
+            completion: completion
         )
     }
 

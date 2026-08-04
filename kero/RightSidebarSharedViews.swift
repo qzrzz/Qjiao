@@ -216,6 +216,7 @@ private struct SidebarSectionHeaderActionButton: View {
     let help: String
     let disabled: Bool
     var showsProgress: Bool = false
+    var activeColor: Color? = nil
     let rowHovering: Bool
     let action: () -> Void
 
@@ -237,7 +238,7 @@ private struct SidebarSectionHeaderActionButton: View {
             .foregroundStyle(
                 (disabled || showsProgress)
                     ? Theme.secondaryColor.opacity(0.35)
-                    : (isHovering ? Theme.primaryColor : Theme.secondaryColor)
+                    : (activeColor ?? (isHovering ? Theme.primaryColor : Theme.secondaryColor))
             )
             .frame(width: 18, height: 18)
             .background(
@@ -269,6 +270,7 @@ struct SidebarSectionHeader: View {
         let help: String
         var disabled: Bool = false
         var showsProgress: Bool = false
+        var activeColor: Color? = nil
         let perform: () -> Void
     }
 
@@ -323,6 +325,7 @@ struct SidebarSectionHeader: View {
                         help: action.help,
                         disabled: action.disabled || actionsDisabled,
                         showsProgress: action.showsProgress,
+                        activeColor: action.activeColor,
                         rowHovering: isHovering,
                         action: action.perform
                     )
