@@ -47,6 +47,23 @@ final class GitStatusModel: nonisolated ObservableObject {
         var mergeRowID: String { "merge/" + path }
         var stagedRowID: String { "staged/" + path }
         var changedRowID: String { "changed/" + path }
+
+        /// 乐观更新时生成状态字母变化后的副本（path / repositoryRoot 保留）。
+        func withStatus(
+            staged: Character,
+            unstaged: Character,
+            origPath: String? = nil
+        ) -> Entry {
+            var copy = Entry(
+                path: path,
+                staged: staged,
+                unstaged: unstaged,
+                isConflict: isConflict,
+                origPath: origPath ?? self.origPath
+            )
+            copy.repositoryRoot = repositoryRoot
+            return copy
+        }
     }
 
     /// Compact Explorer-style decoration for a path in the active repository.
@@ -85,6 +102,17 @@ final class GitStatusModel: nonisolated ObservableObject {
         let subject: String
         let author: String
         let relativeDate: String
+    }
+
+    /// stage / commit 前的列表快照；失败时回滚乐观更新。
+    private struct ResourceSnapshot {
+        var mergeEntries: [Entry]
+        var stagedEntries: [Entry]
+        var changedEntries: [Entry]
+        var fileDecorations: [String: FileDecoration]
+        var directoryDecorations: [String: FileDecoration]
+        var ahead: Int
+        var recentCommits: [RecentCommit]
     }
 
     nonisolated struct Operation: Identifiable, Equatable, Sendable {
@@ -191,6 +219,11 @@ final class GitStatusModel: nonisolated ObservableObject {
     private var appActive = true
     /// 失焦 / 面板隐藏期间到达的文件变化，恢复后补一次刷新。
     private var pendingChangeWhileInactive = false
+    /// VS Code 风格：文件事件防抖后再扫（GitFileWatcher 0.5s 之上再合一次）。
+    private var autoRefreshDebounceTask: Task<Void, Never>?
+    /// mutation 成功后的自动 status 冷却（对齐 VS Code updateWhenIdleAndWait 的节奏）。
+    private var lastMutationRefreshAt = Date.distantPast
+    private static let postMutationAutoRefreshCooldown: TimeInterval = 5
 
     init() {
         gitWatcher = GitFileWatcher()
@@ -233,6 +266,9 @@ final class GitStatusModel: nonisolated ObservableObject {
         if root != rootPath {
             contextGeneration &+= 1
             rootPath = root
+            // 切换项目 / cwd 时立刻脱离旧 root 上的 commit/stage：后台进程可继续跑完，
+            // 但 UI 与结果全部作废，避免 isBusy 挡住新 root 的刷新（表现为面板不切换）。
+            abandonInFlightWorkForContextChange()
             if hasResolvedStatus {
                 // stale-while-revalidate：保留已解析的 UI（仓库内容或非仓库视图），
                 // 仅作废在飞扫描；新结果 apply 后整体替换，不再闪「Finding repository…」。
@@ -245,11 +281,66 @@ final class GitStatusModel: nonisolated ObservableObject {
                 hasResolvedStatus = false
                 clearRepositoryState(preserveIdentity: true)
             }
+            // onAppear 常先 setAutoRefreshEnabled（此时 rootPath 仍空，心跳不会创建），
+            // 再 sync 写入 root；此处必须重算，否则兜底心跳可能一直不跑。
+            updateAutoRefreshTask()
+            // 绕过 actor + 高优先级：切换后立刻扫新仓库，不排队等旧扫描。
+            refreshForRootChange()
+            return
         }
-        // onAppear 常先 setAutoRefreshEnabled（此时 rootPath 仍空，心跳不会创建），
-        // 再 sync 写入 root；此处必须重算，否则兜底心跳可能一直不跑。
         updateAutoRefreshTask()
         refresh()
+    }
+
+    /// 根路径切换时作废旧 root 的操作 / recovery 记账，让面板能立刻跟新上下文。
+    private func abandonInFlightWorkForContextChange() {
+        runningOperationID = nil
+        recoveryID = nil
+        isRecovering = false
+        isBusy = false
+        autoRefreshDebounceTask?.cancel()
+        autoRefreshDebounceTask = nil
+        if let op = operation, op.isRunning {
+            operation = nil
+            lastError = nil
+        }
+    }
+
+    /// 项目 / cwd 切换后的即时全量扫描：不经 actor 队列，带详情（分支列表等）。
+    private func refreshForRootChange() {
+        let root = rootPath
+        let generation = contextGeneration
+        guard !root.isEmpty else { return }
+        invalidateStatusRefresh()
+        let requestID = statusRequestID
+        isRefreshing = true
+        let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                GitScanner.loadStatusNow(
+                    in: root,
+                    includeIgnoredPaths: includeIgnoredPaths,
+                    includeDetails: true,
+                    bypassFsmonitor: false
+                )
+            }.value
+            guard let self else { return }
+            guard self.contextGeneration == generation,
+                  self.statusRequestID == requestID,
+                  self.rootPath == root else {
+                if self.statusRequestID == requestID {
+                    self.isRefreshing = false
+                }
+                return
+            }
+            self.isRefreshing = false
+            self.hasResolvedStatus = true
+            self.apply(result, ignoreBusy: true)
+            if self.refreshPending {
+                self.refreshPending = false
+                self.refresh()
+            }
+        }
     }
 
     func refresh() {
@@ -305,9 +396,9 @@ final class GitStatusModel: nonisolated ObservableObject {
     ///
     /// 与普通 `refresh()` 的区别：
     /// - 先作废在飞扫描，避免吃到 mutation 前启动的陈旧结果；
-    /// - **绕过** `GitScanner` actor 串行队列（mutation 前的长扫描可能仍占着 actor），
-    ///   以 `.userInitiated` 立刻重扫，UI 不再长时间停在旧 staged/changed 列表；
-    /// - bypass fsmonitor，直接读最新 index，避免 daemon 瞬时缓存导致「点了没变」。
+    /// - **绕过** `GitScanner` actor 串行队列，以 `.userInitiated` 立刻重扫；
+    /// - **跳过** branches / remotes / log / stash 详情（只更新变更列表 + branch 头），
+    ///   避免 Commit 后还串行跑 4～5 个 git 子进程拖慢体感；详情由后续心跳补齐。
     private func refreshAfterMutation() {
         let root = rootPath
         let generation = contextGeneration
@@ -322,7 +413,8 @@ final class GitStatusModel: nonisolated ObservableObject {
                 GitScanner.loadStatusNow(
                     in: root,
                     includeIgnoredPaths: includeIgnoredPaths,
-                    bypassFsmonitor: true
+                    includeDetails: false,
+                    bypassFsmonitor: false
                 )
             }.value
             guard let self else { return }
@@ -336,11 +428,35 @@ final class GitStatusModel: nonisolated ObservableObject {
             }
             self.isRefreshing = false
             self.hasResolvedStatus = true
+            self.lastMutationRefreshAt = Date()
             // ignoreBusy：mutation 的 completion 链可能立刻又置 busy，结果仍须落盘。
             self.apply(result, ignoreBusy: true)
             if self.refreshPending {
                 self.refreshPending = false
-                self.refresh()
+                // 冷却后再补，避免与乐观更新刚落地的状态打架。
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    guard let self,
+                          self.contextGeneration == generation,
+                          self.rootPath == root,
+                          !self.isBusy,
+                          !self.isRefreshing else { return }
+                    self.refresh()
+                }
+            } else {
+                // 快路径不带 recent commits 等详情；对齐 VS Code 空闲后再补全量。
+                Task { [weak self] in
+                    try? await Task.sleep(
+                        nanoseconds: UInt64(Self.postMutationAutoRefreshCooldown * 1_000_000_000)
+                    )
+                    guard let self,
+                          self.contextGeneration == generation,
+                          self.rootPath == root,
+                          !self.isBusy,
+                          !self.isRefreshing,
+                          !self.isSwitchingRoot else { return }
+                    self.refresh()
+                }
             }
         }
     }
@@ -463,19 +579,58 @@ final class GitStatusModel: nonisolated ObservableObject {
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 guard let self, !Task.isCancelled else { return }
                 guard self.autoRefreshEnabled, self.appActive, !self.rootPath.isEmpty else { return }
+                // VS Code：操作进行中不自动 status；忙完由 refreshPending / mutation 路径补。
+                guard !self.isBusy, !self.isSwitchingRoot else { continue }
+                // mutation 刚刷过则跳过本拍，避免 stage 后立刻再全量扫。
+                if Date().timeIntervalSince(self.lastMutationRefreshAt)
+                    < Self.postMutationAutoRefreshCooldown {
+                    continue
+                }
                 self.refresh()
             }
         }
     }
 
-    /// 文件 watcher 事件（主线程回调）：面板可见且应用聚焦时刷新，
-    /// 否则记 pending 等恢复后补刷。
+    /// 文件 watcher 事件（主线程回调）：对齐 VS Code onFileChange——
+    /// 失焦 / 操作中 / 大仓库自动跳过，其余防抖后刷新。
     private func handleFileChange() {
         guard autoRefreshEnabled, appActive else {
             pendingChangeWhileInactive = true
             return
         }
-        refresh()
+        // 操作进行中：只记 pending，不打断 commit/stage（VS Code operations.isIdle）。
+        if isBusy || isSwitchingRoot {
+            refreshPending = true
+            return
+        }
+        // 大仓库命中条目上限：跳过事件驱动全量扫，仅靠降频心跳兜底。
+        if statusLimitHit {
+            return
+        }
+        // mutation 冷却内忽略噪声（git 自身写 index 触发的事件）。
+        if Date().timeIntervalSince(lastMutationRefreshAt)
+            < Self.postMutationAutoRefreshCooldown {
+            return
+        }
+        scheduleDebouncedAutoRefresh()
+    }
+
+    /// VS Code `@debounce(1000)` + throttle 的轻量等价：合并洪峰后再 refresh。
+    private func scheduleDebouncedAutoRefresh() {
+        autoRefreshDebounceTask?.cancel()
+        autoRefreshDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            guard self.autoRefreshEnabled, self.appActive else {
+                self.pendingChangeWhileInactive = true
+                return
+            }
+            guard !self.isBusy, !self.isSwitchingRoot, !self.statusLimitHit else {
+                self.refreshPending = true
+                return
+            }
+            self.refresh()
+        }
     }
 
     func dismissOperation() {
@@ -522,9 +677,15 @@ final class GitStatusModel: nonisolated ObservableObject {
         guard validate(entry) else { return }
         let original = entry.unstaged == "R" ? entry.origPath.map { [$0] } ?? [] : []
         let paths = [entry.path] + original
+        let pathSet = Set(paths)
         perform(
             label: "Stage \(entry.fileName)",
-            commands: [["--literal-pathspecs", "add", "--"] + paths]
+            commands: [["--literal-pathspecs", "add", "--"] + paths],
+            // stage 不依赖 HEAD 稳定；跳过 rev-parse 校验加快按钮响应（对齐 VS Code）。
+            requiresStableHead: false,
+            optimisticUpdate: { [weak self] in
+                self?.optimisticallyStage(paths: pathSet)
+            }
         )
     }
 
@@ -532,23 +693,46 @@ final class GitStatusModel: nonisolated ObservableObject {
         guard validate(entry) else { return }
         let original = entry.staged == "R" ? entry.origPath.map { [$0] } ?? [] : []
         let paths = [entry.path] + original
+        let pathSet = Set(paths)
         let args = hasHead
             ? ["--literal-pathspecs", "restore", "--staged", "--"] + paths
             : ["--literal-pathspecs", "rm", "--cached", "-f", "--"] + paths
-        perform(label: "Unstage \(entry.fileName)", commands: [args])
+        perform(
+            label: "Unstage \(entry.fileName)",
+            commands: [args],
+            requiresStableHead: false,
+            optimisticUpdate: { [weak self] in
+                self?.optimisticallyUnstage(paths: pathSet)
+            }
+        )
     }
 
     /// 将工作区所有变更添加到暂存区 (`git add -A`)。
     /// - Parameter completion: 完成后的回调，传入操作是否成功。
     func stageAll(completion: (@MainActor (Bool) -> Void)? = nil) {
-        perform(label: "Stage all changes", commands: [["add", "-A"]], completion: completion)
+        perform(
+            label: "Stage all changes",
+            commands: [["add", "-A"]],
+            requiresStableHead: false,
+            completion: completion,
+            optimisticUpdate: { [weak self] in
+                self?.optimisticallyStageAll()
+            }
+        )
     }
 
     func unstageAll() {
         let args = hasHead
             ? ["restore", "--staged", "--", "."]
             : ["rm", "--cached", "-r", "-f", "--", "."]
-        perform(label: "Unstage all changes", commands: [args])
+        perform(
+            label: "Unstage all changes",
+            commands: [args],
+            requiresStableHead: false,
+            optimisticUpdate: { [weak self] in
+                self?.optimisticallyUnstageAll()
+            }
+        )
     }
 
     /// Restores a tracked file from the index, or moves an untracked file to
@@ -679,7 +863,15 @@ final class GitStatusModel: nonisolated ObservableObject {
         commitArgs += ["-m", trimmed]
         commands.append(commitArgs)
         let label = amend ? "Amend commit" : (includeAll ? "Stage all and commit" : "Commit staged changes")
-        perform(label: label, commands: commands, completion: completion)
+        // VS Code：commit 后立刻清空 staged（乐观），后台 status 纠偏。
+        perform(
+            label: label,
+            commands: commands,
+            completion: completion,
+            optimisticUpdate: { [weak self] in
+                self?.optimisticallyCommit(includeAll: includeAll, amend: amend, message: trimmed)
+            }
+        )
     }
 
     /// Compatibility for older call sites. The behavior remains explicit in
@@ -841,7 +1033,8 @@ final class GitStatusModel: nonisolated ObservableObject {
         directory: String? = nil,
         requiresStableHead: Bool = true,
         requiresStableUpstream: Bool = false,
-        completion: (@MainActor (Bool) -> Void)? = nil
+        completion: (@MainActor (Bool) -> Void)? = nil,
+        optimisticUpdate: (() -> Void)? = nil
     ) {
         if directory == nil && !isRepo {
             failImmediately(
@@ -873,6 +1066,12 @@ final class GitStatusModel: nonisolated ObservableObject {
             finishedAt: nil
         )
 
+        // VS Code optimisticUpdate：git 子进程跑之前先改 UI 列表，失败再回滚。
+        let resourceSnapshot: ResourceSnapshot? = optimisticUpdate != nil
+            ? captureResourceSnapshot()
+            : nil
+        optimisticUpdate?()
+
         Task { [weak self] in
             let batch = await Task.detached(priority: .userInitiated) {
                 var transcript: [String] = []
@@ -887,18 +1086,12 @@ final class GitStatusModel: nonisolated ObservableObject {
                         )
                     }
                     if requiresStableHead {
-                        // 校验 status 绕过 fsmonitor（-c core.fsmonitor=false）：
-                        // 快照校验只需要 branch / HEAD 信息，不需要 daemon 加速；
-                        // 坏 daemon / 多 daemon 环境下该校验会挂起 45s 超时，
-                        // 表现为操作按钮长时间转圈且操作被拒。
-                        let liveStatus = GitScanner.runGit(
-                            ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"],
+                        // 轻量 rev-parse 快照（不做 worktree 全量 status）：大仓库上
+                        // 原先 porcelain status 校验本身可比 commit 更慢。
+                        let live = GitScanner.readBranchSnapshot(
                             in: expectedRepositoryRoot,
-                            config: ["core.fsmonitor": "false"]
+                            includeUpstream: requiresStableUpstream
                         )
-                        let live = liveStatus.status == 0
-                            ? GitScanner.parseStatus(liveStatus.stdout)
-                            : nil
                         guard let live,
                               live.headOID == expectedHeadOID,
                               live.branch == expectedBranch,
@@ -950,6 +1143,10 @@ final class GitStatusModel: nonisolated ObservableObject {
             }
             let finishedAt = Date()
             if let failureCode = batch.failureCode {
+                // 乐观更新回滚，再后台纠偏。
+                if let resourceSnapshot {
+                    self.restoreResourceSnapshot(resourceSnapshot)
+                }
                 self.lastError = batch.failureMessage
                 self.operation = Operation(
                     id: operationID,
@@ -972,9 +1169,188 @@ final class GitStatusModel: nonisolated ObservableObject {
                 )
                 completion?(true)
             }
-            // 绕过 actor 队列即时重扫，避免 stage/unstage 后 UI 长时间停在旧列表。
+            // 成功时列表已是乐观结果，后台轻量 status 纠偏即可；失败时纠偏真实状态。
             self.refreshAfterMutation()
         }
+    }
+
+    // MARK: - Optimistic updates (VS Code 风格)
+
+    private func captureResourceSnapshot() -> ResourceSnapshot {
+        ResourceSnapshot(
+            mergeEntries: mergeEntries,
+            stagedEntries: stagedEntries,
+            changedEntries: changedEntries,
+            fileDecorations: fileDecorations,
+            directoryDecorations: directoryDecorations,
+            ahead: ahead,
+            recentCommits: recentCommits
+        )
+    }
+
+    private func restoreResourceSnapshot(_ snapshot: ResourceSnapshot) {
+        mergeEntries = snapshot.mergeEntries
+        stagedEntries = snapshot.stagedEntries
+        changedEntries = snapshot.changedEntries
+        fileDecorations = snapshot.fileDecorations
+        directoryDecorations = snapshot.directoryDecorations
+        ahead = snapshot.ahead
+        recentCommits = snapshot.recentCommits
+    }
+
+    private func applyOptimisticLists(
+        merge: [Entry],
+        staged: [Entry],
+        changed: [Entry]
+    ) {
+        mergeEntries = merge
+        stagedEntries = staged
+        changedEntries = changed
+        recomputeDecorationsFromLists()
+    }
+
+    /// 从当前三组列表粗算装饰（不要求与 porcelain 完全一致；后台 status 会覆盖）。
+    private func recomputeDecorationsFromLists() {
+        var byPath: [String: Entry] = [:]
+        for entry in mergeEntries + stagedEntries + changedEntries {
+            if let existing = byPath[entry.path] {
+                // 合并两侧字母：同 path 可同时出现在 staged + changed（MM）。
+                let stagedLetter = entry.staged != "." ? entry.staged : existing.staged
+                let unstagedLetter = entry.unstaged != "." ? entry.unstaged : existing.unstaged
+                byPath[entry.path] = existing.withStatus(
+                    staged: stagedLetter,
+                    unstaged: unstagedLetter,
+                    origPath: entry.origPath ?? existing.origPath
+                )
+            } else {
+                byPath[entry.path] = entry
+            }
+        }
+        var fileDec: [String: FileDecoration] = [:]
+        var dirDec: [String: FileDecoration] = [:]
+        for entry in byPath.values {
+            let decoration = Self.optimisticDecoration(for: entry)
+            let key = entry.isDirectoryEntry ? String(entry.path.dropLast()) : entry.path
+            fileDec[key] = decoration
+            var directory = (key as NSString).deletingLastPathComponent
+            while !directory.isEmpty {
+                if let current = dirDec[directory],
+                   current.directoryPriority >= decoration.directoryPriority {
+                    break
+                }
+                dirDec[directory] = decoration
+                directory = (directory as NSString).deletingLastPathComponent
+            }
+            if entry.isDirectoryEntry {
+                dirDec[key] = decoration
+            }
+        }
+        // 保留 ignored 装饰（乐观路径不重扫 ignore）。
+        for (path, decoration) in fileDecorations where decoration == .ignored {
+            if fileDec[path] == nil { fileDec[path] = .ignored }
+        }
+        fileDecorations = fileDec
+        directoryDecorations = dirDec
+    }
+
+    private nonisolated static func optimisticDecoration(for entry: Entry) -> FileDecoration {
+        let statuses = [entry.staged, entry.unstaged]
+        if entry.isConflict || statuses.contains("U") { return .conflict }
+        if statuses.contains("?") { return .untracked }
+        if entry.staged == "A" { return .added }
+        if statuses.contains("D") { return .deleted }
+        if statuses.contains("R") { return .renamed }
+        if statuses.contains("C") { return .copied }
+        return .modified
+    }
+
+    private func pathMatches(_ entry: Entry, paths: Set<String>) -> Bool {
+        paths.contains(entry.path)
+            || (entry.origPath.map { paths.contains($0) } ?? false)
+    }
+
+    /// 乐观 stage：把 changed 中匹配项移入 staged（字母按 git add 后的常见结果估算）。
+    private func optimisticallyStage(paths: Set<String>) {
+        var staged = stagedEntries
+        var changed = changedEntries
+        let moving = changed.filter { pathMatches($0, paths: paths) }
+        changed.removeAll { pathMatches($0, paths: paths) }
+        for entry in moving {
+            let stagedLetter: Character
+            if entry.isUntracked || entry.staged == "?" || entry.unstaged == "?" {
+                stagedLetter = "A"
+            } else if entry.unstaged != "." {
+                stagedLetter = entry.unstaged
+            } else {
+                stagedLetter = entry.staged == "." ? "M" : entry.staged
+            }
+            staged.removeAll { $0.path == entry.path }
+            staged.append(entry.withStatus(staged: stagedLetter, unstaged: "."))
+        }
+        // 已在 staged 且仍有 unstaged 侧（MM）：清 unstaged。
+        staged = staged.map { entry in
+            guard pathMatches(entry, paths: paths), entry.unstaged != "." else { return entry }
+            let letter = entry.staged == "." ? "M" : entry.staged
+            return entry.withStatus(staged: letter, unstaged: ".")
+        }
+        applyOptimisticLists(merge: mergeEntries, staged: staged, changed: changed)
+    }
+
+    private func optimisticallyUnstage(paths: Set<String>) {
+        var staged = stagedEntries
+        var changed = changedEntries
+        let moving = staged.filter { pathMatches($0, paths: paths) }
+        staged.removeAll { pathMatches($0, paths: paths) }
+        for entry in moving {
+            let letter = entry.staged == "." ? "M" : entry.staged
+            // 新文件取消暂存 → 回到未跟踪。
+            let restored: Entry
+            if letter == "A" {
+                restored = entry.withStatus(staged: "?", unstaged: "?", origPath: nil)
+            } else {
+                restored = entry.withStatus(staged: ".", unstaged: letter)
+            }
+            changed.removeAll { $0.path == entry.path }
+            changed.append(restored)
+        }
+        applyOptimisticLists(merge: mergeEntries, staged: staged, changed: changed)
+    }
+
+    private func optimisticallyStageAll() {
+        let paths = Set(changedEntries.map(\.path))
+        guard !paths.isEmpty else { return }
+        optimisticallyStage(paths: paths)
+    }
+
+    private func optimisticallyUnstageAll() {
+        let paths = Set(stagedEntries.map(\.path))
+        guard !paths.isEmpty else { return }
+        optimisticallyUnstage(paths: paths)
+    }
+
+    private func optimisticallyCommit(includeAll: Bool, amend: Bool, message: String) {
+        if includeAll {
+            stagedEntries = []
+            changedEntries = []
+        } else {
+            stagedEntries = []
+        }
+        if !amend {
+            if hasUpstream { ahead += 1 }
+            // 乐观插入一条 recent commit 头（后台 status 会换成真实 hash）。
+            let placeholder = RecentCommit(
+                hash: "optimistic",
+                shortHash: "·······",
+                subject: message,
+                author: "",
+                relativeDate: "just now"
+            )
+            recentCommits = [placeholder] + recentCommits.filter { $0.hash != "optimistic" }
+            if recentCommits.count > 8 {
+                recentCommits = Array(recentCommits.prefix(8))
+            }
+        }
+        recomputeDecorationsFromLists()
     }
 
     private func failImmediately(
@@ -1023,13 +1399,11 @@ final class GitStatusModel: nonisolated ObservableObject {
                         failure: "Repository changed before the file action could run. Review the current changes and try again."
                     )
                 }
-                let liveStatus = GitScanner.runGit(
-                    ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"],
+                // 同 perform：轻量 rev-parse，避免 discard 前再跑全量 status。
+                let live = GitScanner.readBranchSnapshot(
                     in: expectedRepositoryRoot,
-                    // 同 perform：校验 status 绕过 fsmonitor，避免坏 daemon 挂起。
-                    config: ["core.fsmonitor": "false"]
+                    includeUpstream: false
                 )
-                let live = liveStatus.status == 0 ? GitScanner.parseStatus(liveStatus.stdout) : nil
                 guard let live,
                       live.headOID == expectedHeadOID,
                       live.branch == expectedBranch else {

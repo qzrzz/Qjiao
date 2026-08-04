@@ -99,6 +99,7 @@ actor GitScanner {
             in: root,
             includeIgnoredPaths: includeIgnoredPaths,
             bypassFsmonitor: bypass,
+            includeDetails: true,
             timeout: recovery ? Self.gitRecoveryTimeout : Self.gitCommandTimeout,
             diagnosticContext: recovery ? "recovery scan" : "status scan"
         )
@@ -112,6 +113,7 @@ actor GitScanner {
                 in: root,
                 includeIgnoredPaths: includeIgnoredPaths,
                 bypassFsmonitor: true,
+                includeDetails: true,
                 timeout: Self.gitRecoveryTimeout,
                 diagnosticContext: "auto-heal scan (fsmonitor bypassed)"
             )
@@ -130,6 +132,7 @@ actor GitScanner {
             in: root,
             includeIgnoredPaths: includeIgnoredPaths,
             bypassFsmonitor: true,
+            includeDetails: true,
             timeout: gitRecoveryTimeout,
             diagnosticContext: "Retry recovery (fsmonitor bypassed, independent of scan queue)"
         )
@@ -139,6 +142,7 @@ actor GitScanner {
                 in: root,
                 includeIgnoredPaths: includeIgnoredPaths,
                 bypassFsmonitor: true,
+                includeDetails: true,
                 timeout: gitRecoveryTimeout,
                 diagnosticContext: "Retry recovery (git -C, no process cwd)",
                 preferGitDashC: true
@@ -151,19 +155,79 @@ actor GitScanner {
     /// 即时扫描：不经过 actor 串行队列。用于 stage / unstage / commit 等用户
     /// mutation 完成后的状态刷新——mutation 前已启动的 `loadStatus` 可能仍占着
     /// actor（大仓库或坏 fsmonitor 上可长达数十秒），若仍排队则 UI 长时间停在旧列表。
-    /// 默认 bypass fsmonitor，直接读最新 index，避免 daemon 瞬时缓存陈旧。
+    ///
+    /// - `includeDetails: false`（默认）：只跑 rev-parse + status + git-dir，
+    ///   跳过 branches / remotes / log / stash，commit 后列表能立刻更新；
+    ///   详情由后续普通 refresh / 心跳补齐（`loadedDetails == false` 时 UI 保留旧值）。
+    /// - `bypassFsmonitor`：默认 false。mutation 已改 index，fsmonitor 通常仍可用；
+    ///   强制 bypass 会让大仓库 `git status` 全量扫盘，Commit 后体感极慢。
     nonisolated static func loadStatusNow(
         in root: String,
         includeIgnoredPaths: Bool,
-        bypassFsmonitor: Bool = true
+        includeDetails: Bool = false,
+        bypassFsmonitor: Bool = false
     ) -> StatusLoadResult {
         loadStatusOnce(
             in: root,
             includeIgnoredPaths: includeIgnoredPaths,
             bypassFsmonitor: bypassFsmonitor,
+            includeDetails: includeDetails,
             timeout: gitCommandTimeout,
             diagnosticContext: "post-mutation scan"
         )
+    }
+
+    /// 操作前 HEAD / branch / upstream 轻量快照（若干次 `rev-parse`，不做 worktree 扫描）。
+    /// 替代原先整份 `git status --porcelain` 校验——大仓库上可省数秒甚至更久。
+    nonisolated struct BranchSnapshot: Equatable, Sendable {
+        var headOID: String?
+        var branch: String?
+        var upstream: String?
+    }
+
+    nonisolated static func readBranchSnapshot(
+        in repoRoot: String,
+        includeUpstream: Bool
+    ) -> BranchSnapshot? {
+        // 空仓库尚无 HEAD 时 rev-parse HEAD 非 0；仍视为有效快照（headOID = nil）。
+        let head = runGit(
+            ["rev-parse", "HEAD"],
+            in: repoRoot,
+            timeout: 10
+        )
+        let headOID: String?
+        if head.status == 0 {
+            let oid = strippingTrailingLineEnding(head.stdout)
+            headOID = oid.isEmpty ? nil : oid
+        } else {
+            headOID = nil
+        }
+
+        let abr = runGit(
+            ["rev-parse", "--abbrev-ref", "HEAD"],
+            in: repoRoot,
+            timeout: 10
+        )
+        guard abr.status == 0 else { return nil }
+        let abrName = strippingTrailingLineEnding(abr.stdout)
+        let branch: String = abrName == "HEAD" || abrName.isEmpty
+            ? "detached HEAD"
+            : abrName
+
+        var upstream: String?
+        if includeUpstream {
+            let up = runGit(
+                ["rev-parse", "--abbrev-ref", "@{upstream}"],
+                in: repoRoot,
+                timeout: 10
+            )
+            if up.status == 0 {
+                let name = strippingTrailingLineEnding(up.stdout)
+                if !name.isEmpty { upstream = name }
+            }
+        }
+
+        return BranchSnapshot(headOID: headOID, branch: branch, upstream: upstream)
     }
 
     /// 进入 fsmonitor bypass cooldown（Retry 成功/失败后都延长，避免 thrash）。
@@ -174,11 +238,15 @@ actor GitScanner {
     /// 单次扫描（无自愈递归）。`bypassFsmonitor` 时对所有 git 子进程注入
     /// `-c core.fsmonitor=false`，避免再碰残留 IPC。
     ///
+    /// `includeDetails`：为 false 时跳过 branches / remotes / log / stash
+    ///（mutation 后快路径）；status --branch 已带 branch / ahead / behind。
+    ///
     /// `nonisolated`：Retry 恢复路径可在 actor 外直接调用，不被卡住的扫描阻塞。
     nonisolated private static func loadStatusOnce(
         in root: String,
         includeIgnoredPaths: Bool,
         bypassFsmonitor: Bool,
+        includeDetails: Bool,
         timeout: TimeInterval,
         diagnosticContext: String,
         preferGitDashC: Bool = false
@@ -242,52 +310,9 @@ actor GitScanner {
         }
         var result = parseStatus(status.stdout, limit: Self.statusEntryLimit)
         result.topLevel = resolvedRoot
-
-        result.loadedDetails = true
         let repoRoot = resolvedRoot
 
-        let refs = runGit(
-            ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
-            in: repoRoot,
-            config: config,
-            timeout: timeout,
-            preferGitDashC: preferGitDashC
-        )
-        if refs.status == 0 {
-            result.branches = refs.stdout.split(separator: "\n").map(String.init).sorted()
-        }
-
-        let remoteRun = runGit(
-            ["remote"],
-            in: repoRoot,
-            config: config,
-            timeout: timeout,
-            preferGitDashC: preferGitDashC
-        )
-        if remoteRun.status == 0 {
-            result.remotes = remoteRun.stdout.split(separator: "\n").map(String.init).sorted()
-        }
-
-        let log = runGit(
-            ["log", "-n", "8", "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%ar%x1e"],
-            in: repoRoot,
-            config: config,
-            timeout: timeout,
-            preferGitDashC: preferGitDashC
-        )
-        if log.status == 0 { result.recentCommits = parseRecentCommits(log.stdout) }
-
-        let stash = runGit(
-            ["rev-list", "--walk-reflogs", "--count", "refs/stash"],
-            in: repoRoot,
-            config: config,
-            timeout: timeout,
-            preferGitDashC: preferGitDashC
-        )
-        if stash.status == 0 {
-            result.stashCount = Int(stash.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-        }
-
+        // git-dir 供 watcher 挂载；与 details 解耦，mutation 快路径也需要。
         let gitDir = runGit(
             ["rev-parse", "--absolute-git-dir"],
             in: repoRoot,
@@ -300,6 +325,96 @@ actor GitScanner {
             result.repositoryOperation = detectRepositoryOperation(gitDirectory: path)
             result.gitDirectory = path
         }
+
+        if includeDetails {
+            result.loadedDetails = true
+            // 详情命令互不依赖，并行跑以缩短全量扫描尾延迟。
+            let detailQueue = DispatchQueue(
+                label: "com.qzrzz.qjiao.git-status-details",
+                attributes: .concurrent
+            )
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var branches: [String] = []
+            var remotes: [String] = []
+            var recentCommits: [GitStatusModel.RecentCommit] = []
+            var stashCount = 0
+
+            group.enter()
+            detailQueue.async {
+                defer { group.leave() }
+                let refs = runGit(
+                    ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+                    in: repoRoot,
+                    config: config,
+                    timeout: timeout,
+                    preferGitDashC: preferGitDashC
+                )
+                let parsed = refs.status == 0
+                    ? refs.stdout.split(separator: "\n").map(String.init).sorted()
+                    : []
+                lock.lock()
+                branches = parsed
+                lock.unlock()
+            }
+            group.enter()
+            detailQueue.async {
+                defer { group.leave() }
+                let remoteRun = runGit(
+                    ["remote"],
+                    in: repoRoot,
+                    config: config,
+                    timeout: timeout,
+                    preferGitDashC: preferGitDashC
+                )
+                let parsed = remoteRun.status == 0
+                    ? remoteRun.stdout.split(separator: "\n").map(String.init).sorted()
+                    : []
+                lock.lock()
+                remotes = parsed
+                lock.unlock()
+            }
+            group.enter()
+            detailQueue.async {
+                defer { group.leave() }
+                let log = runGit(
+                    ["log", "-n", "8", "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%ar%x1e"],
+                    in: repoRoot,
+                    config: config,
+                    timeout: timeout,
+                    preferGitDashC: preferGitDashC
+                )
+                let parsed = log.status == 0 ? parseRecentCommits(log.stdout) : []
+                lock.lock()
+                recentCommits = parsed
+                lock.unlock()
+            }
+            group.enter()
+            detailQueue.async {
+                defer { group.leave() }
+                let stash = runGit(
+                    ["rev-list", "--walk-reflogs", "--count", "refs/stash"],
+                    in: repoRoot,
+                    config: config,
+                    timeout: timeout,
+                    preferGitDashC: preferGitDashC
+                )
+                let count = stash.status == 0
+                    ? (Int(stash.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0)
+                    : 0
+                lock.lock()
+                stashCount = count
+                lock.unlock()
+            }
+            group.wait()
+            result.branches = branches
+            result.remotes = remotes
+            result.recentCommits = recentCommits
+            result.stashCount = stashCount
+        } else {
+            result.loadedDetails = false
+        }
+
         return .repository(preprocess(result))
     }
 

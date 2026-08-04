@@ -181,10 +181,13 @@ final class SyntaxHighlightCoordinator {
                 return nil
             }
             var attributes: [NSAttributedString.Key: Any] = [:]
-            attributes[.font] = textView.font
             if let color = Self.themeColor(for: neonToken.name, theme: self.theme) {
                 attributes[.foregroundColor] = color
             }
+            // 字体只由 theme 显式声明的 per-token 字体驱动（当前主题字体表
+            // 为空，永不命中）。不把 textView.font 持久写进 text storage：
+            // 编辑器字体由 STTextView 的 `font` 统一管理，多余的持久属性
+            // 会让输入继承和复制结果带上异常样式。
             if let font = self.theme.font(forToken: TokenName(neonToken.name)) {
                 attributes[.font] = font
             }
@@ -480,7 +483,10 @@ private final class SyntaxHighlightTextInterface: TextSystemInterface {
               let textRange = NSTextRange(range, in: textView.textContentManager)
         else { return }
         textView.textLayoutManager.removeRenderingAttribute(.foregroundColor, for: textRange)
-        textView.addAttributes([.font: textView.font], range: range)
+        // 不向 text storage 回写 `.font`：字体由 STTextView 的 `font`
+        // 属性统一管理（其 setter 已把默认字体写入整个文档），这里再写
+        // 只会让每次重绘都产生持久属性变更——污染 typing attributes
+        // （输入继承异常样式）和复制出去的 RTF。
     }
 
     func applyStyle(to token: Neon.Token) {

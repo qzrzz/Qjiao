@@ -370,6 +370,20 @@ final class FocusReportingTextView: STTextView {
         return became
     }
 
+    /// 源码编辑器复制只写纯文本：文档里的字体/颜色是编辑器自己的持久属性，
+    /// 带 `.rtf` 复制出去会在富文本应用（Notes、Xcode、浏览器等）里粘贴出
+    /// 异常的字体和颜色。`cut` 经由 `copy(_:)` 动态派发，同样生效。
+    override func copy(_ sender: Any?) {
+        _ = writeSelection(to: NSPasteboard.general, types: [.string])
+    }
+
+    /// 只接受纯文本：外部富文本的字体/颜色混入源码文档后，会污染该处
+    /// 的 typing attributes（光标停在那里输入的文字带异常样式），并随
+    /// 再次复制继续扩散。
+    override func paste(_ sender: Any?) {
+        _ = readSelection(from: NSPasteboard.general, type: .string)
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event) ?? NSMenu()
         menu.addItem(.separator())
