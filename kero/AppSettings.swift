@@ -75,6 +75,21 @@ enum TabsLayoutMode: String, CaseIterable, Identifiable, Codable, Sendable, Hash
     }
 }
 
+/// Git 操作逻辑模式（简单模式：GitHub Desktop 风格单列表+勾选提交 / 传统模式：VS Code 风格已暂存与变更分立列表）。
+enum GitOperationMode: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
+    case simple = "simple"
+    case traditional = "traditional"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .simple: return L10n.t("Simple")
+        case .traditional: return L10n.t("Traditional")
+        }
+    }
+}
+
 /// Zsh 闲时标签页名称控制模式。
 enum ZshIdleTitleStyle: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
     case defaultStyle = "default"
@@ -454,6 +469,13 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// Git 操作逻辑模式；默认简单模式。
+    ///
+    /// 写入 `config.toml` 的 `git.operation-mode`。
+    @Published var gitOperationMode: GitOperationMode {
+        didSet { save() }
+    }
+
     /// 用户自定义挑选的 `.app` 代码编辑器路径列表。
     @Published var customCodeEditorPaths: [String] {
         didSet { save() }
@@ -615,6 +637,8 @@ final class AppSettings: nonisolated ObservableObject {
         } else {
             gitCommitMessageEmoji = true
         }
+        gitOperationMode = toml["git.operation-mode"]?.string
+            .flatMap(GitOperationMode.init(rawValue:)) ?? .simple
         customCodeEditorPaths = toml["editor.custom-editors"]?.array?.compactMap(\.string) ?? []
         customCLITools = toml["ai.custom-cli-tools"]?.array?.compactMap(\.string) ?? []
         packageManagerCommand = toml["terminal.package-manager"]?.string
@@ -764,6 +788,7 @@ final class AppSettings: nonisolated ObservableObject {
         aiAPIBaseURL = AIAPIProviderID.openAI.defaultBaseURL
         aiWritingLanguage = .english
         gitCommitMessageEmoji = true
+        gitOperationMode = .simple
         customCodeEditorPaths = []
         customCLITools = []
         scriptRunnerJS = .auto
@@ -915,6 +940,9 @@ final class AppSettings: nonisolated ObservableObject {
         // 默认 true：仅关闭时写回。
         if !gitCommitMessageEmoji {
             lines.append("ai.git-commit-emoji = false")
+        }
+        if gitOperationMode != .simple {
+            lines.append("git.operation-mode = \(TOML.quote(gitOperationMode.rawValue))")
         }
         if !customCodeEditorPaths.isEmpty {
             let quoted = customCodeEditorPaths.map { TOML.quote($0) }.joined(separator: ", ")

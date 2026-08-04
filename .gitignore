@@ -7,7 +7,7 @@ build_derived/
 dist/
 output/
 release/
-
+scratch/
 
 # Bun / node deps
 node_modules/
