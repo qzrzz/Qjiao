@@ -631,7 +631,15 @@ struct ImageBuildView: View {
                     .help(L10n.t("Replace current export settings with a template"))
 
                     Button {
-                        variants.append(ImageExportVariant(sizeText: "1x", suffix: "_build"))
+                        let mode = currentNamingMode
+                        let defaultVal = mode == .suffix ? "_build" : ""
+                        variants.append(
+                            ImageExportVariant(
+                                sizeText: "1x",
+                                suffix: defaultVal,
+                                namingMode: mode
+                            )
+                        )
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .symbolRenderingMode(.hierarchical)
@@ -641,12 +649,36 @@ struct ImageBuildView: View {
                     .help(L10n.t("Add an export row"))
                 }
 
-                // 表头
+                // 表头：尺寸 / 命名模式下拉（Suffix 或 File Name）
                 HStack(spacing: 6) {
                     Text(L10n.t("Size"))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(L10n.t("Suffix"))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Menu {
+                        ForEach(ImageExportNamingMode.allCases) { mode in
+                            Button {
+                                updateAllNamingModes(to: mode)
+                            } label: {
+                                if currentNamingMode == mode {
+                                    Label(mode.title, systemImage: "checkmark")
+                                } else {
+                                    Text(mode.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text(currentNamingMode.title)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
                     Color.clear.frame(width: 18)
                 }
                 .font(.system(size: 10, weight: .medium))
@@ -658,9 +690,14 @@ struct ImageBuildView: View {
                         HStack(spacing: 6) {
                             // 尺寸：可输入 + 预置下拉
                             sizeFieldWithPresets(text: $row.sizeText)
-                            TextField("", text: $row.suffix)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 11).monospaced())
+                            TextField(
+                                row.namingMode == .suffix
+                                    ? L10n.t("Suffix")
+                                    : L10n.t("File Name"),
+                                text: $row.suffix
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11).monospaced())
                             Button {
                                 guard variants.count > 1 else { return }
                                 variants.removeAll { $0.id == row.id }
@@ -735,50 +772,19 @@ struct ImageBuildView: View {
         }
     }
 
-    // MARK: - Shared chrome
+    // MARK: - Derived
 
-    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.primary.opacity(0.035))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-            )
+    /// 当前导出的命名模式（优先取第一行，若无变体则默认 Suffix）
+    private var currentNamingMode: ImageExportNamingMode {
+        variants.first?.namingMode ?? .suffix
     }
 
-    private func labeledRow<Content: View>(
-        _ title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .frame(width: Self.labelWidth, alignment: .leading)
-            content()
+    /// 切换表头命名模式时，同步更新所有变体行的命名模式
+    private func updateAllNamingModes(to mode: ImageExportNamingMode) {
+        for i in variants.indices {
+            variants[i].namingMode = mode
         }
     }
-
-    private func statusBanner(_ text: String, kind: BannerKind) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(kind == .error ? Color.red : Color.secondary)
-            .monospacedDigit()
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private enum BannerKind {
-        case error, success
-    }
-
-    // MARK: - Derived
 
     private var sourceSummaryTitle: String {
         if sourcePaths.count == 1 {
@@ -946,6 +952,49 @@ struct ImageBuildView: View {
         }
     }
 
+    // MARK: - Shared chrome
+
+    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.primary.opacity(0.035))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            )
+    }
+
+    private func labeledRow<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(width: Self.labelWidth, alignment: .leading)
+            content()
+        }
+    }
+
+    private func statusBanner(_ text: String, kind: BannerKind) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(kind == .error ? Color.red : Color.secondary)
+            .monospacedDigit()
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private enum BannerKind {
+        case error, success
+    }
+
     // MARK: - Helpers
 
     /// 用模板**完整替换**当前导出变体表（不追加）；每行新 UUID 以免列表复用旧行。
@@ -954,7 +1003,8 @@ struct ImageBuildView: View {
             ImageExportVariant(
                 id: UUID(),
                 sizeText: row.sizeText,
-                suffix: row.suffix
+                suffix: row.suffix,
+                namingMode: row.namingMode
             )
         }
         // onChange(variants) 会持久化本次模板选择
