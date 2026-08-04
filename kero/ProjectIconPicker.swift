@@ -89,7 +89,7 @@ struct ProjectFileIconImage: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
-        .task(id: "f:\(path)@\(String(format: "%.1f", size))") {
+        .task(id: "f:\(path)@\(String(format: "%.1f", size))#\(ProjectIconThumbnailCache.cacheVersion)") {
             image = nil
             didFail = false
             await load()
@@ -132,9 +132,11 @@ struct ProjectFileIconImage: View {
 enum ProjectIconThumbnailCache {
     private static let images = NSCache<NSString, NSImage>()
     private static let templates = NSCache<NSString, NSNumber>()
+    private(set) static var cacheVersion: UInt64 = 0
 
     /// 清理所有图片与模板缓存，确保图标更新后及时重新渲染。
     static func clearCache() {
+        cacheVersion &+= 1
         images.removeAllObjects()
         templates.removeAllObjects()
     }
@@ -271,7 +273,7 @@ struct ProjectPresetIconImage: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
-        .task(id: ProjectIconThumbnailCache.key(for: preset, pointSize: size, isDarkMode: isDarkMode)) {
+        .task(id: "\(ProjectIconThumbnailCache.key(for: preset, pointSize: size, isDarkMode: isDarkMode))#\(ProjectIconThumbnailCache.cacheVersion)") {
             loadedImage = nil
             didFail = false
             if lazyLoad {
@@ -1966,8 +1968,7 @@ struct ProjectIconPicker: View {
         } else if case .file = project.icon {
             ProjectIconFileStore.removeManagedIcons(for: project.id)
         }
-        ProjectIconThumbnailCache.clearCache()
-        project.objectWillChange.send()
+        // icon.didSet：clearCache + saveConfig + objectWillChange（赋值后发送）。
         project.icon = icon
         dismiss()
     }
@@ -1976,8 +1977,7 @@ struct ProjectIconPicker: View {
         if case .file = project.icon {
             ProjectIconFileStore.removeManagedIcons(for: project.id)
         }
-        ProjectIconThumbnailCache.clearCache()
-        project.objectWillChange.send()
+        // icon.didSet：clearCache + saveConfig + objectWillChange（赋值后发送）。
         project.icon = nil
         dismiss()
     }

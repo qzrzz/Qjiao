@@ -153,8 +153,7 @@ enum LocalAIProjectMetaSuggest {
             if case .file = project.icon {
                 ProjectIconFileStore.removeManagedIcons(for: project.id)
             }
-            ProjectIconThumbnailCache.clearCache()
-            project.objectWillChange.send()
+            // icon.didSet：clearCache + saveConfig + objectWillChange（赋值后发送）。
             project.icon = icon
         } else {
             // 仅名称/描述变更时也落盘

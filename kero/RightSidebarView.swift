@@ -199,6 +199,9 @@ struct RightSidebarView: View {
     /// 下半区底栏选中项：system / note。
     @AppStorage("rightSidebarBottomTab") private var bottomTabRaw: String = RightBottomPanel.system.rawValue
     @State private var wasCWDVisible = false
+    /// Git root 跟随节流计数：2s timer 每 5 拍（10s）重新解析一次 gitRoot（含
+    /// 前台作业 cwd / Agent worktree 跟随），事件路径（cd / 命令完成 / 激活）仍即时。
+    @State private var gitSyncTick = 0
     /// 从 Files 树打开的 ImageBuild 会话
     @State private var imageBuildSession: ImageBuildSession?
 
@@ -279,26 +282,37 @@ struct RightSidebarView: View {
             }
         }
         .onAppear {
+            git.setAutoRefreshEnabled(manager.isPanelVisible)
             syncModels(reloadActivePanel: true)
             syncSystemPolling()
             syncNoteBinding()
         }
-        // 进程、端口与文件信息继续按需轮询；Git 在侧栏打开时持续保持状态更新以精确显示角标。
-        .onReceive(refreshTimer) { _ in syncModels(refreshGit: true) }
+        // 进程、端口与文件信息继续按需轮询；Git 改为事件驱动（文件 watcher +
+        // cwd / 命令完成 / 激活等事件）+ GitStatusModel 内部低频兜底心跳。
+        // 每 5 拍（10s）重新解析一次 gitRoot：覆盖 Agent 在进程内 chdir（worktree
+        // 跟随）等不产生 OSC 7 / 事件的变化，避免大仓库每 2s 全量跑 7 个 git 子进程。
+        .onReceive(refreshTimer) { _ in
+            gitSyncTick += 1
+            syncModels(refreshGit: gitSyncTick.isMultiple(of: 5))
+        }
         // 回到前台：恢复 System 轮询（面板可见时）并刷新 Git 角标。
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification
         )) { _ in
             syncSystemPolling()
             refreshGitForExternalEvent()
+            git.setAppActive(true)
         }
-        // 退到后台：立即停止 System 轮询，消除 top 时代的后台空转（原生采集同样无需后台运行）。
+        // 退到后台：立即停止 System 轮询与 Git 自动刷新（心跳 + watcher 事件），
+        // 消除后台空转；期间的文件变化记 pending，聚焦后补刷。
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didResignActiveNotification
         )) { _ in
             systemInfo.setActive(false)
+            git.setAppActive(false)
         }
         .onChange(of: manager.isPanelVisible) {
+            git.setAutoRefreshEnabled(manager.isPanelVisible)
             syncModels(reloadActivePanel: manager.isPanelVisible)
             syncSystemPolling()
             // 隐藏右侧栏时先落盘，避免防抖未到就丢改动。
@@ -859,7 +873,10 @@ struct RightSidebarView: View {
         guard let project = manager.selectedProject, manager.isPanelVisible else { return }
         let session = manager.selectedSession
 
-        // 无论当前 panelTab 是什么，只要侧边栏可见且 refreshGit 为 true，都更新 git 状态以实时保持 Git 角标数量精准。
+        // 无论当前 panelTab 是什么，只要侧边栏可见且 refreshGit 为 true（事件驱动
+        // 路径：cwd 变化 / 命令完成 / 项目切换 / 应用激活），都更新 git 状态以实时
+        // 保持 Git 角标数量精准。定时轮询路径（refreshGit=false）不再驱动 Git——
+        // 由 GitStatusModel 内部文件 watcher + 低频兜底心跳负责。
         // 优先使用当前 terminal session 的 cwd，若无 session 或 cwd 为空则回退到项目根目录，确保切换项目时即时同步 Git 状态。
         if refreshGit {
             let root = project.gitRoot(
