@@ -1326,6 +1326,25 @@ final class TerminalManager: nonisolated ObservableObject {
         )
     }
 
+    /// Opens the selected path as changed by one historical commit.
+    func openCommitDiff(
+        repoRoot: String,
+        path: String,
+        commitHash: String,
+        parentHash: String?,
+        status: Character,
+        origPath: String?
+    ) {
+        selectedProject?.openCommitDiff(
+            repoRoot: repoRoot,
+            path: path,
+            commitHash: commitHash,
+            parentHash: parentHash,
+            status: status,
+            origPath: origPath
+        )
+    }
+
     /// Saves the focused pane if it holds a file.
     func saveSelectedFile() {
         if case .file(let file)? = selectedProject?.focusedContent {
@@ -1663,6 +1682,16 @@ final class TerminalManager: nonisolated ObservableObject {
         case .browser(let browser):
             return .browser(url: browser.snapshotURL)
         case .diff(let diff):
+            if let commitHash = diff.commitHash {
+                return .commitDiff(
+                    repoRoot: diff.repoRoot,
+                    path: diff.path,
+                    commitHash: commitHash,
+                    parentHash: diff.commitParentHash,
+                    status: diff.commitStatus.map(String.init) ?? "M",
+                    origPath: diff.origPath
+                )
+            }
             return .diff(
                 repoRoot: diff.repoRoot, path: diff.path, staged: diff.staged,
                 untracked: diff.untracked, origPath: diff.origPath

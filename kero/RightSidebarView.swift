@@ -566,6 +566,16 @@ struct RightSidebarView: View {
                         untracked: entry.isUntracked,
                         origPath: entry.origPath
                     )
+                },
+                openCommitDiff: { commit, file in
+                    manager.openCommitDiff(
+                        repoRoot: git.repoRoot,
+                        path: file.path,
+                        commitHash: commit.hash,
+                        parentHash: commit.parentHash,
+                        status: file.status,
+                        origPath: file.originalPath
+                    )
                 }
             )
         }

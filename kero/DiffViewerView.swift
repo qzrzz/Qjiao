@@ -15,15 +15,45 @@ private nonisolated final class DiffPipeData: @unchecked Sendable {
     var value = Data()
 }
 
+/// Lightweight UI state that should follow Qjiao across launches without
+/// becoming a user-facing TOML setting.
+private enum DiffViewPreferences {
+    private static let layoutKey = "diffView.layout"
+    private static let modeKey = "diffView.mode"
+
+    static var diffStyle: DiffStyle {
+        get {
+            guard let rawValue = UserDefaults.standard.string(forKey: layoutKey),
+                  let style = DiffStyle(rawValue: rawValue)
+            else { return .unified }
+            return style
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: layoutKey)
+        }
+    }
+
+    static var prefersEditing: Bool {
+        get { UserDefaults.standard.string(forKey: modeKey) == "edit" }
+        set {
+            UserDefaults.standard.set(newValue ? "edit" : "review", forKey: modeKey)
+        }
+    }
+}
+
 /// Observable inputs for a diff tab's web view. Owned by `DiffTab` and also
 /// retained by the tab's long-lived hosting view, so it must never reference
 /// the `DiffTab` back (that would leak the tab through a retain cycle).
 @MainActor
 final class DiffWebModel: nonisolated ObservableObject {
+    @Published var fileID = ""
     @Published var oldContent = ""
     @Published var newContent = ""
     @Published var fileName = ""
-    @Published var diffStyle: DiffStyle = .unified
+    @Published var diffStyle: DiffStyle = DiffViewPreferences.diffStyle
+    @Published var isEditing = false
+    var onFileEditChange: ((String, String) -> Void)?
+    var onFileEditComplete: ((String, String) -> Void)?
     @Published var overflowMode: OverflowMode = .scroll
     /// The WKWebView renders blank until its JS bundle has drawn the diff;
     /// a skeleton covers it until the bridge reports ready.
@@ -47,10 +77,26 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
     /// Previous path when the change is a rename/copy; the "before" side
     /// reads from here so renames diff old file → new file like VS Code.
     var origPath: String?
+    /// Historical commit shown by this tab. Nil keeps the existing
+    /// index/worktree behavior.
+    let commitHash: String?
+    /// First parent and name-status metadata used to describe a historical
+    /// comparison in the tab strip.
+    let commitParentHash: String?
+    let commitStatus: Character?
 
     @Published private(set) var error: String?
     @Published private(set) var isLoading = true
     @Published private(set) var isUnmerged = false
+    @Published private(set) var isEditable = false
+    @Published private(set) var isDirty = false
+    @Published var saveError: String?
+    /// 磁盘上的最新内容；编辑后与 `editedNewContent` 比较得出 dirty 状态。
+    private var savedNewContent = ""
+    /// Live text emitted by Pierre's editor. Kept out of `DiffWebModel` while
+    /// editing so a keystroke does not rebuild the CodeView item that owns the
+    /// editor, selection, and undo stack.
+    private var editedNewContent = ""
 
     let web = DiffWebModel()
 
@@ -65,13 +111,32 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
     private nonisolated static let maxBytes = 5 << 20
     private var reloadGeneration: UInt = 0
 
-    init(repoRoot: String, path: String, staged: Bool, untracked: Bool, origPath: String?) {
+    init(
+        repoRoot: String,
+        path: String,
+        staged: Bool,
+        untracked: Bool,
+        origPath: String?,
+        commitHash: String? = nil,
+        commitParentHash: String? = nil,
+        commitStatus: Character? = nil
+    ) {
         self.repoRoot = repoRoot
         self.path = path
         self.staged = staged
         self.untracked = untracked
         self.origPath = origPath
+        self.commitHash = commitHash
+        self.commitParentHash = commitParentHash
+        self.commitStatus = commitStatus
         web.fileName = name
+        web.fileID = path
+        web.onFileEditChange = { [weak self] fileID, contents in
+            self?.updateEditedContent(fileID: fileID, contents: contents)
+        }
+        web.onFileEditComplete = { [weak self] fileID, contents in
+            self?.completeEditing(fileID: fileID, contents: contents)
+        }
         reload()
     }
 
@@ -80,7 +145,18 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
     }
 
     var title: String {
-        staged ? name + " (Staged)" : name
+        if let commitHash {
+            let after = "\(name) (\(commitHash.prefix(7)))"
+            guard let commitParentHash else { return after }
+            let beforeName = ((origPath ?? path) as NSString).lastPathComponent
+            let before = "\(beforeName) (\(commitParentHash.prefix(7)))"
+            switch commitStatus {
+            case "A": return after
+            case "D": return before
+            default: return "\(before) ↔ \(after)"
+            }
+        }
+        return staged ? name + " (Staged)" : name
     }
 
     func reload() {
@@ -93,14 +169,27 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
         let oldPath = origPath ?? path
         let staged = staged
         let untracked = untracked
+        let commitHash = commitHash
+
+        // Keep the editor's document and undo history stable until the user
+        // leaves edit mode, and never replace an unsaved buffer from disk.
+        guard !web.isEditing, !isDirty else { return }
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 var failureVar: String?
-                let unmerged = !staged && Self.isUnmerged(path: path, in: root)
+                let unmerged = commitHash == nil && !staged
+                    && Self.isUnmerged(path: path, in: root)
                 let old: String
                 let new: String
-                if staged {
+                if let commitHash {
+                    old = Self.firstGitContent(
+                        ["\(commitHash)^:\(oldPath)"], in: root, error: &failureVar
+                    )
+                    new = Self.firstGitContent(
+                        ["\(commitHash):\(path)"], in: root, error: &failureVar
+                    )
+                } else if staged {
                     old = Self.firstGitContent(
                         ["HEAD:\(oldPath)"], in: root, error: &failureVar
                     )
@@ -122,15 +211,83 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
                     }
                     new = Self.readWorktreeFile(root: root, path: path, error: &failureVar)
                 }
-                return (old: old, new: new, failure: failureVar, unmerged: unmerged)
+                return (
+                    old: old,
+                    new: new,
+                    failure: failureVar,
+                    unmerged: unmerged,
+                    editable: !staged && Self.isEditableWorktreeFile(root: root, path: path)
+                )
             }.value
             guard let self, self.reloadGeneration == generation else { return }
             self.isLoading = false
             self.error = result.failure
             self.isUnmerged = result.unmerged
+            self.isEditable = result.editable && result.failure == nil
+            self.web.isEditing = self.isEditable && DiffViewPreferences.prefersEditing
+            self.savedNewContent = result.new
+            self.editedNewContent = result.new
+            self.isDirty = false
+            self.saveError = nil
             self.web.oldContent = result.old
             self.web.newContent = result.new
         }
+    }
+
+    /// Accepts the updated side emitted by Pierre's editor. The web view owns
+    /// the live document; this mirrored value drives dirty state and saving.
+    func updateEditedContent(fileID: String, contents: String) {
+        guard isEditable, fileID == path else { return }
+        editedNewContent = contents
+        isDirty = contents != savedNewContent
+        if isDirty {
+            // A reload already in flight must not win after the first edit.
+            reloadGeneration &+= 1
+        }
+    }
+
+    /// Once Pierre has torn down its editor, publish the final buffer so the
+    /// read-only diff renders the text the user just reviewed and edited.
+    func completeEditing(fileID: String, contents: String) {
+        updateEditedContent(fileID: fileID, contents: contents)
+        guard isEditable, fileID == path else { return }
+        web.newContent = contents
+    }
+
+    func setDiffStyle(_ style: DiffStyle) {
+        web.diffStyle = style
+        DiffViewPreferences.diffStyle = style
+    }
+
+    func setEditing(_ isEditing: Bool) {
+        guard isEditable else { return }
+        web.isEditing = isEditing
+        DiffViewPreferences.prefersEditing = isEditing
+    }
+
+    func save() {
+        guard isEditable, isDirty else { return }
+        let fileURL = URL(fileURLWithPath: repoRoot, isDirectory: true)
+            .appendingPathComponent(path)
+        do {
+            try editedNewContent.write(to: fileURL, atomically: true, encoding: .utf8)
+            savedNewContent = editedNewContent
+            isDirty = false
+            saveError = nil
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    /// Editing is limited to regular worktree files. In particular, writing a
+    /// symlink atomically would replace the link itself with a regular file.
+    private nonisolated static func isEditableWorktreeFile(root: String, path: String) -> Bool {
+        let url = URL(fileURLWithPath: root, isDirectory: true).appendingPathComponent(path)
+        guard (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              (attributes[.type] as? FileAttributeType) == .typeRegular
+        else { return false }
+        return true
     }
 
     /// Refreshes a live diff when navigation brings it back on screen.
@@ -330,6 +487,115 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
     }
 }
 
+/// Native controls for the materially changed diff toolbar. The surrounding
+/// diff view is legacy SwiftUI, but new interaction stays in AppKit.
+private struct DiffControlsBar: NSViewRepresentable {
+    @Binding var diffStyle: DiffStyle
+    @Binding var isEditing: Bool
+    let canEdit: Bool
+
+    func makeNSView(context: Context) -> DiffControlsNSView {
+        DiffControlsNSView()
+    }
+
+    func updateNSView(_ view: DiffControlsNSView, context: Context) {
+        view.update(
+            diffStyle: diffStyle,
+            isEditing: isEditing,
+            canEdit: canEdit,
+            onDiffStyleChange: { diffStyle = $0 },
+            onEditingChange: { isEditing = $0 }
+        )
+    }
+}
+
+private final class DiffControlsNSView: NSView {
+    private let modeControl = NSSegmentedControl(
+        labels: [
+            L10n.t("Review"),
+            L10n.t("Edit"),
+        ],
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private let layoutControl = NSSegmentedControl(
+        labels: [
+            L10n.t("Unified"),
+            L10n.t("Split"),
+        ],
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private let divider = NSView()
+    private var onDiffStyleChange: ((DiffStyle) -> Void)?
+    private var onEditingChange: ((Bool) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+
+        for control in [modeControl, layoutControl] {
+            control.controlSize = .small
+            control.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(control)
+        }
+        modeControl.target = self
+        modeControl.action = #selector(modeChanged)
+        modeControl.setAccessibilityLabel(L10n.t("Diff Mode"))
+        layoutControl.target = self
+        layoutControl.action = #selector(layoutChanged)
+        layoutControl.setAccessibilityLabel(L10n.t("Diff Layout"))
+
+        divider.wantsLayer = true
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(divider)
+
+        NSLayoutConstraint.activate([
+            layoutControl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            layoutControl.centerYAnchor.constraint(equalTo: centerYAnchor),
+            modeControl.trailingAnchor.constraint(equalTo: layoutControl.leadingAnchor, constant: -8),
+            modeControl.centerYAnchor.constraint(equalTo: centerYAnchor),
+            divider.leadingAnchor.constraint(equalTo: leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: trailingAnchor),
+            divider.bottomAnchor.constraint(equalTo: bottomAnchor),
+            divider.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(
+        diffStyle: DiffStyle,
+        isEditing: Bool,
+        canEdit: Bool,
+        onDiffStyleChange: @escaping (DiffStyle) -> Void,
+        onEditingChange: @escaping (Bool) -> Void
+    ) {
+        self.onDiffStyleChange = onDiffStyleChange
+        self.onEditingChange = onEditingChange
+        layer?.backgroundColor = Theme.background.cgColor
+        divider.layer?.backgroundColor = Theme.divider.cgColor
+
+        layoutControl.selectedSegment = diffStyle == .split ? 1 : 0
+        modeControl.isHidden = !canEdit
+        modeControl.setEnabled(canEdit, forSegment: 1)
+        modeControl.selectedSegment = canEdit && isEditing ? 1 : 0
+    }
+
+    @objc private func modeChanged() {
+        onEditingChange?(modeControl.selectedSegment == 1)
+    }
+
+    @objc private func layoutChanged() {
+        onDiffStyleChange?(layoutControl.selectedSegment == 1 ? .split : .unified)
+    }
+}
+
 /// 为 WebKit Diff 生成与终端设置一致的字体配置。
 private enum DiffViewerFont {
     static func renderOptions(settings: AppSettings) -> PierreDiffRenderOptions {
@@ -376,15 +642,22 @@ private struct DiffWebRoot: View {
         PierreMultiDiffView(
             files: [
                 PierreDiffFile(
-                    id: model.fileName,
+                    id: model.fileID,
                     name: model.fileName,
                     oldContents: model.oldContent,
-                    newContents: model.newContent
+                    newContents: model.newContent,
+                    isEditable: model.isEditing
                 )
             ],
             diffStyle: $model.diffStyle,
             overflowMode: $model.overflowMode,
             renderOptions: DiffViewerFont.renderOptions(settings: settings),
+            onFileEditChange: { fileID, contents in
+                model.onFileEditChange?(fileID, contents)
+            },
+            onFileEditComplete: { fileID, contents in
+                model.onFileEditComplete?(fileID, contents)
+            },
             onReady: {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     model.isReady = true
@@ -443,6 +716,9 @@ struct DiffViewerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let saveError = diff.saveError {
+                saveErrorBar(saveError)
+            }
             if diff.isUnmerged {
                 conflictBanner
             }
@@ -522,25 +798,33 @@ struct DiffViewerView: View {
     }
 
     private var controlBar: some View {
-        HStack {
+        DiffControlsBar(
+            diffStyle: Binding(
+                get: { web.diffStyle },
+                set: { diff.setDiffStyle($0) }
+            ),
+            isEditing: Binding(
+                get: { web.isEditing },
+                set: { diff.setEditing($0) }
+            ),
+            canEdit: diff.isEditable
+        )
+        .frame(height: 37)
+    }
+
+    private func saveErrorBar(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10))
+            Text(L10n.format("Could not save: %@", message))
+                .font(.system(size: 11))
+                .lineLimit(1)
             Spacer(minLength: 0)
-            Picker("", selection: $web.diffStyle) {
-                ForEach(DiffStyle.allCases) { style in
-                    Text(style.displayName).tag(style)
-                }
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .fixedSize()
-            .accessibilityLabel(L10n.t("Diff Layout"))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color(nsColor: Theme.divider))
-                .frame(height: 1)
-        }
+        .foregroundStyle(Color(red: 0.82, green: 0.60, blue: 0.13))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(0.04))
     }
 
     private func placeholder(icon: String, text: String) -> some View {

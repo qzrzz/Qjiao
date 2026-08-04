@@ -43,6 +43,8 @@ struct StatusResult: Equatable, Sendable {
     /// 仓库默认分支（clone 的 origin/HEAD 指向；非 clone 仓库用 main/master 惯例降级）。
     var defaultBranch: String?
     var recentCommits: [GitStatusModel.RecentCommit] = []
+    /// 提交历史超过当前分页上限（多取一条探测）。
+    var hasMoreRecentCommits = false
     var repositoryOperation: String?
     var stashCount = 0
     var loadedDetails = false
@@ -93,7 +95,8 @@ actor GitScanner {
     func loadStatus(
         in root: String,
         includeIgnoredPaths: Bool,
-        recovery: Bool = false
+        recovery: Bool = false,
+        recentCommitLimit: Int = GitStatusModel.defaultRecentCommitPageSize
     ) -> StatusLoadResult {
         let inCooldown = Date() < bypassFsmonitorUntil
         let bypass = recovery || inCooldown
@@ -102,6 +105,7 @@ actor GitScanner {
             includeIgnoredPaths: includeIgnoredPaths,
             bypassFsmonitor: bypass,
             includeDetails: true,
+            recentCommitLimit: recentCommitLimit,
             timeout: recovery ? Self.gitRecoveryTimeout : Self.gitCommandTimeout,
             diagnosticContext: recovery ? "recovery scan" : "status scan"
         )
@@ -116,6 +120,7 @@ actor GitScanner {
                 includeIgnoredPaths: includeIgnoredPaths,
                 bypassFsmonitor: true,
                 includeDetails: true,
+                recentCommitLimit: recentCommitLimit,
                 timeout: Self.gitRecoveryTimeout,
                 diagnosticContext: "auto-heal scan (fsmonitor bypassed)"
             )
@@ -128,13 +133,15 @@ actor GitScanner {
     /// 调用方须先 `recoverFilesystemMonitor`，再以 bypass 全量重扫。
     nonisolated static func loadStatusForRecovery(
         in root: String,
-        includeIgnoredPaths: Bool
+        includeIgnoredPaths: Bool,
+        recentCommitLimit: Int = GitStatusModel.defaultRecentCommitPageSize
     ) -> StatusLoadResult {
         let result = loadStatusOnce(
             in: root,
             includeIgnoredPaths: includeIgnoredPaths,
             bypassFsmonitor: true,
             includeDetails: true,
+            recentCommitLimit: recentCommitLimit,
             timeout: gitRecoveryTimeout,
             diagnosticContext: "Retry recovery (fsmonitor bypassed, independent of scan queue)"
         )
@@ -145,6 +152,7 @@ actor GitScanner {
                 includeIgnoredPaths: includeIgnoredPaths,
                 bypassFsmonitor: true,
                 includeDetails: true,
+                recentCommitLimit: recentCommitLimit,
                 timeout: gitRecoveryTimeout,
                 diagnosticContext: "Retry recovery (git -C, no process cwd)",
                 preferGitDashC: true
@@ -167,13 +175,15 @@ actor GitScanner {
         in root: String,
         includeIgnoredPaths: Bool,
         includeDetails: Bool = false,
-        bypassFsmonitor: Bool = false
+        bypassFsmonitor: Bool = false,
+        recentCommitLimit: Int = GitStatusModel.defaultRecentCommitPageSize
     ) -> StatusLoadResult {
         loadStatusOnce(
             in: root,
             includeIgnoredPaths: includeIgnoredPaths,
             bypassFsmonitor: bypassFsmonitor,
             includeDetails: includeDetails,
+            recentCommitLimit: recentCommitLimit,
             timeout: gitCommandTimeout,
             diagnosticContext: "post-mutation scan"
         )
@@ -249,6 +259,7 @@ actor GitScanner {
         includeIgnoredPaths: Bool,
         bypassFsmonitor: Bool,
         includeDetails: Bool,
+        recentCommitLimit: Int,
         timeout: TimeInterval,
         diagnosticContext: String,
         preferGitDashC: Bool = false
@@ -342,6 +353,7 @@ actor GitScanner {
             var recentCommits: [GitStatusModel.RecentCommit] = []
             var stashCount = 0
             var defaultBranch: String?
+            var hasMoreRecentCommits = false
 
             group.enter()
             detailQueue.async {
@@ -380,16 +392,18 @@ actor GitScanner {
             group.enter()
             detailQueue.async {
                 defer { group.leave() }
-                let log = runGit(
-                    ["log", "-n", "8", "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%ar%x1e"],
-                    in: repoRoot,
-                    config: config,
-                    timeout: timeout,
-                    preferGitDashC: preferGitDashC
-                )
+                // NUL-delimited name-status records preserve every valid path while
+                // supplying the nested file rows used by the commit history rows.
+                // 多取一条探测是否还有更多提交（分页）。
+                let log = runGit([
+                    "log", "-n", "\(recentCommitLimit + 1)", "--decorate=short",
+                    "--pretty=format:%x1e%H%x1f%h%x1f%s%x1f%an%x1f%ar%x1f%P%x1f%D",
+                    "--name-status", "-z",
+                ], in: repoRoot, config: config, timeout: timeout, preferGitDashC: preferGitDashC)
                 let parsed = log.status == 0 ? parseRecentCommits(log.stdout) : []
                 lock.lock()
-                recentCommits = parsed
+                recentCommits = Array(parsed.prefix(recentCommitLimit))
+                hasMoreRecentCommits = parsed.count > recentCommitLimit
                 lock.unlock()
             }
             group.enter()
@@ -449,6 +463,7 @@ actor GitScanner {
             result.remotes = remotes
             result.recentCommits = recentCommits
             result.stashCount = stashCount
+            result.hasMoreRecentCommits = hasMoreRecentCommits
             // 非 clone 仓库（git remote add）没有 remote HEAD symbolic ref，
             // 按 main > master 惯例降级；两者都必须存在于本地分支列表。
             var resolvedDefaultBranch = defaultBranch
@@ -987,13 +1002,62 @@ actor GitScanner {
 
     nonisolated static func parseRecentCommits(_ output: String) -> [GitStatusModel.RecentCommit] {
         output.split(separator: "\u{1e}").compactMap { record in
-            let clean = record.trimmingCharacters(in: .newlines)
-            let fields = clean.split(separator: "\u{1f}", omittingEmptySubsequences: false)
-            guard fields.count == 5 else { return nil }
+            var chunks = record.split(separator: "\u{0}", omittingEmptySubsequences: false)
+                .map(String.init)
+            guard !chunks.isEmpty else { return nil }
+
+            // With --name-status -z, the first status follows the pretty
+            // header after a newline; subsequent statuses are their own NUL
+            // fields. Rename/copy records carry both old and new paths.
+            let headerAndStatus = chunks.removeFirst()
+            let boundary = headerAndStatus.lastIndex(of: "\n")
+            let header = boundary.map { String(headerAndStatus[..<$0]) } ?? headerAndStatus
+            var statusToken = boundary.map {
+                String(headerAndStatus[headerAndStatus.index(after: $0)...])
+            } ?? ""
+            let fields = header.split(separator: "\u{1f}", omittingEmptySubsequences: false)
+            guard fields.count == 7 else { return nil }
+
+            var files: [GitStatusModel.RecentCommit.FileChange] = []
+            var index = 0
+            while !statusToken.isEmpty, index < chunks.count {
+                guard let status = statusToken.first else { break }
+                if status == "R" || status == "C" {
+                    guard index + 1 < chunks.count else { break }
+                    files.append(.init(
+                        status: status,
+                        path: chunks[index + 1],
+                        originalPath: chunks[index]
+                    ))
+                    index += 2
+                } else {
+                    files.append(.init(
+                        status: status,
+                        path: chunks[index],
+                        originalPath: nil
+                    ))
+                    index += 1
+                }
+                guard index < chunks.count else { break }
+                statusToken = chunks[index]
+                index += 1
+            }
+
+            let parentHash = fields[5]
+                .split(separator: " ")
+                .first
+                .map(String.init)
+            let references = fields[6]
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
             return GitStatusModel.RecentCommit(
                 hash: String(fields[0]), shortHash: String(fields[1]),
                 subject: String(fields[2]), author: String(fields[3]),
-                relativeDate: String(fields[4])
+                relativeDate: String(fields[4]),
+                parentHash: parentHash,
+                references: references,
+                files: files
             )
         }
     }

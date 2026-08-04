@@ -48,6 +48,7 @@
   - 文件事件：操作中 / 失焦 / 大仓库（status 上限）跳过自动扫；1s 防抖合并；mutation 后 5s 冷却避免 index 自触发扫。
   - Stage 类操作跳过 HEAD 稳定校验（与 VS Code 一样只跑 `git add`/`restore`）。
 - 大仓库友好：变更上限、未跟踪目录折叠展示、列表惰性渲染；可指定项目级 Git 仓库路径。
+- 提交历史：可展开查看每次提交改动的文件列表（点击打开父→提交的历史 diff），支持分页加载更多。
 - stage / commit / discard、历史提交编辑（Reword / Amend / Drop 等）、大 Diff 虚拟化渲染；右侧 Git 标签显示变更数角标。
 - 多语言（L10n）完整覆盖 Git 操作完成提示（Commit/Push/Pull/Fetch/Stage/Discard/Stash 等状态与输出消息），支持中文与日文实时切换。
 - 扫描失败可强制刷新并自愈 fsmonitor；子进程统一超时与回收，避免句柄泄漏导致状态卡死。
@@ -94,6 +95,8 @@
 
 ## 上游移植记录
 
+- 移植上游 Kero `main` `212ea0a`（Improve the Recent Commits view in git panel，2026-08-04）：提交历史支持展开显示文件变更列表（`--name-status -z` + `--decorate=short` 单命令解析，RecentCommit 增加 `parentHash`/`references`/`files`）、分页加载（每页 8 条、`loadMoreCommits`、按 root 记忆分页位置）、打开历史提交 diff（`openCommitDiff`：父→提交比较，DiffTab 增加 `commitHash`/`commitParentHash`/`commitStatus`，会话快照新增 `commitDiff` 兼容解码）。本地保留 SwiftUI `GitCommitRow`（含 Reword/Amend/Drop/AI Commit 定制）并叠加展开与分页，未跟随上游 AppKit `RecentCommitsView` 重写；未移植上游 `runGit` timeout 参数（本地已统一 SubprocessRunner 超时）。
+- 移植上游 Kero `main` `17bb787` + `dd14529`（Enable direct editing for live worktree diffs，2026-08-04）：PierreDiffsSwift 1.4.1 → 1.5.0；DiffWebModel 增加 fileID/编辑状态/编辑回调，DiffTab 增加 `isEditable`/`isDirty`/`saveError` 编辑状态机（`save`/`updateEditedContent`/`completeEditing`/`setDiffStyle`/`setEditing`，符号链接与 staged diff 不可编辑），`DiffViewPreferences` 记忆布局与编辑偏好；controlBar 替换为 AppKit `DiffControlsBar`（Review/Edit + Unified/Split，L10n 适配，新增 Split Layout 专用词条避免与分屏语义冲突）；关闭未保存确认泛化为 PaneContent（支持 diff），Tab 标签显示 dirty 标记。未移植：上游 `runGit` 的 timeout 参数与 10s 全局 deadline（本地已统一走 SubprocessRunner 超时/回收）。
 - 移植上游 Kero `main` `3f0cdd8`（add toolbar）的 GitStatusModel 增量（2026-08-04）：`defaultBranch` 采用优化实现——`for-each-ref --format="%(refname:short) %(symref)" refs/remotes` 单命令并行解析所有 remote 的 symbolic HEAD（origin 优先），非 clone 仓库按 main > master 惯例降级，均校验必须存在于本地分支列表；替代上游串行 `symbolic-ref` 实现。`cachedStatusByRoot` 未直接移植，改为单槽 root 快照优化本地 `isSwitchingRoot`：`apply` 时保存最近一次成功解析结果，`sync(root:)` 切回同一 root 时立即 `apply` 恢复正确内容（不锁交互、后台刷新纠偏），多 root 循环退化为原路径。未移植：`lineAdditions`/`lineDeletions`/numstat 行数统计与未跟踪行数计数（用户不需要）、底部工具栏 UI 与 `toolbarVisibility` 设置（与本地右侧栏 Git 面板重叠）、`defaultBranch` 目前无 UI 消费方。
 - 移植上游 Kero `main` `dae03e9`（Improve Git operation progress and error feedback，2026-08-04）的增量部分：本地已有同构的 `GitActionTarget` + `beginGitAction` 机制（覆盖 stage/unstage/discard/commit/sync），本轮补充更多菜单、分支菜单、提交选项菜单与初始化仓库的 spinner 触发源，`beginGitAction` 发起新操作时折叠旧操作输出，主操作按钮 accessibility 进度标签（L10n 三语）；保留本地全状态操作横幅（running/succeeded/failed）与内联分支创建输入框，未跟随上游失败横幅与 NSAlert 改造。
 - 本轮移植上游 Kero `main` `90cd6bf` 之前的 unrelease 提交（2026-08-04，`2163068` 之后）：
