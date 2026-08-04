@@ -10,6 +10,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
 set in the Xcode project.
 
+## [1.1.33]
+
+### Added
+
+- Add GitHub Desktop-style simple Git operation mode with checkbox-based commit flow, toggleable in settings.
+- Support generating AI commit suggestions for selected file paths (checking files in simple mode filters the diff).
+- Save AI provider configurations independently per API vendor.
+- Add Image Build export naming modes (`Suffix` / `File Name`) with a preset 10-size macOS icon template set.
+
 ## [1.1.31]
 
 ### Added
