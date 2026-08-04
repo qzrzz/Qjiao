@@ -282,9 +282,9 @@ public enum GitCommitEditor {
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
         if res.status == 0 {
-            return EditResult(success: true, output: combined.isEmpty ? "\(label) succeeded." : combined, errorMessage: nil)
+            return EditResult(success: true, output: combined.isEmpty ? L10n.format("%@ succeeded.", label) : combined, errorMessage: nil)
         } else {
-            let err = combined.isEmpty ? "\(label) failed with exit code \(res.status)" : combined
+            let err = combined.isEmpty ? L10n.format("%@ failed with exit code %d", label, res.status) : combined
             return EditResult(success: false, output: combined, errorMessage: err)
         }
     }
