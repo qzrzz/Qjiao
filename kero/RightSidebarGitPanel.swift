@@ -562,7 +562,11 @@ struct GitPanel: View {
                 commitMessage = consumed
                 if isPendingAICommit {
                     isPendingAICommit = false
-                    performCommit(includeAll: false)
+                    if settings.gitOperationMode == .simple {
+                        performSimpleCommit(amend: false)
+                    } else {
+                        performCommit(includeAll: false)
+                    }
                 }
             }
         }
@@ -625,8 +629,19 @@ struct GitPanel: View {
         guard model.isRepo, !model.repoRoot.isEmpty else { return }
         aiCommitTasks.clearError(model.repoRoot)
         let language = project?.resolvedAIWritingLanguage ?? settings.aiWritingLanguage
+
+        let targetPaths: [String]?
+        if settings.gitOperationMode == .simple {
+            let simplePaths = Set(allSimpleEntries.map(\.path))
+            let checked = checkedPaths.filter { simplePaths.contains($0) }
+            targetPaths = checked.isEmpty ? nil : Array(checked)
+        } else {
+            targetPaths = nil
+        }
+
         aiCommitTasks.start(
             repoRoot: model.repoRoot,
+            targetPaths: targetPaths,
             language: language,
             useEmoji: settings.gitCommitMessageEmoji
         )
@@ -677,18 +692,25 @@ struct GitPanel: View {
             && model.mergeEntries.isEmpty
     }
 
-    /// 执行 AI 完成变更提交：先全部暂存，然后 AI 生成 Commit Message，成功后自动提交。
+    /// 执行 AI 完成变更提交：先全选/暂存，然后 AI 生成 Commit Message，成功后自动提交。
     private func performAICompleteChangesCommit() {
         guard canAICompleteChangesCommit else { return }
         isPendingAICommit = true
-        beginGitAction(.stageAll) {
-            model.stageAll { success in
-                guard success else {
-                    isPendingAICommit = false
-                    activeActionTarget = nil
-                    return
+        if settings.gitOperationMode == .simple {
+            for entry in allSimpleEntries {
+                checkedPaths.insert(entry.path)
+            }
+            startAICommitMessage()
+        } else {
+            beginGitAction(.stageAll) {
+                model.stageAll { success in
+                    guard success else {
+                        isPendingAICommit = false
+                        activeActionTarget = nil
+                        return
+                    }
+                    startAICommitMessage()
                 }
-                startAICommitMessage()
             }
         }
     }

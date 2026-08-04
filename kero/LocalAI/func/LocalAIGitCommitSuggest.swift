@@ -44,6 +44,7 @@ enum LocalAIGitCommitSuggest {
     /// 非 MainActor：可在后台 Task 中调用，避免 CLI 等待时拖住 UI。
     static func suggest(
         repoRoot: String,
+        targetPaths: [String]? = nil,
         language: AIWritingLanguage,
         useEmoji: Bool
     ) async throws -> LocalAIGitCommitSuggestion {
@@ -67,7 +68,7 @@ enum LocalAIGitCommitSuggest {
         }
 
         let diff = try await Task.detached(priority: .userInitiated) {
-            try collectDiff(in: root)
+            try collectDiff(in: root, targetPaths: targetPaths)
         }.value
 
         try Task.checkCancellation()
@@ -159,13 +160,41 @@ enum LocalAIGitCommitSuggest {
     /// - Parameter repoRoot: 仓库根目录绝对路径。
     /// - Returns: 格式化与截断后的 Git Diff 字符串。
     /// - Throws: `LocalAIGitCommitSuggestError.noChanges` 当没有任何可用的变更时。
-    nonisolated static func collectDiff(in repoRoot: String) throws -> String {
+    nonisolated static func collectDiff(in repoRoot: String, targetPaths: [String]? = nil) throws -> String {
+        let cleanTargets = targetPaths?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let hasTargets = cleanTargets != nil && !cleanTargets!.isEmpty
+
+        if hasTargets {
+            var sections: [String] = []
+            if let staged = compactDiffSection(title: "Staged", cached: true, targetPaths: cleanTargets, in: repoRoot) {
+                sections.append(staged)
+            }
+            if let unstaged = compactDiffSection(title: "Unstaged", cached: false, targetPaths: cleanTargets, in: repoRoot) {
+                sections.append(unstaged)
+            }
+            let targetSet = Set(cleanTargets!)
+            let untracked = listUntrackedPaths(in: repoRoot).filter { targetSet.contains($0) }
+            if !untracked.isEmpty {
+                var block = "## Untracked files (paths only)\n"
+                for path in untracked.prefix(maxUntrackedList) {
+                    block += "- \(path)\n"
+                }
+                sections.append(block)
+            }
+            let combined = sections.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !combined.isEmpty else {
+                throw LocalAIGitCommitSuggestError.noChanges
+            }
+            return finalizeDiff(combined)
+        }
+
         // 1) 判断已暂存 (Staged) 变更是否存在
         if hasStagedChanges(in: repoRoot) {
             // 已暂存存在：仅描述已暂存 (Staged)
             let stagedSummary = compactDiffSection(
                 title: "Staged",
                 cached: true,
+                targetPaths: nil,
                 in: repoRoot
             )
             if let stagedSummary {
@@ -181,6 +210,7 @@ enum LocalAIGitCommitSuggest {
         if let unstaged = compactDiffSection(
             title: "Unstaged",
             cached: false,
+            targetPaths: nil,
             in: repoRoot
         ) {
             sections.append(unstaged)
@@ -210,15 +240,20 @@ enum LocalAIGitCommitSuggest {
     nonisolated private static func compactDiffSection(
         title: String,
         cached: Bool,
+        targetPaths: [String]? = nil,
         in repoRoot: String
     ) -> String? {
+        let pathArgs: [String] = (targetPaths != nil && !targetPaths!.isEmpty)
+            ? ["--"] + targetPaths!
+            : []
+
         let base = cached
             ? ["diff", "--cached"]
             : ["diff"]
 
         // 文件状态列表（轻量）
         let nameStatus = GitStatusModel.runGit(
-            base + ["--name-status", "--find-renames", "--no-color"],
+            base + ["--name-status", "--find-renames", "--no-color"] + pathArgs,
             in: repoRoot
         )
         let names = nameStatus.status == 0
@@ -227,7 +262,7 @@ enum LocalAIGitCommitSuggest {
 
         // 行数统计（轻量）
         let stat = GitStatusModel.runGit(
-            base + ["--stat=72", "--no-color"],
+            base + ["--stat=72", "--no-color"] + pathArgs,
             in: repoRoot
         )
         let statText = stat.status == 0
@@ -242,7 +277,7 @@ enum LocalAIGitCommitSuggest {
                 "--unified=0",
                 "--ignore-space-change",
                 "--diff-filter=ACDMRTUXB",
-            ],
+            ] + pathArgs,
             in: repoRoot
         )
         let rawPatch = patchRun.status == 0

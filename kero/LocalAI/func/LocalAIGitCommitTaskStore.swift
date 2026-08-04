@@ -50,7 +50,12 @@ final class LocalAIGitCommitTaskStore: ObservableObject {
     ///   - repoRoot: 仓库根目录。
     ///   - language: 已解析的写作语言。
     ///   - useEmoji: 是否 Gitmoji。
-    func start(repoRoot: String, language: AIWritingLanguage, useEmoji: Bool) {
+    func start(
+        repoRoot: String,
+        targetPaths: [String]? = nil,
+        language: AIWritingLanguage,
+        useEmoji: Bool
+    ) {
         let key = normalize(repoRoot)
         guard !key.isEmpty else {
             var s = states[key] ?? LocalAIGitCommitTaskState()
@@ -94,6 +99,7 @@ final class LocalAIGitCommitTaskStore: ObservableObject {
                 try Task.checkCancellation()
                 let suggestion = try await LocalAIGitCommitSuggest.suggest(
                     repoRoot: key,
+                    targetPaths: targetPaths,
                     language: language,
                     useEmoji: useEmoji
                 )
