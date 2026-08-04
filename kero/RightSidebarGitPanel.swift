@@ -46,6 +46,7 @@ struct GitPanel: View {
 
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var aiCommitTasks = LocalAIGitCommitTaskStore.shared
+    @ObservedObject private var l10n = L10n.shared
 
     @State private var commitMessage = ""
     @State private var pendingDiscard: PendingDiscard?
@@ -80,9 +81,9 @@ struct GitPanel: View {
                 statusFailure(statusError)
             } else if !model.isRepo {
                 if model.isResolvingInitialStatus {
-                    placeholder(icon: "arrow.clockwise", text: "Finding repository…")
+                    placeholder(icon: "arrow.clockwise", text: L10n.t("Finding repository…"))
                 } else if model.isBusy {
-                    placeholder(icon: "hourglass", text: "Finishing Git operation…")
+                    placeholder(icon: "hourglass", text: L10n.t("Finishing Git operation…"))
                 } else {
                     notRepository
                 }
@@ -285,7 +286,7 @@ struct GitPanel: View {
             Divider()
             Button(L10n.t("Stash All Changes")) { model.stash(includeUntracked: true) }
                 .disabled(model.isInteractionLocked || model.totalChangeCount == 0)
-            Button(model.stashCount == 1 ? "Pop Stash" : "Pop Stash (\(model.stashCount))") {
+            Button(model.stashCount == 1 ? L10n.t("Pop Stash") : L10n.format("Pop Stash (%d)", model.stashCount)) {
                 model.stashPop()
             }
             .disabled(model.isInteractionLocked || model.stashCount == 0)
@@ -319,7 +320,7 @@ struct GitPanel: View {
                 Image(systemName: model.hasUpstream ? "arrow.triangle.2.circlepath" : "icloud.slash")
                     .font(SidebarTypography.micro())
                     .foregroundStyle(.tertiary)
-                Text(model.upstream ?? (branch == "detached HEAD" ? "Detached HEAD" : "Unpublished branch"))
+                Text(model.upstream ?? (branch == "detached HEAD" ? L10n.t("Detached HEAD") : L10n.t("Unpublished branch")))
                     .font(SidebarTypography.section())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -351,7 +352,7 @@ struct GitPanel: View {
                     Text(current)
                         .font(SidebarTypography.caption(.medium))
                     Text(model.mergeEntries.isEmpty
-                         ? "Finish or abort from the terminal"
+                         ? L10n.t("Finish or abort from the terminal")
                          : "Resolve and stage \(model.mergeEntries.count) conflicted \(model.mergeEntries.count == 1 ? "file" : "files")")
                         .font(SidebarTypography.section())
                         .foregroundStyle(.secondary)
@@ -455,7 +456,7 @@ struct GitPanel: View {
                 Image(systemName: "arrow.triangle.branch")
                     .font(SidebarTypography.caption())
                     .foregroundStyle(.secondary)
-                TextField("New branch name", text: $newBranchName)
+                TextField(L10n.t("New branch name"), text: $newBranchName)
                     .textFieldStyle(.plain)
                     .font(SidebarTypography.secondary())
                     .focused($branchFieldFocused)
@@ -876,7 +877,7 @@ struct GitPanel: View {
                 Image(systemName: "magnifyingglass")
                     .font(SidebarTypography.caption())
                     .foregroundStyle(.tertiary)
-                TextField("Filter changed files", text: $filterText)
+                TextField(L10n.t("Filter changed files"), text: $filterText)
                     .textFieldStyle(.plain)
                     .font(SidebarTypography.secondary())
                 if !filterText.isEmpty {

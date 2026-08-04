@@ -134,9 +134,9 @@ final class GitStatusModel: nonisolated ObservableObject {
 
         var statusLabel: String {
             switch state {
-            case .running: return label + "…"
-            case .succeeded: return label + " completed"
-            case .failed: return label + " failed"
+            case .running: return L10n.format("%@…", label)
+            case .succeeded: return L10n.format("%@ completed", label)
+            case .failed: return L10n.format("%@ failed", label)
             }
         }
     }
@@ -698,7 +698,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         let paths = [entry.path] + original
         let pathSet = Set(paths)
         perform(
-            label: "Stage \(entry.fileName)",
+            label: L10n.format("Stage %@", entry.fileName),
             commands: [["--literal-pathspecs", "add", "-A", "--"] + paths],
             // stage 不依赖 HEAD 稳定；跳过 rev-parse 校验加快按钮响应（对齐 VS Code）。
             requiresStableHead: false,
@@ -717,7 +717,7 @@ final class GitStatusModel: nonisolated ObservableObject {
             ? ["--literal-pathspecs", "restore", "--staged", "--"] + paths
             : ["--literal-pathspecs", "rm", "--cached", "-f", "--"] + paths
         perform(
-            label: "Unstage \(entry.fileName)",
+            label: L10n.format("Unstage %@", entry.fileName),
             commands: [args],
             requiresStableHead: false,
             optimisticUpdate: { [weak self] in
@@ -730,7 +730,7 @@ final class GitStatusModel: nonisolated ObservableObject {
     /// - Parameter completion: 完成后的回调，传入操作是否成功。
     func stageAll(completion: (@MainActor (Bool) -> Void)? = nil) {
         perform(
-            label: "Stage all changes",
+            label: L10n.t("Stage all changes"),
             commands: [["add", "-A"]],
             requiresStableHead: false,
             completion: completion,
@@ -745,7 +745,7 @@ final class GitStatusModel: nonisolated ObservableObject {
             ? ["restore", "--staged", "--", "."]
             : ["rm", "--cached", "-r", "-f", "--", "."]
         perform(
-            label: "Unstage all changes",
+            label: L10n.t("Unstage all changes"),
             commands: [args],
             requiresStableHead: false,
             optimisticUpdate: { [weak self] in
@@ -760,7 +760,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         guard validate(entry) else { return }
         if entry.isIntentToAdd {
             perform(
-                label: "Remove intent-to-add for \(entry.fileName)",
+                label: L10n.format("Remove intent-to-add for %@", entry.fileName),
                 commands: [[
                     "--literal-pathspecs", "rm", "--cached", "-f", "--", entry.path,
                 ]]
@@ -768,27 +768,27 @@ final class GitStatusModel: nonisolated ObservableObject {
                 guard success else { return }
                 self?.trash(
                     paths: [entry.path],
-                    label: "Move \(entry.fileName) to Trash",
+                    label: L10n.format("Move %@ to Trash", entry.fileName),
                     completedBefore: "Removed the intent-to-add index entry."
                 )
             }
         } else if entry.isUntracked || entry.isWorktreeCopy {
-            trash(paths: [entry.path], label: "Move \(entry.fileName) to Trash")
+            trash(paths: [entry.path], label: L10n.format("Move %@ to Trash", entry.fileName))
         } else if entry.isWorktreeRename, let original = entry.origPath {
             perform(
-                label: "Restore \((original as NSString).lastPathComponent)",
+                label: L10n.format("Restore %@", (original as NSString).lastPathComponent),
                 commands: [["--literal-pathspecs", "restore", "--worktree", "--", original]]
             ) { [weak self] success in
                 guard success else { return }
                 self?.trash(
                     paths: [entry.path],
-                    label: "Move \(entry.fileName) to Trash",
+                    label: L10n.format("Move %@ to Trash", entry.fileName),
                     completedBefore: "Restored \((original as NSString).lastPathComponent)."
                 )
             }
         } else {
             perform(
-                label: "Discard changes in \(entry.fileName)",
+                label: L10n.format("Discard changes in %@", entry.fileName),
                 commands: [["--literal-pathspecs", "restore", "--worktree", "--", entry.path]]
             )
         }
@@ -828,7 +828,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         guard !commands.isEmpty || !untracked.isEmpty else { return }
 
         if commands.isEmpty {
-            trash(paths: untracked, label: "Move untracked files to Trash")
+            trash(paths: untracked, label: L10n.t("Move untracked files to Trash"))
         } else {
             var completedSteps: [String] = []
             if !tracked.isEmpty {
@@ -841,11 +841,11 @@ final class GitStatusModel: nonisolated ObservableObject {
                     "Removed \(intentToAdd.count) intent-to-add index entr\(intentToAdd.count == 1 ? "y" : "ies")."
                 )
             }
-            perform(label: "Discard all changes", commands: commands) { [weak self] success in
+            perform(label: L10n.t("Discard all changes"), commands: commands) { [weak self] success in
                 guard success, !untracked.isEmpty else { return }
                 self?.trash(
                     paths: untracked,
-                    label: "Finish discarding all changes",
+                    label: L10n.t("Finish discarding all changes"),
                     completedBefore: completedSteps.joined(separator: "\n")
                 )
             }
@@ -853,7 +853,7 @@ final class GitStatusModel: nonisolated ObservableObject {
     }
 
     func cancelStaleDiscard() {
-        failImmediately("Files changed while the confirmation was open. Review them and try again.")
+        failImmediately(L10n.t("Files changed while the confirmation was open. Review them and try again."))
     }
 
     // MARK: - Commit and remote operations
@@ -867,11 +867,11 @@ final class GitStatusModel: nonisolated ObservableObject {
     ) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            failImmediately("Enter a commit message", completion: completion)
+            failImmediately(L10n.t("Enter a commit message"), completion: completion)
             return
         }
         guard includeAll || !stagedEntries.isEmpty || amend else {
-            failImmediately("Stage changes before committing", completion: completion)
+            failImmediately(L10n.t("Stage changes before committing"), completion: completion)
             return
         }
 
@@ -881,7 +881,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         if amend { commitArgs.append("--amend") }
         commitArgs += ["-m", trimmed]
         commands.append(commitArgs)
-        let label = amend ? "Amend commit" : (includeAll ? "Stage all and commit" : "Commit staged changes")
+        let label = amend ? L10n.t("Amend commit") : (includeAll ? L10n.t("Stage all and commit") : L10n.t("Commit staged changes"))
         // VS Code：commit 后立刻清空 staged（乐观），后台 status 纠偏。
         perform(
             label: label,
@@ -903,11 +903,11 @@ final class GitStatusModel: nonisolated ObservableObject {
     ) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            failImmediately("Enter a commit message", completion: completion)
+            failImmediately(L10n.t("Enter a commit message"), completion: completion)
             return
         }
         guard !checkedEntries.isEmpty || amend else {
-            failImmediately("Select changes before committing", completion: completion)
+            failImmediately(L10n.t("Select changes before committing"), completion: completion)
             return
         }
 
@@ -953,7 +953,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         commitArgs += ["-m", trimmed]
         commands.append(commitArgs)
 
-        let label = amend ? "Amend commit" : "Commit selected changes"
+        let label = amend ? L10n.t("Amend commit") : L10n.t("Commit selected changes")
         perform(
             label: label,
             commands: commands,
@@ -969,11 +969,11 @@ final class GitStatusModel: nonisolated ObservableObject {
 
     func fetch() {
         guard !remotes.isEmpty else {
-            failImmediately("No Git remote is configured")
+            failImmediately(L10n.t("No Git remote is configured"))
             return
         }
         perform(
-            label: "Fetch",
+            label: L10n.t("Fetch"),
             commands: [["fetch", "--all", "--prune"]],
             requiresStableHead: false
         )
@@ -981,11 +981,11 @@ final class GitStatusModel: nonisolated ObservableObject {
 
     func pull() {
         guard hasUpstream else {
-            failImmediately("This branch has no upstream to pull from")
+            failImmediately(L10n.t("This branch has no upstream to pull from"))
             return
         }
         perform(
-            label: "Pull",
+            label: L10n.t("Pull"),
             commands: [["pull", "--ff-only"]],
             requiresStableUpstream: true
         )
@@ -993,56 +993,56 @@ final class GitStatusModel: nonisolated ObservableObject {
 
     func push() {
         guard branch != "detached HEAD" || hasUpstream else {
-            failImmediately("Create or switch to a branch before publishing detached HEAD")
+            failImmediately(L10n.t("Create or switch to a branch before publishing detached HEAD"))
             return
         }
         if hasUpstream {
-            perform(label: "Push", commands: [["push"]], requiresStableUpstream: true)
+            perform(label: L10n.t("Push"), commands: [["push"]], requiresStableUpstream: true)
             return
         }
         guard let remote = unambiguousRemote else {
             failImmediately(remotes.isEmpty
-                ? "Add a Git remote before publishing this branch"
-                : "Choose which remote should receive this branch")
+                ? L10n.t("Add a Git remote before publishing this branch")
+                : L10n.t("Choose which remote should receive this branch"))
             return
         }
-        perform(label: "Publish branch", commands: [["push", "-u", remote, "HEAD"]])
+        perform(label: L10n.t("Publish branch"), commands: [["push", "-u", remote, "HEAD"]])
     }
 
     func publish(to remote: String) {
         guard branch != "detached HEAD" else {
-            failImmediately("Create or switch to a branch before publishing detached HEAD")
+            failImmediately(L10n.t("Create or switch to a branch before publishing detached HEAD"))
             return
         }
         guard remotes.contains(remote) else {
-            failImmediately("The selected Git remote is no longer available")
+            failImmediately(L10n.t("The selected Git remote is no longer available"))
             return
         }
         perform(
-            label: "Publish branch to \(remote)",
+            label: L10n.format("Publish branch to %@", remote),
             commands: [["push", "-u", remote, "HEAD"]]
         )
     }
 
     func syncChanges() {
         guard branch != "detached HEAD" || hasUpstream else {
-            failImmediately("Create or switch to a branch before publishing detached HEAD")
+            failImmediately(L10n.t("Create or switch to a branch before publishing detached HEAD"))
             return
         }
         if hasUpstream {
             perform(
-                label: "Sync changes",
+                label: L10n.t("Sync changes"),
                 commands: [["pull", "--ff-only"], ["push"]],
                 requiresStableUpstream: true
             )
         } else {
             guard let remote = unambiguousRemote else {
                 failImmediately(remotes.isEmpty
-                    ? "Add a Git remote before publishing this branch"
-                    : "Choose which remote should receive this branch")
+                    ? L10n.t("Add a Git remote before publishing this branch")
+                    : L10n.t("Choose which remote should receive this branch"))
                 return
             }
-            perform(label: "Publish branch", commands: [["push", "-u", remote, "HEAD"]])
+            perform(label: L10n.t("Publish branch"), commands: [["push", "-u", remote, "HEAD"]])
         }
     }
 
@@ -1053,17 +1053,17 @@ final class GitStatusModel: nonisolated ObservableObject {
             completion?(name == branch)
             return
         }
-        perform(label: "Switch to \(name)", commands: [["switch", name]], completion: completion)
+        perform(label: L10n.format("Switch to %@", name), commands: [["switch", name]], completion: completion)
     }
 
     func createBranch(named name: String, completion: (@MainActor (Bool) -> Void)? = nil) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            failImmediately("Enter a branch name", completion: completion)
+            failImmediately(L10n.t("Enter a branch name"), completion: completion)
             return
         }
         perform(
-            label: "Create branch \(trimmed)",
+            label: L10n.format("Create branch %@", trimmed),
             commands: [["switch", "-c", trimmed]],
             completion: completion
         )
@@ -1071,29 +1071,29 @@ final class GitStatusModel: nonisolated ObservableObject {
 
     func stash(includeUntracked: Bool = true) {
         guard totalChangeCount > 0 else {
-            failImmediately("There are no changes to stash")
+            failImmediately(L10n.t("There are no changes to stash"))
             return
         }
         var args = ["stash", "push"]
         if includeUntracked { args.append("--include-untracked") }
-        perform(label: "Stash changes", commands: [args])
+        perform(label: L10n.t("Stash changes"), commands: [args])
     }
 
     func stashPop() {
         guard stashCount > 0 else {
-            failImmediately("There are no stashes to pop")
+            failImmediately(L10n.t("There are no stashes to pop"))
             return
         }
-        perform(label: "Pop stash", commands: [["stash", "pop"]])
+        perform(label: L10n.t("Pop stash"), commands: [["stash", "pop"]])
     }
 
     func initializeRepository(completion: (@MainActor (Bool) -> Void)? = nil) {
         guard !rootPath.isEmpty else {
-            failImmediately("Open a terminal directory first", completion: completion)
+            failImmediately(L10n.t("Open a terminal directory first"), completion: completion)
             return
         }
         perform(
-            label: "Initialize repository",
+            label: L10n.t("Initialize repository"),
             commands: [["init"]],
             directory: rootPath,
             completion: completion
@@ -1250,7 +1250,7 @@ final class GitStatusModel: nonisolated ObservableObject {
                     id: operationID,
                     label: label,
                     state: .succeeded,
-                    output: batch.output.isEmpty ? "Completed successfully." : batch.output,
+                    output: batch.output.isEmpty ? L10n.t("Completed successfully.") : batch.output,
                     startedAt: self.operation?.startedAt ?? finishedAt,
                     finishedAt: finishedAt
                 )
@@ -1451,7 +1451,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         lastError = message
         operation = Operation(
             id: UUID(),
-            label: "Git action",
+            label: L10n.t("Git action"),
             state: .failed(exitCode: -1),
             output: message,
             startedAt: Date(),
