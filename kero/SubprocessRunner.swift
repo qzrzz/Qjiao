@@ -247,7 +247,8 @@ nonisolated enum SubprocessRunner {
         var rl = rlimit()
         if getrlimit(RLIMIT_NOFILE, &rl) == 0 {
             let targetLimit = rlim_t(10240)
-            rl.rlim_cur = min(targetLimit, rl.rlim_max)
+            rl.rlim_max = max(rl.rlim_max, targetLimit)
+            rl.rlim_cur = targetLimit
             setrlimit(RLIMIT_NOFILE, &rl)
         }
     }

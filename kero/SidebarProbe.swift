@@ -556,51 +556,17 @@ enum SidebarProbe {
         return ports.sorted { $0.port < $1.port }
     }
 
+    /// 统一通过 SubprocessRunner 执行 ps / lsof 命令，避免频繁读写磁盘临时文件与 Pipe 句柄泄漏。
     private nonisolated static func run(_ executable: String, _ args: [String]) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = args
-
-        // 用临时文件承接输出，避免 ps 输出超过 Pipe 缓冲区时与 wait 互相阻塞。
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qjiao-sidebar-\(UUID().uuidString).log")
-        guard FileManager.default.createFile(atPath: outputURL.path, contents: nil),
-              let output = try? FileHandle(forWritingTo: outputURL)
-        else { return "" }
-        defer {
-            try? output.close()
-            try? FileManager.default.removeItem(at: outputURL)
-        }
-        process.standardOutput = output
-        process.standardError = Pipe()
-
-        let finished = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in finished.signal() }
-
-        do {
-            try process.run()
-        } catch {
-            return ""
-        }
-
-        // ps/lsof 正常应在毫秒级返回；同时响应 Task 取消，并设置 3 秒硬超时。
-        let deadline = Date().addingTimeInterval(3)
-        while finished.wait(timeout: .now() + 0.05) == .timedOut {
-            let isCancelled = withUnsafeCurrentTask { task in
-                task?.isCancelled ?? false
-            }
-            guard !isCancelled, Date() < deadline else {
-                process.terminate()
-                if finished.wait(timeout: .now() + 0.25) == .timedOut {
-                    Darwin.kill(process.processIdentifier, SIGKILL)
-                    _ = finished.wait(timeout: .now() + 0.5)
-                }
-                break
-            }
-        }
-
-        try? output.synchronize()
-        let data = (try? Data(contentsOf: outputURL)) ?? Data()
-        return String(data: data, encoding: .utf8) ?? ""
+        let result = SubprocessRunner.run(
+            SubprocessRunner.Config(
+                executable: executable,
+                arguments: args,
+                timeout: 3.0,
+                drainGrace: 1.0
+            )
+        )
+        guard result.launched else { return "" }
+        return String(data: result.stdout, encoding: .utf8) ?? ""
     }
 }

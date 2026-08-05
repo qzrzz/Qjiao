@@ -237,8 +237,12 @@ public final class FilesFindEngine: @unchecked Sendable {
                     }
                 }
 
+                let stdinPipe = Pipe()
+                process.standardInput = stdinPipe
+
                 do {
                     try process.run()
+                    try? stdinPipe.fileHandleForWriting.close()
                     process.waitUntilExit()
                     handle.readabilityHandler = nil
                     
@@ -247,6 +251,7 @@ public final class FilesFindEngine: @unchecked Sendable {
                     lock.unlock()
                     continuation.resume(returning: finalResults)
                 } catch {
+                    try? stdinPipe.fileHandleForWriting.close()
                     handle.readabilityHandler = nil
                     continuation.resume(throwing: error)
                 }
