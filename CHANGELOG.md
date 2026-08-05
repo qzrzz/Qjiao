@@ -10,6 +10,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
 set in the Xcode project.
 
+## [1.1.36]
+
+### Added
+
+- Support terminal links to local files: ⌘-click to reveal in Finder, ⌘-right-click to open in a new file tab or split pane.
+- Support expanding file changes in Git commit history with paginated loading.
+- Add progress indicators for Git operations (fetch, pull, push, branch switch) and default branch auto-detection.
+- Add multi-language (Chinese & Japanese) support for Git operation status and notifications.
+
+### Fixed
+
+- Fix process stdin pipe handle leaks and ensure PTY jobs are properly terminated upon session release.
+
 ## [1.1.33]
 
 ### Added
