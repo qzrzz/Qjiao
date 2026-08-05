@@ -507,6 +507,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         let requestID = statusRequestID
         isRefreshing = true
         let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
+        let refStart = Date()
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 GitScanner.loadStatusNow(
@@ -516,6 +517,8 @@ final class GitStatusModel: nonisolated ObservableObject {
                     bypassFsmonitor: false
                 )
             }.value
+            let refElapsed = Date().timeIntervalSince(refStart) * 1_000
+            print("[GitStatusModel refreshAfterMutation] loadStatusNow took \(String(format: "%.0fms", refElapsed))")
             guard let self else { return }
             guard self.contextGeneration == generation,
                   self.statusRequestID == requestID,
@@ -1275,8 +1278,12 @@ final class GitStatusModel: nonisolated ObservableObject {
                 }
 
                 for args in commands {
-                    transcript.append("$ git " + Self.displayCommand(args))
+                    let cmdStart = Date()
+                    let displayCmd = Self.displayCommand(args)
+                    transcript.append("$ git " + displayCmd)
                     let run = GitScanner.runGit(args, in: dir)
+                    let cmdElapsed = Date().timeIntervalSince(cmdStart) * 1_000
+                    print("[GitStatusModel perform] git \(displayCmd) took \(String(format: "%.0fms", cmdElapsed))")
                     let text = [run.stdout, run.stderr]
                         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .filter { !$0.isEmpty }
