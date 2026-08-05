@@ -166,6 +166,11 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     }
 
     deinit {
+        MainActor.assumeIsolated {
+            if !hasExited {
+                terminateImmediately()
+            }
+        }
         if let launchDirectoryURL {
             try? FileManager.default.removeItem(at: launchDirectoryURL)
         }
@@ -205,7 +210,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         beginTeardown(processAlive: true, notifyExit: false)
     }
 
-    /// 应用退出时同步停止整个 PTY 作业，避免子进程存活到 Sparkle 替换 App 之后。
+    /// 应用退出或 session 释放时同步停止整个 PTY 作业并解绑 Surface，避免句柄与 GPU 资源残留。
     func terminateImmediately() {
         guard !hasExited, !isTerminating else { return }
         isTerminating = true
@@ -218,6 +223,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         _ = shellPid // 在状态改变前缓存 pid，供进程组信号使用。
         signalTerminalJob(SIGHUP)
         signalTerminalJob(SIGKILL)
+        _terminalView?.controller = nil
         hasExited = true
         removeLaunchArtifacts()
     }
@@ -1306,11 +1312,22 @@ extension TerminalSession: TerminalSurfaceOpenURLDelegate {
             return .file(fileURL)
         }
         guard let url = URL(string: value),
-              url.scheme != nil,
+              let scheme = url.scheme?.lowercased(),
+              Self.openableURLSchemes.contains(scheme),
               !url.isFileURL
         else { return nil }
         return .url(url)
     }
+
+    /// 只放行可交给 NSWorkspace 打开的 scheme。相对路径片段（如
+    /// `src/main.swift:42`）会被 `URL(string:)` 误解析出伪 scheme（`src`），
+    /// 白名单过滤后返回 nil，避免 `NSWorkspace.open` 弹出「应用程序无法
+    /// 打开。-50」。
+    private static let openableURLSchemes: Set<String> = [
+        "http", "https", "mailto", "ftp", "ftps", "ssh", "tel", "sms",
+        "facetime", "message", "geo", "itms", "itmss", "itunes", "music",
+        "podcasts", "appstore", "x-apple.systempreferences", "x-apple",
+    ]
 
     /// Resolves terminal links the way the shell would: `file:` URLs are
     /// already absolute, `~` belongs to the current user, and other paths are
