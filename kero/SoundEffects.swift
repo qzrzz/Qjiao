@@ -185,32 +185,37 @@ final class SoundEffects {
     }
 
     /// 扫描内置自定义音效（WindowsXP / Windows7），去掉前缀后生成展示名称。
+    ///
+    /// 兼容两种打包布局：
+    /// 1. Xcode 同步文件夹会把 wav 拍平到 `Resources/` 根目录（`XP_*.wav` / `Win7_*.wav`）；
+    /// 2. 文件夹引用方式打包时位于 `Resources/Sounds/<category>/` 子目录；
+    /// 3. 本地开发时直接从源码目录扫描。
     private static func scanCustomSounds(category: String, prefix: String) -> [SoundItem] {
         let fm = FileManager.default
-        var soundFileNames: [String] = []
+        var soundFileNames: Set<String> = []
 
-        // 优先从本地源码路径扫描
+        // 候选扫描目录：Bundle 子目录 → Bundle 根目录（拍平布局）→ 本地源码目录
+        var candidateDirs: [URL] = []
+        if let resourceURL = Bundle.main.resourceURL {
+            candidateDirs.append(resourceURL.appendingPathComponent("Sounds/\(category)"))
+            candidateDirs.append(resourceURL)
+        }
         let currentFileURL = URL(fileURLWithPath: #file)
         let keroDir = currentFileURL.deletingLastPathComponent()
-        let localDirURL = keroDir.appendingPathComponent("Sounds").appendingPathComponent(category)
+        candidateDirs.append(keroDir.appendingPathComponent("Sounds").appendingPathComponent(category))
 
-        if let files = try? fm.contentsOfDirectory(at: localDirURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
-            soundFileNames = files.compactMap { url -> String? in
-                guard url.pathExtension.lowercased() == "wav" else { return nil }
-                return url.deletingPathExtension().lastPathComponent
-            }.sorted()
+        for dir in candidateDirs {
+            guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { continue }
+            for url in files {
+                guard url.pathExtension.lowercased() == "wav" else { continue }
+                let rawFileName = url.deletingPathExtension().lastPathComponent
+                // 根目录扫描时只收前缀匹配的，避免混入其它资源
+                guard rawFileName.hasPrefix(prefix) else { continue }
+                soundFileNames.insert(rawFileName)
+            }
         }
 
-        // 备选从 App Bundle 扫描
-        if soundFileNames.isEmpty, let bundleURL = Bundle.main.resourceURL?.appendingPathComponent("Sounds/\(category)"),
-           let files = try? fm.contentsOfDirectory(at: bundleURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
-            soundFileNames = files.compactMap { url -> String? in
-                guard url.pathExtension.lowercased() == "wav" else { return nil }
-                return url.deletingPathExtension().lastPathComponent
-            }.sorted()
-        }
-
-        return soundFileNames.map { rawFileName in
+        return soundFileNames.sorted().map { rawFileName in
             let cleanName: String
             if rawFileName.hasPrefix(prefix) {
                 cleanName = String(rawFileName.dropFirst(prefix.count))

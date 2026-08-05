@@ -104,6 +104,11 @@ nonisolated enum SubprocessRunner {
             try process.run()
         } catch {
             try? stdin.fileHandleForWriting.close()
+            try? stdin.fileHandleForReading.close()
+            try? stdout.fileHandleForReading.close()
+            try? stdout.fileHandleForWriting.close()
+            try? stderr.fileHandleForReading.close()
+            try? stderr.fileHandleForWriting.close()
             return Result(
                 launched: false,
                 exitCode: -1,
@@ -147,6 +152,13 @@ nonisolated enum SubprocessRunner {
             try? errRead.close()
             _ = readers.wait(timeout: .now() + config.drainGrace)
         }
+
+        // 显式回收所有 Pipe 的读写句柄，杜绝文件描述符 (FD) 泄漏
+        try? stdin.fileHandleForReading.close()
+        try? outRead.close()
+        try? stdout.fileHandleForWriting.close()
+        try? errRead.close()
+        try? stderr.fileHandleForWriting.close()
 
         return Result(
             launched: true,
@@ -199,15 +211,25 @@ nonisolated enum SubprocessRunner {
         task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
         task.arguments = ["-P", "\(pid)"]
         let pipe = Pipe()
+        let errPipe = Pipe()
         task.standardOutput = pipe
-        task.standardError = Pipe()
+        task.standardError = errPipe
         do {
             try task.run()
             task.waitUntilExit()
         } catch {
+            try? pipe.fileHandleForReading.close()
+            try? pipe.fileHandleForWriting.close()
+            try? errPipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForWriting.close()
             return
         }
         let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+        try? pipe.fileHandleForReading.close()
+        try? pipe.fileHandleForWriting.close()
+        try? errPipe.fileHandleForReading.close()
+        try? errPipe.fileHandleForWriting.close()
+
         guard let text = String(data: data, encoding: .utf8) else { return }
         for line in text.split(separator: "\n") {
             guard let child = Int32(line.trimmingCharacters(in: .whitespacesAndNewlines)),

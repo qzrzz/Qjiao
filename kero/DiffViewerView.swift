@@ -383,69 +383,32 @@ final class DiffTab: nonisolated ObservableObject, nonisolated Identifiable {
     private nonisolated static func runGitData(
         _ args: [String], in root: String
     ) -> (status: Int32, stdout: Data, stderr: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: root, isDirectory: true)
-        var environment = ProcessInfo.processInfo.environment
-        environment["GIT_OPTIONAL_LOCKS"] = "0"
-        environment["GIT_TERMINAL_PROMPT"] = "0"
-        environment["LC_ALL"] = "C"
-        process.environment = environment
+        var env: [String: String] = [:]
+        env["GIT_OPTIONAL_LOCKS"] = "0"
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["LC_ALL"] = "C"
 
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        // 独立 EOF pipe，避免 FileHandle.nullDevice 被 Process 关闭后全局 EBADF。
-        // 注意：不可在 process.run() 之前 close 写端，否则 posix_spawn file actions 会抛 NSPOSIXErrorDomain code 9。
-        let stdinPipe = Pipe()
-        process.standardInput = stdinPipe
+        let run = SubprocessRunner.run(
+            SubprocessRunner.Config(
+                executable: "/usr/bin/git",
+                arguments: args,
+                workingDirectory: root,
+                environment: env,
+                timeout: 30
+            )
+        )
 
-        do {
-            try process.run()
-            try? stdinPipe.fileHandleForWriting.close()
-        } catch {
-            try? stdinPipe.fileHandleForWriting.close()
-            return (-1, Data(), error.localizedDescription)
+        guard run.launched else {
+            return (-1, Data(), run.launchError ?? "Failed to launch git")
         }
 
-        let outData = DiffPipeData()
-        let errData = DiffPipeData()
         let captureLimit = maxBytes + 1
-        let readers = DispatchGroup()
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
-            // Drain the pipe so Git cannot deadlock, but retain at most one
-            // byte beyond the limit. The index may change between cat-file's
-            // size check and this read while an agent is working.
-            while true {
-                let chunk: Data
-                do {
-                    guard let next = try stdout.fileHandleForReading.read(upToCount: 64 * 1024),
-                          !next.isEmpty else { break }
-                    chunk = next
-                } catch {
-                    break
-                }
-                let remaining = captureLimit - outData.value.count
-                if remaining > 0 {
-                    outData.value.append(chunk.prefix(remaining))
-                }
-            }
-            readers.leave()
-        }
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
-            errData.value = (try? stderr.fileHandleForReading.readToEnd()) ?? Data()
-            readers.leave()
-        }
-        process.waitUntilExit()
-        readers.wait()
+        let truncatedStdout = run.stdout.prefix(captureLimit)
+
         return (
-            process.terminationStatus,
-            outData.value,
-            String(data: errData.value, encoding: .utf8) ?? ""
+            run.exitCode,
+            Data(truncatedStdout),
+            String(data: run.stderr, encoding: .utf8) ?? ""
         )
     }
 

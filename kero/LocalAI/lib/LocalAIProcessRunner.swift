@@ -132,6 +132,12 @@ private actor LocalAIProcessBox {
                 _ = readers.wait(timeout: .now() + 2)
             }
 
+            try? stdin.fileHandleForReading.close()
+            try? stdout.fileHandleForReading.close()
+            try? stdout.fileHandleForWriting.close()
+            try? stderr.fileHandleForReading.close()
+            try? stderr.fileHandleForWriting.close()
+
             let result = LocalAIProcessResult(
                 exitCode: process.terminationStatus,
                 stdout: String(data: outBox.data, encoding: .utf8) ?? "",

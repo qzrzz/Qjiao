@@ -149,8 +149,11 @@ public final class FilesFindEngine: @unchecked Sendable {
                 process.arguments = args
 
                 let pipe = Pipe()
+                let errPipe = Pipe()
+                let stdinPipe = Pipe()
                 process.standardOutput = pipe
-                process.standardError = Pipe()
+                process.standardError = errPipe
+                process.standardInput = stdinPipe
 
                 var fileResultsMap: [String: FileSearchResult] = [:]
                 let lock = NSLock()
@@ -237,14 +240,17 @@ public final class FilesFindEngine: @unchecked Sendable {
                     }
                 }
 
-                let stdinPipe = Pipe()
-                process.standardInput = stdinPipe
-
                 do {
                     try process.run()
                     try? stdinPipe.fileHandleForWriting.close()
                     process.waitUntilExit()
                     handle.readabilityHandler = nil
+
+                    try? pipe.fileHandleForReading.close()
+                    try? pipe.fileHandleForWriting.close()
+                    try? errPipe.fileHandleForReading.close()
+                    try? errPipe.fileHandleForWriting.close()
+                    try? stdinPipe.fileHandleForReading.close()
                     
                     lock.lock()
                     let finalResults = Array(fileResultsMap.values)
@@ -253,6 +259,13 @@ public final class FilesFindEngine: @unchecked Sendable {
                 } catch {
                     try? stdinPipe.fileHandleForWriting.close()
                     handle.readabilityHandler = nil
+
+                    try? pipe.fileHandleForReading.close()
+                    try? pipe.fileHandleForWriting.close()
+                    try? errPipe.fileHandleForReading.close()
+                    try? errPipe.fileHandleForWriting.close()
+                    try? stdinPipe.fileHandleForReading.close()
+
                     continuation.resume(throwing: error)
                 }
             }
