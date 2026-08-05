@@ -45,6 +45,17 @@
             surface?.hasSelection() ?? false
         }
 
+        /// Read the visible viewport as plain text (no temp files).
+        ///
+        /// Use this instead of the `write_screen_file` binding action for
+        /// hot read paths: Ghostty's file export leaks directory fds
+        /// upstream (see `TerminalSurface.readText`), and enough leaks
+        /// eventually exhaust the process fd table and make every
+        /// `Process.run()` fail with EBADF.
+        public func readTerminalText() -> String? {
+            surface?.readText()
+        }
+
         /// Search the screen and scrollback for `needle`, replacing any active
         /// search. An empty needle cancels without dismissing host search UI.
         @discardableResult

@@ -262,13 +262,13 @@ nonisolated enum SubprocessRunner {
 
     /// 在应用启动时提升当前进程的 open file descriptor 软限制（rlimit）。
     ///
-    /// macOS 默认给 GUI App 设置的软限制较小（通常为 256 或 1024）。提升至 10240 可为
+    /// macOS 默认给 GUI App 设置的软限制较小（通常为 256 或 1024）。提升至 65536 可为
     /// 多项目、多终端 Tab 及并发 Git 扫描提供巨大的安全缓冲，杜绝 EMFILE / EBADF 连锁反应。
     nonisolated static func boostFileDescriptorLimit() {
         ensureStandardFileDescriptorsOpen()
         var rl = rlimit()
         if getrlimit(RLIMIT_NOFILE, &rl) == 0 {
-            let targetLimit = rlim_t(10240)
+            let targetLimit = rlim_t(65536)
             rl.rlim_max = max(rl.rlim_max, targetLimit)
             rl.rlim_cur = targetLimit
             setrlimit(RLIMIT_NOFILE, &rl)
@@ -290,10 +290,15 @@ nonisolated enum SubprocessRunner {
         return lines.joined(separator: "\n")
     }
 
-    /// 在 Debug 模式下启动 FD 句柄泄漏巡检任务（每 30s 检查一次）。
-    /// 当打开的 File Descriptors 超过阈值（300）时，控制台输出警报。
-    nonisolated static func startDebugFDMonitor(warningThreshold: Int32 = 300) {
+    /// 启动 FD 句柄泄漏巡检任务（每 30s 检查一次）。
+    /// 当打开的 File Descriptors 超过阈值（release 默认 1500；Debug 用 300）时，控制台输出警报。
+    /// 正常应用的基线约数百（字体缓存、watcher、终端管道），持续增长说明存在泄漏。
+    nonisolated static func startFDMonitor() {
         #if DEBUG
+        let warningThreshold: Int32 = 300
+        #else
+        let warningThreshold: Int32 = 1500
+        #endif
         DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 10) {
             let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .background))
             timer.schedule(deadline: .now(), repeating: .seconds(30))
@@ -305,7 +310,6 @@ nonisolated enum SubprocessRunner {
             }
             timer.resume()
         }
-        #endif
     }
 
     /// 获取当前进程打开的文件描述符数量（仅在统计与巡检时使用）。

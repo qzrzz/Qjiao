@@ -17,7 +17,7 @@ struct keroApp: App {
 
     init() {
         SubprocessRunner.boostFileDescriptorLimit()
-        SubprocessRunner.startDebugFDMonitor()
+        SubprocessRunner.startFDMonitor()
         DisplayCycleLayoutProtection.install()
         TerminalFont.registerBundledFonts()
         TerminalNotificationService.shared.configure()

@@ -24,7 +24,7 @@ final class AgentWatcher: ObservableObject {
 
     /// 进程识别轮询间隔（廉价）。
     private static let processPollInterval: TimeInterval = 2.0
-    /// 已识别 Agent 的读屏最短间隔（昂贵：write_screen_file）。
+    /// 已识别 Agent 的读屏最短间隔（直接读 surface 文本，无文件 IO）。
     private static let screenScanInterval: TimeInterval = 3.0
     /// 读屏行数上限（对齐 herdr 底部缓冲规模）。
     private static let screenMaxLines = 28

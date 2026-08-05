@@ -38,7 +38,12 @@ enum TerminalHistorySerializer {
     }
 
     /// 为标签切换器读取终端可见文本。Metal Surface 无法稳定生成位图，
-    /// 因此通过 Ghostty 导出的 VT 内容构造轻量预览，并限制尾部读取量。
+    /// 因此直接读取 Ghostty surface 的视口文本构造轻量预览，并限制尾部读取量。
+    ///
+    /// 必须走 `ghostty_surface_read_text` 而不是 `write_screen_file`：上游
+    /// Ghostty 的 TempDir 只在出错时回收（errdefer），每次文件导出都会泄漏
+    /// 目录 fd——Agent 轮询 / 切换器预览长期运行后 fd 表被塞满，导致所有
+    /// `Process.run()` 报 EBADF（Bad file descriptor）。
     @MainActor
     static func previewText(
         from view: KeroTerminalView,
@@ -47,38 +52,8 @@ enum TerminalHistorySerializer {
     ) -> String? {
         guard maxLines > 0,
               maxColumns > 0,
-              let captureFile = exportedFile(
-                  from: view,
-                  action: "write_screen_file:open,vt"
-              )
+              let text = view.readTerminalText()
         else { return nil }
-        defer { removeCaptureFile(captureFile) }
-
-        guard let handle = try? FileHandle(forReadingFrom: captureFile.fileURL) else {
-            return nil
-        }
-        defer { try? handle.close() }
-
-        let byteLimit: UInt64 = 128 * 1024
-        guard let fileSize = try? handle.seekToEnd() else { return nil }
-        let offset = fileSize > byteLimit ? fileSize - byteLimit : 0
-        do {
-            try handle.seek(toOffset: offset)
-        } catch {
-            return nil
-        }
-        guard let data = try? handle.read(upToCount: Int(fileSize - offset)),
-              !data.isEmpty
-        else { return nil }
-
-        var text = String(decoding: data, as: UTF8.self)
-        // 从文件尾部截取时可能落在半行或半个 ANSI 序列中，首个残行不参与预览。
-        if offset > 0, let firstNewline = text.firstIndex(of: "\n") {
-            text.removeSubrange(...firstNewline)
-        }
-        text = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
 
         var rows = text
             .split(separator: "\n", omittingEmptySubsequences: false)
