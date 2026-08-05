@@ -73,11 +73,13 @@ final class AIAPIRegistry: nonisolated ObservableObject {
         guard !baseURL.isEmpty else {
             throw LocalAIError.invalidAPIConfiguration(L10n.t("Enter an API base URL."))
         }
+        let reasoningEffort = settings.aiAPIReasoningEffort
         return AIAPIConfiguration(
             provider: provider,
             apiKey: apiKey,
             model: model,
-            baseURL: baseURL
+            baseURL: baseURL,
+            reasoningEffort: reasoningEffort
         )
     }
 }

@@ -67,15 +67,21 @@ enum LocalAIGitCommitSuggest {
             throw LocalAIGitCommitSuggestError.invalidRepo
         }
 
+        let startTime = Date()
+
+        let diffStartTime = Date()
         let diff = try await Task.detached(priority: .userInitiated) {
             try collectDiff(in: root, targetPaths: targetPaths)
         }.value
+        let diffDuration = Date().timeIntervalSince(diffStartTime)
 
         try Task.checkCancellation()
 
+        let promptStartTime = Date()
         let prompt = try await Task.detached(priority: .userInitiated) {
             try buildPrompt(diff: diff, language: language, useEmoji: useEmoji)
         }.value
+        let promptDuration = Date().timeIntervalSince(promptStartTime)
 
         try Task.checkCancellation()
 
@@ -93,6 +99,7 @@ enum LocalAIGitCommitSuggest {
             """
         )
 
+        let aiStartTime = Date()
         // disableTools：禁止 CLI 再跑 git/读文件，只根据已给 diff 写 message；否则易卡权限/转圈
         let response = try await LocalAI.prompt(
             LocalAIRequest(
@@ -104,6 +111,7 @@ enum LocalAIGitCommitSuggest {
                 disableTools: true
             )
         )
+        let aiDuration = Date().timeIntervalSince(aiStartTime)
 
         print(
             """
@@ -121,10 +129,27 @@ enum LocalAIGitCommitSuggest {
 
         try Task.checkCancellation()
 
+        let sanitizeStartTime = Date()
         let message = sanitizeMessage(response.text)
+        let sanitizeDuration = Date().timeIntervalSince(sanitizeStartTime)
         guard !message.isEmpty else {
             throw LocalAIGitCommitSuggestError.emptyResponse
         }
+
+        let totalDuration = Date().timeIntervalSince(startTime)
+
+        print(
+            """
+            [LocalAIGitCommitSuggest] ——— metrics begin ———
+            repo: \(root)
+            diff collection: \(String(format: "%.0fms", diffDuration * 1_000))
+            prompt build: \(String(format: "%.0fms", promptDuration * 1_000))
+            AI inference: \(String(format: "%.0fms", aiDuration * 1_000)) (\(String(format: "%.2fs", aiDuration)))
+            sanitize message: \(String(format: "%.0fms", sanitizeDuration * 1_000))
+            total duration: \(String(format: "%.0fms", totalDuration * 1_000)) (\(String(format: "%.2fs", totalDuration)))
+            [LocalAIGitCommitSuggest] ——— metrics end ———
+            """
+        )
 
         return LocalAIGitCommitSuggestion(message: message)
     }
@@ -132,16 +157,14 @@ enum LocalAIGitCommitSuggest {
     // MARK: - Diff
 
     /// 检查仓库中是否有已暂存 (Staged) 的文件变更。
-    ///
-    /// 通过解析 `git status --porcelain=v1` 中每个文件的首个状态字符（Index 状态）：
-    /// - 若首字符不是 `' '`（未暂存/无变更）、`'?'`（未跟踪）、`'!'`（忽略），则代表 index 中存在已暂存变更。
-    /// - Parameter repoRoot: 仓库根目录路径。
-    /// - Returns: 若存在已暂存变更返回 true，否则返回 false。
     nonisolated static func hasStagedChanges(in repoRoot: String) -> Bool {
+        let t0 = Date()
         let status = GitStatusModel.runGit(
             ["status", "--porcelain=v1", "--no-renames"],
             in: repoRoot
         )
+        let elapsed = Date().timeIntervalSince(t0) * 1_000
+        print("[LocalAIGitCommitSuggest] hasStagedChanges took \(String(format: "%.0fms", elapsed))")
         guard status.status == 0 else { return false }
         for line in status.stdout.split(separator: "\n") {
             guard line.count >= 2 else { continue }
@@ -251,35 +274,34 @@ enum LocalAIGitCommitSuggest {
             ? ["diff", "--cached"]
             : ["diff"]
 
-        // 文件状态列表（轻量）
+        // 文件状态列表（禁用耗时的重命名对比计算）
+        let t0 = Date()
         let nameStatus = GitStatusModel.runGit(
-            base + ["--name-status", "--find-renames", "--no-color"] + pathArgs,
+            base + ["--name-status", "--no-renames", "--no-color"] + pathArgs,
             in: repoRoot
         )
+        let nameDuration = Date().timeIntervalSince(t0) * 1_000
+        print("[LocalAIGitCommitSuggest] \(title) git diff --name-status took \(String(format: "%.0fms", nameDuration))")
+
         let names = nameStatus.status == 0
             ? nameStatus.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
             : ""
 
-        // 行数统计（轻量）
-        let stat = GitStatusModel.runGit(
-            base + ["--stat=72", "--no-color"] + pathArgs,
-            in: repoRoot
-        )
-        let statText = stat.status == 0
-            ? stat.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-            : ""
-
-        // 实际 patch：无上下文、忽略空白、跳过二进制
+        // 实际 patch：无上下文、忽略空白、禁用重命名计算、跳过二进制
+        let t2 = Date()
         let patchRun = GitStatusModel.runGit(
             base + [
                 "--no-color",
-                "--find-renames",
+                "--no-renames",
                 "--unified=0",
                 "--ignore-space-change",
                 "--diff-filter=ACDMRTUXB",
             ] + pathArgs,
             in: repoRoot
         )
+        let patchDuration = Date().timeIntervalSince(t2) * 1_000
+        print("[LocalAIGitCommitSuggest] \(title) git diff patch took \(String(format: "%.0fms", patchDuration))")
+
         let rawPatch = patchRun.status == 0
             ? patchRun.stdout
             : ""
@@ -291,9 +313,6 @@ enum LocalAIGitCommitSuggest {
         var out = "## \(title)\n"
         if hasNames {
             out += "### name-status\n\(names)\n"
-        }
-        if !statText.isEmpty {
-            out += "### stat\n\(statText)\n"
         }
         if hasPatch {
             let clipped = clipPatchByFile(rawPatch)

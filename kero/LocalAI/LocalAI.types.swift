@@ -25,6 +25,26 @@ enum AIBackend: String, CaseIterable, Identifiable, Codable, Sendable, Hashable 
     }
 }
 
+/// 云端 AI API 推理强度 / 思考级别 (Reasoning Effort)。
+enum AIReasoningEffort: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
+    case low
+    case medium
+    case high
+    case disabled
+
+    var id: String { rawValue }
+
+    /// 设置面板展示名。
+    var displayName: String {
+        switch self {
+        case .low: return L10n.t("Low")
+        case .medium: return L10n.t("Medium")
+        case .high: return L10n.t("High")
+        case .disabled: return L10n.t("Disabled")
+        }
+    }
+}
+
 /// 云端 AI API 供应商。
 enum AIAPIProviderID: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
     case openAI = "openai"

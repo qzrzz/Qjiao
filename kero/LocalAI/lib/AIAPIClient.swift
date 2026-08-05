@@ -13,6 +13,7 @@ struct AIAPIConfiguration: Sendable {
     let apiKey: String
     let model: String
     let baseURL: String
+    let reasoningEffort: AIReasoningEffort
 }
 
 /// 云端 AI API 的统一客户端。
@@ -100,11 +101,14 @@ enum AIAPIClient {
         switch provider.protocolStyle {
         case .openAIChatCompletions:
             endpoint = appendPath("chat/completions", to: configuration.baseURL)
-            body = [
+            var b: [String: Any] = [
                 "model": configuration.model,
                 "messages": [["role": "user", "content": request.prompt]],
-                "reasoning_effort": "low",
             ]
+            if configuration.reasoningEffort != .disabled {
+                b["reasoning_effort"] = configuration.reasoningEffort.rawValue
+            }
+            body = b
         case .anthropicMessages:
             endpoint = appendPath("messages", to: configuration.baseURL)
             body = [
