@@ -571,6 +571,8 @@ extension L10n {
         "New branch name": "新しいブランチ名",
         "New Browser Pane": "新規ブラウザペイン",
         "New Browser Tab": "新規ブラウザタブ",
+        "New File Pane": "新規ファイルペイン",
+        "New File Tab": "新規ファイルタブ",
         "New Custom Theme": "New Custom Theme",
         "New Dark Theme…": "New Dark Theme…",
         "New File": "New File",

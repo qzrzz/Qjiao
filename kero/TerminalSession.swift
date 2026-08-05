@@ -9,6 +9,13 @@ import Darwin
 import Foundation
 import GhosttyTerminal
 
+/// A Command-clickable terminal value after the owning session has resolved
+/// it against the pane's live local working directory.
+enum TerminalLinkTarget {
+    case url(URL)
+    case file(URL)
+}
+
 /// One login shell rendered by one long-lived libghostty surface. SwiftUI only
 /// reparents the same `KeroTerminalView`, so PTY state, selection, and
 /// scrollback survive tab and split-layout changes.
@@ -135,6 +142,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         self._find = TerminalFind(terminal: terminalView)
 
         terminalView.delegate = self
+        // ⌘-点击 / ⌘-右键链接时，由会话按其工作目录解析本地路径分类。
+        terminalView.resolveLinkTarget = { [weak self] value in
+            self?.terminalLinkTarget(for: value)
+        }
         terminalView.configuration = TerminalSurfaceOptions(
             backend: .exec,
             workingDirectory: launchWorkingDirectory,
@@ -1277,8 +1288,67 @@ extension TerminalSession: TerminalSurfaceCommandFinishedDelegate {
 extension TerminalSession: TerminalSurfaceOpenURLDelegate {
     func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
         if terminalView.consumeHistoryExportURL(url, kind: kind) { return }
-        guard let target = URL(string: url) else { return }
-        NSWorkspace.shared.open(target)
+        guard let target = terminalLinkTarget(for: url) else { return }
+        switch target {
+        case .file(let fileURL):
+            // 本地文件：在 Finder 中显示，而不是交给默认应用打开。
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        case .url(let url):
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Classifies a detected terminal link only after proving a local path
+    /// exists or a non-file URL has a scheme. Context menus and Command-click
+    /// use this same answer, so neither offers an action it cannot perform.
+    func terminalLinkTarget(for value: String) -> TerminalLinkTarget? {
+        if let fileURL = existingFileURL(from: value) {
+            return .file(fileURL)
+        }
+        guard let url = URL(string: value),
+              url.scheme != nil,
+              !url.isFileURL
+        else { return nil }
+        return .url(url)
+    }
+
+    /// Resolves terminal links the way the shell would: `file:` URLs are
+    /// already absolute, `~` belongs to the current user, and other paths are
+    /// relative to this pane's live working directory. Diagnostics commonly
+    /// append `:line[:column]`, so try the literal path before peeling those
+    /// numeric locations off.
+    private func existingFileURL(from value: String) -> URL? {
+        let candidate: URL
+        if let url = URL(string: value), url.scheme != nil {
+            guard url.isFileURL else { return nil }
+            candidate = url
+        } else {
+            let decoded = value.removingPercentEncoding ?? value
+            let expanded = (decoded as NSString).expandingTildeInPath
+            if expanded.hasPrefix("/") {
+                candidate = URL(fileURLWithPath: expanded)
+            } else {
+                let basePath = foregroundDirectoryPath ?? currentDirectoryPath
+                candidate = URL(
+                    fileURLWithPath: expanded,
+                    relativeTo: URL(fileURLWithPath: basePath, isDirectory: true)
+                )
+            }
+        }
+
+        var url = candidate.standardizedFileURL
+        while true {
+            if FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+            let strippedPath = url.path.replacingOccurrences(
+                of: #":\d+$"#,
+                with: "",
+                options: .regularExpression
+            )
+            guard strippedPath != url.path else { return nil }
+            url = URL(fileURLWithPath: strippedPath).standardizedFileURL
+        }
     }
 }
 
