@@ -11,6 +11,10 @@ import Foundation
 extension L10n {
     /// English → 简体中文. Unlisted keys keep the English source.
     static let zhHans: [String: String] = [
+        "Reasoning Effort": "思考强度",
+        "Low": "低 (Low)",
+        "Medium": "中 (Medium)",
+        "High": "高 (High)",
         "%lld unread": "%lld 条未读",
         "(all themes)": "（所有主题）",
         "(Bundled)": "（内置）",

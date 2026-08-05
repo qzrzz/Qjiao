@@ -1176,6 +1176,16 @@ private struct AIAPIProviderSettings: View {
                     .frame(width: 300)
             }
 
+            apiSettingRow(L10n.t("Reasoning Effort")) {
+                Picker("", selection: $settings.aiAPIReasoningEffort) {
+                    ForEach(AIReasoningEffort.allCases) { effort in
+                        Text(effort.displayName).tag(effort)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+
             apiSettingRow(L10n.t("API Key")) {
                 HStack(spacing: 8) {
                     SecureField("", text: apiKeyBinding)

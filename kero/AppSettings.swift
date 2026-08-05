@@ -455,6 +455,11 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// 各 AI API 供应商独立保存的 Reasoning Effort 字典。
+    @Published var aiAPIReasoningEfforts: [AIAPIProviderID: AIReasoningEffort] = [:] {
+        didSet { save() }
+    }
+
     /// 云端 API 模型 ID，自动对应当前选中供应商的配置，由用户按供应商账号可用模型编辑。
     var aiAPIModel: String {
         get {
@@ -475,6 +480,18 @@ final class AppSettings: nonisolated ObservableObject {
         set {
             objectWillChange.send()
             aiAPIBaseURLs[aiAPIProvider] = newValue
+            save()
+        }
+    }
+
+    /// 云端 API 思考强度，自动对应当前选中供应商的配置；默认为 low。
+    var aiAPIReasoningEffort: AIReasoningEffort {
+        get {
+            aiAPIReasoningEfforts[aiAPIProvider] ?? .low
+        }
+        set {
+            objectWillChange.send()
+            aiAPIReasoningEfforts[aiAPIProvider] = newValue
             save()
         }
     }
@@ -654,12 +671,16 @@ final class AppSettings: nonisolated ObservableObject {
 
         var loadedModels: [AIAPIProviderID: String] = [:]
         var loadedBaseURLs: [AIAPIProviderID: String] = [:]
+        var loadedReasoningEfforts: [AIAPIProviderID: AIReasoningEffort] = [:]
         for provider in AIAPIProviderID.allCases {
             if let m = toml["ai.api.\(provider.rawValue).model"]?.string ?? toml["ai.api-model.\(provider.rawValue)"]?.string {
                 loadedModels[provider] = m
             }
             if let u = toml["ai.api.\(provider.rawValue).base-url"]?.string ?? toml["ai.api-base-url.\(provider.rawValue)"]?.string {
                 loadedBaseURLs[provider] = u
+            }
+            if let r = toml["ai.api.\(provider.rawValue).reasoning-effort"]?.string.flatMap(AIReasoningEffort.init(rawValue:)) {
+                loadedReasoningEfforts[provider] = r
             }
         }
         if loadedModels[apiProvider] == nil, let legacyModel = toml["ai.api-model"]?.string {
@@ -670,6 +691,7 @@ final class AppSettings: nonisolated ObservableObject {
         }
         aiAPIModels = loadedModels
         aiAPIBaseURLs = loadedBaseURLs
+        aiAPIReasoningEfforts = loadedReasoningEfforts
         aiWritingLanguage = toml["ai.writing-language"]?.string
             .flatMap(AIWritingLanguage.init(rawValue:)) ?? .english
         // 默认 true：缺省或非法值均视为开启 Gitmoji。
@@ -827,6 +849,7 @@ final class AppSettings: nonisolated ObservableObject {
         aiAPIProvider = .openAI
         aiAPIModels = [:]
         aiAPIBaseURLs = [:]
+        aiAPIReasoningEfforts = [:]
         aiWritingLanguage = .english
         gitCommitMessageEmoji = true
         gitOperationMode = .simple
@@ -980,6 +1003,9 @@ final class AppSettings: nonisolated ObservableObject {
             }
             if let u = aiAPIBaseURLs[provider], u != provider.defaultBaseURL {
                 lines.append("ai.api.\(provider.rawValue).base-url = \(TOML.quote(u))")
+            }
+            if let r = aiAPIReasoningEfforts[provider], r != .low {
+                lines.append("ai.api.\(provider.rawValue).reasoning-effort = \(TOML.quote(r.rawValue))")
             }
         }
         // 默认英文：仅非默认时写回。
