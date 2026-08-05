@@ -64,12 +64,17 @@ async function main() {
       console.log(chalk.dim("--------------------- 控制台与崩溃日志 ---------------------"));
 
       // 在前台直接执行 app 二进制，实时把 stdout/stderr 输出到终端
-      const appProcess = await $`${binaryPath}`.nothrow();
+      const proc = Bun.spawn([binaryPath], {
+        stdout: "inherit",
+        stderr: "inherit",
+        stdin: "inherit",
+      });
+      const exitCode = await proc.exited;
 
       console.log(chalk.dim("-----------------------------------------------------------"));
-      if (appProcess.exitCode !== 0) {
-        console.error(chalk.bold.red(`💥 应用程序异常退出 (Exit Code: ${appProcess.exitCode})`));
-        process.exit(appProcess.exitCode);
+      if (exitCode !== 0) {
+        console.error(chalk.bold.red(`💥 应用程序异常退出 (Exit Code: ${exitCode})`));
+        process.exit(exitCode);
       } else {
         console.log(chalk.bold.green("✨ 应用程序已正常退出"));
       }
