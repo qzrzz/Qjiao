@@ -17,6 +17,8 @@ final class KeroTerminalView: AppTerminalView {
     let splitTarget = SplitMenuTarget()
     /// Ghostty 当前识别到的悬停链接，⌘-右键时作为浏览器初始地址。
     var hoveredLink: String?
+    /// ⌘-点击 / ⌘-右键链接时的分类回调（由 TerminalSession 按工作目录解析）。
+    var resolveLinkTarget: ((String) -> TerminalLinkTarget?)?
 
     private let progressBar = KeroTerminalProgressBarView(frame: .zero)
     private var progressReportTimer: Timer?
@@ -167,7 +169,7 @@ final class KeroTerminalView: AppTerminalView {
     override func rightMouseDown(with event: NSEvent) {
         focusForInteraction()
         NSMenu.popUpContextMenu(
-            contextMenu(initialURL: browserInitialURL(for: event)),
+            contextMenu(linkTarget: linkTarget(for: event)),
             with: event,
             for: self
         )
@@ -177,22 +179,32 @@ final class KeroTerminalView: AppTerminalView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         focusForInteraction()
-        return contextMenu(initialURL: browserInitialURL(for: event))
+        return contextMenu(linkTarget: linkTarget(for: event))
     }
 
-    private func browserInitialURL(for event: NSEvent) -> String? {
-        event.modifierFlags.contains(.command) ? hoveredLink : nil
+    private func linkTarget(for event: NSEvent) -> TerminalLinkTarget? {
+        guard event.modifierFlags.contains(.command), let hoveredLink else { return nil }
+        return resolveLinkTarget?(hoveredLink)
     }
 
-    private func contextMenu(initialURL: String?) -> NSMenu {
+    private func contextMenu(linkTarget: TerminalLinkTarget?) -> NSMenu {
         let menu = NSMenu()
         menu.addItem(contextItem(L10n.t("Copy"), #selector(copy(_:))))
         menu.addItem(contextItem(L10n.t("Paste"), #selector(NSText.paste(_:))))
         menu.addItem(.separator())
         menu.addItem(contextItem(L10n.t("Select All"), #selector(selectAll(_:))))
         menu.addItem(.separator())
-        for item in splitTarget.browserMenuItems(initialURL: initialURL) {
-            menu.addItem(item)
+        if let linkTarget {
+            switch linkTarget {
+            case .url(let url):
+                for item in splitTarget.browserMenuItems(initialURL: url.absoluteString) {
+                    menu.addItem(item)
+                }
+            case .file(let url):
+                for item in splitTarget.fileMenuItems(path: url.path) {
+                    menu.addItem(item)
+                }
+            }
         }
         menu.addItem(.separator())
         for item in splitTarget.menuItems() { menu.addItem(item) }
@@ -370,6 +382,9 @@ final class SplitMenuTarget: NSObject {
     var onSplit: ((PaneDropEdge) -> Void)?
     var onNewBrowserTab: ((String?) -> Void)?
     var onNewBrowserPane: ((String?) -> Void)?
+    /// 终端 ⌘-右键本地文件链接时：在 Qjiao 中打开文件。
+    var onNewFileTab: ((String) -> Void)?
+    var onNewFilePane: ((String) -> Void)?
     var onClose: (() -> Void)?
     private var browserInitialURL: String?
 
@@ -386,6 +401,21 @@ final class SplitMenuTarget: NSObject {
                 #selector(newBrowserPane)
             ),
         ]
+    }
+
+    /// 返回本地文件打开菜单；⌘-右键悬停到已存在的文件路径时使用。
+    func fileMenuItems(path: String) -> [NSMenuItem] {
+        let tabItem = item(
+            L10n.t("New File Tab"),
+            #selector(newFileTab(_:))
+        )
+        tabItem.representedObject = path
+        let paneItem = item(
+            L10n.t("New File Pane"),
+            #selector(newFilePane(_:))
+        )
+        paneItem.representedObject = path
+        return [tabItem, paneItem]
     }
 
     func menuItems() -> [NSMenuItem] {
@@ -420,6 +450,14 @@ final class SplitMenuTarget: NSObject {
     }
     @objc private func newBrowserPane() {
         onNewBrowserPane?(browserInitialURL)
+    }
+    @objc private func newFileTab(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        onNewFileTab?(path)
+    }
+    @objc private func newFilePane(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        onNewFilePane?(path)
     }
     @objc private func toggleShowPaneHeaders() {
         Task { @MainActor in

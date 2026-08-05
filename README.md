@@ -34,6 +34,7 @@
 - 粘贴安全确认（OSC 52 / 可疑内容）；Finder 文件粘贴为 shell 路径；`TERM_PROGRAM=ghostty`，不强制注入 `LANG`。
 - 终端桌面通知带声音；点击通知自动激活窗口并跳转到发出通知的会话。
 - 兼容用户安装的 ghost-complete 等 PTY 补全代理；前台进程驱动 Tab 应用图标（含深浅色变体）。
+- 终端本地文件链接：⌘-点击链接时本地文件在 Finder 中显示、URL 走浏览器；⌘-右键文件链接可在 Qjiao 中新建文件标签/分屏打开（路径按 pane 工作目录解析，支持 `~`、`file:` 与 `:行:列` 后缀）。
 - 多 Tab 惰性启动 Shell，后台 Tab 降低 GPU 占用；访问过的项目其 Diff 视图保持挂载，切换项目不重建 WebKit（提速），恢复会话时保留文件/Diff 标签的上下文终端指向。
 
 ### Git
@@ -95,6 +96,7 @@
 
 ## 上游移植记录
 
+- 移植上游 Kero `main` `b83f338`（Support terminal links to local files，v0.1.43，2026-08-04）：新增 `TerminalLinkTarget`（url/file）分类与 `TerminalSession.terminalLinkTarget(for:)`/`existingFileURL` 路径解析（file: URL、~ 展开、相对路径按 pane 工作目录、剥离 `:行:列` 后缀）；`terminalDidRequestOpenURL` 本地文件改走 Finder 显示；⌘-右键菜单新增「New File Tab / New File Pane」（SplitMenuTarget 经 representedObject 传递路径），回调链 KeroTerminalView → TerminalHostView → PaneLayoutView → ContentView（manager.openFile / openFileToSide）；L10n 三语词条。适配：本地 KeroTerminalView 无上游 `events` 代理，改为 `resolveLinkTarget` 回调由 TerminalSession 注入；保留本地 `kind: TerminalOpenURLKind` 参数与历史导出 URL 定制；上游 FileViewer/SourceTextEditor 移除 onNewBrowserTab 属重构清理，未跟随。`e74f2b0`（OSC 22 鼠标指针，Alacritty）未移植。
 - 补全上游 `212ea0a` Recent Commits 视图的剩余 UI 差距（SwiftUI 实现，保留本地 GitCommitRow 定制）：提交图（`CommitGraphColumn` 垂直线 + 圆点，展开放大，首行/续线规则与上游一致；`FileRailColumn` 文件行延续线）、引用徽章（`primaryReference` 同上游规则：优先带斜杠分支、其次 HEAD 指向，accent 胶囊白字）、滚动自动加载（`LazyVStack` 中 Load More 按钮 `.task(id: commits.count)` 进入视口即加载，连续加载至填满或没有更多）。未跟随：AppKit 绘制（保持 SwiftUI）。
 - 移植上游 Kero `main` `db9a061` + `0a253ba`（v0.1.40–v0.1.41，2026-08-04）：`DiffViewPreferences` 从静态 enum 重构为 `@MainActor ObservableObject` 单例（`@Published diffStyle`/`prefersEditing` 落盘 UserDefaults，多标签/多窗口同步编辑与布局偏好；`DiffWebModel.isEditing` 改为 `canEdit`，编辑意图统一读偏好）；diff 外观跟随系统主题——`DiffWebHostingView`（NSHostingView 子类）在 `viewDidChangeEffectiveAppearance` 时经 `DiffWebModel.usesDarkAppearance` 驱动 WebKit 的 `colorScheme` 环境值，`DiffControlsNSView` 颜色改为 `effectiveAppearance.performAsCurrentDrawingAppearance` 内更新。
 - 上游 `93b2b34`（Support dragging tabs into split panes，v0.1.42）**无需移植**：对比确认本地 `TabSplitDragController` + `Project.mergeTab` 已实现等价能力（拖标签到任意 pane 四象限分屏、保留源标签完整分屏树 `absorb`、diff 标签不可并入、不能拖到自身终端），且本地另有光标反馈与落点预览。唯一缺口：上游在 `moveTab` 中把源标签的 `contextSession` 迁移给目标标签（目标为空时），本地 `mergeTab` 未处理——已按上游语义补齐。

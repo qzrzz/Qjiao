@@ -63,6 +63,12 @@ struct ContentView: View {
                                 },
                                 onNewBrowserPane: {
                                     manager.newBrowserPane(initialURL: $0)
+                                },
+                                onNewFileTab: {
+                                    manager.openFile($0)
+                                },
+                                onNewFilePane: {
+                                    manager.openFileToSide($0)
                                 }
                             )
                         } else {

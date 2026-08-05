@@ -594,6 +594,8 @@ extension L10n {
         "New branch name": "新分支名称",
         "New Browser Pane": "新建浏览器窗格",
         "New Browser Tab": "新建浏览器标签页",
+        "New File Pane": "新建文件窗格",
+        "New File Tab": "新建文件标签页",
         "New Custom Theme": "新建自定义主题",
         "New Dark Theme…": "新建深色主题…",
         "New File": "新建文件",

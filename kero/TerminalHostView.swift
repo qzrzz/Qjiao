@@ -23,6 +23,9 @@ struct TerminalHostView: NSViewRepresentable {
     var onSplit: (PaneDropEdge) -> Void = { _ in }
     var onNewBrowserTab: (String?) -> Void = { _ in }
     var onNewBrowserPane: (String?) -> Void = { _ in }
+    /// 终端 ⌘-右键本地文件链接：在 Qjiao 中打开文件。
+    var onNewFileTab: (String) -> Void = { _ in }
+    var onNewFilePane: (String) -> Void = { _ in }
     /// Closes this pane when the terminal is part of a split layout.
     var onClose: (() -> Void)?
 
@@ -55,6 +58,8 @@ struct TerminalHostView: NSViewRepresentable {
         session.terminalView.splitTarget.onSplit = onSplit
         session.terminalView.splitTarget.onNewBrowserTab = onNewBrowserTab
         session.terminalView.splitTarget.onNewBrowserPane = onNewBrowserPane
+        session.terminalView.splitTarget.onNewFileTab = onNewFileTab
+        session.terminalView.splitTarget.onNewFilePane = onNewFilePane
         session.terminalView.splitTarget.onClose = onClose
         container.focusOnAppear = isFocused
         container.updateCornerRadius(hasMultiplePanes: hasMultiplePanes)
@@ -79,6 +84,8 @@ struct TerminalHostView: NSViewRepresentable {
         terminal.splitTarget.onSplit = onSplit
         terminal.splitTarget.onNewBrowserTab = onNewBrowserTab
         terminal.splitTarget.onNewBrowserPane = onNewBrowserPane
+        terminal.splitTarget.onNewFileTab = onNewFileTab
+        terminal.splitTarget.onNewFilePane = onNewFilePane
         terminal.splitTarget.onClose = onClose
         let scrollbar = session.overlayScrollbar
         terminal.translatesAutoresizingMaskIntoConstraints = false

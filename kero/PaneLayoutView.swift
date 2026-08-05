@@ -62,6 +62,9 @@ struct PaneLayoutView: View {
     /// 由终端、编辑器和网页链接右键菜单触发的浏览器创建动作。
     var onNewBrowserTab: (String?) -> Void = { _ in }
     var onNewBrowserPane: (String?) -> Void = { _ in }
+    /// 终端 ⌘-右键本地文件链接：在 Qjiao 中打开文件。
+    var onNewFileTab: (String) -> Void = { _ in }
+    var onNewFilePane: (String) -> Void = { _ in }
 
     /// Gap between tiles, which doubles as the divider hit area. The same
     /// value insets the whole grid from the parent, so the spacing around the
@@ -121,7 +124,9 @@ struct PaneLayoutView: View {
                     onSplit: onSplit,
                     onClosePane: onClosePane,
                     onNewBrowserTab: onNewBrowserTab,
-                    onNewBrowserPane: onNewBrowserPane
+                    onNewBrowserPane: onNewBrowserPane,
+                    onNewFileTab: onNewFileTab,
+                    onNewFilePane: onNewFilePane
                 )
             } else {
                 grid
@@ -187,7 +192,9 @@ struct PaneLayoutView: View {
                         onSplit: onSplit,
                         onClosePane: tab.hasMultiplePanes ? onClosePane : nil,
                         onNewBrowserTab: onNewBrowserTab,
-                        onNewBrowserPane: onNewBrowserPane
+                        onNewBrowserPane: onNewBrowserPane,
+                        onNewFileTab: onNewFileTab,
+                        onNewFilePane: onNewFilePane
                     )
                     .frame(
                         width: placement.frame.width,
@@ -421,6 +428,8 @@ private struct PaneView: View {
     let onClosePane: ((PaneContent) -> Void)?
     let onNewBrowserTab: (String?) -> Void
     let onNewBrowserPane: (String?) -> Void
+    let onNewFileTab: (String) -> Void
+    let onNewFilePane: (String) -> Void
 
     /// Height of the grab strip at the pane's top.
     private let handleHeight: CGFloat = 8
@@ -489,6 +498,16 @@ private struct PaneView: View {
         onNewBrowserPane(initialURL)
     }
 
+    private func newFileTabFromMenu(path: String) {
+        focus()
+        onNewFileTab(path)
+    }
+
+    private func newFilePaneFromMenu(path: String) {
+        focus()
+        onNewFilePane(path)
+    }
+
     @ViewBuilder
     private var content: some View {
         switch pane.content {
@@ -502,6 +521,8 @@ private struct PaneView: View {
                     onSplit: splitFromMenu,
                     onNewBrowserTab: newBrowserTabFromMenu,
                     onNewBrowserPane: newBrowserPaneFromMenu,
+                    onNewFileTab: newFileTabFromMenu,
+                    onNewFilePane: newFilePaneFromMenu,
                     onClose: onClosePane.map { close in
                         { focus(); close(pane.content) }
                     }
