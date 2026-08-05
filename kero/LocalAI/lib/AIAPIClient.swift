@@ -103,6 +103,7 @@ enum AIAPIClient {
             body = [
                 "model": configuration.model,
                 "messages": [["role": "user", "content": request.prompt]],
+                "reasoning_effort": "low",
             ]
         case .anthropicMessages:
             endpoint = appendPath("messages", to: configuration.baseURL)
@@ -148,18 +149,17 @@ enum AIAPIClient {
         return urlRequest
     }
 
-    /// 打印实际发出的 HTTP 请求，包含完整 URL、Header、Body 以及可直接运行的 curl 命令。
+    /// 打印实际发出的 HTTP 请求；鉴权头与 URL 中常见密钥参数始终脱敏。
     private static func logRequest(
         _ request: URLRequest,
         configuration: AIAPIConfiguration
     ) {
         let headers = request.allHTTPHeaderFields ?? [:]
         let headerLines = headers.keys.sorted().map { name in
-            "\(name): \(headers[name] ?? "")"
+            let value = isSensitiveName(name) ? "<redacted>" : (headers[name] ?? "")
+            return "\(name): \(value)"
         }.joined(separator: "\n")
-        let rawURL = request.url?.absoluteString ?? ""
         let body = formattedJSON(request.httpBody)
-        let curlCmd = makeCurlCommand(request)
 
         print(
             """
@@ -167,54 +167,45 @@ enum AIAPIClient {
             provider: \(configuration.provider.displayName)
             model: \(configuration.model)
             method: \(request.httpMethod ?? "POST")
-            url: \(rawURL)
+            url: \(redactedURL(request.url))
             timeout: \(String(format: "%.1f", request.timeoutInterval))s
             body bytes: \(request.httpBody?.count ?? 0)
             headers:
             \(headerLines)
             body:
             \(body)
-            curl:
-            \(curlCmd)
             [LocalAI API] ——— HTTP request end ———
             """
         )
     }
 
-    /// 根据 `URLRequest` 生成可直接在终端中复制运行的 curl 命令字符串。
-    /// - Parameter request: 发出的 HTTP 请求
-    /// - Returns: 格式化后的 curl 命令行文本
-    private static func makeCurlCommand(_ request: URLRequest) -> String {
-        guard let url = request.url?.absoluteString,
-              let method = request.httpMethod else {
-            return ""
+    /// 对 URL 查询参数中的常见凭据名称执行脱敏，避免凭据意外泄密。
+    private static func redactedURL(_ url: URL?) -> String {
+        guard let url else { return "<invalid>" }
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems,
+              !queryItems.isEmpty
+        else {
+            return url.absoluteString
         }
-
-        var components = ["curl -X \(method) \(shellQuote(url))"]
-
-        if let headers = request.allHTTPHeaderFields {
-            for key in headers.keys.sorted() {
-                if let value = headers[key] {
-                    components.append("-H \(shellQuote("\(key): \(value)"))")
-                }
-            }
+        components.queryItems = queryItems.map { item in
+            URLQueryItem(
+                name: item.name,
+                value: isSensitiveName(item.name) ? "<redacted>" : item.value
+            )
         }
-
-        if let bodyData = request.httpBody,
-           let bodyString = String(data: bodyData, encoding: .utf8),
-           !bodyString.isEmpty {
-            components.append("-d \(shellQuote(bodyString))")
-        }
-
-        return components.joined(separator: " \\\n  ")
+        return components.string ?? url.absoluteString
     }
 
-    /// 对字符串进行单引号包裹和转义，确保在 shell 中可安全直接执行。
-    /// - Parameter string: 原始文本
-    /// - Returns: 单引号包裹并转义后的文本
-    private static func shellQuote(_ string: String) -> String {
-        let escaped = string.replacingOccurrences(of: "'", with: "'\\''")
-        return "'\(escaped)'"
+    /// HTTP 鉴权头与常见查询参数使用同一组大小写无关的凭据名称。
+    private static func isSensitiveName(_ name: String) -> Bool {
+        switch name.lowercased() {
+        case "authorization", "x-api-key", "x-goog-api-key", "api-key", "apikey",
+             "api_key", "key", "token", "access-token", "access_token":
+            true
+        default:
+            false
+        }
     }
 
     /// 打印供应商 HTTP 响应，便于结合请求定位协议与解析问题。
