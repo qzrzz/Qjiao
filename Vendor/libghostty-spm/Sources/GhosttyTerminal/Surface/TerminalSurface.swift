@@ -257,6 +257,61 @@ public final class TerminalSurface {
         return metrics
     }
 
+    // MARK: - Text Read
+
+    /// Read the visible viewport as plain text, without touching the
+    /// filesystem.
+    ///
+    /// Hot paths must use this instead of the `write_screen_file` /
+    /// `write_scrollback_file` binding actions: upstream Ghostty's
+    /// `TempDir` is only cleaned up via `errdefer`, so every successful
+    /// file export leaks directory file descriptors (visible as open
+    /// `DIR` fds on random 22-char temp directories that eventually
+    /// exhaust the process fd table and break every `Process` launch
+    /// with EBADF).
+    ///
+    /// Selection grammar: `(VIEWPORT, TOP_LEFT)` to `(VIEWPORT,
+    /// BOTTOM_RIGHT)` with `rectangle: false` (linear flow), i.e. the
+    /// same region `write_screen_file` dumps. Empty viewports return an
+    /// empty string.
+    func readText() -> String? {
+        guard let s = surface else {
+            TerminalDebugLog.log(.input, "surface readText ignored: missing surface")
+            return nil
+        }
+        let topLeft = ghostty_point_s(
+            tag: GHOSTTY_POINT_VIEWPORT,
+            coord: GHOSTTY_POINT_COORD_TOP_LEFT,
+            x: 0,
+            y: 0
+        )
+        let bottomRight = ghostty_point_s(
+            tag: GHOSTTY_POINT_VIEWPORT,
+            coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT,
+            x: 0,
+            y: 0
+        )
+        let selection = ghostty_selection_s(
+            top_left: topLeft,
+            bottom_right: bottomRight,
+            rectangle: false
+        )
+
+        var out = ghostty_text_s()
+        guard ghostty_surface_read_text(s, selection, &out) else {
+            TerminalDebugLog.log(.input, "surface readText returned false")
+            return nil
+        }
+        defer { ghostty_surface_free_text(s, &out) }
+
+        guard let textPtr = out.text, out.text_len > 0 else {
+            return ""
+        }
+        let bytes = UnsafeBufferPointer(start: textPtr, count: Int(out.text_len))
+            .map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
     // MARK: - Selection
 
     struct SelectionResult {

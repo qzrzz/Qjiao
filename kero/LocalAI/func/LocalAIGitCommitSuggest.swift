@@ -30,7 +30,7 @@ enum LocalAIGitCommitSuggest {
     static let maxPatchPerFile = 800
     static let maxPatchPerNoiseFile = 120
 
-    /// 未跟踪文件最多列出条数（不读正文）。
+    /// 未跟踪文件最多列出条数；只传路径，不读取文件正文。
     static let maxUntrackedList = 15
 
     /// 收集 diff 并请求 AI；需已配置可用的 CLI 或 API provider。
@@ -84,6 +84,9 @@ enum LocalAIGitCommitSuggest {
         let promptDuration = Date().timeIntervalSince(promptStartTime)
 
         try Task.checkCancellation()
+
+        print("[LocalAIGitCommitSuggest] collectDiff took \(String(format: "%.0fms", diffDuration * 1_000))")
+        print("[LocalAIGitCommitSuggest] buildPrompt took \(String(format: "%.0fms", promptDuration * 1_000))")
 
         print(
             """
@@ -160,7 +163,7 @@ enum LocalAIGitCommitSuggest {
     nonisolated static func hasStagedChanges(in repoRoot: String) -> Bool {
         let t0 = Date()
         let status = GitStatusModel.runGit(
-            ["status", "--porcelain=v1", "--no-renames"],
+            ["status", "--porcelain=v1", "-uno", "--no-renames"],
             in: repoRoot
         )
         let elapsed = Date().timeIntervalSince(t0) * 1_000
@@ -177,8 +180,8 @@ enum LocalAIGitCommitSuggest {
     }
 
     /// 收集并精简变更摘要（分情况处理）：
-    /// 1. 如果已暂存 (Staged) 存在：仅仅包含已暂存 (Staged) 变更，绝对不包含已变更 (Unstaged) 或未跟踪文件。
-    /// 2. 如果已暂存 (Staged) 为空：才包含已变更 (Unstaged diff) 与未跟踪文件 (Untracked paths)。
+    /// 1. 如果已暂存 (Staged) 存在：仅仅包含已暂存 (Staged) 变更，绝对不包含未暂存 (Unstaged)。
+    /// 2. 如果已暂存 (Staged) 为空：包含未暂存 (Unstaged diff) 与未跟踪文件路径。
     ///
     /// - Parameter repoRoot: 仓库根目录绝对路径。
     /// - Returns: 格式化与截断后的 Git Diff 字符串。
@@ -195,14 +198,12 @@ enum LocalAIGitCommitSuggest {
             if let unstaged = compactDiffSection(title: "Unstaged", cached: false, targetPaths: cleanTargets, in: repoRoot) {
                 sections.append(unstaged)
             }
-            let targetSet = Set(cleanTargets!)
-            let untracked = listUntrackedPaths(in: repoRoot).filter { targetSet.contains($0) }
+            let untracked = listUntrackedPaths(
+                in: repoRoot,
+                targetPaths: cleanTargets
+            )
             if !untracked.isEmpty {
-                var block = "## Untracked files (paths only)\n"
-                for path in untracked.prefix(maxUntrackedList) {
-                    block += "- \(path)\n"
-                }
-                sections.append(block)
+                sections.append(untrackedSection(paths: untracked))
             }
             let combined = sections.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !combined.isEmpty else {
@@ -228,7 +229,7 @@ enum LocalAIGitCommitSuggest {
             }
         }
 
-        // 2) 若已暂存 (Staged) 为空：才收集已变更 (Unstaged patch + 未跟踪路径列表)
+        // 2) 若已暂存 (Staged) 为空：收集未暂存 patch 与未跟踪文件路径。
         var sections: [String] = []
         if let unstaged = compactDiffSection(
             title: "Unstaged",
@@ -241,14 +242,7 @@ enum LocalAIGitCommitSuggest {
 
         let untracked = listUntrackedPaths(in: repoRoot)
         if !untracked.isEmpty {
-            var block = "## Untracked files (paths only)\n"
-            for path in untracked.prefix(maxUntrackedList) {
-                block += "- \(path)\n"
-            }
-            if untracked.count > maxUntrackedList {
-                block += "- … and \(untracked.count - maxUntrackedList) more\n"
-            }
-            sections.append(block)
+            sections.append(untrackedSection(paths: untracked))
         }
 
         let combined = sections.joined(separator: "\n")
@@ -256,6 +250,7 @@ enum LocalAIGitCommitSuggest {
         guard !combined.isEmpty else {
             throw LocalAIGitCommitSuggestError.noChanges
         }
+
         return finalizeDiff(combined)
     }
 
@@ -431,18 +426,32 @@ enum LocalAIGitCommitSuggest {
         return false
     }
 
-    /// 未跟踪路径列表（不读文件内容）。
-    nonisolated private static func listUntrackedPaths(in repoRoot: String) -> [String] {
-        let status = GitStatusModel.runGit(
-            ["status", "--porcelain=v1", "-uall", "--no-renames"],
-            in: repoRoot
-        )
-        guard status.status == 0 else { return [] }
-        return status.stdout
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .filter { $0.hasPrefix("??") }
-            .map { String($0.dropFirst(3)).trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+    /// 列出被 Git 忽略规则排除后仍未跟踪的文件路径；不读取文件正文。
+    nonisolated private static func listUntrackedPaths(
+        in repoRoot: String,
+        targetPaths: [String]? = nil
+    ) -> [String] {
+        var args = ["ls-files", "--others", "--exclude-standard", "-z"]
+        if let targetPaths, !targetPaths.isEmpty {
+            args += ["--"] + targetPaths
+        }
+        let result = GitStatusModel.runGit(args, in: repoRoot)
+        guard result.status == 0 else { return [] }
+        return result.stdout
+            .split(separator: "\0", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+
+    /// 将未跟踪文件压缩成仅含路径的摘要，避免把新文件正文注入 prompt。
+    nonisolated private static func untrackedSection(paths: [String]) -> String {
+        var block = "## Untracked files (paths only)\n"
+        for path in paths.prefix(maxUntrackedList) {
+            block += "- \(path)\n"
+        }
+        if paths.count > maxUntrackedList {
+            block += "- … and \(paths.count - maxUntrackedList) more\n"
+        }
+        return block
     }
 
     nonisolated private static func finalizeDiff(_ text: String) -> String {
