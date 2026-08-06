@@ -469,26 +469,6 @@ struct SettingsView: View {
             }
             }
 
-            if selectedSection == .git {
-            Section(L10n.t("Git")) {
-                Group {
-                    settingWithDescription(
-                        L10n.t("Operation Mode"),
-                        L10n.t("Simple mode uses a single list of changes with checkboxes for commit selection (GitHub Desktop style). Traditional mode splits changes into Staged and Unstaged (VS Code style).")
-                    ) {
-                        Picker("", selection: $settings.gitOperationMode) {
-                            ForEach(GitOperationMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-                }
-                .settingsRowPadding()
-            }
-            }
-
             if selectedSection == .ai {
             Section(L10n.t("Backend")) {
                 Group {
@@ -698,6 +678,10 @@ struct SettingsView: View {
             }
             }
 
+            if selectedSection == .project {
+                ProjectSettingsSectionView(settings: settings)
+            }
+
             if selectedSection == .files {
             Section(L10n.t("Font")) {
                 Group {
@@ -790,8 +774,24 @@ struct SettingsView: View {
             }
             }
 
-            if selectedSection == .project {
-                ProjectSettingsSectionView(settings: settings)
+            if selectedSection == .git {
+            Section(L10n.t("Git")) {
+                Group {
+                    settingWithDescription(
+                        L10n.t("Operation Mode"),
+                        L10n.t("Simple mode uses a single list of changes with checkboxes for commit selection (GitHub Desktop style). Traditional mode splits changes into Staged and Unstaged (VS Code style).")
+                    ) {
+                        Picker("", selection: $settings.gitOperationMode) {
+                            ForEach(GitOperationMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                }
+                .settingsRowPadding()
+            }
             }
 
             if selectedSection == .about {
@@ -1484,12 +1484,12 @@ private var settingsWindowLifecycleKey: UInt8 = 0
 /// 设置页的可见分类；每个分类对应左侧导航一项。
 private enum SettingsSection: CaseIterable, Identifiable, Hashable {
     case general
-    case git
     case ai
     case terminal
     case editor
-    case files
     case project
+    case files
+    case git
     case about
 
     var id: Self { self }
@@ -1497,12 +1497,12 @@ private enum SettingsSection: CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
         case .general: L10n.t("General")
-        case .git: L10n.t("Git")
         case .ai: L10n.t("AI")
         case .terminal: L10n.t("Terminal")
         case .editor: L10n.t("Editor")
-        case .files: L10n.t("Files")
         case .project: L10n.t("Project")
+        case .files: L10n.t("Files")
+        case .git: L10n.t("Git")
         case .about: L10n.t("About")
         }
     }
@@ -1510,12 +1510,12 @@ private enum SettingsSection: CaseIterable, Identifiable, Hashable {
     var systemImage: String {
         switch self {
         case .general: "gearshape"
-        case .git: "arrow.triangle.branch"
         case .ai: "sparkles"
         case .terminal: "terminal"
         case .editor: "text.cursor"
-        case .files: "folder"
         case .project: "shippingbox"
+        case .files: "folder"
+        case .git: "arrow.triangle.branch"
         case .about: "info.circle"
         }
     }

@@ -852,11 +852,14 @@ final class TerminalManager: nonisolated ObservableObject {
     }
 
     /// 通用项目脚本运行接口（支持 NPM, Gradle, uv, PDM, Rust alias, Makefile 等）
+    /// - Parameter projectOverride: 指定脚本所属项目（Cmd+R 重新运行时传入原项目，
+    ///   避免脚本被误跑到当前选中的另一个项目下）；缺省用 selectedProject。
     func runProjectScript(
         _ script: UniversalProjectScript,
-        mode: UniversalScriptRunMode = .normal
+        mode: UniversalScriptRunMode = .normal,
+        in projectOverride: Project? = nil
     ) {
-        guard let project = selectedProject, !script.name.isEmpty else { return }
+        guard let project = projectOverride ?? selectedProject, !script.name.isEmpty else { return }
         let resolvedDirectory = !script.directory.isEmpty ? script.directory : (project.projectDirectory.isEmpty ? (selectedSession?.currentDirectoryPath ?? "") : project.projectDirectory)
         guard !resolvedDirectory.isEmpty else { return }
 
@@ -1002,6 +1005,33 @@ final class TerminalManager: nonisolated ObservableObject {
                 fallbackDirectory: fallbackDirectory
             )
         )
+    }
+
+    /// Cmd+R 重新运行：当前终端由右侧栏任务或 Script Runner 发起时，在其原项目内重新运行。
+    /// 返回 true 表示快捷键已被消费。
+    func rerunTerminalTask(for session: TerminalSession) -> Bool {
+        // 1. 右侧栏任务（npm scripts / Gradle / Makefile 等）：优先原 pane 原地替换会话。
+        if let record = packageScriptRecords.values.first(where: { $0.sessionID == session.id }) {
+            let hostProject = project(containingSessionID: session.id) ?? selectedProject
+            runProjectScript(record.script, in: hostProject)
+            return true
+        }
+        // 2. Script Runner 单文件脚本：按原运行模式（分屏 / 新 Tab）重新运行。
+        let runner = ScriptRunner.shared
+        if let filePath = runner.activeSessionsByPath.first(where: { $0.value.id == session.id })?.key {
+            if runner.splitPaneBySessionID[session.id] == true {
+                try? runner.runInSplitPane(filePath: filePath, manager: self)
+            } else {
+                try? runner.run(filePath: filePath, manager: self)
+            }
+            return true
+        }
+        return false
+    }
+
+    /// 查找包含指定 Session 的 manager（Cmd+R 重新运行入口，支持多窗口）。
+    static func manager(containingSession sessionID: UUID) -> TerminalManager? {
+        registry.first { $0.project(containingSessionID: sessionID) != nil }
     }
 
     /// 重新运行指定的 package script。

@@ -20,6 +20,10 @@ final class ScriptRunner: ObservableObject {
     /// 当前每个文件路径对应的终端 Session
     @Published private(set) var activeSessionsByPath: [String: TerminalSession] = [:]
 
+    /// 每个运行会话的创建模式（true = 分屏运行，false = 新 Tab 运行），
+    /// 供 Cmd+R 重新运行时按原模式恢复。
+    private(set) var splitPaneBySessionID: [UUID: Bool] = [:]
+
     /// 当前正在运行脚本的文件路径（用于底栏按钮状态展示）
     @Published private(set) var currentRunningPath: String?
 
@@ -99,7 +103,7 @@ final class ScriptRunner: ObservableObject {
             manager: manager,
             splitPane: false
         )
-        trackSession(session, for: filePath, projectID: project.id)
+        trackSession(session, for: filePath, projectID: project.id, isSplitPane: false)
     }
 
     /// 在当前标签页以上下分屏模式运行脚本（关闭上一次的运行分屏并重新分屏）
@@ -126,7 +130,7 @@ final class ScriptRunner: ObservableObject {
                directory: workingDir
            ) {
             replaced.sendCommandWhenReady(command.shellString + "\n")
-            trackSession(replaced, for: filePath, projectID: projectID)
+            trackSession(replaced, for: filePath, projectID: projectID, isSplitPane: true)
             return
         }
 
@@ -142,7 +146,7 @@ final class ScriptRunner: ObservableObject {
             manager: manager,
             splitPane: true
         )
-        trackSession(session, for: filePath, projectID: projectID)
+        trackSession(session, for: filePath, projectID: projectID, isSplitPane: true)
     }
 
     /// 停止指定文件路径正在运行的脚本（关闭运行分屏）
@@ -160,14 +164,21 @@ final class ScriptRunner: ObservableObject {
     }
 
     /// 跟踪 Session 状态
-    private func trackSession(_ session: TerminalSession, for filePath: String, projectID: UUID) {
+    private func trackSession(
+        _ session: TerminalSession,
+        for filePath: String,
+        projectID: UUID,
+        isSplitPane: Bool
+    ) {
         session.isTaskRunning = true
+        splitPaneBySessionID[session.id] = isSplitPane
         activeSplitSessionsByProject[projectID] = session
         activeSessionsByPath[filePath] = session
         currentRunningPath = filePath
 
         session.onExited = { [weak self] exitedSession in
             Task { @MainActor in
+                self?.splitPaneBySessionID.removeValue(forKey: exitedSession.id)
                 if self?.currentRunningPath == filePath {
                     self?.currentRunningPath = nil
                 }
