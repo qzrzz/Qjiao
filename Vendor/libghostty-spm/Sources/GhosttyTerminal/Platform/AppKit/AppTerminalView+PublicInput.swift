@@ -48,10 +48,8 @@
         /// Read the visible viewport as plain text (no temp files).
         ///
         /// Use this instead of the `write_screen_file` binding action for
-        /// hot read paths: Ghostty's file export leaks directory fds
-        /// upstream (see `TerminalSurface.readText`), and enough leaks
-        /// eventually exhaust the process fd table and make every
-        /// `Process.run()` fail with EBADF.
+        /// hot read paths. It avoids filesystem I/O and the lifetime of
+        /// Ghostty's temporary export directory entirely.
         public func readTerminalText() -> String? {
             surface?.readText()
         }
