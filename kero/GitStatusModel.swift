@@ -496,9 +496,11 @@ final class GitStatusModel: nonisolated ObservableObject {
     /// 与普通 `refresh()` 的区别：
     /// - 先作废在飞扫描，避免吃到 mutation 前启动的陈旧结果；
     /// - **绕过** `GitScanner` actor 串行队列，以 `.userInitiated` 立刻重扫；
-    /// - **跳过** branches / remotes / log / stash 详情（只更新变更列表 + branch 头），
-    ///   避免 Commit 后还串行跑 4～5 个 git 子进程拖慢体感；详情由后续心跳补齐。
-    private func refreshAfterMutation() {
+    /// - 默认**跳过** branches / remotes / log / stash 详情（只更新变更列表 + branch
+    ///   头），避免普通操作额外启动 4～5 个 git 子进程拖慢体感；详情由后续心跳补齐。
+    /// - 提交 / amend 传入 `loadDetails`，在本次刷新中直接读取提交历史，避免新提交
+    ///   先显示乐观占位、再等待低频心跳替换。
+    private func refreshAfterMutation(loadDetails: Bool = false) {
         let root = rootPath
         let generation = contextGeneration
         guard !root.isEmpty else { return }
@@ -507,14 +509,16 @@ final class GitStatusModel: nonisolated ObservableObject {
         let requestID = statusRequestID
         isRefreshing = true
         let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
+        let commitLimit = recentCommitLimit
         let refStart = Date()
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 GitScanner.loadStatusNow(
                     in: root,
                     includeIgnoredPaths: includeIgnoredPaths,
-                    includeDetails: false,
-                    bypassFsmonitor: false
+                    includeDetails: loadDetails,
+                    bypassFsmonitor: false,
+                    recentCommitLimit: commitLimit
                 )
             }.value
             let refElapsed = Date().timeIntervalSince(refStart) * 1_000
@@ -545,7 +549,7 @@ final class GitStatusModel: nonisolated ObservableObject {
                           !self.isRefreshing else { return }
                     self.refresh()
                 }
-            } else {
+            } else if !loadDetails {
                 // 快路径不带 recent commits 等详情；对齐 VS Code 空闲后再补全量。
                 Task { [weak self] in
                     try? await Task.sleep(
@@ -972,7 +976,8 @@ final class GitStatusModel: nonisolated ObservableObject {
             completion: completion,
             optimisticUpdate: { [weak self] in
                 self?.optimisticallyCommit(includeAll: includeAll, amend: amend, message: trimmed)
-            }
+            },
+            reloadCommitHistory: true
         )
     }
 
@@ -1040,7 +1045,8 @@ final class GitStatusModel: nonisolated ObservableObject {
         perform(
             label: label,
             commands: commands,
-            completion: completion
+            completion: completion,
+            reloadCommitHistory: true
         )
     }
 
@@ -1204,7 +1210,8 @@ final class GitStatusModel: nonisolated ObservableObject {
         requiresStableHead: Bool = true,
         requiresStableUpstream: Bool = false,
         completion: (@MainActor (Bool) -> Void)? = nil,
-        optimisticUpdate: (() -> Void)? = nil
+        optimisticUpdate: (() -> Void)? = nil,
+        reloadCommitHistory: Bool = false
     ) {
         if directory == nil && !isRepo {
             failImmediately(
@@ -1343,8 +1350,8 @@ final class GitStatusModel: nonisolated ObservableObject {
                 )
                 completion?(true)
             }
-            // 成功时列表已是乐观结果，后台轻量 status 纠偏即可；失败时纠偏真实状态。
-            self.refreshAfterMutation()
+            // 提交操作需要在成功后立即补齐真实历史；其它操作沿用轻量 status 纠偏。
+            self.refreshAfterMutation(loadDetails: reloadCommitHistory)
         }
     }
 

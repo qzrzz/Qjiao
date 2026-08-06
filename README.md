@@ -52,6 +52,8 @@
   - Stage 类操作跳过 HEAD 稳定校验（与 VS Code 一样只跑 `git add`/`restore`）。
 - 大仓库友好：变更上限、未跟踪目录折叠展示、列表惰性渲染；可指定项目级 Git 仓库路径。
 - 提交历史：可展开查看每次提交改动的文件列表（点击打开父→提交的历史 diff），支持分页加载更多；提交图（垂直线 + 圆点）、引用徽章（HEAD/main/tag）、滚动接近底部自动加载更多。
+- 提交历史分组统一命名为「提交历史」；创建 commit 或 amend 成功后立即刷新真实提交记录。
+- Commit 输入框使用单个多行编辑器，第一行作为 Subject、后续内容作为 Body；提交时按 Git 标准用空行拼接。
 - stage / commit / discard、历史提交编辑（Reword / Amend / Drop 等）、大 Diff 虚拟化渲染；右侧 Git 标签显示变更数角标。
 - 多语言（L10n）完整覆盖 Git 操作完成提示（Commit/Push/Pull/Fetch/Stage/Discard/Stash 等状态与输出消息），支持中文与日文实时切换。
 - 扫描失败可强制刷新并自愈 fsmonitor；子进程统一超时与回收，彻底治理 Process / Pipe 文件描述符 (FD) 泄漏（显式关闭 stdin/stdout/stderr 读写句柄，Diff 视图统一下放 SubprocessRunner），解决长时间运行后因 FD 耗尽引发 `Bad file descriptor` (`NSPOSIXErrorDomain` code 9) 导致子进程创建失败的问题。
