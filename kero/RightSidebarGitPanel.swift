@@ -57,6 +57,7 @@ struct GitPanel: View {
     @ObservedObject private var aiCommitTasks = LocalAIGitCommitTaskStore.shared
     @ObservedObject private var l10n = L10n.shared
 
+    /// 使用一个多行输入框编辑提交信息，第一行作为标题，其余内容作为正文。
     @State private var commitMessage = ""
     @State private var pendingDiscard: PendingDiscard?
     @State private var pendingDiscardAll: [PendingDiscard] = []
@@ -547,10 +548,10 @@ struct GitPanel: View {
             HStack(alignment: .top, spacing: 4) {
                 GitCommitMessageEditor(
                     text: $commitMessage,
-                    placeholder: commitFieldPlaceholder,
+                    placeholder: commitMessagePlaceholder,
                     onCommit: performPrimaryAction
                 )
-                .frame(minHeight: 36, maxHeight: 72)
+                .frame(minHeight: 52, maxHeight: 92)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.primary.opacity(0.05))
@@ -598,7 +599,7 @@ struct GitPanel: View {
             // 成功生成后写入 Message 输入框
             guard let newMessage, !newMessage.isEmpty else { return }
             if let consumed = aiCommitTasks.consumeMessage(model.repoRoot) {
-                commitMessage = consumed
+                setCommitDraft(from: consumed)
                 if isPendingAICommit {
                     isPendingAICommit = false
                     if settings.gitOperationMode == .simple {
@@ -792,25 +793,70 @@ struct GitPanel: View {
         }
     }
 
-    private var commitFieldPlaceholder: String {
+    private var commitMessagePlaceholder: String {
         if settings.gitOperationMode == .simple {
             if checkedEntriesCount == 0 {
-                return L10n.t("Message (select changes to use ⌘⏎)")
+                return L10n.t("Commit Message (first line is Subject; select changes to use ⌘⏎)")
             }
             if let branch = model.branch {
-                return L10n.format("Message (⌘⏎ to commit on \"%@\")", branch)
+                return L10n.format("Commit Message (first line is Subject; ⌘⏎ to commit on \"%@\")", branch)
             }
-            return L10n.t("Message (⌘⏎ to commit)")
+            return L10n.t("Commit Message (first line is Subject; ⌘⏎ to commit)")
         }
         if model.stagedEntries.isEmpty {
             return model.recentCommits.isEmpty
-                ? L10n.t("Message (stage changes to use ⌘⏎)")
-                : L10n.t("Message (stage changes to use ⌘⏎, or choose Amend)")
+                ? L10n.t("Commit Message (first line is Subject; stage changes to use ⌘⏎)")
+                : L10n.t("Commit Message (first line is Subject; stage changes to use ⌘⏎, or choose Amend)")
         }
         if let branch = model.branch {
-            return L10n.format("Message (⌘⏎ to commit on \"%@\")", branch)
+            return L10n.format("Commit Message (first line is Subject; ⌘⏎ to commit on \"%@\")", branch)
         }
-        return L10n.t("Message (⌘⏎ to commit)")
+        return L10n.t("Commit Message (first line is Subject; ⌘⏎ to commit)")
+    }
+
+    /// 标题是 Git commit message 的必填首行；正文可以为空。
+    private var hasCommitSubject: Bool {
+        guard let firstLine = normalizedCommitMessage.split(separator: "\n", omittingEmptySubsequences: false).first else {
+            return false
+        }
+        return !firstLine.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// 以 Git 标准的「标题 + 空行 + 正文」格式组装最终提交信息。
+    private var composedCommitMessage: String {
+        let normalized = normalizedCommitMessage
+        guard let firstLineEnd = normalized.firstIndex(of: "\n") else { return normalized }
+        let subject = String(normalized[..<firstLineEnd]).trimmingCharacters(in: .whitespaces)
+        let bodyStart = normalized.index(after: firstLineEnd)
+        let body = String(normalized[bodyStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !subject.isEmpty else { return body }
+        return body.isEmpty ? subject : subject + "\n\n" + body
+    }
+
+    /// 统一换行符并去除提交信息首尾空白，保留第一行标题与后续正文结构。
+    private var normalizedCommitMessage: String {
+        commitMessage
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 将 AI 返回的完整 message 写入同一个多行输入框。
+    private func setCommitDraft(from message: String) {
+        let normalized = message
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            clearCommitDraft()
+            return
+        }
+        commitMessage = normalized
+    }
+
+    /// 清空提交信息，切换仓库或提交成功后共用。
+    private func clearCommitDraft() {
+        commitMessage = ""
     }
 
     private var showSyncButton: Bool {
@@ -842,7 +888,7 @@ struct GitPanel: View {
 
     private func canCommit(includeAll: Bool) -> Bool {
         if settings.gitOperationMode == .simple {
-            return !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return hasCommitSubject
                 && checkedEntriesCount > 0
                 && model.mergeEntries.isEmpty
                 && !model.isInteractionLocked
@@ -850,7 +896,7 @@ struct GitPanel: View {
         let hasEligibleChanges = includeAll
             ? (!model.changedEntries.isEmpty || !model.stagedEntries.isEmpty)
             : !model.stagedEntries.isEmpty
-        return !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasCommitSubject
             && hasEligibleChanges
             && model.mergeEntries.isEmpty
             && !model.isInteractionLocked
@@ -861,7 +907,7 @@ struct GitPanel: View {
         let hasEligibleChanges = (settings.gitOperationMode == .simple)
             ? !allSimpleEntries.isEmpty
             : (!includeAll || !model.changedEntries.isEmpty || !model.stagedEntries.isEmpty)
-        return !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasCommitSubject
             && hasCommit
             && hasEligibleChanges
             && model.mergeEntries.isEmpty
@@ -869,7 +915,7 @@ struct GitPanel: View {
     }
 
     private func performPrimaryAction() {
-        guard !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard hasCommitSubject else { return }
         if settings.gitOperationMode == .simple {
             performSimpleCommit()
             return
@@ -885,15 +931,16 @@ struct GitPanel: View {
         let all = allSimpleEntries
         let checked = all.filter { checkedPaths.contains($0.path) }
         let unchecked = all.filter { !checkedPaths.contains($0.path) }
+        let submittedMessage = composedCommitMessage
         beginGitAction(trigger) {
             model.commitSimple(
-                message: commitMessage,
+                message: submittedMessage,
                 checkedEntries: checked,
                 uncheckedEntries: unchecked,
                 amend: amend
             ) { success in
                 if success {
-                    commitMessage = ""
+                    clearCommitDraft()
                 }
             }
         }
@@ -901,10 +948,10 @@ struct GitPanel: View {
 
     private func performCommit(includeAll: Bool, amend: Bool = false, trigger: GitActionTarget = .commit) {
         guard amend ? canAmend(includeAll: includeAll) : canCommit(includeAll: includeAll) else { return }
-        let submittedMessage = commitMessage
+        let submittedMessage = composedCommitMessage
         beginGitAction(trigger) {
             model.commit(message: submittedMessage, includeAll: includeAll, amend: amend) { success in
-                if success, commitMessage == submittedMessage { commitMessage = "" }
+                if success, composedCommitMessage == submittedMessage { clearCommitDraft() }
             }
         }
     }
@@ -1098,7 +1145,7 @@ struct GitPanel: View {
                         }
                         if filterText.isEmpty, !model.recentCommits.isEmpty {
                             SidebarSectionHeader(
-                                title: L10n.t("RECENT COMMITS"),
+                                title: L10n.t("COMMIT HISTORY"),
                                 count: model.recentCommits.count,
                                 isCollapsed: $historyCollapsed,
                                 actions: [],
@@ -1670,7 +1717,7 @@ struct GitPanel: View {
     }
 
     private func resetRepositoryDrafts() {
-        commitMessage = ""
+        clearCommitDraft()
         filterText = ""
         showFilter = false
         newBranchName = ""
