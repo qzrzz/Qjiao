@@ -449,12 +449,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             }
             return terminalView.foregroundPid == shellPid
         }()
-        if !rootShellIsForeground,
-           !TerminalHistorySerializer.hasPrimaryScrollback(terminalView) {
-            // A primary screen with no rows above the viewport and an
-            // alternate screen both have no scrollback export. The root shell
-            // is foreground only in the former case; a TUI owns its own
-            // foreground process group in the latter.
+        if !rootShellIsForeground {
+            // 这里不再探测 write_scrollback_file。探测只用于区分 TUI 与后台任务，
+            // 却会额外创建 Ghostty 临时导出。非 shell 前台进程统一保留上一次
+            // shell 快照；正常关闭路径只保留下面这一次最终历史导出。
             return lastHistorySnapshot
         }
         switch TerminalHistorySerializer.capture(

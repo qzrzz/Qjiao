@@ -40,10 +40,10 @@ enum TerminalHistorySerializer {
     /// 为标签切换器读取终端可见文本。Metal Surface 无法稳定生成位图，
     /// 因此直接读取 Ghostty surface 的视口文本构造轻量预览，并限制尾部读取量。
     ///
-    /// 必须走 `ghostty_surface_read_text` 而不是 `write_screen_file`：上游
-    /// Ghostty 的 TempDir 只在出错时回收（errdefer），每次文件导出都会泄漏
-    /// 目录 fd——Agent 轮询 / 切换器预览长期运行后 fd 表被塞满，导致所有
-    /// `Process.run()` 报 EBADF（Bad file descriptor）。
+    /// 高频路径必须走 `ghostty_surface_read_text` 而不是 `write_screen_file`。
+    /// 锁定的 Ghostty 上游版本曾只用 `errdefer` 回收 TempDir；Vendor 构建链
+    /// 通过 `0011-fix-tempdir-fd-leak.patch` 修复文件导出，直接读 surface
+    /// 则让 Agent 轮询 / 切换器预览完全不触碰文件系统。
     @MainActor
     static func previewText(
         from view: KeroTerminalView,
@@ -72,18 +72,6 @@ enum TerminalHistorySerializer {
             return cropped
         }
         .joined(separator: "\n")
-    }
-
-    /// A positive-only probe for a primary-buffer scrollback snapshot. Ghostty
-    /// does not export scrollback while an alternate buffer is active, but an
-    /// empty primary buffer can also produce no file, so false is inconclusive.
-    @MainActor
-    static func hasPrimaryScrollback(_ view: KeroTerminalView) -> Bool {
-        guard let captureFile = exportedFile(
-            from: view, action: "write_scrollback_file:open,vt"
-        ) else { return false }
-        removeCaptureFile(captureFile)
-        return true
     }
 
     /// Runs a Ghostty file-export action and returns only its validated output.

@@ -262,13 +262,11 @@ public final class TerminalSurface {
     /// Read the visible viewport as plain text, without touching the
     /// filesystem.
     ///
-    /// Hot paths must use this instead of the `write_screen_file` /
-    /// `write_scrollback_file` binding actions: upstream Ghostty's
-    /// `TempDir` is only cleaned up via `errdefer`, so every successful
-    /// file export leaks directory file descriptors (visible as open
-    /// `DIR` fds on random 22-char temp directories that eventually
-    /// exhaust the process fd table and break every `Process` launch
-    /// with EBADF).
+    /// Hot paths use this instead of the `write_screen_file` /
+    /// `write_scrollback_file` binding actions. The locked Ghostty source
+    /// previously cleaned its TempDir only via `errdefer`; the Vendor build
+    /// patch fixes that export path, while direct reads avoid filesystem I/O
+    /// entirely for polling and preview.
     ///
     /// Selection grammar: `(VIEWPORT, TOP_LEFT)` to `(VIEWPORT,
     /// BOTTOM_RIGHT)` with `rectangle: false` (linear flow), i.e. the

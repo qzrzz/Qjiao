@@ -18,6 +18,7 @@
 //  各自模块，IO 细节全部下放本执行器。
 //
 
+import Darwin
 import Foundation
 
 /// 统一子进程执行器。
@@ -262,16 +263,37 @@ nonisolated enum SubprocessRunner {
 
     /// 在应用启动时提升当前进程的 open file descriptor 软限制（rlimit）。
     ///
-    /// macOS 默认给 GUI App 设置的软限制较小（通常为 256 或 1024）。提升至 65536 可为
-    /// 多项目、多终端 Tab 及并发 Git 扫描提供巨大的安全缓冲，杜绝 EMFILE / EBADF 连锁反应。
+    /// macOS 默认给 GUI App 设置的软限制较小（通常为 256 或 1024）。将软限制提升至
+    /// 65536（不超过系统硬限制）可为多项目、多终端 Tab 及并发 Git 扫描提供安全缓冲；
+    /// 这不是泄漏修复，设置失败必须保留诊断。
     nonisolated static func boostFileDescriptorLimit() {
         ensureStandardFileDescriptorsOpen()
         var rl = rlimit()
-        if getrlimit(RLIMIT_NOFILE, &rl) == 0 {
-            let targetLimit = rlim_t(65536)
-            rl.rlim_max = max(rl.rlim_max, targetLimit)
-            rl.rlim_cur = targetLimit
-            setrlimit(RLIMIT_NOFILE, &rl)
+        guard getrlimit(RLIMIT_NOFILE, &rl) == 0 else {
+            NSLog("qjiao: getrlimit(RLIMIT_NOFILE) failed: errno=\(errno)")
+            return
+        }
+
+        let requestedLimit = rlim_t(65536)
+        let targetLimit = min(requestedLimit, rl.rlim_max)
+        guard targetLimit > rl.rlim_cur else { return }
+
+        var updated = rl
+        updated.rlim_cur = targetLimit
+        guard setrlimit(RLIMIT_NOFILE, &updated) == 0 else {
+            NSLog(
+                "qjiao: setrlimit(RLIMIT_NOFILE) failed: errno=\(errno), "
+                    + "soft=\(rl.rlim_cur), hard=\(rl.rlim_max), target=\(targetLimit)"
+            )
+            return
+        }
+
+        var verified = rlimit()
+        guard getrlimit(RLIMIT_NOFILE, &verified) == 0,
+              verified.rlim_cur >= targetLimit
+        else {
+            NSLog("qjiao: rlimit verification failed after setrlimit")
+            return
         }
     }
 
