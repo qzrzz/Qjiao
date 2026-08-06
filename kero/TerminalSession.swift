@@ -69,6 +69,15 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     }
     var onExited: ((TerminalSession) -> Void)?
 
+    /// Cmd+R 重新运行：会话由右侧栏任务或 Script Runner 发起时，请求重新运行；
+    /// 返回 true 表示快捷键已被消费（普通 shell 会话返回 false 放行）。
+    @MainActor
+    func handleRerunShortcut() -> Bool {
+        let manager = TerminalManager.manager(containingSession: id)
+            ?? TerminalManager.registry.first
+        return manager?.rerunTerminalTask(for: self) ?? false
+    }
+
     private static let persistedHistoryLineLimit = 500
 
     private let shellPath: String
@@ -142,6 +151,8 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         self._find = TerminalFind(terminal: terminalView)
 
         terminalView.delegate = self
+        // 视图→会话反向引用：Cmd+R 重新运行需要定位本会话对应的任务。
+        terminalView.terminalSession = self
         // ⌘-点击 / ⌘-右键链接时，由会话按其工作目录解析本地路径分类。
         terminalView.resolveLinkTarget = { [weak self] value in
             self?.terminalLinkTarget(for: value)

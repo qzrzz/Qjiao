@@ -15,6 +15,8 @@ final class KeroTerminalView: AppTerminalView {
     /// 保留属性以免会话/项目层配置代码失效；返回 true 表示已消费该目录。
     var onOpenProjectDirectory: ((URL) -> Bool)?
     let splitTarget = SplitMenuTarget()
+    /// 所属终端会话（用于 Cmd+R 重新运行等视图→会话回调）。
+    weak var terminalSession: TerminalSession?
     /// Ghostty 当前识别到的悬停链接，⌘-右键时作为浏览器初始地址。
     var hoveredLink: String?
     /// ⌘-点击 / ⌘-右键链接时的分类回调（由 TerminalSession 按工作目录解析）。
@@ -152,6 +154,23 @@ final class KeroTerminalView: AppTerminalView {
     override func mouseDown(with event: NSEvent) {
         focusForInteraction()
         super.mouseDown(with: event)
+    }
+
+    // MARK: - Cmd+R 重新运行
+
+    /// 终端获得焦点时拦截 Cmd+R：若当前会话由右侧栏任务或 Script Runner 发起
+    /// （有重新运行能力），则在原 pane 原地重新运行；普通 shell 不消费，放行给
+    /// 菜单（浏览器 Reload Page）或终端本身。
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.type == .keyDown,
+           event.modifierFlags.intersection([.command, .control, .option, .shift]) == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "r",
+           let session = terminalSession,
+           session.handleRerunShortcut()
+        {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     private func focusForInteraction() {

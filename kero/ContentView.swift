@@ -508,10 +508,8 @@ private struct MainHeaderView: View {
                 HeaderWindowDragBand(height: Self.tabEdgeDragHeight)
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .clipped()
         }
         .frame(height: Self.headerHeight)
-        .clipped()
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color(nsColor: Theme.divider))
@@ -748,9 +746,14 @@ private struct TabListRow: View {
                     }
 
                     if tab.allPanes.count > 1 {
-                        Label(L10n.format("%d panes", tab.allPanes.count), systemImage: "square.split.2x1")
-                            .font(SidebarTypography.section())
-                            .foregroundStyle(.tertiary)
+                        HStack(alignment: .center, spacing: 3) {
+                            Image(systemName: "square.split.2x1")
+                                .font(SidebarTypography.micro(.medium))
+                                .offset(y: -0.5)
+                            Text(L10n.format("%d panes", tab.allPanes.count))
+                                .font(SidebarTypography.section())
+                        }
+                        .foregroundStyle(.tertiary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -958,6 +961,10 @@ private struct SessionTabsView: View {
     @ObservedObject private var settings = AppSettings.shared
     let maxStripWidth: CGFloat
     private let fadeWidth: CGFloat = 20
+    /// 非当前 Tab 向内容区分屏拖拽时，越过 Tab 栏底部 20pt 后切换出排序模式。
+    private let splitDragHandoffDistance: CGFloat = 20
+    /// 相邻 Tab 中线附近的滞后区，避免弹簧重排时指针在边界两侧反复换序。
+    private let horizontalSortHysteresis: CGFloat = 6
     @State private var overflow = StripOverflow()
     /// Scroll 几何完整快照（含 offset），用于选中 Tab 避让边缘渐隐的精调滚动。
     @State private var stripGeometry = StripGeometry()
@@ -966,11 +973,27 @@ private struct SessionTabsView: View {
     /// 标签条已挤满时压低单 Tab 最小/最大宽度，腾出可见数量（仅滚动模式）。
     @State private var stripIsFull = false
     @State private var draggedTabID: UUID?
+    /// 拖拽预览的水平指针位置；预览不参与 HStack 布局，直接跟随鼠标横向移动。
+    @State private var draggedTabLocationX: CGFloat?
+    /// 分屏拖拽时的垂直指针位置；排序模式仍固定在 Tab 栏内。
+    @State private var draggedTabLocationY: CGFloat?
+    /// 记录鼠标按下点在源 Tab 内的水平偏移，避免拖拽时 Tab 左边缘跳到鼠标位置。
+    @State private var draggedTabGrabOffsetX: CGFloat = 0
+    /// 记录鼠标按下点在源 Tab 内的垂直偏移，分屏拖拽时保持抓取位置不跳动。
+    @State private var draggedTabGrabOffsetY: CGFloat = 0
+    /// 拖拽开始时 Tab 的全局 Y 坐标，保证排序预览始终停留在 Tab 栏内。
+    @State private var draggedTabOriginY: CGFloat = 0
+    /// 源 Tab 的原始尺寸，用于让浮动预览与真实 Tab 保持完全一致。
+    @State private var draggedTabSize = CGSize.zero
+    /// 是否处于水平排序模式；进入分屏拖拽区域后切换为二维跟随鼠标。
+    @State private var isHorizontalDragMode = false
     @State private var tabFrames: [UUID: CGRect] = [:]
     @State private var tabSizes: [UUID: CGSize] = [:]
     @State private var renamingTabID: UUID?
     /// 弹性布局分配结果；随标题 / 选中 / 宽度变化重算。
     @State private var elasticSlots: [UUID: ElasticTabSlot] = [:]
+    /// 拖拽期间锁定每个 Tab 的实际宽度和图标模式，避免排序导致布局反复重算而抖动。
+    @State private var draggedTabLayouts: [UUID: ElasticTabSlot] = [:]
     /// 标题驱动的弹性重算防抖：新建 Tab 后 shell 初始化会让标题短时间多次变化，
     /// 每次都重算会让激活 Tab 宽度来回跳动、条带反复滚动；等标题稳定后再重算一次。
     @State private var elasticRecomputeTask: Task<Void, Never>?
@@ -1015,6 +1038,51 @@ private struct SessionTabsView: View {
         return min(contentWidth, maxStripWidth)
     }
 
+    /// Tab frame 与拖拽位置都在 global 坐标系中，使用所有 Tab 的底边作为条带底部。
+    private var tabStripBottomY: CGFloat? {
+        tabFrames.values.map(\.maxY).max()
+    }
+
+    /// 当前 Tab 不能进入分屏；只有非当前 Tab 拖过条带底部 20pt 才切换到分屏视觉。
+    private func shouldShowHorizontalDragPreview(for source: UUID, at location: CGPoint) -> Bool {
+        guard source != project.selectedTabID,
+              let tabStripBottomY
+        else { return true }
+        return location.y <= tabStripBottomY + splitDragHandoffDistance
+    }
+
+    /// 只根据拖拽 Tab 当前顺序中的相邻项判断换序，不直接命中任意重排中的 frame。
+    /// 这样排序动画移动 frame 时不会因为命中顺序变化而来回移动。
+    private func horizontalSortTarget(for source: UUID, at location: CGPoint) -> UUID? {
+        guard let sourceIndex = project.tabs.firstIndex(where: { $0.id == source }) else {
+            return nil
+        }
+
+        let sourceWidth = draggedTabSize.width > 0
+            ? draggedTabSize.width
+            : (tabFrames[source]?.width ?? 0)
+        let draggedCenterX = location.x - draggedTabGrabOffsetX + sourceWidth / 2
+
+        if sourceIndex > 0 {
+            let previousID = project.tabs[sourceIndex - 1].id
+            if let previousFrame = tabFrames[previousID],
+               draggedCenterX < previousFrame.midX - horizontalSortHysteresis {
+                return previousID
+            }
+        }
+
+        let nextIndex = sourceIndex + 1
+        if nextIndex < project.tabs.count {
+            let nextID = project.tabs[nextIndex].id
+            if let nextFrame = tabFrames[nextID],
+               draggedCenterX > nextFrame.midX + horizontalSortHysteresis {
+                return nextID
+            }
+        }
+
+        return nil
+    }
+
     var body: some View {
         // 弹性模式用轻量时钟跟踪终端动态标题，以便重算宽度分配。
         TimelineView(.periodic(from: .now, by: isElastic ? 0.45 : 3600)) { _ in
@@ -1044,18 +1112,7 @@ private struct SessionTabsView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: TabStripMetrics.interTabSpacing) {
                     ForEach(project.tabs) { tab in
-                        let slot = elasticSlots[tab.id]
-                        PaneTabItem(
-                            manager: manager,
-                            tab: tab,
-                            isSelected: tab.id == chromeSelectedID,
-                            minWidth: isElastic ? (slot?.width ?? tabMinWidth) : tabMinWidth,
-                            maxWidth: isElastic ? (slot?.width ?? tabMaxWidth) : tabMaxWidth,
-                            iconOnly: isElastic && (slot?.iconOnly ?? false),
-                            select: { selectTabChromeFirst(tab.id) },
-                            close: { project.close(tab) },
-                            renamingTabID: $renamingTabID
-                        )
+                        paneTabItem(for: tab)
                         .id(tab.id)
                         .contextMenu { tabContextMenu(for: tab) }
                         .background {
@@ -1066,7 +1123,9 @@ private struct SessionTabsView: View {
                                 )
                             }
                         }
-                        .opacity(draggedTabID == tab.id ? 0.65 : 1)
+                        // 源 Tab 只保留布局占位；可见内容由下方的浮动预览绘制。
+                        // 这样其它 Tab 可以平滑让位，而源 Tab 不会被 HStack 的重排动画拖慢。
+                        .opacity(draggedTabID == tab.id ? 0 : 1)
                         // 占满 Tab 热区，避免透明间隙把事件漏给其它拖动手势。
                         .contentShape(Rectangle())
                         .highPriorityGesture(
@@ -1125,7 +1184,7 @@ private struct SessionTabsView: View {
             // 跟 chrome 即时滚入，不必等内容切换。
             // 不包 withAnimation：与新开 Tab 同帧时会把插入/宽度布局做成左→右插值。
             .onChange(of: project.chromeSelectedTabID) { _, id in
-                guard let id else { return }
+                guard id != nil else { return }
                 scrollToSelectedTab(using: proxy)
             }
             .onChange(of: project.selectedTabID) { _, id in
@@ -1136,7 +1195,7 @@ private struct SessionTabsView: View {
                     // 外部切换（快捷键等）覆盖本地意图。
                     localChromeTabID = nil
                 }
-                guard let id else { return }
+                guard id != nil else { return }
                 scrollToSelectedTab(using: proxy)
             }
             .onChange(of: localChromeTabID) { _, id in
@@ -1199,6 +1258,9 @@ private struct SessionTabsView: View {
             }
         }
         .frame(width: stripWidth, alignment: .leading)
+        .overlay {
+            draggedTabPreview
+        }
         .onChange(of: titleFingerprint) { _, _ in
             // 标题在 shell 启动 / 命令执行期间可能连续变化（如新 Tab 的目录名→
             // 提示符→稳定标题），直接重算会让激活 Tab 宽度跟随标题来回跳动。
@@ -1212,6 +1274,86 @@ private struct SessionTabsView: View {
         }
         .onDisappear {
             elasticRecomputeTask?.cancel()
+        }
+    }
+
+    /// 构造主 Tab 内容，供正常布局和拖拽浮层复用，避免标题 / 底色出现两套实现。
+    @ViewBuilder
+    private func paneTabItem(for tab: PaneTab, isDragPreview: Bool = false) -> some View {
+        let sizing = paneTabSizing(for: tab)
+        PaneTabItem(
+            manager: manager,
+            tab: tab,
+            isSelected: tab.id == chromeSelectedID,
+            minWidth: sizing.minWidth,
+            maxWidth: sizing.maxWidth,
+            iconOnly: sizing.iconOnly,
+            isDragActive: draggedTabID != nil,
+            isDragPreview: isDragPreview,
+            select: { selectTabChromeFirst(tab.id) },
+            close: { project.close(tab) },
+            renamingTabID: $renamingTabID
+        )
+    }
+
+    private func paneTabSizing(for tab: PaneTab) -> (
+        minWidth: CGFloat,
+        maxWidth: CGFloat,
+        iconOnly: Bool
+    ) {
+        let frozenSlot = draggedTabID == nil ? nil : draggedTabLayouts[tab.id]
+        let slot = frozenSlot ?? elasticSlots[tab.id]
+        if let frozenSlot {
+            return (frozenSlot.width, frozenSlot.width, frozenSlot.iconOnly)
+        }
+        if isElastic {
+            return (
+                slot?.width ?? tabMinWidth,
+                slot?.width ?? tabMaxWidth,
+                slot?.iconOnly ?? false
+            )
+        }
+        return (tabMinWidth, tabMaxWidth, false)
+    }
+
+    /// 浮在条带之上的拖拽预览。预览使用完整 Tab Chrome，确保标题和选中底色
+    /// 共享同一次位移，不再出现底色已经移动而文字滞后的错位。
+    @ViewBuilder
+    private var draggedTabPreview: some View {
+        if let draggedTabID,
+           let tab = project.tabs.first(where: { $0.id == draggedTabID }),
+           let locationX = draggedTabLocationX,
+           let locationY = draggedTabLocationY,
+           draggedTabSize.width > 0,
+           draggedTabSize.height > 0 {
+            GeometryReader { geo in
+                let frame = geo.frame(in: .global)
+                let previewOriginY = isHorizontalDragMode
+                    ? draggedTabOriginY
+                    : locationY - draggedTabGrabOffsetY
+                paneTabItem(for: tab, isDragPreview: true)
+                    .frame(
+                        width: draggedTabSize.width,
+                        height: draggedTabSize.height,
+                        alignment: .leading
+                    )
+                    .background {
+                        // TabItemChrome 负责绘制当前 / hover 底色；这里仅补一层独立后板，
+                        // 先用材质模糊背景，再用主题色遮罩，避免终端内容从浮层后面透出。
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(.regularMaterial)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color(nsColor: Theme.background.withAlphaComponent(0.86)))
+                            }
+                    }
+                    .position(
+                        x: locationX - frame.minX - draggedTabGrabOffsetX + draggedTabSize.width / 2,
+                        y: previewOriginY - frame.minY + draggedTabSize.height / 2
+                    )
+                    .allowsHitTesting(false)
+                    .zIndex(10)
+            }
         }
     }
 
@@ -1233,6 +1375,9 @@ private struct SessionTabsView: View {
     }
 
     private func recomputeElasticSlots() {
+        // 排序 / 分屏拖拽期间使用 beginTabLayoutFreeze() 的布局快照；等手势结束后
+        // 再以最终顺序、标题和选中态统一重算，避免 Tab 宽度边变边抖。
+        guard draggedTabID == nil else { return }
         guard isElastic else {
             if !elasticSlots.isEmpty { elasticSlots = [:] }
             return
@@ -1322,6 +1467,7 @@ private struct SessionTabsView: View {
 
     /// 内容超出可视宽度 → 压缩；仅当按宽松最大宽度也一定放得下时才恢复，避免 140/220 来回抖。
     private func updateStripFullness(contentWidth: CGFloat, containerWidth: CGFloat) {
+        guard draggedTabID == nil else { return }
         let overflowing = contentWidth > containerWidth + 0.5
         if overflowing {
             if !stripIsFull { stripIsFull = true }
@@ -1339,6 +1485,7 @@ private struct SessionTabsView: View {
     }
 
     private func reevaluateStripFullnessAfterTabCountChange() {
+        guard draggedTabID == nil else { return }
         guard stripIsFull else { return }
         let tabCount = max(project.tabs.count, 1)
         let spacing = CGFloat(max(tabCount - 1, 0)) * TabStripMetrics.interTabSpacing
@@ -1353,16 +1500,45 @@ private struct SessionTabsView: View {
     /// 1) 指针越过其它 Tab → 立即重排（保持原有行为，不用 pasteboard，避免被标题栏抢窗口拖动）；
     /// 2) 指针进入当前内容区 pane → 四象限分屏预览，松手并入目标 Tab（不能拖到自己的终端）。
     private func updateTabDrag(source: UUID, location: CGPoint) {
-        draggedTabID = source
+        if draggedTabID == nil {
+            beginTabLayoutFreeze()
+        }
+        if draggedTabID != source {
+            draggedTabID = source
+        }
+        let shouldShowHorizontalPreview = shouldShowHorizontalDragPreview(
+            for: source,
+            at: location
+        )
+        if isHorizontalDragMode != shouldShowHorizontalPreview {
+            // 分流到分屏模式时不让预览的跟随方向产生一段过渡动画。
+            var transaction = Transaction()
+            transaction.animation = nil
+            withTransaction(transaction) {
+                isHorizontalDragMode = shouldShowHorizontalPreview
+            }
+        }
+        // 几何偏好可能比第一次 DragGesture 晚一帧；在预览尚未初始化时继续尝试捕获。
+        if draggedTabSize == .zero, let frame = tabFrames[source] {
+            draggedTabGrabOffsetX = location.x - frame.minX
+            draggedTabGrabOffsetY = location.y - frame.minY
+            draggedTabOriginY = frame.minY
+            draggedTabSize = frame.size
+        }
+        // 不使用 withAnimation：水平预览必须与指针同帧更新，不能产生跟手滞后。
+        draggedTabLocationX = location.x
+        draggedTabLocationY = location.y
         tabSplitDrag.begin(sourceTabID: source)
 
-        // 优先：落在另一个 Tab 热区 → 排序，并清掉分屏预览。
-        if let target = tabFrames.first(where: {
-            $0.key != source && $0.value.contains(location)
-        })?.key {
+        // 优先：越过相邻 Tab 中线 → 排序，并清掉分屏预览。
+        // 不用 contains 命中任意 frame，避免重排中的 frame 互相覆盖时来回换序。
+        if shouldShowHorizontalPreview,
+           let target = horizontalSortTarget(for: source, at: location) {
             tabSplitDrag.setDropTarget(paneID: nil, edge: nil)
             NSCursor.closedHand.set()
-            withAnimation(.easeInOut(duration: 0.12)) {
+            // 只让占位 Tab 与周围标签弹簧让位；浮动源 Tab 不进入这次动画，
+            // 因而预览可以始终与鼠标同帧，而不是被 0.12s 的 ease 动画拖在后面。
+            withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.84, blendDuration: 0.04)) {
                 project.moveTab(source, to: target)
             }
             return
@@ -1370,6 +1546,27 @@ private struct SessionTabsView: View {
 
         // 内容区分屏：仅当源 Tab 不是当前内容 Tab，且目标允许分屏。
         updateTabSplitDrop(source: source, location: location)
+    }
+
+    /// 在第一次拖拽回调到达时保存当前几何尺寸。快照按 Tab ID 保存，排序后仍跟随
+    /// 各自的 Tab，而不是跟随位置，因此 HStack 重排时所有宽度都保持不变。
+    private func beginTabLayoutFreeze() {
+        guard draggedTabLayouts.isEmpty else { return }
+
+        var snapshot: [UUID: ElasticTabSlot] = [:]
+        for tab in project.tabs {
+            let currentSlot = elasticSlots[tab.id]
+            let measuredWidth = tabSizes[tab.id]?.width ?? tabFrames[tab.id]?.width ?? 0
+            let width = measuredWidth > 0
+                ? measuredWidth
+                : (currentSlot?.width ?? (isElastic ? tabMinWidth : tabMaxWidth))
+            snapshot[tab.id] = ElasticTabSlot(
+                width: width,
+                iconOnly: isElastic && (currentSlot?.iconOnly ?? false)
+            )
+        }
+
+        draggedTabLayouts = snapshot
     }
 
     /// 根据指针与内容区 pane frame 更新分屏落点预览与光标。
@@ -1424,7 +1621,16 @@ private struct SessionTabsView: View {
             project.mergeTab(source, toward: drop.edge, of: drop.paneID)
         }
         draggedTabID = nil
+        draggedTabLocationX = nil
+        draggedTabLocationY = nil
+        draggedTabGrabOffsetX = 0
+        draggedTabGrabOffsetY = 0
+        draggedTabOriginY = 0
+        draggedTabSize = .zero
+        isHorizontalDragMode = false
         tabSplitDrag.end()
+        draggedTabLayouts = [:]
+        recomputeElasticSlots()
         NSCursor.arrow.set()
     }
 
@@ -1530,6 +1736,10 @@ private struct PaneTabItem: View {
     var maxWidth: CGFloat = 220
     /// 弹性模式仅图标：无标题、无关闭，保留状态指示器。
     var iconOnly = false
+    /// 拖拽期间普通 Tab 不响应鼠标 hover；浮动预览仍由 isDragPreview 显示自身底色。
+    var isDragActive = false
+    /// 拖拽浮层中的 Tab 没有独立 hover 事件，需要显式复用 hover 底色。
+    var isDragPreview = false
     let select: () -> Void
     let close: () -> Void
     @Binding var renamingTabID: UUID?
@@ -1563,6 +1773,8 @@ private struct PaneTabItem: View {
                     minWidth: minWidth,
                     maxWidth: maxWidth,
                     iconOnly: iconOnly,
+                    isDragActive: isDragActive,
+                    isDragPreview: isDragPreview,
                     select: select,
                     close: close
                 )
@@ -1575,6 +1787,8 @@ private struct PaneTabItem: View {
                     minWidth: minWidth,
                     maxWidth: maxWidth,
                     iconOnly: iconOnly,
+                    isDragActive: isDragActive,
+                    isDragPreview: isDragPreview,
                     select: select,
                     close: close
                 )
@@ -1587,6 +1801,8 @@ private struct PaneTabItem: View {
                     minWidth: minWidth,
                     maxWidth: maxWidth,
                     iconOnly: iconOnly,
+                    isDragActive: isDragActive,
+                    isDragPreview: isDragPreview,
                     select: select,
                     close: close
                 )
@@ -1602,6 +1818,8 @@ private struct PaneTabItem: View {
                     minWidth: minWidth,
                     maxWidth: maxWidth,
                     iconOnly: iconOnly,
+                    isDragActive: isDragActive,
+                    isDragPreview: isDragPreview,
                     select: select,
                     close: close
                 )
@@ -1696,6 +1914,8 @@ private struct SessionTabLabel: View {
     var minWidth: CGFloat = 150
     var maxWidth: CGFloat = 220
     var iconOnly = false
+    var isDragActive = false
+    var isDragPreview = false
     let select: () -> Void
     let close: () -> Void
 
@@ -1728,6 +1948,8 @@ private struct SessionTabLabel: View {
                 minWidth: minWidth,
                 maxWidth: maxWidth,
                 iconOnly: iconOnly,
+                isDragActive: isDragActive,
+                isDragPreview: isDragPreview,
                 select: {
                     // 点开即视为已读。
                     for s in sessionsForUnread {
@@ -1756,6 +1978,8 @@ private struct FileTabLabel: View {
     var minWidth: CGFloat = 150
     var maxWidth: CGFloat = 220
     var iconOnly = false
+    var isDragActive = false
+    var isDragPreview = false
     let select: () -> Void
     let close: () -> Void
 
@@ -1771,6 +1995,8 @@ private struct FileTabLabel: View {
             minWidth: minWidth,
             maxWidth: maxWidth,
             iconOnly: iconOnly,
+            isDragActive: isDragActive,
+            isDragPreview: isDragPreview,
             select: select,
             close: close
         )
@@ -1786,6 +2012,8 @@ private struct BrowserTabLabel: View {
     var minWidth: CGFloat = 150
     var maxWidth: CGFloat = 220
     var iconOnly = false
+    var isDragActive = false
+    var isDragPreview = false
     let select: () -> Void
     let close: () -> Void
 
@@ -1800,6 +2028,8 @@ private struct BrowserTabLabel: View {
             minWidth: minWidth,
             maxWidth: maxWidth,
             iconOnly: iconOnly,
+            isDragActive: isDragActive,
+            isDragPreview: isDragPreview,
             select: select,
             close: close
         )
@@ -1947,6 +2177,10 @@ private struct TabItemChrome: View {
     private static let defaultMinWidth: CGFloat = 150
     /// 标题缩短后保留当前宽度的时长，避免命令状态频繁变化造成标签抖动。
     private static let shrinkDelay: Duration = .seconds(2)
+    /// 选中态只在 Tab 自身的统一 Chrome 容器内过渡，避免底色和文字分别继承不同速度。
+    private static let selectionAnimation = Animation.easeInOut(duration: 0.12)
+    /// hover 显示关闭按钮时，给右侧分栏标识一个更快的位移动画。
+    private static let trailingLayoutAnimation = Animation.easeInOut(duration: 0.08)
 
     let systemImage: String
     /// 非空时优先显示 Material 文件图标（打开的文件 / Diff）。
@@ -1976,6 +2210,10 @@ private struct TabItemChrome: View {
     var maxWidth: CGFloat = 220
     /// 弹性仅图标：无标题、无关闭；保留 Task / dirty 状态指示。
     var iconOnly = false
+    /// 普通 Tab 在拖拽期间屏蔽 hover；浮动预览通过 isDragPreview 保留自身视觉。
+    var isDragActive = false
+    /// 浮动预览本身不接收 hover 事件，但视觉上要保留被拖 Tab 的 hover 底色。
+    var isDragPreview = false
     let select: () -> Void
     let close: () -> Void
 
@@ -1993,6 +2231,15 @@ private struct TabItemChrome: View {
     /// 弹性模式 min==max 时使用固定分配宽；滚动模式走 retainedWidth。
     private var isFixedWidth: Bool {
         abs(minWidth - maxWidth) < 0.5
+    }
+
+    /// 拖拽浮层脱离原布局后没有 hover 事件，显式沿用 Tab 的 hover 底色。
+    private var showsHoverFill: Bool {
+        isDragPreview || (isHovering && !isDragActive)
+    }
+
+    private var showsCloseButton: Bool {
+        isHovering && !isDragActive
     }
 
     private var displayWidth: CGFloat {
@@ -2020,75 +2267,77 @@ private struct TabItemChrome: View {
 
     var body: some View {
         Button(action: select) {
-            HStack(spacing: iconOnly ? 0 : 5) {
-                tabIcon
+            ZStack(alignment: .leading) {
+                // 底色和标题放入同一个固定尺寸的 Button label，避免外层 background
+                // 与内部 Text 在重排 / 选中事务中采用不同的动画路径。
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(
+                        isSelected
+                            ? Theme.primaryColor.opacity(0.09)
+                            : (showsHoverFill ? Theme.primaryColor.opacity(0.04) : .clear)
+                    )
 
-                if !iconOnly {
-                    Text(title)
-                        .font(SidebarTypography.body())
-                        .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
-                        .lineLimit(1)
-                        // 标题独占可伸缩空间，右侧的分栏提示、修改提示和关闭按钮始终右对齐。
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background {
-                            GeometryReader { geo in
-                                Color.clear.preference(
-                                    key: TabTitleSlotWidthKey.self,
-                                    value: geo.size.width
-                                )
+                HStack(spacing: iconOnly ? 0 : 5) {
+                    tabIcon
+
+                    if !iconOnly {
+                        Text(title)
+                            .font(SidebarTypography.body())
+                            .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
+                            .lineLimit(1)
+                            // 标题占据左侧剩余空间，把分栏徽章和关闭/状态标识推到右侧。
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background {
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: TabTitleSlotWidthKey.self,
+                                        value: geo.size.width
+                                    )
+                                }
                             }
+
+                        if paneCount > 1 {
+                            TabPaneCountBadge(paneCount: paneCount)
                         }
-                    if paneCount > 1 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "square.split.2x1")
-                                .font(SidebarTypography.chevron())
-                            Text("\(paneCount)")
-                                .font(SidebarTypography.micro(.semibold))
-                                .monospacedDigit()
-                        }
-                        .foregroundStyle(.tertiary)
-                    }
-                    if isHovering {
-                        Button(action: close) {
-                            Image(systemName: "xmark")
-                                .font(SidebarTypography.compact(.bold))
-                                .foregroundStyle(Theme.secondaryColor)
+
+                        if showsCloseButton {
+                            Button(action: close) {
+                                Image(systemName: "xmark")
+                                    .font(SidebarTypography.compact(.bold))
+                                    .foregroundStyle(Theme.secondaryColor)
+                                    .frame(width: 14, height: 14)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        } else if isAgentUnread && !isAgentWorking {
+                            // Agent 未读：小蓝点（与 dirty 同位置）。
+                            Circle()
+                                .fill(Color(nsColor: .systemBlue))
+                                .frame(width: 5, height: 5)
                                 .frame(width: 14, height: 14)
-                                .contentShape(Rectangle())
+                                .accessibilityLabel(L10n.t("Unread"))
+                        } else if isDirty {
+                            Circle()
+                                .fill(Theme.secondaryColor)
+                                .frame(width: 5, height: 5)
+                                .frame(width: 14, height: 14)
                         }
-                        .buttonStyle(.plain)
-                    } else if isAgentUnread && !isAgentWorking {
-                        // Agent 未读：小蓝点（与 dirty 同位置）。
-                        Circle()
-                            .fill(Color(nsColor: .systemBlue))
-                            .frame(width: 5, height: 5)
-                            .frame(width: 14, height: 14)
-                            .accessibilityLabel(L10n.t("Unread"))
-                    } else if isDirty {
-                        Circle()
-                            .fill(Theme.secondaryColor)
-                            .frame(width: 5, height: 5)
-                            .frame(width: 14, height: 14)
-                    } else {
-                        Spacer()
-                            .frame(width: 14)
                     }
                 }
+                .padding(.leading, iconOnly ? 7 : 9)
+                .padding(.trailing, iconOnly ? 7 : 5)
+                // 内容页 Tabs 相对原先各边 +1pt，整体高度 +2pt。
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: iconOnly ? .center : .leading)
+                .animation(Self.trailingLayoutAnimation, value: showsCloseButton)
             }
-            .padding(.leading, iconOnly ? 7 : 9)
-            .padding(.trailing, iconOnly ? 7 : 5)
-            // 内容页 Tabs 相对原先各边 +1pt，整体高度 +2pt。
-            .padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: iconOnly ? .center : .leading)
             .contentShape(RoundedRectangle(cornerRadius: 6))
+            .animation(Self.selectionAnimation, value: isSelected)
         }
         .buttonStyle(.plain)
         .frame(width: displayWidth, alignment: .leading)
         .clipped()
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Theme.primaryColor.opacity(0.09) : (isHovering ? Theme.primaryColor.opacity(0.04) : .clear))
-        )
         // 未完整显示时在 Tab 上方展示完整标题；完整显示则不挂 tooltip。
         .modifier(TabTruncatedTitleTooltip(title: title, enabled: needsTitleTooltip))
         .onPreferenceChange(TabTitleSlotWidthKey.self) { titleSlotWidth = $0 }
@@ -2250,6 +2499,23 @@ private struct TabItemChrome: View {
     /// 用户完成手动改名后不等待自动标题的防抖时间，立即更新为新标题所需宽度。
     private func applyManualTitleWidth() {
         updateRetainedWidth(immediate: true)
+    }
+}
+
+/// Tab 分栏提示徽章（精准垂直/基线对齐图标与数字）
+private struct TabPaneCountBadge: View {
+    let paneCount: Int
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2.5) {
+            Image(systemName: "square.split.2x1")
+                .font(.system(size: 9.5, weight: .medium))
+            Text("\(paneCount)")
+                .font(SidebarTypography.micro(.semibold))
+                .monospacedDigit()
+        }
+        .frame(height: 16, alignment: .center)
+        .foregroundStyle(.tertiary)
     }
 }
 
