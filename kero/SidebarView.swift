@@ -1201,9 +1201,10 @@ private struct SidebarArchiveSection: View {
                                     project: project,
                                     index: index,
                                     isSelected: project.id == manager.selectedProjectID,
+                                    // 选中已归档项目，不再自动解除归档
                                     select: {
                                         withAnimation(.easeInOut(duration: 0.15)) {
-                                            manager.unarchiveProject(project)
+                                            manager.selectedProjectID = project.id
                                         }
                                     },
                                     close: { manager.close(project) },
@@ -1225,6 +1226,18 @@ private struct SidebarArchiveSection: View {
                 Rectangle()
                     .fill(Color(nsColor: Theme.divider).opacity(0.6))
                     .frame(height: 1)
+            }
+            .onAppear {
+                if manager.selectedProject?.isArchived == true {
+                    isExpanded = true
+                }
+            }
+            .onChange(of: manager.selectedProjectID) { _, newID in
+                if let newID, manager.projects.first(where: { $0.id == newID })?.isArchived == true {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isExpanded = true
+                    }
+                }
             }
         }
     }
