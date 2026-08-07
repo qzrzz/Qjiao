@@ -293,7 +293,13 @@ struct RightSidebarView: View {
         // 跟随）等不产生 OSC 7 / 事件的变化，避免大仓库每 2s 全量跑 7 个 git 子进程。
         .onReceive(refreshTimer) { _ in
             gitSyncTick += 1
-            syncModels(refreshGit: gitSyncTick.isMultiple(of: 5))
+            // 定时路径只重新解析 gitRoot（覆盖 Agent 进程内 chdir 等不产生事件
+            // 的变化）；root 未变时不重复刷新——GitStatusModel 内部心跳 + watcher
+            // 已兜底，避免每 10s 与心跳各跑一次全量（8 个 git 子进程）。
+            syncModels(
+                refreshGit: gitSyncTick.isMultiple(of: 5),
+                gitRefreshIfSameRoot: false
+            )
         }
         // 回到前台：恢复 System 轮询（面板可见时）并刷新 Git 角标。
         .onReceive(NotificationCenter.default.publisher(
@@ -869,7 +875,9 @@ struct RightSidebarView: View {
 
     private func syncModels(
         reloadActivePanel: Bool = false,
-        refreshGit: Bool = true
+        refreshGit: Bool = true,
+        gitRefreshIfSameRoot: Bool = true,
+        gitIncludeDetails: Bool? = nil
     ) {
         let projectPanelActive = manager.isPanelVisible
             && (manager.panelTab == .start || manager.panelTab == .project)
@@ -894,7 +902,15 @@ struct RightSidebarView: View {
                 foregroundAt: session?.foregroundDirectoryPath
             )
             if !root.isEmpty {
-                git.sync(root: root)
+                // 详情级别：显式指定优先；未指定时仅在 Git 面板可见（用户正看着
+                // 提交历史 / 分支 / stash）才带详情，其它标签页只需变更数角标，
+                // 走快路径（3 个子进程）即可。
+                let includeDetails = gitIncludeDetails ?? (manager.panelTab == .git)
+                git.sync(
+                    root: root,
+                    refreshIfSameRoot: gitRefreshIfSameRoot,
+                    includeDetails: includeDetails
+                )
             }
         }
 

@@ -92,10 +92,14 @@ actor GitScanner {
     ///
     /// - Parameter recovery: 为 true 时全程 `-c core.fsmonitor=false`，绕过
     ///   失效的 fsmonitor daemon / IPC（Retry 与 EBADF 自愈路径使用）。
+    /// - Parameter includeDetails: 为 false 时跳过 branches / remotes / log /
+    ///   stash / defaultBranch 详情命令（事件驱动快路径用，只刷新变更列表 +
+    ///   branch 头）。模型侧保留旧详情展示，`loadedDetails == false` 标记过期。
     func loadStatus(
         in root: String,
         includeIgnoredPaths: Bool,
         recovery: Bool = false,
+        includeDetails: Bool = true,
         recentCommitLimit: Int = GitStatusModel.defaultRecentCommitPageSize
     ) -> StatusLoadResult {
         let inCooldown = Date() < bypassFsmonitorUntil
@@ -104,7 +108,7 @@ actor GitScanner {
             in: root,
             includeIgnoredPaths: includeIgnoredPaths,
             bypassFsmonitor: bypass,
-            includeDetails: true,
+            includeDetails: includeDetails,
             recentCommitLimit: recentCommitLimit,
             timeout: recovery ? Self.gitRecoveryTimeout : Self.gitCommandTimeout,
             diagnosticContext: recovery ? "recovery scan" : "status scan"
@@ -119,7 +123,7 @@ actor GitScanner {
                 in: root,
                 includeIgnoredPaths: includeIgnoredPaths,
                 bypassFsmonitor: true,
-                includeDetails: true,
+                includeDetails: includeDetails,
                 recentCommitLimit: recentCommitLimit,
                 timeout: Self.gitRecoveryTimeout,
                 diagnosticContext: "auto-heal scan (fsmonitor bypassed)"

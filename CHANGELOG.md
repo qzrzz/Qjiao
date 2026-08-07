@@ -11,6 +11,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.43]
+
+### Performance
+
+- Tier Git refreshes by event source: file events, terminal command completion, cd, and tab switches now run a fast path (rev-parse + status only), while commit history, branches, remotes, and stash details are fetched on HEAD/refs changes, on-demand expansion of commit history, or the low-frequency heartbeat, keeping previous details on screen without flicker.
+- Skip duplicate full scans between the 10s timer and the internal heartbeat when the repository root is unchanged, and omit detail commands from refreshes triggered while the Git panel isn't visible.
+
 ## [1.1.42]
 
 ### Added
