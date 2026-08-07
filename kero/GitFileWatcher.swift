@@ -29,8 +29,11 @@ final class GitFileWatcher {
     /// FSEvents latency：洪峰聚合窗口（秒）。
     private static let eventLatency: TimeInterval = 1.0
 
-    /// 文件变化回调（主线程派发）。
-    var onChange: (() -> Void)?
+    /// 文件变化回调（主线程派发）。参数 `affectsHistory`：HEAD / refs /
+    /// packed-refs 等提交历史相关元数据变化为 true（需带详情重扫，刷新
+    /// 提交历史 / 分支 / stash）；工作区文件与 index 变化为 false（快路径
+    /// 刷新变更列表即可）。防抖窗口内任一事件要求详情则最终回调 true。
+    var onChange: ((_ affectsHistory: Bool) -> Void)?
     private var repositoryRoot = ""
     private var gitDirectory = ""
     private var sources: [DispatchSourceFileSystemObject] = []
@@ -38,6 +41,8 @@ final class GitFileWatcher {
     private var debounceWorkItem: DispatchWorkItem?
     /// 防抖窗口内是否收到过需要 reopen vnode 的事件（.rename / .delete）。
     private var pendingRebuildDispatchSources = false
+    /// 防抖窗口内是否收到过提交历史相关元数据事件（HEAD / refs / packed-refs）。
+    private var pendingAffectsHistory = false
 
     init() {}
 
@@ -78,6 +83,7 @@ final class GitFileWatcher {
         debounceWorkItem?.cancel()
         debounceWorkItem = nil
         pendingRebuildDispatchSources = false
+        pendingAffectsHistory = false
         stopSources()
         stopEventStream()
     }
@@ -100,14 +106,16 @@ final class GitFileWatcher {
         // 捕获这些写入，导致「扫描 → 事件 → 再扫描」的无限自触发循环。
         // index / HEAD 文件监听覆盖 git add / commit / checkout；
         // refs 目录覆盖分支创建 / 删除；packed-refs 覆盖打包引用更新。
-        watchPath((gitDirectory as NSString).appendingPathComponent("index"))
-        watchPath((gitDirectory as NSString).appendingPathComponent("HEAD"))
-        watchPath((gitDirectory as NSString).appendingPathComponent("refs"))
-        watchPath((gitDirectory as NSString).appendingPathComponent("packed-refs"))
+        // index 变化（git add / stage）不影响提交历史 → affectsHistory = false；
+        // HEAD / refs / packed-refs（commit / amend / checkout / branch）→ true。
+        watchPath((gitDirectory as NSString).appendingPathComponent("index"), affectsHistory: false)
+        watchPath((gitDirectory as NSString).appendingPathComponent("HEAD"), affectsHistory: true)
+        watchPath((gitDirectory as NSString).appendingPathComponent("refs"), affectsHistory: true)
+        watchPath((gitDirectory as NSString).appendingPathComponent("packed-refs"), affectsHistory: true)
     }
 
     /// DispatchSource 监听单个文件 / 目录（vnode 事件）。
-    private func watchPath(_ path: String) {
+    private func watchPath(_ path: String, affectsHistory: Bool) {
         let descriptor = open(path, O_EVTONLY)
         guard descriptor >= 0 else { return }
 
@@ -127,7 +135,10 @@ final class GitFileWatcher {
             // 普通 .write/.extend 仍挂在同一 vnode 上，不必每次重建。
             let events = source.data
             let rebuild = events.contains(.delete) || events.contains(.rename)
-            self.scheduleChange(rebuildDispatchSources: rebuild)
+            self.scheduleChange(
+                rebuildDispatchSources: rebuild,
+                affectsHistory: affectsHistory
+            )
         }
         source.setCancelHandler {
             close(descriptor)
@@ -175,7 +186,11 @@ final class GitFileWatcher {
                     }
                     guard hasRelevantChange else { return }
                     // FSEventStream 按路径监听、不依赖 inode，无需重建 DispatchSource。
-                    watcher.scheduleChange(rebuildDispatchSources: false)
+                    // 工作区文件变化不涉及提交历史 → affectsHistory = false（快路径）。
+                    watcher.scheduleChange(
+                        rebuildDispatchSources: false,
+                        affectsHistory: false
+                    )
                 }
             },
             &context,
@@ -196,10 +211,15 @@ final class GitFileWatcher {
     /// 合并式防抖：持续变化会推迟回调，但 GitStatusModel 的兜底心跳保证最终一致。
     /// - Parameter rebuildDispatchSources: index/HEAD 原子 rename 后需 reopen vnode；
     ///   对齐 SidebarProjectFileWatcher。普通写入与 FSEvents 不必重建。
-    private func scheduleChange(rebuildDispatchSources: Bool) {
+    /// - Parameter affectsHistory: HEAD / refs / packed-refs 变化（commit / checkout
+    ///   / branch 等）为 true；防抖窗口内任一事件为 true 则最终回调 true。
+    private func scheduleChange(rebuildDispatchSources: Bool, affectsHistory: Bool) {
         // 防抖窗口内任一事件要求重建，则最终回调时重建一次即可。
         if rebuildDispatchSources {
             pendingRebuildDispatchSources = true
+        }
+        if affectsHistory {
+            pendingAffectsHistory = true
         }
         debounceWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
@@ -208,7 +228,9 @@ final class GitFileWatcher {
                 self.pendingRebuildDispatchSources = false
                 self.rebuildDispatchSources()
             }
-            self.onChange?()
+            let history = self.pendingAffectsHistory
+            self.pendingAffectsHistory = false
+            self.onChange?(history)
         }
         debounceWorkItem = workItem
         DispatchQueue.main.asyncAfter(

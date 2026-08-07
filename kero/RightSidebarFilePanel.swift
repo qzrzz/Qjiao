@@ -1278,7 +1278,7 @@ private struct FileTreeRow: View {
         ) {
             selectForContextAction()
             model.moveToTrash(paths: Set(menuActionTargets.map(\.path)))
-            git.refresh()
+            git.refresh(includeDetails: false)
         }
     }
 
@@ -1295,7 +1295,7 @@ private struct FileTreeRow: View {
         let oldPath = item.path
         if let newPath = model.rename(item, to: editingName) {
             onRename(oldPath, newPath)
-            git.refresh()
+            git.refresh(includeDetails: false)
         }
     }
 
@@ -1305,7 +1305,7 @@ private struct FileTreeRow: View {
         guard item.isDraft, model.draft != nil else { return }
         if let created = model.commitDraft(name: editingName) {
             openFile(created)
-            git.refresh()
+            git.refresh(includeDetails: false)
         }
     }
 

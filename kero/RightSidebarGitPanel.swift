@@ -573,7 +573,7 @@ struct GitPanel: View {
                 actionButton(
                     icon: "checkmark",
                     title: commitButtonTitle,
-                    enabled: canCommit(includeAll: false),
+                    enabled: canCommitPrimary,
                     help: L10n.t("Commit staged changes"),
                     shortcut: "⌘↩",
                     showsProgress: activeActionTarget == .commit,
@@ -883,7 +883,18 @@ struct GitPanel: View {
         if model.stagedEntries.count > 1 {
             return L10n.format("Commit %d Staged Files", model.stagedEntries.count)
         }
+        if model.changedEntries.count == 1 { return L10n.t("Commit 1 File") }
+        if model.changedEntries.count > 1 {
+            return L10n.format("Commit %d Files", model.changedEntries.count)
+        }
         return L10n.t("Commit Staged")
+    }
+
+    private var canCommitPrimary: Bool {
+        if settings.gitOperationMode == .simple {
+            return canCommit(includeAll: false)
+        }
+        return canCommit(includeAll: model.stagedEntries.isEmpty)
     }
 
     private func canCommit(includeAll: Bool) -> Bool {
@@ -1169,6 +1180,10 @@ struct GitPanel: View {
                                                 expandedCommitIDs.remove(commit.hash)
                                             } else {
                                                 expandedCommitIDs.insert(commit.hash)
+                                                // 事件驱动快路径可能已让详情过期
+                                                // （recentCommits 保留旧值展示）：
+                                                // 展开时按需补一次全量刷新。
+                                                model.ensureDetailsFresh()
                                             }
                                         },
                                         onOpenCommitDiff: { file in

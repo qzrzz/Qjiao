@@ -235,6 +235,15 @@ final class GitStatusModel: nonisolated ObservableObject {
     private var lastResolvedStatus: StatusLoadResult?
     /// 合并刷新期间到达的新事件，避免取消轮询后丢事件导致状态长期陈旧。
     private var refreshPending = false
+    /// pending 刷新合并期间是否有请求要求带详情（提交历史等）；任一请求要求则最终补扫详情。
+    private var refreshPendingDetails = false
+    /// 防抖合并期间是否有详情请求（HEAD / refs 事件）；commit 的 HEAD + index
+    /// 事件常成对到达，后到的 index 事件不能降级掉已要求的详情。
+    private var pendingDebouncedDetails = false
+    /// 最近一次 apply 的结果是否带详情（branches / remotes / log / stash）。
+    /// 事件驱动快路径刷新后为 false，UI 保留旧详情展示；提交历史展开等
+    /// 详情消费者通过 `ensureDetailsFresh()` 按需补全。
+    private var detailsAreFresh = true
     /// Keeps a mutation globally exclusive even if the terminal changes cwd
     /// while its Git process is still running.
     private var runningOperationID: UUID?
@@ -263,8 +272,8 @@ final class GitStatusModel: nonisolated ObservableObject {
 
     init() {
         gitWatcher = GitFileWatcher()
-        gitWatcher.onChange = { [weak self] in
-            self?.handleFileChange()
+        gitWatcher.onChange = { [weak self] affectsHistory in
+            self?.handleFileChange(affectsHistory: affectsHistory)
         }
     }
 
@@ -317,7 +326,11 @@ final class GitStatusModel: nonisolated ObservableObject {
         return entry.repositoryRoot.isEmpty || entry.repositoryRoot == repoRoot
     }
 
-    func sync(root: String) {
+    func sync(
+        root: String,
+        refreshIfSameRoot: Bool = true,
+        includeDetails: Bool = true
+    ) {
         if root != rootPath {
             contextGeneration &+= 1
             rootPath = root
@@ -353,7 +366,12 @@ final class GitStatusModel: nonisolated ObservableObject {
             return
         }
         updateAutoRefreshTask()
-        refresh()
+        // 同 root 的 sync：仅事件路径（cd / 命令完成 / 激活）才立即刷新；
+        // 10s 定时路径传 refreshIfSameRoot: false，重新解析 root 只为跟随
+        // Agent 进程内 chdir，root 未变时由心跳 + watcher 兜底，避免与心跳重复全量扫。
+        if refreshIfSameRoot {
+            refresh(includeDetails: includeDetails)
+        }
     }
 
     /// 根路径切换时作废旧 root 的操作 / recovery 记账，让面板能立刻跟新上下文。
@@ -364,6 +382,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         isBusy = false
         autoRefreshDebounceTask?.cancel()
         autoRefreshDebounceTask = nil
+        pendingDebouncedDetails = false
         if let op = operation, op.isRunning {
             operation = nil
             lastError = nil
@@ -434,15 +453,33 @@ final class GitStatusModel: nonisolated ObservableObject {
         isLoadingMoreCommits = false
     }
 
-    func refresh() {
+    /// 详情消费者（提交历史展开 / 历史编辑后）展示前调用：若最近一次刷新是
+    /// 事件驱动快路径（详情过期，UI 仍展示旧 branches / remotes / log / stash），
+    /// 立即补一次带详情的全量刷新；详情新鲜时零开销。
+    func ensureDetailsFresh() {
+        guard isRepo, !detailsAreFresh, !isBusy, !isSwitchingRoot,
+              !rootPath.isEmpty else { return }
+        refresh(includeDetails: true)
+    }
+
+    /// 普通刷新（默认带详情）。高频事件路径（文件事件 / 命令完成 / cd）应显式传
+    /// `includeDetails: false` 走快路径：只跑 rev-parse + status + git-dir 三个
+    /// 子进程，跳过 branches / remotes / log / stash / defaultBranch 五个详情命令
+    /// （其中 `git log --name-status` 在大仓库上可能比 status 本身更贵），
+    /// 提交历史等详情由元数据事件 / 心跳 / `ensureDetailsFresh()` 按需补齐。
+    func refresh(includeDetails: Bool = true) {
         let root = rootPath
         let generation = contextGeneration
         guard !root.isEmpty else { return }
         guard !isRefreshing, !isBusy else {
+            // 合并等待中的刷新；任一请求要求详情则最终按详情补扫（提交历史等）。
+            if includeDetails { refreshPendingDetails = true }
             refreshPending = true
             return
         }
         refreshPending = false
+        let retryDetails = refreshPendingDetails
+        refreshPendingDetails = false
         statusRequestID &+= 1
         let requestID = statusRequestID
         isRefreshing = true
@@ -452,10 +489,12 @@ final class GitStatusModel: nonisolated ObservableObject {
         let commitLimit = recentCommitLimit
 
         Task { [weak self] in
+            let effectiveDetails = includeDetails || retryDetails
             let result = await Task.detached(priority: .utility) {
                 await GitScanner.shared.loadStatus(
                     in: root,
                     includeIgnoredPaths: includeIgnoredPaths,
+                    includeDetails: effectiveDetails,
                     recentCommitLimit: commitLimit
                 )
             }.value
@@ -478,6 +517,9 @@ final class GitStatusModel: nonisolated ObservableObject {
             self.hasResolvedStatus = true
             if self.refreshPending {
                 self.refreshPending = false
+                // pending 期间合并的详情要求随补扫一起生效。
+                let pendingDetails = self.refreshPendingDetails
+                self.refreshPendingDetails = false
                 // 扫描进行中又收到文件事件 / 心跳时合并为 pending；完成后立即再扫
                 // 会形成无间隙连续扫描，git 子进程持续占满 CPU / IO。
                 // 延迟一小段再补扫，留出呼吸窗口（事件合并窗口的配套）。
@@ -485,7 +527,7 @@ final class GitStatusModel: nonisolated ObservableObject {
                     try? await Task.sleep(nanoseconds: 800_000_000)
                     guard let self, !self.isRefreshing, !self.isBusy,
                           self.rootPath == root else { return }
-                    self.refresh()
+                    self.refresh(includeDetails: pendingDetails)
                 }
             }
         }
@@ -635,8 +677,12 @@ final class GitStatusModel: nonisolated ObservableObject {
             Task { await GitScanner.shared.noteFilesystemMonitorBypassCooldown() }
             // 刷新期间 timer 可能堆积了 refreshPending；状态已是最新时清掉即可，
             // 若仍失败则再走一次普通 refresh（cooldown 内会自动 bypass）。
+            // forceRefresh 本身带详情，pending 的详情请求一并消费，避免下一次
+            // 事件刷新被意外升级为全量。
             if self.refreshPending {
                 self.refreshPending = false
+                self.refreshPendingDetails = false
+                self.pendingDebouncedDetails = false
                 if self.statusError != nil {
                     self.refresh()
                 }
@@ -699,7 +745,11 @@ final class GitStatusModel: nonisolated ObservableObject {
 
     /// 文件 watcher 事件（主线程回调）：对齐 VS Code onFileChange——
     /// 失焦 / 操作中 / 大仓库自动跳过，其余防抖后刷新。
-    private func handleFileChange() {
+    /// - Parameter affectsHistory: HEAD / refs / packed-refs 等提交历史相关
+    ///   元数据变化为 true（带详情重扫）；工作区文件与 index 变化为 false
+    ///   （快路径，只刷变更列表 + branch 头，跳过 log / branches / stash 等
+    ///   详情子进程）。
+    private func handleFileChange(affectsHistory: Bool) {
         guard autoRefreshEnabled, appActive else {
             pendingChangeWhileInactive = true
             return
@@ -707,6 +757,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         // 操作进行中：只记 pending，不打断 commit/stage（VS Code operations.isIdle）。
         if isBusy || isSwitchingRoot {
             refreshPending = true
+            if affectsHistory { refreshPendingDetails = true }
             return
         }
         // 大仓库命中条目上限：跳过事件驱动全量扫，仅靠降频心跳兜底。
@@ -718,11 +769,14 @@ final class GitStatusModel: nonisolated ObservableObject {
             < Self.postMutationAutoRefreshCooldown {
             return
         }
-        scheduleDebouncedAutoRefresh()
+        scheduleDebouncedAutoRefresh(affectsHistory: affectsHistory)
     }
 
     /// VS Code `@debounce(1000)` + throttle 的轻量等价：合并洪峰后再 refresh。
-    private func scheduleDebouncedAutoRefresh() {
+    /// 防抖窗口内任一事件要求详情则最终按详情刷新（HEAD / refs 事件不可被
+    /// 后到的 index / 工作区事件降级）。
+    private func scheduleDebouncedAutoRefresh(affectsHistory: Bool) {
+        if affectsHistory { pendingDebouncedDetails = true }
         autoRefreshDebounceTask?.cancel()
         autoRefreshDebounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -733,9 +787,15 @@ final class GitStatusModel: nonisolated ObservableObject {
             }
             guard !self.isBusy, !self.isSwitchingRoot, !self.statusLimitHit else {
                 self.refreshPending = true
+                if self.pendingDebouncedDetails {
+                    self.refreshPendingDetails = true
+                }
+                self.pendingDebouncedDetails = false
                 return
             }
-            self.refresh()
+            let details = self.pendingDebouncedDetails
+            self.pendingDebouncedDetails = false
+            self.refresh(includeDetails: details)
         }
     }
 
@@ -1041,11 +1101,15 @@ final class GitStatusModel: nonisolated ObservableObject {
         commitArgs += ["-m", trimmed]
         commands.append(commitArgs)
 
+        let checkedPaths = Set(checkedEntries.map(\.path))
         let label = amend ? L10n.t("Amend commit") : L10n.t("Commit selected changes")
         perform(
             label: label,
             commands: commands,
             completion: completion,
+            optimisticUpdate: { [weak self] in
+                self?.optimisticallyCommitSimple(checkedPaths: checkedPaths, amend: amend, message: trimmed)
+            },
             reloadCommitHistory: true
         )
     }
@@ -1537,6 +1601,29 @@ final class GitStatusModel: nonisolated ObservableObject {
         recomputeDecorationsFromLists()
     }
 
+    private func optimisticallyCommitSimple(checkedPaths: Set<String>, amend: Bool, message: String) {
+        stagedEntries.removeAll { pathMatches($0, paths: checkedPaths) }
+        changedEntries.removeAll { pathMatches($0, paths: checkedPaths) }
+        if !amend {
+            if hasUpstream { ahead += 1 }
+            let placeholder = RecentCommit(
+                hash: "optimistic",
+                shortHash: "·······",
+                subject: message,
+                author: "",
+                relativeDate: "just now",
+                parentHash: nil,
+                references: [],
+                files: []
+            )
+            recentCommits = [placeholder] + recentCommits.filter { $0.hash != "optimistic" }
+            if recentCommits.count > 8 {
+                recentCommits = Array(recentCommits.prefix(8))
+            }
+        }
+        recomputeDecorationsFromLists()
+    }
+
     private func failImmediately(
         _ message: String,
         completion: (@MainActor (Bool) -> Void)? = nil
@@ -1666,6 +1753,8 @@ final class GitStatusModel: nonisolated ObservableObject {
         statusRequestID &+= 1
         isRefreshing = false
         refreshPending = false
+        refreshPendingDetails = false
+        pendingDebouncedDetails = false
     }
 
     private nonisolated static func displayCommand(_ args: [String]) -> String {
@@ -1715,6 +1804,7 @@ final class GitStatusModel: nonisolated ObservableObject {
         repositoryOperation = nil
         stashCount = 0
         isRefreshing = false
+        detailsAreFresh = false
         // 作废 in-flight recovery 记账：async 任务仍会跑完，但 completion
         // 用 recoveryID 匹配失败后不再清/改 busy，避免与新 root 交错。
         recoveryID = nil
@@ -1788,6 +1878,7 @@ final class GitStatusModel: nonisolated ObservableObject {
     /// 主线程不再承担任何 O(n) 计算。
     private func applyRepository(_ result: StatusResult) {
         isRepo = true
+        detailsAreFresh = result.loadedDetails
         branch = result.branch
         headOID = result.headOID
         hasHead = result.hasHead
