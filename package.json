@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
-    "version+": "bun run scripts/bump-version.ts",
+    "version+": "bun run scripts/bump-version.ts && bun run scripts/update-changelog.ts",
     "release": "bun run scripts/release.ts",
     "web:build": "cd ./web && npm run build",
     "web:update-latest": "cd ./web && bun run update-latest",
