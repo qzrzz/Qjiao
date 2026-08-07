@@ -205,7 +205,7 @@ final class AppSettings: nonisolated ObservableObject {
     static let defaultSidebarFontSize: Double = 13
     static let sidebarFontSizeRange: ClosedRange<Double> = 9...18
     /// Files / CWD 树默认字号，与 chrome `body` 一致。
-    static let defaultFilesFontSize: Double = 13
+    static let defaultFilesFontSize: Double = 14
     static let filesFontSizeRange: ClosedRange<Double> = 10...22
     static let backgroundOpacityRange: ClosedRange<Double> = 0.1...1
 
