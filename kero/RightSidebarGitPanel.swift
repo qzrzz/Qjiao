@@ -1937,6 +1937,9 @@ private struct GitCommitRow: View {
     @State private var showEditSheet = false
     @State private var isHovering = false
 
+    /// 引用徽章的固定槽位，保证不同长度的 branch / tag 右边缘对齐。
+    private static let referenceSlotWidth: CGFloat = 112
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
@@ -2123,14 +2126,18 @@ private struct GitCommitRow: View {
     }
 
     private func referenceBadge(_ reference: String) -> some View {
-        Text(reference)
-            .font(SidebarTypography.micro(.medium))
-            .foregroundStyle(.white)
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 1)
-            .background(Capsule().fill(Color(nsColor: Theme.cursor)))
-            .frame(maxWidth: 104)
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Text(reference)
+                .font(SidebarTypography.micro(.medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(Color(nsColor: Theme.cursor)))
+                .frame(maxWidth: 104)
+        }
+        .frame(width: Self.referenceSlotWidth, alignment: .trailing)
     }
 
     private func statusIcon(_ status: Character) -> String {
