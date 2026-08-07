@@ -2239,7 +2239,8 @@ private struct TabItemChrome: View {
     }
 
     private var showsCloseButton: Bool {
-        isHovering && !isDragActive
+        // 关闭按钮仅属于当前 Tab，避免 hover 其他 Tab 时也出现关闭操作。
+        isSelected && isHovering && !isDragActive
     }
 
     private var displayWidth: CGFloat {
@@ -2515,6 +2516,7 @@ private struct TabPaneCountBadge: View {
                 .monospacedDigit()
         }
         .frame(height: 16, alignment: .center)
+        .padding(.trailing, 2)
         .foregroundStyle(.tertiary)
     }
 }
