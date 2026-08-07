@@ -10,6 +10,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
 set in the Xcode project.
 
+
+## [1.1.42]
+
+### Added
+
+- Press ⌘R to re-run the terminal spawned by a script or task (right sidebar tasks, npm scripts, Script Runner single-file scripts) in place, preserving the original pane and split layout.
+- Use a single multi-line editor for commit messages: the first line is the subject, following lines form the body, with the history refreshed immediately after commit/amend.
+
+### Changed
+
+- Show the tab close button only when hovering the active tab, and keep split indicator spacing consistent.
+- Right-align reference badges in the Git panel with a fixed slot width.
+
 ## [1.1.38]
 
 
