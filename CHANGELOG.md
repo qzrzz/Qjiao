@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.44]
+
+### Changed
+
+- Increase the default file list font size from 13 to 14 for better readability.
+
 ## [1.1.43]
 
 ### Performance
