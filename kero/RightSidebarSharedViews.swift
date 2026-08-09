@@ -311,7 +311,7 @@ struct SidebarSectionHeader: View {
                     // 数量紧跟标题，不再右对齐到行尾。
                     if count > 0 {
                         Text("\(count)")
-                            .font(SidebarTypography.micro())
+                            .font(SidebarTypography.micro().monospacedDigit())
                             .foregroundStyle(Theme.secondaryColor)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)

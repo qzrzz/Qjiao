@@ -48,7 +48,7 @@
     {
       "label": "npm",
       "match": ["npm", "npx"],
-      "material": "npm"
+      "icon": "bxl-npm.svg"
     },
     {
       "label": "pnpm",
@@ -58,7 +58,7 @@
     {
       "label": "Yarn",
       "match": ["yarn", "yarn.js"],
-      "material": "yarn"
+      "icon": "bxl-yarn.svg"
     },
   
     {

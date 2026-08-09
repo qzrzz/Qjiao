@@ -158,7 +158,11 @@ final class TerminalAppIconCatalog {
         case .material:
             effectiveSource = source
         }
-        return image(for: effectiveSource, pointSize: pointSize)
+        let img = image(for: effectiveSource, pointSize: pointSize)
+        if isBundledFileTemplate(fileName) {
+            img?.isTemplate = true
+        }
+        return img
     }
 
     /// 内置文件名是否应按 template 着色（单色 currentColor SVG）。
