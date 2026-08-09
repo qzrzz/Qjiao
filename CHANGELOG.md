@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.46]
+
+### Fixed
+
+- Fix first commit being wrongly rejected in repositories with no commits yet: read the branch name via `symbolic-ref --short HEAD` (aligned with porcelain `branch.head`) so the HEAD stability check no longer misreports "Branch or HEAD changed" on unborn branches.
+
 ## [1.1.44]
 
 ### Changed
