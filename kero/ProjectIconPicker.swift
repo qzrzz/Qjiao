@@ -154,11 +154,12 @@ enum ProjectIconThumbnailCache {
 
     static func cached(for key: String) -> (image: NSImage, isTemplate: Bool)? {
         guard let image = images.object(forKey: key as NSString) else { return nil }
-        let isTemplate = templates.object(forKey: key as NSString)?.boolValue ?? false
+        let isTemplate = templates.object(forKey: key as NSString)?.boolValue ?? image.isTemplate
         return (image, isTemplate)
     }
 
     static func store(_ image: NSImage, isTemplate: Bool, for key: String) {
+        image.isTemplate = isTemplate
         images.setObject(image, forKey: key as NSString)
         templates.setObject(NSNumber(value: isTemplate), forKey: key as NSString)
     }
@@ -223,6 +224,7 @@ enum ProjectIconThumbnailCache {
         }.value
 
         if let image {
+            image.isTemplate = isTemplate
             store(image, isTemplate: isTemplate, for: cacheKey)
         }
         return (image, isTemplate)
@@ -251,15 +253,16 @@ struct ProjectPresetIconImage: View {
     var body: some View {
         Group {
             if let image = displayImage {
+                let template = displayIsTemplate
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
-                    .renderingMode(displayIsTemplate ? .template : .original)
+                    .renderingMode(template ? .template : .original)
                     .aspectRatio(contentMode: .fit)
                     .foregroundStyle(
-                        displayIsTemplate
-                            ? (isSelected ? Color(nsColor: Theme.cursor) : Color.secondary)
-                            : Color.primary
+                        template
+                            ? AnyShapeStyle(isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor)
+                            : AnyShapeStyle(Color.primary)
                     )
             } else if didFail {
                 Image(systemName: "photo")
@@ -303,7 +306,12 @@ struct ProjectPresetIconImage: View {
     }
 
     private var displayIsTemplate: Bool {
-        if let hit = currentCacheHit { return hit.isTemplate }
+        if let hit = currentCacheHit {
+            return hit.isTemplate || hit.image.isTemplate
+        }
+        if displayImage?.isTemplate == true {
+            return true
+        }
         if !lazyLoad {
             return Self.isTemplate(preset)
         }

@@ -1199,7 +1199,7 @@ struct GitPanel: View {
                                             model.refresh()
                                         }
                                     )
-                                    .padding(.leading, SidebarPanelMetrics.expandedContentLeading)
+                                    .padding(.leading, 4)
                                 }
                                 if model.hasMoreRecentCommits {
                                     Button {
@@ -1952,12 +1952,9 @@ private struct GitCommitRow: View {
     @State private var showEditSheet = false
     @State private var isHovering = false
 
-    /// 引用徽章的固定槽位，保证不同长度的 branch / tag 右边缘对齐。
-    private static let referenceSlotWidth: CGFloat = 112
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 CommitGraphColumn(
                     isFirst: isHead,
                     continuesBelow: isExpanded || !isLastCommit,
@@ -1983,12 +1980,14 @@ private struct GitCommitRow: View {
                         Text(commit.author)
                         Text("·")
                         Text(commit.relativeDate)
+                            .monospacedDigit()
                         Spacer(minLength: 8)
                         // hash 右对齐到行尾，使用次级文本色。
                         Text(commit.shortHash)
                             .font(SidebarTypography.section(design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .monospacedDigit()
                     }
                     .font(SidebarTypography.section())
                     .foregroundStyle(.tertiary)
@@ -1996,7 +1995,7 @@ private struct GitCommitRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 4)
             .padding(.vertical, 4)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggleExpand)
@@ -2109,7 +2108,7 @@ private struct GitCommitRow: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, 4)
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
                 }
@@ -2124,7 +2123,7 @@ private struct GitCommitRow: View {
                         .font(SidebarTypography.section())
                         .foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 4)
                 .padding(.vertical, 2)
             }
         }
@@ -2141,18 +2140,13 @@ private struct GitCommitRow: View {
     }
 
     private func referenceBadge(_ reference: String) -> some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
-            Text(reference)
-                .font(SidebarTypography.micro(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(Color(nsColor: Theme.cursor)))
-                .frame(maxWidth: 104)
-        }
-        .frame(width: Self.referenceSlotWidth, alignment: .trailing)
+        Text(reference)
+            .font(SidebarTypography.micro(.medium))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color(nsColor: Theme.cursor)))
     }
 
     private func statusIcon(_ status: Character) -> String {
@@ -2187,7 +2181,8 @@ private struct CommitGraphColumn: View {
     let continuesBelow: Bool
     let isExpanded: Bool
 
-    private static let lineX: CGFloat = 10
+    private static let columnWidth: CGFloat = 12
+    private static let lineX: CGFloat = 6
     private static let lineWidth: CGFloat = 1.5
     /// 图列在头部 HStack 内部（垂直 padding 之外），线底距下一行内容顶的实际
     /// 空隙：本行 padding 下 4 + LazyVStack spacing 1 + 下行 padding 上 4 = 9pt；
@@ -2211,9 +2206,9 @@ private struct CommitGraphColumn: View {
                     .frame(width: (isExpanded ? 10 : 8), height: (isExpanded ? 10 : 8))
                     .position(x: Self.lineX, y: height / 2)
             }
-            .frame(width: 20, height: height)
+            .frame(width: Self.columnWidth, height: height)
         }
-        .frame(width: 20)
+        .frame(width: Self.columnWidth)
     }
 }
 
@@ -2221,7 +2216,8 @@ private struct CommitGraphColumn: View {
 private struct FileRailColumn: View {
     let continuesBelow: Bool
 
-    private static let lineX: CGFloat = 10
+    private static let columnWidth: CGFloat = 12
+    private static let lineX: CGFloat = 6
     private static let lineWidth: CGFloat = 1.5
     /// 文件行 rail 在文件行 HStack 内部（垂直 padding 之外）：文件行间空隙
     /// 2 + 0 + 2 = 4pt；最后文件行→下一提交行内容顶 2 + 1 + 4 = 7pt。
@@ -2241,9 +2237,9 @@ private struct FileRailColumn: View {
                         .position(x: Self.lineX, y: (geo.size.height + Self.rowGap) / 2)
                 }
             }
-            .frame(width: 20, height: geo.size.height)
+            .frame(width: Self.columnWidth, height: geo.size.height)
         }
-        .frame(width: 20)
+        .frame(width: Self.columnWidth)
     }
 }
 
