@@ -47,6 +47,7 @@
 - Git 操作进度反馈：更多操作菜单（Fetch/Pull/Push/Stash 等）、分支切换、提交选项菜单、初始化仓库按钮均有进行中指示；发起新操作自动折叠上一条操作输出。
 - **操作中切换项目立刻跟新**：root 变化时脱离旧 commit/stage 的 `isBusy`，高优先级扫描新仓库，Git 面板不再等旧操作跑完才切换。
 - **Commit Staged 加速**：操作前 HEAD/branch 校验改为轻量 `rev-parse`（不再全量 `git status`）；mutation 后先快路径更新变更列表（跳过 log/stash 等详情，空闲再补全）；全量扫描详情命令并行。
+- **修复无提交仓库首次 Commit 误拒**：unborn 分支上 `rev-parse --abbrev-ref HEAD` 失败，操作前 HEAD 稳定性校验误报「Branch or HEAD changed」；改为 `symbolic-ref --short HEAD` 读取分支名，与 porcelain `# branch.head` 对齐。
 - **对齐 VS Code 的乐观更新与刷新策略**：
   - Stage / Unstage / Stage All / Unstage All / Commit：git 子进程跑之前先改 UI 列表（失败回滚快照），列表几乎瞬时响应；后台再轻量 `status` 纠偏。
   - 文件事件：操作中 / 失焦 / 大仓库（status 上限）跳过自动扫；1s 防抖合并；mutation 后 5s 冷却避免 index 自触发扫。

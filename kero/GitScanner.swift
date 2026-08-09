@@ -219,16 +219,22 @@ actor GitScanner {
             headOID = nil
         }
 
-        let abr = runGit(
-            ["rev-parse", "--abbrev-ref", "HEAD"],
+        // 用 symbolic-ref 对齐 porcelain `# branch.head`：
+        // 无提交的 unborn 分支上 `rev-parse --abbrev-ref HEAD` 会失败（exit 128）
+        // 或仅回 `HEAD`，若当成 detached / 整份快照 nil，会误拒首次 commit。
+        // symbolic-ref 在 unborn 与普通分支上都返回真实分支名；detached 时失败。
+        let sym = runGit(
+            ["symbolic-ref", "--short", "HEAD"],
             in: repoRoot,
             timeout: 10
         )
-        guard abr.status == 0 else { return nil }
-        let abrName = strippingTrailingLineEnding(abr.stdout)
-        let branch: String = abrName == "HEAD" || abrName.isEmpty
-            ? "detached HEAD"
-            : abrName
+        let branch: String
+        if sym.status == 0 {
+            let name = strippingTrailingLineEnding(sym.stdout)
+            branch = name.isEmpty ? "detached HEAD" : name
+        } else {
+            branch = "detached HEAD"
+        }
 
         var upstream: String?
         if includeUpstream {
