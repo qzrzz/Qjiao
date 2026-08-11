@@ -561,6 +561,32 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         return session
     }
 
+    /// 为本地 Agent 自动化在指定 pane 旁创建终端。与 UI 分屏一样复用
+    /// `makeSession`，因此项目目录、退出回收、主题和会话观察都保持一致。
+    /// `focus` 为 false 时不改变用户当前焦点。
+    @discardableResult
+    func automationSplitTerminal(
+        beside paneID: UUID,
+        toward edge: PaneDropEdge,
+        directory: String?,
+        focus: Bool
+    ) -> (tab: PaneTab, pane: Pane, session: TerminalSession)? {
+        guard let tab = tabs.first(where: { $0.allPanes.contains { $0.id == paneID } }),
+              let target = tab.allPanes.first(where: { $0.id == paneID }),
+              !target.content.isDiff
+        else { return nil }
+
+        let previousFocus = tab.focusedPaneID
+        tab.focusedPaneID = paneID
+        let session = makeSession(directory: directory)
+        let pane = Pane(content: .session(session))
+        tab.split(pane, toward: edge)
+        if !focus {
+            tab.focusedPaneID = previousFocus
+        }
+        return (tab: tab, pane: pane, session: session)
+    }
+
     /// 在原 pane 位置用新终端会话替换旧会话，保留分屏布局、分隔比例与 pane id。
     /// 旧会话已不在任何 tab 的布局树中时返回 nil（调用方应回退到 `newSession`）。
     @discardableResult

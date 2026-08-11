@@ -242,6 +242,8 @@ struct ProjectPresetIconImage: View {
     var lazyLoad: Bool = false
 
     @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var themeChanges = Theme.changes
+    @ObservedObject private var settings = AppSettings.shared
     @State private var loadedImage: NSImage?
     @State private var isTemplate = false
     @State private var didFail = false
@@ -250,7 +252,13 @@ struct ProjectPresetIconImage: View {
         colorScheme == .dark
     }
 
+    /// 将强制外观和实际亮暗状态同时纳入任务标识，避免惰性列表复用旧图标。
+    private var appearanceID: String {
+        "\(settings.theme.rawValue):\(isDarkMode ? "dark" : "light")"
+    }
+
     var body: some View {
+        let _ = themeChanges
         Group {
             if let image = displayImage {
                 let template = displayIsTemplate
@@ -276,7 +284,7 @@ struct ProjectPresetIconImage: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
-        .task(id: "\(ProjectIconThumbnailCache.key(for: preset, pointSize: size, isDarkMode: isDarkMode))#\(ProjectIconThumbnailCache.cacheVersion)") {
+        .task(id: "\(ProjectIconThumbnailCache.key(for: preset, pointSize: size, isDarkMode: isDarkMode))#\(appearanceID)#\(ProjectIconThumbnailCache.cacheVersion)") {
             loadedImage = nil
             didFail = false
             if lazyLoad {

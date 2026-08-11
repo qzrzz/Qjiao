@@ -16,6 +16,13 @@ struct keroApp: App {
     @ObservedObject private var l10n = L10n.shared
 
     init() {
+        // Qjiao's bundled executable also serves as the short-lived `qjiao`
+        // automation client. Handle CLI-shaped invocations before creating
+        // the normal SwiftUI scene; ordinary launches fall through.
+        if CommandLine.arguments.count > 1 {
+            _ = QjiaoCLIService.handleCommandLine(arguments: CommandLine.arguments)
+        }
+        _ = QjiaoCLIService.shared
         SubprocessRunner.boostFileDescriptorLimit()
         SubprocessRunner.startFDMonitor()
         DisplayCycleLayoutProtection.install()
