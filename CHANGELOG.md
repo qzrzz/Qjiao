@@ -11,6 +11,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.47]
+
+### Added
+
+- Add a local automation protocol with `qjiao +pane` / `qjiao +agent` CLI commands to query, split, read, and write terminal panes, launch agents, wait for their status, and send guarded prompts to running, unblocked agents.
+
+### Changed
+
+- Replace the spinning refresh icon with a ProgressView in sidebar refresh buttons.
+- Align commit history timeline dots with guide lines, auto-fit branch/tag badge widths, and load package manager icons from the icon directory with template rendering preserved.
+
+### Fixed
+
+- Fix GitScanner infinite loop at the filesystem root and a MainActor isolation crash in tab switching.
+- Refresh project and terminal icons when the appearance theme changes.
+
 ## [1.1.46]
 
 ### Fixed
