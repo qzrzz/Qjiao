@@ -187,30 +187,26 @@ struct SidebarRefreshButton: View {
     var body: some View {
         let helpText = isRefreshing ? L10n.t("Refreshing…") : L10n.t("Refresh")
         return Button(action: action) {
-            Image(systemName: "arrow.clockwise")
-                .font(SidebarTypography.caption(.medium))
-                .foregroundStyle(
-                    isRefreshing
-                        ? Color(nsColor: Theme.cursor)
-                        : (isHovering ? Theme.primaryColor : Theme.secondaryColor)
-                )
-                .rotationEffect(.degrees(isRefreshing ? 360 : 0))
-                .animation(
-                    isRefreshing
-                        ? .linear(duration: 0.7).repeatForever(autoreverses: false)
-                        : .default,
-                    value: isRefreshing
-                )
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(
-                            isHovering && !isRefreshing
-                                ? Theme.primaryColor.opacity(0.08)
-                                : Color.clear
-                        )
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 5))
+            Group {
+                if isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(SidebarTypography.caption(.medium))
+                        .foregroundStyle(isHovering ? Theme.primaryColor : Theme.secondaryColor)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(
+                        isHovering && !isRefreshing
+                            ? Theme.primaryColor.opacity(0.08)
+                            : Color.clear
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)
         .disabled(isRefreshing)
