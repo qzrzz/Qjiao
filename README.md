@@ -13,6 +13,10 @@
   A: 内置了中文等宽字体在内的许多字体（ SourceHanSansCN-VF-Mono1200.ttf, InterVariable.ttf），还内置了 cwebp, oxipng, cjxl 等图片处理工具
 
 
+## LICENSE
+
+[GPLv3](./LICENSE)
+
 ## 增加功能
 
 相对上游 [Kero](https://github.com/egoist/kero) 的二次开发增量。按能力域归纳；细节以源码为准，此处只写**用户意图**。
