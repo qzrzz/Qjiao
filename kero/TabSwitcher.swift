@@ -242,19 +242,21 @@ final class TabSwitcherMonitorView: NSView {
             object: window,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.controller?.cancel()
-            }
+            self?.cancelFromMainThreadNotification()
         })
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.controller?.cancel()
-            }
+            self?.cancelFromMainThreadNotification()
         })
+    }
+
+    nonisolated private func cancelFromMainThreadNotification() {
+        assumeMainActor {
+            controller?.cancel()
+        }
     }
 
     func detach() {

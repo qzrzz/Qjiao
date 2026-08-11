@@ -111,6 +111,10 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Live managers in window-creation order; the persisted snapshot is
     /// one entry per registered manager.
     private(set) static var registry: [TerminalManager] = []
+    /// Read-only view for the authenticated local automation router. Requests
+    /// are still resolved on the main actor and mutations remain private to
+    /// each manager/project.
+    static var automationManagers: [TerminalManager] { registry }
     /// Folder requests can arrive while macOS is still launching Qjiao, before
     /// a WindowGroup has produced a manager/window to receive them.
     private static var pendingDirectories: [String] = []

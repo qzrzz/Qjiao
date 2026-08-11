@@ -31,6 +31,7 @@
 - 递归分屏树：任意方向嵌套；标签可拖入内容区边缘分屏；任务「重新运行」优先在原 pane 替换会话，不打散分屏布局。
 - 终端 ⌘R 重新运行：脚本/运行器创建的终端（右侧栏任务、npm scripts、Script Runner 单文件脚本等）按 ⌘R 在其原 pane 原地重新运行；普通 shell 会话不拦截，⌘R 仍放行给菜单（浏览器 Reload）或终端。
 - 标签布局可选弹性压缩（默认）或横向滚动；Ctrl+1–9 切标签；Ctrl-Tab 预览（可选 MRU）；溢出滚动时选中 Tab 自动避让边缘渐隐，不被遮挡；右键可「关闭全部文件 / 关闭全部 Diff」。
+- Ctrl-Tab 切换器在窗口失焦或应用退到后台时安全取消，避免主线程回调隔离检查导致偶发崩溃。
 - 内容 Tabs 拖拽排序采用 Chrome 风格水平浮动预览：源 Tab 仅跟随鼠标横向移动，周围 Tab 以短响应弹簧动画让位，按相邻 Tab 中线触发换序，拖拽时屏蔽其他 Tab 的 hover 状态，标题、图标与选中底色保持同步；关闭按钮仅在当前 Tab hover 时显示，分栏标识在 Tab 右侧水平排列、垂直居中并保留 2pt 右边距，关闭按钮出现时快速过渡；拖拽期间锁定每个 Tab 的宽度，结束后再按最终顺序重算，避免宽度变化导致抖动；浮层带材质模糊底板，避免内容透底。非当前 Tab 拖过 Tabs 底部 20pt 后进入分屏拖拽模式，浮层改为二维跟随鼠标。
 - 终端默认点击移动光标、OSC 133 语义提示符；闲时标签标题可配置；可开关 Option-as-Alt、Vim 帮助条、字体加粗。
 - 粘贴安全确认（OSC 52 / 可疑内容）；Finder 文件粘贴为 shell 路径；`TERM_PROGRAM=ghostty`，不强制注入 `LANG`。
@@ -41,6 +42,7 @@
 
 ### Git
 
+- 非 Git 目录探测在文件系统根目录正确终止，避免损坏 `.git` 元数据或普通目录触发无限路径遍历。
 - **操作逻辑可配置（简单 vs 传统）**：设置中新增 Git 分类与操作逻辑切换，默认使用简单模式（GitHub Desktop 风格，统一 CHANGES 单列表 + 复选框提交，点击提交按钮批量打包暂存并 commit；传统模式保持 VS Code 已暂存/变更分立列表）。
 - 事件驱动刷新（仓库元数据 + 工作区监听）加低频心跳兜底，替代固定短间隔轮询；切换仓库时保留旧内容直至新结果就绪，减少闪烁；两仓库来回切换时立即恢复上次解析的内容（单槽快照），不再显示上一个仓库的旧状态。
 - **刷新分级提速**：工作区文件事件 / 终端命令完成 / cd / 切换标签等高频路径只跑 rev-parse + status 快路径（3 个子进程），提交历史、分支、remote、stash 等详情（含大仓库上比 status 更贵的 `git log --name-status`）由 HEAD/refs 元数据事件（commit/checkout/branch 才会触发）、提交历史展开时按需加载与低频心跳补齐；快路径期间 UI 保留旧详情展示不闪烁。10s 定时不再与内部心跳重复全量扫（root 未变时跳过），Git 标签页外的事件刷新不再带详情。
@@ -88,12 +90,14 @@
 - **AI API 配置独立记录机制**：每个供应商各自的 Model、Base URL 与 API Key 独立保存与复用，切换供应商时自动恢复上一次的自定义参数，无需重复输入。
 - 能力：AI 选图标、AI 生成名称/描述/图标、AI Commit Message（语言与 Gitmoji 可配；上下文优先 staged；未跟踪文件仅提供文件路径，不读取正文）。
 - AgentWatcher：识别常见 Coding Agent 的 working / blocked / done，Tab 绿点、未读蓝点与项目角标；可配完成/阻塞音效。
+- Agent guarded pane：通过带终端 capability 的本地自动化协议查询/分屏/读写 Pane；Agent Prompt 仅发送给当前项目中仍在运行且未处于 blocked 状态的已识别 Agent，避免把自动输入注入错误终端。
 - Project / Info 可一键用已安装的 AI 桌面应用或 CLI 打开当前目录。
 
 ### 外观与国际化
 
 - 跟随系统语言，支持 English / 简体中文 / 日本語；界面文案走 L10n。
 - Ghostty 全局与项目级 Light/Dark 配色；自定义主题（背景 / 文本 / 强调 + 终端 palette）。
+- Project 面板 PACKAGE 图标在 Light/Dark 外观切换时可靠刷新，并正确应用对应的图标变体与主题色。
 - 窗口与终端背景透明度、侧栏与文件树字体、短路径 `~`（默认开）、等宽中文字体回退。
 - 优化设置分类导航的排列顺序为：通用、AI、终端、编辑器、项目、文件、Git、关于。
 - 优化 Tab 分栏提示的文字与图标垂直居中对齐，并在未显示关闭按钮时紧靠标题左对齐。
@@ -107,6 +111,8 @@
 
 ## 上游移植记录
 
+- 移植上游 Kero `main` `0590f15` + `0158396`（2026-08-11）：修复 Git 非仓库元数据探测在文件系统根目录可能无限循环的问题；修复 Ctrl-Tab 窗口/应用失焦通知回调使用 `MainActor.assumeIsolated` 导致的偶发崩溃。Qjiao 仅在结构上确定运行于主线程的 TabSwitcher 通知回调使用 `assumeMainActor`，未全局替换其他隔离调用。
+- 移植上游 Kero `main` `4433b6f`（Add guarded pane and agent automation，2026-08-11）：适配 Qjiao 的 Ghostty 与 `AgentWatcher`，新增每终端 capability、本地 Unix socket/NDJSON 自动化协议及 `qjiao +pane` / `qjiao +agent` CLI；支持当前项目内 Pane 查询、分屏、读写、Agent 启动、状态等待和 guarded Prompt。未移植上游 Alacritty 专属改动、Agent Skill 安装以及独立的 Agent 状态扫描器；Blocked 拦截复用本地 `AgentWatcher` 结果，普通 `+pane send` 保留为明确的原始输入逃生通道。
 - 移植上游 Kero `main` `b83f338`（Support terminal links to local files，v0.1.43，2026-08-04）：新增 `TerminalLinkTarget`（url/file）分类与 `TerminalSession.terminalLinkTarget(for:)`/`existingFileURL` 路径解析（file: URL、~ 展开、相对路径按 pane 工作目录、剥离 `:行:列` 后缀）；`terminalDidRequestOpenURL` 本地文件改走 Finder 显示；⌘-右键菜单新增「New File Tab / New File Pane」（SplitMenuTarget 经 representedObject 传递路径），回调链 KeroTerminalView → TerminalHostView → PaneLayoutView → ContentView（manager.openFile / openFileToSide）；L10n 三语词条。适配：本地 KeroTerminalView 无上游 `events` 代理，改为 `resolveLinkTarget` 回调由 TerminalSession 注入；保留本地 `kind: TerminalOpenURLKind` 参数与历史导出 URL 定制；上游 FileViewer/SourceTextEditor 移除 onNewBrowserTab 属重构清理，未跟随。`e74f2b0`（OSC 22 鼠标指针，Alacritty）未移植。
 - 补全上游 `212ea0a` Recent Commits 视图的剩余 UI 差距（SwiftUI 实现，保留本地 GitCommitRow 定制）：提交图（`CommitGraphColumn` 垂直线 + 圆点，展开放大，首行/续线规则与上游一致；`FileRailColumn` 文件行延续线）、引用徽章（`primaryReference` 同上游规则：优先带斜杠分支、其次 HEAD 指向，accent 胶囊白字）、滚动自动加载（`LazyVStack` 中 Load More 按钮 `.task(id: commits.count)` 进入视口即加载，连续加载至填满或没有更多）。未跟随：AppKit 绘制（保持 SwiftUI）。
 - 移植上游 Kero `main` `db9a061` + `0a253ba`（v0.1.40–v0.1.41，2026-08-04）：`DiffViewPreferences` 从静态 enum 重构为 `@MainActor ObservableObject` 单例（`@Published diffStyle`/`prefersEditing` 落盘 UserDefaults，多标签/多窗口同步编辑与布局偏好；`DiffWebModel.isEditing` 改为 `canEdit`，编辑意图统一读偏好）；diff 外观跟随系统主题——`DiffWebHostingView`（NSHostingView 子类）在 `viewDidChangeEffectiveAppearance` 时经 `DiffWebModel.usesDarkAppearance` 驱动 WebKit 的 `colorScheme` 环境值，`DiffControlsNSView` 颜色改为 `effectiveAppearance.performAsCurrentDrawingAppearance` 内更新。

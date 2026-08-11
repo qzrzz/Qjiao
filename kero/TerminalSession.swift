@@ -34,6 +34,9 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     @Published private(set) var isInitialized = false
     /// 每次 Ghostty 收到 OSC 133 命令完成报告时递增，供 Git 等事件消费者观察。
     @Published private(set) var commandCompletionSequence: UInt64 = 0
+    /// 由 Qjiao 自动化启动或声明的 Agent。普通手动启动的 Agent 仍由
+    /// AgentWatcher 被动识别，不会因为自动化状态字段而改变既有 UI 行为。
+    @Published var automationAgent: QjiaoAgentStatus?
     /// 是否已确认登录 shell 到达首个提示符（zsh 集成通过 OSC 2 哨兵上报）。
     /// 这是向 PTY 注入命令的最安全时机：shell 初始化期间写入的命令会被回显但不执行。
     private(set) var hasShownPrompt = false
@@ -157,14 +160,15 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         terminalView.resolveLinkTarget = { [weak self] value in
             self?.terminalLinkTarget(for: value)
         }
-        terminalView.configuration = TerminalSurfaceOptions(
-            backend: .exec,
-            workingDirectory: launchWorkingDirectory,
-            envVars: Self.surfaceEnvironment(
-                shellPath: shellPath,
-                zshIntegrationDirectoryURL: zshIntegrationDirectoryURL,
-                pendingCommandFile: pendingCommandFileURL,
-                shellPidFile: shellPidFileURL
+            terminalView.configuration = TerminalSurfaceOptions(
+                backend: .exec,
+                workingDirectory: launchWorkingDirectory,
+                envVars: Self.surfaceEnvironment(
+                    shellPath: shellPath,
+                    sessionID: id,
+                    zshIntegrationDirectoryURL: zshIntegrationDirectoryURL,
+                    pendingCommandFile: pendingCommandFileURL,
+                    shellPidFile: shellPidFileURL
             )
         )
         terminalView.controller = controller
@@ -178,6 +182,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
     deinit {
         MainActor.assumeIsolated {
+            QjiaoCLIService.shared.revokeTerminal(id: id)
             if !hasExited {
                 terminateImmediately()
             }
@@ -978,6 +983,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
     private static func surfaceEnvironment(
         shellPath: String,
+        sessionID: UUID,
         zshIntegrationDirectoryURL: URL?,
         pendingCommandFile: URL?,
         shellPidFile: URL?
@@ -987,6 +993,9 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             "COLORTERM": "truecolor",
             "QJIAO_CONFIG_DIR": AppSettings.configURL.deletingLastPathComponent().path,
         ]
+        environment.merge(
+            QjiaoCLIService.shared.terminalEnvironment(for: sessionID)
+        ) { _, newValue in newValue }
         // 终端区域设置属于用户的 Shell 环境，应用界面语言不得代替用户注入 LANG/LC_*。
         if (shellPath as NSString).lastPathComponent == "zsh",
            let integrationDirectory = zshIntegrationDirectoryURL?.path {

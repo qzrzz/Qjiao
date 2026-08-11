@@ -1166,6 +1166,14 @@ struct TerminalAppIconView: View {
     var size: CGFloat = 12
     var isSelected: Bool = true
     @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var themeChanges = Theme.changes
+    @ObservedObject private var settings = AppSettings.shared
+
+    /// 外观可能由 SwiftUI 的 colorScheme 或 AppSettings 的强制模式驱动；
+    /// 两者都纳入身份，避免 LazyVStack 复用旧的 NSImage 视图。
+    private var appearanceID: String {
+        "\(settings.theme.rawValue):\(colorScheme == .dark ? "dark" : "light")"
+    }
 
     /// 按当前外观解析实际图标：深色模式优先 `darkPath` 变体。
     private var effectiveSource: TerminalAppIconSource {
@@ -1181,6 +1189,7 @@ struct TerminalAppIconView: View {
     }
 
     var body: some View {
+        let _ = themeChanges
         let catalog = TerminalAppIconCatalog.shared
         let source = effectiveSource
         let isDark = colorScheme == .dark
@@ -1206,12 +1215,14 @@ struct TerminalAppIconView: View {
                 )
                 .opacity(isSelected || isMask ? 1 : 0.72)
                 .accessibilityHidden(true)
+                .id(appearanceID)
         } else {
             Image(systemName: "terminal")
                 .font(.system(size: size * 0.85, weight: .medium))
                 .foregroundStyle(isSelected ? Color(nsColor: Theme.cursor) : Theme.secondaryColor)
                 .frame(width: size, height: size)
                 .accessibilityHidden(true)
+                .id(appearanceID)
         }
     }
 }
