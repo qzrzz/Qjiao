@@ -200,7 +200,18 @@ final class AgentWatcher: ObservableObject {
         var screen = ""
         if shouldScanScreen {
             lastScreenScanAt[sessionID] = now
-            screen = captureScreenTail(from: session) ?? ""
+            if let captured = captureScreenTail(from: session),
+               !captured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                screen = captured
+            } else if let previous = states[sessionID], previous.kind == kind {
+                // 读屏结果为空（如分屏表面未就绪 / 渲染延迟）：保留上一次有效状态，避免误识别为 done
+                if isSessionAttended(session) {
+                    markRead(sessionID: sessionID)
+                }
+                var cached = previous
+                cached.updatedAt = now
+                return cached
+            }
         } else if let previous = states[sessionID], previous.kind == kind {
             // 间隔内：仅用标题重评
             let titleOnly = AgentRuleEngine.detect(
@@ -254,7 +265,8 @@ final class AgentWatcher: ObservableObject {
         } else if let last = lastSemanticStatus[sessionID] {
             status = last
         } else {
-            status = .done
+            // 已知名为 Agent 的前台进程在运行，且尚无规则匹配时，默认为 working
+            status = .working
         }
 
         lastSemanticStatus[sessionID] = status
@@ -262,7 +274,7 @@ final class AgentWatcher: ObservableObject {
             sessionID: sessionID,
             kind: kind,
             status: status,
-            matchedRuleID: detection.matchedRuleID ?? "default_known_agent_idle_fallback",
+            matchedRuleID: detection.matchedRuleID ?? (status == .working ? "process_running_fallback" : "default_known_agent_idle_fallback"),
             updatedAt: now
         )
         publish(snap, session: session)
