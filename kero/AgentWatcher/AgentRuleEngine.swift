@@ -43,9 +43,10 @@ struct AgentDetectionResult: Sendable, Equatable {
     var visibleBlocker: Bool
     var visibleWorking: Bool
 
-    static func idleFallback() -> AgentDetectionResult {
+    /// 未命中任何规则时的未知回退结果（保留上次语义状态，避免误切为 done）。
+    static func unknownFallback() -> AgentDetectionResult {
         AgentDetectionResult(
-            state: .idle,
+            state: .unknown,
             matchedRuleID: nil,
             skipStateUpdate: false,
             visibleIdle: false,
@@ -79,7 +80,7 @@ enum AgentRuleEngine {
         }
 
         guard let matched = best else {
-            return .idleFallback()
+            return .unknownFallback()
         }
 
         let rule = matched.rule
