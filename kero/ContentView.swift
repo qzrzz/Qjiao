@@ -1924,8 +1924,10 @@ private struct SessionTabLabel: View {
         // state. A lightweight timeline refreshes just the visible tab icon.
         TimelineView(.periodic(from: .now, by: 0.3)) { _ in
             let appIcon = session.foregroundAppIcon
-            let isAgentWorking = agentWatcher.snapshot(for: session.id)?.status == .working
             let sessionsForUnread = tabSessions.isEmpty ? [session] : tabSessions
+            let isAgentWorking = sessionsForUnread.contains {
+                agentWatcher.snapshot(for: $0.id)?.status == .working
+            }
             let isAgentBlocked = sessionsForUnread.contains {
                 agentWatcher.snapshot(for: $0.id)?.status == .blocked
             }
