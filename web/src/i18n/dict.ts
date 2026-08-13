@@ -219,9 +219,9 @@ export function getLangUrl(
 
 /**
  * 获取相对于根目录的静态文件相对路径
- * 例如在 /zh-Hans/ 子目录下获取根目录的 latest.json 需返回 ../latest.json
+ * 例如在 /zh-Hans/ 子目录下获取根目录的 download.json 需返回 ../download.json
  *
- * @param filename 文件相对名（如 "latest.json"）
+ * @param filename 文件相对名（如 "download.json"）
  * @param currentLang 当前页面语言（若未提供则自动匹配当前环境）
  * @returns {string} 正确的根路径相对文件 URL
  */

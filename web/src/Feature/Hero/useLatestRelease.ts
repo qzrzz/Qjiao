@@ -1,23 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCurrentLang, getRootRelativePath, type SupportedLang } from "../../i18n/dict";
-
-/** GitHub Release 资源文件结构定义 */
-interface GitHubAsset {
-  /** 资源文件名 */
-  name: string;
-  /** 资源文件直接下载地址 */
-  browser_download_url: string;
-}
-
-/** GitHub Latest Release API 响应结构定义 */
-interface GitHubReleaseResponse {
-  /** 发布版本标签名称，如 "v1.0.0" */
-  tag_name?: string;
-  /** 发布页面 HTML 链接 */
-  html_url?: string;
-  /** 资源文件列表 */
-  assets?: GitHubAsset[];
-}
+import { resolveReleaseDownload } from "./downloadManifest";
 
 /** Release 信息 Hook 返回的状态接口 */
 export interface ReleaseInfo {
@@ -56,62 +39,51 @@ export function useLatestRelease(
 
   useEffect(() => {
     let isMounted = true;
-    const jsonUrl = getRootRelativePath("latest.json", currentLang);
 
-    fetch(jsonUrl)
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`读取静态 latest.json 失败: ${res.status}`);
-        }
-        return res.json() as Promise<GitHubReleaseResponse>;
-      })
-      .then((data) => {
-        if (!isMounted) return;
+    const loadRelease = async () => {
+      const manifestUrl = getRootRelativePath("download.json", currentLang);
+      const legacyUrl = getRootRelativePath("latest.json", currentLang);
 
-        const tagName = data.tag_name || "";
-        const htmlUrl = data.html_url || defaultReleaseUrl;
-        const assets = data.assets || [];
+      const data =
+        (await fetchStaticJson(manifestUrl)) ??
+        (await fetchStaticJson(legacyUrl));
+      if (!isMounted) return;
 
-        // 优先匹配 .dmg 安装包，其次为 .zip 或 .pkg 等 macOS 发布产物
-        const dmgAsset = assets.find((asset) =>
-          asset.name.toLowerCase().endsWith(".dmg")
-        );
-        const zipAsset = assets.find((asset) =>
-          asset.name.toLowerCase().endsWith(".zip")
-        );
-        const pkgAsset = assets.find((asset) =>
-          asset.name.toLowerCase().endsWith(".pkg")
-        );
-
-        const matchedAsset = dmgAsset || zipAsset || pkgAsset;
-        // 如果有可直接下载的 Asset 安装包则优先链接，否则链接到 Tag Release 页面或 Latest 页面
-        const finalDownloadUrl = matchedAsset
-          ? matchedAsset.browser_download_url
-          : htmlUrl;
-
+      if (!data) {
         setInfo({
-          downloadUrl: finalDownloadUrl,
+          downloadUrl: defaultReleaseUrl,
           versionText: "macOS",
-          tagName: tagName || null,
+          tagName: null,
           isLoading: false,
         });
-      })
-      .catch(() => {
-        // 请求静态文件失败时（如离线或环境配置异常），静默退回到默认 Releases 地址
-        if (isMounted) {
-          setInfo({
-            downloadUrl: defaultReleaseUrl,
-            versionText: "macOS",
-            tagName: null,
-            isLoading: false,
-          });
-        }
+        return;
+      }
+
+      const resolved = resolveReleaseDownload(data, defaultReleaseUrl);
+      setInfo({
+        downloadUrl: resolved.downloadUrl,
+        versionText: "macOS",
+        tagName: resolved.tagName,
+        isLoading: false,
       });
+    };
+
+    void loadRelease();
 
     return () => {
       isMounted = false;
     };
-  }, [owner, repo, currentLang]);
+  }, [owner, repo, currentLang, defaultReleaseUrl]);
 
   return info;
+}
+
+async function fetchStaticJson(url: string): Promise<unknown | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
 }

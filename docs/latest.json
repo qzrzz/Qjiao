@@ -1,23 +1,23 @@
 {
-  "tag_name": "v1.0.4",
-  "html_url": "https://github.com/qzrzz/Qjiao/releases/tag/v1.0.4",
-  "published_at": "2026-07-31T02:46:54Z",
+  "tag_name": "v1.1.48",
+  "html_url": "https://github.com/qzrzz/Qjiao/releases/tag/v1.1.48",
+  "published_at": "2026-08-13T12:15:10Z",
   "assets": [
     {
       "name": "appcast.xml",
-      "browser_download_url": "https://github.com/qzrzz/Qjiao/releases/download/v1.0.4/appcast.xml"
+      "browser_download_url": "https://github.com/qzrzz/Qjiao/releases/download/v1.1.48/appcast.xml"
     },
     {
-      "name": "qjiao-1.0.4.dmg",
-      "browser_download_url": "https://github.com/qzrzz/Qjiao/releases/download/v1.0.4/qjiao-1.0.4.dmg"
+      "name": "qjiao-1.1.48.dmg",
+      "browser_download_url": "https://github.com/qzrzz/Qjiao/releases/download/v1.1.48/qjiao-1.1.48.dmg"
     },
     {
-      "name": "qjiao-1.0.4.md",
-      "browser_download_url": "https://github.com/qzrzz/Qjiao/releases/download/v1.0.4/qjiao-1.0.4.md"
+      "name": "qjiao-1.1.48.md",
+      "browser_download_url": "https://github.com/qzrzz/Qjiao/releases/download/v1.1.48/qjiao-1.1.48.md"
     },
     {
-      "name": "qjiao-1.0.4.zip",
-      "browser_download_url": "https://github.com/qzrzz/Qjiao/releases/download/v1.0.4/qjiao-1.0.4.zip"
+      "name": "qjiao-1.1.48.zip",
+      "browser_download_url": "https://github.com/qzrzz/Qjiao/releases/download/v1.1.48/qjiao-1.1.48.zip"
     }
   ]
 }

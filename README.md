@@ -112,6 +112,7 @@
 - 独立产品标识与 Sparkle 自动更新；本机 Developer ID 签名、公证、DMG/ZIP、delta 与 GitHub Releases 发布脚本。
 - `version+` 脚本由 `scripts/update-changelog.ts` 调用 pi AI 生成版本更新记录并写入 CHANGELOG.md（与 pbxproj 中的 MARKETING_VERSION 严格一致）。
 - 产品官网 `web/`（Vite + React）：中/英/日、功能介绍与响应式布局。
+- 官网下载读取 `docs/download.json` 直链最新公证 DMG；发布脚本在 GitHub Release 成功后写入该清单（并同步 `web/public/download.json`）后提交推送，GitHub Pages 即可直接下载安装包。
 
 ## 上游移植记录
 
