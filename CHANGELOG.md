@@ -11,6 +11,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.48]
+
+### Added
+
+- Add "Close Empty Tabs" to the tab context menu to close blank browser tabs and never-used terminal tabs in one go.
+- Preserve file tree expansion state and scroll position across refreshes and Files ↔ CWD switches.
+- Run npm scripts from the `package.json` context menu in the file tree.
+
+### Fixed
+
+- Fix agent status being misjudged as `done` when the screen capture is empty (e.g. split surface not ready yet): keep the last valid status and default to `working` for known agent processes without a matched rule.
+- Fix syntax highlighting missing on first paint by re-rendering highlights once the viewport is ready and precompiling tree-sitter queries in the background, shared across editors.
+- Fix the sidebar resize handle hotspot offset misalignment.
+
 ## [1.1.47]
 
 ### Added
