@@ -516,6 +516,10 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         tabs.contains { $0.allContents.contains { $0.isDiff } }
     }
 
+    var hasEmptyTabs: Bool {
+        tabs.contains(where: \.isEmpty)
+    }
+
     /// The focused terminal session; while a file, browser, or diff pane is focused it
     /// has no directory of its own, so panels that need a working directory
     /// (file tree, git, info) track a terminal that does: one sharing the
@@ -1054,6 +1058,11 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// Closes every diff pane while leaving other content in split tabs open.
     func closeDiffs() {
         closeBatch(tabs.flatMap(\.allContents).filter { $0.isDiff })
+    }
+
+    /// 关闭从未用过的终端标签和空白浏览器标签。
+    func closeEmptyTabs() {
+        closeBatch(tabs.filter(\.isEmpty).flatMap(\.allContents))
     }
 
     /// Closes every tab, leaving the project open but empty.

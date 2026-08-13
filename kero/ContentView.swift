@@ -1698,6 +1698,8 @@ private struct SessionTabsView: View {
             .disabled(!project.hasFiles)
         Button(L10n.t("Close Diffs")) { project.closeDiffs() }
             .disabled(!project.hasDiffs)
+        Button(L10n.t("Close Empty Tabs")) { project.closeEmptyTabs() }
+            .disabled(!project.hasEmptyTabs)
         Divider()
         Button(L10n.t("Close All")) { project.closeAll() }
     }

@@ -34,6 +34,15 @@ enum PaneContent: nonisolated Identifiable {
         if case .file = self { return true }
         return false
     }
+
+    /// 空白浏览器，或从未用过的终端。文件 / Diff 不算空。
+    @MainActor var isUnused: Bool {
+        switch self {
+        case .session(let session): return session.appearsUnused
+        case .browser(let browser): return browser.isBlank
+        case .file, .diff: return false
+        }
+    }
 }
 
 extension PaneContent {
@@ -475,6 +484,13 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
     }
 
     var hasMultiplePanes: Bool { allPanes.count > 1 }
+
+    /// 整页都是未使用的终端或空白浏览器。
+    var isEmpty: Bool {
+        guard !isTaskRunning else { return false }
+        let contents = allContents
+        return contents.isEmpty || contents.allSatisfy(\.isUnused)
+    }
 
     /// Splitting is disallowed while a diff is focused: diffs stay in their own
     /// single-pane tab so their always-mounted web view keeps filling the tab.
