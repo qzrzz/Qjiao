@@ -86,6 +86,17 @@ final class FileTreeModel: nonisolated ObservableObject {
         let fingerprint: DirectoryFingerprint?
     }
 
+    /// 一棵已访问过的树：展开集 + 目录缓存。
+    private struct RootSnapshot {
+        var expanded: Set<String>
+        var cache: [String: DirectoryCacheEntry]
+    }
+
+    /// 手动刷新写入的哨兵指纹：与任何真实目录 mtime 都不等，触发后台重扫但保留旧子项。
+    private static let forcedStaleFingerprint = DirectoryFingerprint(
+        contentModificationDate: .distantPast
+    )
+
     @Published private(set) var rootPath = ""
     @Published private(set) var items: [Item] = []
     /// 当前选中的路径集合（不含草稿行）。
@@ -112,11 +123,20 @@ final class FileTreeModel: nonisolated ObservableObject {
         return true
     }()
     private var expanded: Set<String> = []
+    /// 按 root 记住展开项与目录缓存；切回已访问过的树时直接恢复。
+    private var snapshots: [String: RootSnapshot] = [:]
+    /// 最近访问的 root，超出上限时丢掉最旧的快照。
+    private var snapshotMRU: [String] = []
+    private let maxSnapshots = 8
+    /// 各 root 的纵向滚动位置（与快照共用 MRU 淘汰）。
+    private var scrollOffsetByRoot: [String: CGFloat] = [:]
     /// 目录内容缓存（path → 已扫描的直接子项，未排序）。
-    /// 排序在展平时于主线程进行，因此排序切换无需失效缓存；root 切换时整体清空。
+    /// 排序在展平时于主线程进行，因此排序切换无需失效缓存。
+    /// 切到未访问过的 root 时清空；切回已访问 root 时从 snapshots 恢复。
     private var directoryCache: [String: DirectoryCacheEntry] = [:]
-    /// 正在后台扫描的目录（去重，避免同一目录被并发扫多次）。
-    private var inFlightScans: Set<String> = []
+    /// 正在后台扫描的目录 → 发起时的 scanGeneration。
+    /// 完成时只清掉仍属于该 generation 的标记，避免 forceReload 后旧任务打穿新一代去重。
+    private var inFlightScans: [String: UInt64] = [:]
     /// root 切换等结构性变化时递增；后台扫描完成回主线程时校验，丢弃过期结果。
     private var scanGeneration: UInt64 = 0
     /// ⇧ 范围选择的锚点：最近一次普通单击或 ⌘ 点击的目标。
@@ -154,33 +174,84 @@ final class FileTreeModel: nonisolated ObservableObject {
         folderSizeStates[path] ?? .idle
     }
 
-    /// Points the tree at `root` (collapsing everything if it moved) and
-    /// re-reads visible directories. Cheap when nothing changed.
+    /// Points the tree at `root` and re-reads visible directories.
+    /// Same root just rebuilds. A previously visited root restores expanded
+    /// folders and cache; an unseen root starts collapsed.
     func sync(root: String) {
         if root != rootPath {
+            storeCurrentSnapshot()
+            if let saved = snapshots[root] {
+                expanded = saved.expanded
+                directoryCache = saved.cache
+            } else {
+                expanded = []
+                directoryCache.removeAll()
+            }
+            touchMRU(root)
+
             rootPath = root
-            expanded = []
             // Any in-progress inline edit belonged to the old tree.
             renamingPath = nil
             draft = nil
             clearSelection()
             clearAllFolderSizes()
-            // 旧 root 的目录缓存整体作废；在飞扫描结果按 generation 丢弃。
-            directoryCache.removeAll()
+            // 旧 root 的在飞扫描结果按 generation 丢弃。
             scanGeneration &+= 1
         }
         rebuild()
     }
 
-    /// 手动完全刷新：清空全部目录缓存并丢弃在飞扫描，强制所有已展开目录
-    /// 重新后台扫描。用于绕过缓存的场景——目录 mtime 指纹只能感知「子项增删」，
-    /// 已有文件的大小/日期变化不会触发自动重扫，用户可手动强制全量刷新。
+    /// 当前 root 的已记滚动位置。
+    func scrollOffset(for root: String) -> CGFloat? {
+        scrollOffsetByRoot[root]
+    }
+
+    /// 记住某棵树的纵向滚动；与快照共用淘汰。
+    func rememberScrollOffset(_ offset: CGFloat, for root: String) {
+        guard !root.isEmpty else { return }
+        scrollOffsetByRoot[root] = offset
+        touchMRU(root)
+        evictOldSnapshots()
+    }
+
+    /// 手动完全刷新：把已缓存目录标成过期并后台重扫。
+    /// 不清空缓存、不折叠已展开项——重扫完成前继续展示旧子项，避免滚动条回顶。
+    /// 不清 in-flight：旧任务完成时只摘自己的 generation，不会挡新一轮扫描。
     func forceReload() {
         guard !rootPath.isEmpty else { return }
-        directoryCache.removeAll()
-        inFlightScans.removeAll()
         scanGeneration &+= 1
+        for (dir, entry) in directoryCache {
+            directoryCache[dir] = DirectoryCacheEntry(
+                items: entry.items,
+                fingerprint: Self.forcedStaleFingerprint
+            )
+        }
         rebuild()
+    }
+
+    private func storeCurrentSnapshot() {
+        guard !rootPath.isEmpty else { return }
+        snapshots[rootPath] = RootSnapshot(expanded: expanded, cache: directoryCache)
+        touchMRU(rootPath)
+        evictOldSnapshots()
+    }
+
+    private func touchMRU(_ root: String) {
+        guard !root.isEmpty else { return }
+        snapshotMRU.removeAll { $0 == root }
+        snapshotMRU.append(root)
+    }
+
+    private func evictOldSnapshots() {
+        while snapshotMRU.count > maxSnapshots {
+            let evict = snapshotMRU.removeFirst()
+            if evict == rootPath {
+                snapshotMRU.append(evict)
+                continue
+            }
+            snapshots.removeValue(forKey: evict)
+            scrollOffsetByRoot.removeValue(forKey: evict)
+        }
     }
 
     func toggle(_ item: Item) {
@@ -1331,8 +1402,8 @@ final class FileTreeModel: nonisolated ObservableObject {
     }
 
     /// 展平已展开目录树：全部来自 `directoryCache`（内存），不做任何磁盘 I/O。
-    /// 缓存缺失或指纹过期（目录内容变化）的目录收集进 `stale`，由 `scheduleScan`
-    /// 在后台补扫；补扫完成前该目录显示一行 loading 占位。
+    /// 缓存缺失的目录收集进 `stale`，由 `scheduleScan` 在后台补扫，并显示 loading。
+    /// 指纹过期时同样入队重扫，但继续展示旧子项，避免刷新折叠树、滚动条回顶。
     private func appendCachedChildren(of dir: String, depth: Int, into out: inout [Item], stale: inout [String]) {
         // Guard against runaway recursion through symlink cycles.
         guard depth < 32 else { return }
@@ -1354,16 +1425,12 @@ final class FileTreeModel: nonisolated ObservableObject {
             stale.append(dir)
             return
         }
-        // 指纹有效则校验：目录内容变化（直接子项增删/改名）时失效重扫。
+        // 指纹有效则校验：目录内容变化（直接子项增删/改名）时后台重扫。
+        // 重扫完成前继续展示旧子项，避免刷新时折叠树、丢失滚动位置。
         // fingerprint == nil 的目录（不存在/不可读）稳定显示为空，不重复入队。
-        if let cachedFingerprint = entry.fingerprint {
-            guard let current = fingerprint(of: dir), current == cachedFingerprint else {
-                if needsPlaceholder {
-                    out.append(loadingItem(in: dir, depth: depth))
-                }
-                stale.append(dir)
-                return
-            }
+        if let cachedFingerprint = entry.fingerprint,
+           fingerprint(of: dir) != cachedFingerprint {
+            stale.append(dir)
         }
         // 排序在主线程展平时进行：size 排序需要 folderSizeStates，且排序切换
         // 无需失效缓存。
@@ -1388,10 +1455,12 @@ final class FileTreeModel: nonisolated ObservableObject {
     /// 写缓存并再次 `rebuild()`（此时应全部命中，除非扫描期间目录又变化）。
     /// 同一目录同时只允许一个在飞任务，避免并发读盘。
     private func scheduleScan(of dirs: [String]) {
-        let toScan = dirs.filter { !inFlightScans.contains($0) }
-        guard !toScan.isEmpty else { return }
-        inFlightScans.formUnion(toScan)
         let generation = scanGeneration
+        let toScan = dirs.filter { inFlightScans[$0] != generation }
+        guard !toScan.isEmpty else { return }
+        for dir in toScan {
+            inFlightScans[dir] = generation
+        }
         Task.detached(priority: .utility) { [weak self] in
             var results: [String: DirectoryCacheEntry] = [:]
             results.reserveCapacity(toScan.count)
@@ -1400,10 +1469,11 @@ final class FileTreeModel: nonisolated ObservableObject {
             }
             await MainActor.run {
                 guard let self else { return }
-                // 先清理在飞标记：即使 root 已切换（generation 不匹配），
-                // 也不能让旧目录残留阻塞后续扫描。
-                self.inFlightScans.subtract(toScan)
-                // root 已切换：结果整体作废，不写缓存（sync 已递增 generation）。
+                for dir in toScan {
+                    if self.inFlightScans[dir] == generation {
+                        self.inFlightScans.removeValue(forKey: dir)
+                    }
+                }
                 guard self.scanGeneration == generation else { return }
                 for (dir, result) in results {
                     self.directoryCache[dir] = result

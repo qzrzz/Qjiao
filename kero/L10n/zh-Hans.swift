@@ -661,6 +661,7 @@ extension L10n {
         "Not selected": "未选中",
         "Note": "笔记",
         "NPM SCRIPTS": "NPM 脚本",
+        "npm scripts": "NPM 脚本",
         "npx taze": "npx taze",
         "Jump": "跳转",
         "Jump to Offset": "跳转到偏移",

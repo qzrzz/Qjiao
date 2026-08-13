@@ -100,13 +100,43 @@ struct SyntaxHighlightPlugin: STPlugin {
 enum HighlightQueryCache {
     private static var cache: [SyntaxLanguage: SwiftTreeSitter.Query] = [:]
     private static var injectionCache: [SyntaxLanguage: SwiftTreeSitter.Query] = [:]
+    /// In-flight highlights compiles. Multiple editors of the same language
+    /// (and `precompile(for:)`) share one background `ts_query_new`.
+    private static var highlightsWaiters: [SyntaxLanguage: [(SwiftTreeSitter.Query?) -> Void]] = [:]
 
     static func cached(_ language: SyntaxLanguage) -> SwiftTreeSitter.Query? {
         cache[language]
     }
 
-    static func store(_ query: SwiftTreeSitter.Query, for language: SyntaxLanguage) {
-        cache[language] = query
+    /// Load (or compile once) the highlights query. Cached hits invoke
+    /// `completion` synchronously; misses share a single background compile.
+    static func loadHighlights(
+        _ language: SyntaxLanguage,
+        data: Data,
+        completion: @escaping (SwiftTreeSitter.Query?) -> Void
+    ) {
+        if let query = cache[language] {
+            completion(query)
+            return
+        }
+        if highlightsWaiters[language] != nil {
+            highlightsWaiters[language, default: []].append(completion)
+            return
+        }
+        highlightsWaiters[language] = [completion]
+        let tsLanguage = Language(language: language.parser)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let query = try? SwiftTreeSitter.Query(language: tsLanguage, data: data)
+            DispatchQueue.main.async {
+                if let query {
+                    cache[language] = query
+                }
+                let waiters = highlightsWaiters.removeValue(forKey: language) ?? []
+                for waiter in waiters {
+                    waiter(query)
+                }
+            }
+        }
     }
 
     /// A language's compiled *injections* query. Separate from the highlights
@@ -137,6 +167,16 @@ final class SyntaxHighlightCoordinator {
     /// thread right now, so the token provider kicks off each compile only once.
     private var pendingInjectionCompiles: Set<SyntaxLanguage> = []
     private var prevViewportRange: NSTextRange?
+    /// Highlighter is created only after the query is ready. Until then,
+    /// viewport events must not mark ranges valid via Neon's no-op provider —
+    /// that is what left the first open of a language unhighlighted.
+    /// Optional so `init` can capture `self` in later closures after other
+    /// stored properties are set.
+    private var textInterface: SyntaxHighlightTextInterface!
+    private var didInstallTokenProvider = false
+    /// Query finished before the text view had a real viewport (typical:
+    /// `viewDidMoveToWindow` → plugin setup → first layout later).
+    private var pendingFullInvalidate = false
 
     init(
         textView: STTextView,
@@ -164,20 +204,16 @@ final class SyntaxHighlightCoordinator {
             return Point(row: position.row, column: position.column)
         }
 
-        tsClient.invalidationHandler = { [weak self] indexSet in
-            self?.highlighter?.invalidate(.set(indexSet))
-        }
-
         // Empty fonts table (see SyntaxHighlighting.theme) → this keeps kero's
         // own editor font instead of resetting to the theme's.
         textView.font = theme.font(forToken: "plain") ?? textView.font
 
-        let textInterface = SyntaxHighlightTextInterface(textView: textView) { [weak self, weak textView] neonToken in
+        textInterface = SyntaxHighlightTextInterface(textView: textView) { [weak self] neonToken in
             // Metadata captures aren't colors — skip them so they don't repaint
             // a real capture on the same range. Swift captures comments as
             // `@comment @spell`; letting `spell` through (it resolves to the
             // plain fallback, applied after `comment`) turned comments black.
-            guard let self, let textView, !Self.ignoredCaptures.contains(neonToken.name) else {
+            guard let self, !Self.ignoredCaptures.contains(neonToken.name) else {
                 return nil
             }
             var attributes: [NSAttributedString.Key: Any] = [:]
@@ -194,12 +230,13 @@ final class SyntaxHighlightCoordinator {
             return attributes.isEmpty ? nil : attributes
         }
 
-        // Start with no token provider (a no-op); it's installed below once the
-        // query is ready — off the main thread on first use, so opening a file
-        // never blocks on the ~190 ms Swift query compile.
-        highlighter = Neon.Highlighter(textInterface: textInterface)
+        tsClient.invalidationHandler = { [weak self] indexSet in
+            self?.highlighter?.invalidate(.set(indexSet))
+        }
 
-        // Parse the whole document once up front.
+        // Parse the whole document once up front. The highlighter is created
+        // later, when the query is ready — a default no-op provider would
+        // otherwise mark the first viewport valid with no colors.
         let documentRange = NSRange(textView.textContentManager.documentRange, in: textView.textContentManager)
         tsClient.willChangeContent(in: documentRange)
         tsClient.didChangeContent(
@@ -217,6 +254,17 @@ final class SyntaxHighlightCoordinator {
     func update(theme: STPluginNeonAppKit.Theme) {
         self.theme = theme
         highlighter?.invalidate()
+    }
+
+    /// 视口第一次有真实尺寸时再铺一次色。打开文件时 query 往往在首帧
+    /// layout 之前就编译完，当时 `visibleRange` 仍是 `.zero`，Neon 只会
+    /// 请求文档开头一小段；等视口就绪后必须再 invalidate。
+    func refreshVisibleHighlighting() {
+        guard highlighter != nil else {
+            pendingFullInvalidate = true
+            return
+        }
+        requestHighlightPass()
     }
 
     /// tree-sitter capture names that carry no color — spell-check hints,
@@ -266,21 +314,9 @@ final class SyntaxHighlightCoordinator {
     /// installed when it finishes, so the editor opens without blocking and the
     /// colors appear a moment later.
     private func installTokenProvider(textContentManager: NSTextContentManager) {
-        if let query = HighlightQueryCache.cached(language) {
-            finishInstall(highlightsQuery: query, textContentManager: textContentManager)
-            return
-        }
-
-        let data = highlightsData
-        let tsLanguage = self.tsLanguage
-        let language = self.language
-        DispatchQueue.global(qos: .userInitiated).async {
-            let query = try? SwiftTreeSitter.Query(language: tsLanguage, data: data)
-            DispatchQueue.main.async { [weak self] in
-                guard let self, let query else { return }
-                HighlightQueryCache.store(query, for: language)
-                self.finishInstall(highlightsQuery: query, textContentManager: textContentManager)
-            }
+        HighlightQueryCache.loadHighlights(language, data: highlightsData) { [weak self] query in
+            guard let self, let query else { return }
+            self.finishInstall(highlightsQuery: query, textContentManager: textContentManager)
         }
     }
 
@@ -290,34 +326,60 @@ final class SyntaxHighlightCoordinator {
     /// grammar — so it's done inline and cached), otherwise the plain
     /// single-language provider, unchanged.
     private func finishInstall(highlightsQuery: SwiftTreeSitter.Query, textContentManager: NSTextContentManager) {
-        guard let injectionsData else {
-            setTokenProvider(query: highlightsQuery, textContentManager: textContentManager)
-            return
+        guard !didInstallTokenProvider else { return }
+        didInstallTokenProvider = true
+
+        let provider: TokenProvider
+        if let injectionsData {
+            let injectionsQuery = HighlightQueryCache.cachedInjection(language)
+                ?? (try? SwiftTreeSitter.Query(language: tsLanguage, data: injectionsData))
+            if let injectionsQuery {
+                HighlightQueryCache.storeInjection(injectionsQuery, for: language)
+                provider = makeInjectionTokenProvider(
+                    highlightsQuery: highlightsQuery,
+                    injectionsQuery: injectionsQuery,
+                    textContentManager: textContentManager
+                )
+            } else {
+                provider = makeTokenProvider(query: highlightsQuery, textContentManager: textContentManager)
+            }
+        } else {
+            provider = makeTokenProvider(query: highlightsQuery, textContentManager: textContentManager)
         }
 
-        let injectionsQuery = HighlightQueryCache.cachedInjection(language)
-            ?? (try? SwiftTreeSitter.Query(language: tsLanguage, data: injectionsData))
-        guard let injectionsQuery else {
-            setTokenProvider(query: highlightsQuery, textContentManager: textContentManager)
-            return
-        }
-        HighlightQueryCache.storeInjection(injectionsQuery, for: language)
-
-        setInjectionTokenProvider(
-            highlightsQuery: highlightsQuery,
-            injectionsQuery: injectionsQuery,
-            textContentManager: textContentManager
-        )
+        let highlighter = Neon.Highlighter(textInterface: textInterface, tokenProvider: provider)
+        // Default request window is 1024 UTF-16 units — about a dozen lines.
+        // A typical viewport is several times that; a larger window fills the
+        // first screen in one pass instead of several sequential requests.
+        highlighter.requestLengthLimit = 8192
+        self.highlighter = highlighter
+        requestHighlightPass()
     }
 
-    private func setTokenProvider(query: SwiftTreeSitter.Query, textContentManager: NSTextContentManager) {
-        highlighter?.tokenProvider = tsClient.tokenProvider(with: query) { range, _ in
+    private func makeTokenProvider(
+        query: SwiftTreeSitter.Query,
+        textContentManager: NSTextContentManager
+    ) -> TokenProvider {
+        tsClient.tokenProvider(with: query, executionMode: .synchronousPreferred) { range, _ in
             guard !range.isEmpty else { return nil }
             return textContentManager.attributedString(in: NSTextRange(range, provider: textContentManager))?.string
         }
-        // Re-run highlighting now that the provider exists (the no-op provider
-        // produced nothing during the initial parse).
-        highlighter?.invalidate()
+    }
+
+    /// Kick highlighting now if the viewport exists; otherwise wait for the
+    /// first real layout. Also schedule a next-turn pass so a viewport that
+    /// appears later in this run loop (plugin setup is `viewDidMoveToWindow`,
+    /// first layout is after) is not missed.
+    private func requestHighlightPass() {
+        if textInterface.visibleRange.length > 0 {
+            highlighter?.invalidate()
+        } else {
+            pendingFullInvalidate = true
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.highlighter != nil else { return }
+            self.highlighter?.invalidate()
+        }
     }
 
     /// A token provider that highlights the root language *and* any embedded
@@ -327,23 +389,28 @@ final class SyntaxHighlightCoordinator {
     /// appended after the base ones so they win on the shared range: markdown
     /// tags fenced content `@none` (dropped), and the embedded bash/js/… tokens
     /// paint over it — e.g. a shell comment finally gets the comment color.
-    private func setInjectionTokenProvider(
+    private func makeInjectionTokenProvider(
         highlightsQuery: SwiftTreeSitter.Query,
         injectionsQuery: SwiftTreeSitter.Query,
         textContentManager: NSTextContentManager
-    ) {
+    ) -> TokenProvider {
         let textProvider: SwiftTreeSitter.Predicate.TextProvider = { range, _ in
             guard !range.isEmpty else { return nil }
             return textContentManager.attributedString(in: NSTextRange(range, provider: textContentManager))?.string
         }
 
-        highlighter?.tokenProvider = { [weak self] range, completion in
+        return { [weak self] range, completion in
             guard let self else {
                 completion(.success(.noChange))
                 return
             }
 
-            self.tsClient.executeHighlightsQuery(highlightsQuery, in: range, textProvider: textProvider) { baseResult in
+            self.tsClient.executeHighlightsQuery(
+                highlightsQuery,
+                in: range,
+                executionMode: .synchronousPreferred,
+                textProvider: textProvider
+            ) { baseResult in
                 switch baseResult {
                 case .failure(let error):
                     completion(.failure(error))
@@ -352,7 +419,12 @@ final class SyntaxHighlightCoordinator {
                     // Same tree, so this resolves against the state the base
                     // tokens came from; an embedded region's own tokens are
                     // appended so they layer over the base `@none`.
-                    self.tsClient.executeInjectionsQuery(injectionsQuery, in: range, textProvider: textProvider) { injectionResult in
+                    self.tsClient.executeInjectionsQuery(
+                        injectionsQuery,
+                        in: range,
+                        executionMode: .synchronousPreferred,
+                        textProvider: textProvider
+                    ) { injectionResult in
                         if case .success(let injections) = injectionResult {
                             for injection in injections {
                                 tokens.append(contentsOf: self.injectedTokens(for: injection, textProvider: textProvider))
@@ -363,7 +435,6 @@ final class SyntaxHighlightCoordinator {
                 }
             }
         }
-        highlighter?.invalidate()
     }
 
     /// Highlight one embedded region: parse its text with the embedded
@@ -420,25 +491,24 @@ final class SyntaxHighlightCoordinator {
         guard !pendingInjectionCompiles.contains(language) else { return nil }
         pendingInjectionCompiles.insert(language)
 
-        let data = SyntaxHighlighting.highlightsData(for: language)
-        let parser = language.parser
-        DispatchQueue.global(qos: .userInitiated).async {
-            let query = try? SwiftTreeSitter.Query(language: Language(language: parser), data: data)
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.pendingInjectionCompiles.remove(language)
-                if let query {
-                    HighlightQueryCache.store(query, for: language)
-                }
-                // Repaint: the token provider can now emit this region's tokens.
-                self.highlighter?.invalidate()
-            }
+        HighlightQueryCache.loadHighlights(
+            language,
+            data: SyntaxHighlighting.highlightsData(for: language)
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.pendingInjectionCompiles.remove(language)
+            // Repaint: the token provider can now emit this region's tokens.
+            self.highlighter?.invalidate()
         }
         return nil
     }
 
     func updateViewportRange(_ range: NSTextRange?) {
-        if range != prevViewportRange {
+        let hasContent = range.map { !$0.isEmpty } ?? false
+        if pendingFullInvalidate, hasContent {
+            pendingFullInvalidate = false
+            highlighter?.invalidate()
+        } else if range != prevViewportRange {
             highlighter?.visibleContentDidChange()
         }
         prevViewportRange = range
@@ -450,6 +520,10 @@ final class SyntaxHighlightCoordinator {
 
     func didChangeContent(_ textContentManager: NSTextContentManager, in range: NSRange, delta: Int, limit: Int) {
         guard let string = textContentManager.attributedString(in: nil)?.string else { return }
+        // Neon requires this on every edit so valid/pending ranges shift with
+        // the text. Without it, the first keystroke after open can leave
+        // stale highlighted ranges.
+        highlighter?.didChangeContent(in: range, delta: delta)
         tsClient.didChangeContent(
             in: range,
             delta: delta,
@@ -479,10 +553,12 @@ private final class SyntaxHighlightTextInterface: TextSystemInterface {
     }
 
     func clearStyle(in range: NSRange) {
-        guard let textView,
-              let textRange = NSTextRange(range, in: textView.textContentManager)
-        else { return }
-        textView.textLayoutManager.removeRenderingAttribute(.foregroundColor, for: textRange)
+        guard let textView else { return }
+        // Go through STTextView so `needsLayout` is set. Calling the layout
+        // manager directly writes the attribute but does not schedule a
+        // viewport pass — first-open highlighting then sits invisible until
+        // the user types or scrolls.
+        textView.removeRenderingAttribute(.foregroundColor, range: range)
         // 不向 text storage 回写 `.font`：字体由 STTextView 的 `font`
         // 属性统一管理（其 setter 已把默认字体写入整个文档），这里再写
         // 只会让每次重绘都产生持久属性变更——污染 typing attributes
@@ -495,15 +571,14 @@ private final class SyntaxHighlightTextInterface: TextSystemInterface {
         // this, but skipping here avoids the wasted work.
         guard let textView,
               token.range.length > 0,
-              let attributes = attributeProvider(token),
-              let textRange = NSTextRange(token.range, in: textView.textContentManager)
+              let attributes = attributeProvider(token)
         else {
             return
         }
 
         for attribute in attributes {
             if attribute.key == .foregroundColor {
-                textView.textLayoutManager.addRenderingAttribute(.foregroundColor, value: attribute.value, for: textRange)
+                textView.addRenderingAttributes([.foregroundColor: attribute.value], range: token.range)
             } else {
                 textView.addAttributes([attribute.key: attribute.value], range: token.range)
             }
