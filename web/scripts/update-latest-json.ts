@@ -1,35 +1,15 @@
 #!/usr/bin/env bun
 /**
  * @file Update Latest Release JSON Script
- * @description 从 GitHub REST API 获取最新 Release 信息并导出为静态 latest.json 文件
+ * @description 从 GitHub REST API 获取最新 Release 并写入 download.json
  */
 
 import chalk from "chalk";
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-/** Web 项目根目录与文件路径定义 */
-const WEB_DIR = resolve(__dirname, "..");
-const PUBLIC_LATEST_JSON = resolve(WEB_DIR, "public", "latest.json");
-const DOCS_LATEST_JSON = resolve(WEB_DIR, "../docs", "latest.json");
-
-/** GitHub Release Asset 字段 */
-export interface ReleaseAsset {
-  name: string;
-  browser_download_url: string;
-}
-
-/** 静态 latest.json 结构 */
-export interface LatestReleaseData {
-  tag_name: string;
-  html_url: string;
-  published_at?: string;
-  assets: ReleaseAsset[];
-}
+import {
+  buildDownloadManifest,
+  writeDownloadManifestFiles,
+  type IDownloadManifest,
+} from "../../scripts/download-manifest";
 
 /**
  * 获取 GitHub 仓库最新 Release 信息并写入静态 JSON 文件
@@ -43,24 +23,30 @@ export async function fetchAndUpdateLatestJson(
 ): Promise<void> {
   console.log(chalk.bold.cyan("\n🔄 正在获取 GitHub 最新 Release 数据..."));
 
-  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
-  const defaultReleaseUrl = `https://github.com/${owner}/${repo}/releases/latest`;
+  const repository = `${owner}/${repo}`;
+  const apiUrl = `https://api.github.com/repos/${repository}/releases/latest`;
 
   const headers: Record<string, string> = {
     "User-Agent": "Qjiao-Web-Build-Script",
     Accept: "application/vnd.github+json",
   };
 
-  // 如果环境变量中包含 GITHUB_TOKEN（如 GitHub Actions 环境），增加 Bearer 认证提升额度
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  let releaseData: LatestReleaseData = {
-    tag_name: "",
-    html_url: defaultReleaseUrl,
-    assets: [],
+  let manifest: IDownloadManifest = buildDownloadManifest({
+    repository,
+    version: "",
+    tag: "",
+    publishedAt: "",
+  });
+  manifest = {
+    ...manifest,
+    htmlUrl: `https://github.com/${repository}/releases/latest`,
+    dmg: { name: "", url: "" },
+    zip: { name: "", url: "" },
   };
 
   try {
@@ -72,46 +58,40 @@ export async function fetchAndUpdateLatestJson(
     } else {
       const data = (await res.json()) as {
         tag_name?: string;
-        html_url?: string;
         published_at?: string;
-        assets?: Array<{ name: string; browser_download_url: string }>;
+        assets?: Array<{ name?: string; browser_download_url?: string }>;
       };
-
-      releaseData = {
-        tag_name: data.tag_name || "",
-        html_url: data.html_url || defaultReleaseUrl,
-        published_at: data.published_at || "",
-        assets: (data.assets || []).map((asset) => ({
-          name: asset.name,
-          browser_download_url: asset.browser_download_url,
-        })),
-      };
+      const tag = data.tag_name || "";
+      const version = tag.startsWith("v") ? tag.slice(1) : tag;
+      const assets = data.assets ?? [];
+      const dmg = assets.find((asset) => asset.name?.toLowerCase().endsWith(".dmg"));
+      const zip = assets.find((asset) => asset.name?.toLowerCase().endsWith(".zip"));
+      manifest = buildDownloadManifest({
+        repository,
+        version,
+        tag,
+        publishedAt: data.published_at || "",
+      });
+      if (dmg?.name && dmg.browser_download_url) {
+        manifest.dmg = { name: dmg.name, url: dmg.browser_download_url };
+      }
+      if (zip?.name && zip.browser_download_url) {
+        manifest.zip = { name: zip.name, url: zip.browser_download_url };
+      }
       console.log(
-        chalk.green(`✔ 成功获取最新 Release 标签: ${chalk.bold(releaseData.tag_name || "未知")}`)
+        chalk.green(`✔ 成功获取最新 Release 标签: ${chalk.bold(manifest.tag || "未知")}`)
       );
     }
   } catch (error) {
     console.error(chalk.red("✖ 请求 GitHub Release API 发生网络错误:"), error);
   }
 
-  const jsonContent = JSON.stringify(releaseData, null, 2) + "\n";
-
-  // 1. 保存至 web/public/latest.json
-  const publicDir = dirname(PUBLIC_LATEST_JSON);
-  if (!existsSync(publicDir)) {
-    mkdirSync(publicDir, { recursive: true });
-  }
-  writeFileSync(PUBLIC_LATEST_JSON, jsonContent);
-  console.log(chalk.green(`✔ 已写入: ${chalk.gray(PUBLIC_LATEST_JSON)}`));
-
-  // 2. 如果 docs 目录存在，也同步写入 docs/latest.json
-  const docsDir = dirname(DOCS_LATEST_JSON);
-  if (existsSync(docsDir)) {
-    writeFileSync(DOCS_LATEST_JSON, jsonContent);
-    console.log(chalk.green(`✔ 已写入: ${chalk.gray(DOCS_LATEST_JSON)}`));
+  const written = writeDownloadManifestFiles(manifest, repository);
+  for (const path of written) {
+    console.log(chalk.green(`✔ 已写入: ${chalk.gray(path)}`));
   }
 
-  console.log(chalk.bold.green("🎉 静态 latest.json 更新完成！\n"));
+  console.log(chalk.bold.green("🎉 静态 download.json 更新完成！\n"));
 }
 
 if (import.meta.main) {
