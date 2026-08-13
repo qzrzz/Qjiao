@@ -102,6 +102,18 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         !hasExited && !isTerminating
     }
 
+    /// 从未执行过命令、没有恢复的历史、也不是任务终端。
+    var appearsUnused: Bool {
+        if isTaskRunning || taskHasError { return false }
+        if commandCompletionSequence > 0 { return false }
+        if pendingCommand != nil { return false }
+        if let history = lastHistorySnapshot,
+           !history.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+        return true
+    }
+
     init(initialDirectory: String? = nil, restoredHistory: String? = nil, isLazy: Bool = false) {
         let shellPath = Self.loginShell()
         let directory = Self.validWorkingDirectory(initialDirectory)
