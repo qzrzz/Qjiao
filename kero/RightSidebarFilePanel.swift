@@ -309,6 +309,15 @@ struct FileTreePanel: View {
 
     @State private var scrollProxy: ScrollViewProxy? = nil
 
+    /// 用于钉住滚动位置：列表结构变化时若 SwiftUI 把 offset 打回顶部则还原。
+    private var fileTreeScrollPinToken: Int {
+        var hasher = Hasher()
+        hasher.combine(model.items.count)
+        hasher.combine(model.items.first?.path)
+        hasher.combine(model.items.last?.path)
+        return hasher.finalize()
+    }
+
     /// 根据首字母定位并选中目标文件，连续触发时在相同首字母文件间循环切换。
     private func jumpToNextItem(startingWith char: Character) {
         let prefix = String(char).lowercased()
@@ -567,6 +576,14 @@ struct FileTreePanel: View {
                                     manager: manager,
                                     visibleItems: filteredItems
                                 )
+                            }
+                            .background {
+                                FileTreeScrollRestorer(
+                                    rootPath: model.rootPath,
+                                    pinToken: fileTreeScrollPinToken,
+                                    model: model
+                                )
+                                .frame(width: 0, height: 0)
                             }
                         }
                         .coordinateSpace(name: "FileTreePanelContainer")
@@ -1093,6 +1110,10 @@ private struct FileTreeRow: View {
             Label(L10n.t("Open in Terminal"), systemImage: "terminal")
         }
 
+        if let only = onlyItem, !only.isDirectory, only.name.lowercased() == "package.json" {
+            packageScriptsMenu(packageJSONPath: only.path)
+        }
+
         if let only = onlyItem, !only.isDirectory, ScriptRunner.shared.canRun(filePath: only.path) {
             let supported = ScriptRunner.shared.supportedModifiers(filePath: only.path)
             Divider()
@@ -1279,6 +1300,31 @@ private struct FileTreeRow: View {
             selectForContextAction()
             model.moveToTrash(paths: Set(menuActionTargets.map(\.path)))
             git.refresh(includeDetails: false)
+        }
+    }
+
+    /// package.json 右键：子菜单列出 scripts，点选即在该文件所在目录执行。
+    /// 脚本列表放在 Menu 内容里，等子菜单打开再读盘。
+    @ViewBuilder
+    private func packageScriptsMenu(packageJSONPath: String) -> some View {
+        let directory = (packageJSONPath as NSString).deletingLastPathComponent
+        Divider()
+        Menu {
+            let scripts = PackageJSONScriptsCache.scripts(at: packageJSONPath)
+            if scripts.isEmpty {
+                Button(L10n.t("No package scripts in package.json")) {}
+                    .disabled(true)
+            } else {
+                ForEach(scripts) { script in
+                    Button(script.name) {
+                        selectForContextAction()
+                        manager?.runPackageScript(script.name, directory: directory)
+                    }
+                    .help(script.command)
+                }
+            }
+        } label: {
+            Label(L10n.t("npm scripts"), systemImage: "shippingbox")
         }
     }
 
@@ -2028,6 +2074,170 @@ private final class AnchorNSView: NSView {
         super.layout()
         if window != nil {
             onLayout?(self)
+        }
+    }
+}
+
+// MARK: - 文件树滚动位置
+
+/// 把 NSScrollView 的纵向偏移记在 FileTreeModel 上。
+/// root / 列表结构变化时若 SwiftUI 把文档打回顶部，按已记位置还原。
+private struct FileTreeScrollRestorer: NSViewRepresentable {
+    let rootPath: String
+    let pinToken: Int
+    let model: FileTreeModel
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.isHidden = true
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.model = model
+        if let scrollView = nsView.enclosingScrollView {
+            context.coordinator.sync(
+                clip: scrollView.contentView,
+                scrollView: scrollView,
+                root: rootPath,
+                pinToken: pinToken
+            )
+            return
+        }
+        DispatchQueue.main.async {
+            guard let scrollView = nsView.enclosingScrollView else { return }
+            context.coordinator.sync(
+                clip: scrollView.contentView,
+                scrollView: scrollView,
+                root: self.rootPath,
+                pinToken: self.pinToken
+            )
+        }
+    }
+
+    final class Coordinator {
+        var model: FileTreeModel?
+        var currentRoot = ""
+        var pinToken = 0
+        /// 刚还原过的目标 y；随后若立刻被打回 0，忽略这次写入。
+        var restoredY: CGFloat = 0
+        var observer: NSObjectProtocol?
+        weak var clipView: NSClipView?
+
+        func sync(clip: NSClipView, scrollView: NSScrollView, root: String, pinToken: Int) {
+            observe(clip)
+            let currentY = clip.bounds.origin.y
+
+            if currentRoot != root {
+                remember(currentY, for: currentRoot)
+                currentRoot = root
+                self.pinToken = pinToken
+                if let saved = model?.scrollOffset(for: root), saved > 1 {
+                    restore(saved, clip: clip, scrollView: scrollView)
+                }
+                return
+            }
+
+            if self.pinToken != pinToken {
+                let previous = model?.scrollOffset(for: currentRoot) ?? currentY
+                self.pinToken = pinToken
+                if previous > 1, currentY < 1 {
+                    restore(previous, clip: clip, scrollView: scrollView)
+                    return
+                }
+            }
+
+            remember(currentY, for: currentRoot)
+        }
+
+        private func restore(_ y: CGFloat, clip: NSClipView, scrollView: NSScrollView) {
+            restoredY = y
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
+            scrollView.reflectScrolledClipView(clip)
+        }
+
+        private func remember(_ y: CGFloat, for root: String) {
+            guard !root.isEmpty else { return }
+            if y < 1, restoredY > 1 {
+                return
+            }
+            if restoredY > 1 {
+                restoredY = 0
+            }
+            model?.rememberScrollOffset(y, for: root)
+        }
+
+        private func observe(_ clip: NSClipView) {
+            clip.postsBoundsChangedNotifications = true
+            guard clipView !== clip else { return }
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            clipView = clip
+            observer = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: clip,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                self.remember(clip.bounds.origin.y, for: self.currentRoot)
+            }
+        }
+
+        deinit {
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+    }
+}
+
+// MARK: - package.json scripts 菜单缓存
+
+/// 按路径 + mtime/size 缓存 package.json scripts，避免树刷新时反复读盘。
+@MainActor
+private enum PackageJSONScriptsCache {
+    private struct Entry {
+        var modificationDate: Date?
+        var size: UInt64?
+        var scripts: [SidebarProbe.PackageScript]
+    }
+
+    private static var entries: [String: Entry] = [:]
+    private static var mru: [String] = []
+    private static let maxEntries = 16
+
+    static func scripts(at packageJSONPath: String) -> [SidebarProbe.PackageScript] {
+        let directory = (packageJSONPath as NSString).deletingLastPathComponent
+        let state = SidebarProbe.packageFileState(directory: directory)
+        if let hit = entries[packageJSONPath],
+           hit.modificationDate == state.modificationDate,
+           hit.size == state.size {
+            touch(packageJSONPath)
+            return hit.scripts
+        }
+        let scripts = SidebarProbe.loadPackageScripts(directory: directory)
+        entries[packageJSONPath] = Entry(
+            modificationDate: state.modificationDate,
+            size: state.size,
+            scripts: scripts
+        )
+        touch(packageJSONPath)
+        evict()
+        return scripts
+    }
+
+    private static func touch(_ path: String) {
+        mru.removeAll { $0 == path }
+        mru.append(path)
+    }
+
+    private static func evict() {
+        while mru.count > maxEntries {
+            let evict = mru.removeFirst()
+            entries.removeValue(forKey: evict)
         }
     }
 }

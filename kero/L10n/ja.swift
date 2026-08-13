@@ -634,6 +634,7 @@ extension L10n {
         "Not selected": "未選択",
         "Note": "Note",
         "NPM SCRIPTS": "NPM SCRIPTS",
+        "npm scripts": "npm scripts",
         "npx taze": "npx taze",
         "Jump": "移動",
         "Jump to Offset": "オフセットへ移動",

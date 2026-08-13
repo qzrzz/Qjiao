@@ -38,9 +38,10 @@ struct SidebarResizeHandle: View {
                 .contentShape(Rectangle())
         }
         .frame(width: handleWidth)
-        // 将热区中心对齐在侧栏边框线上（向两侧扩展响应范围）
-        .offset(x: edge == .trailing ? (handleWidth - 1) / 2 : -(handleWidth - 1) / 2)
-
+        .fixedSize(horizontal: true, vertical: false)
+        .contentShape(Rectangle())
+        // pointerStyle / 手势必须在 offset 之前，否则光标热区停在未偏移的布局框上。
+        //
         // Not `NSCursor.columnResize.push()` from `onHover`, which looks
         // equivalent but loses: it pushes onto the shared cursor stack from
         // outside AppKit's own pointer resolution, and AppKit resets the
@@ -67,6 +68,7 @@ struct SidebarResizeHandle: View {
         .simultaneousGesture(
             TapGesture(count: 2).onEnded { width = defaultWidth }
         )
+        .offset(x: edge == .trailing ? (handleWidth - 1) / 2 : -(handleWidth - 1) / 2)
     }
 }
 

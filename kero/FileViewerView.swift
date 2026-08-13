@@ -151,6 +151,7 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
             lastDiskModificationDate = currentDiskModificationDate()
             startFileWatcher()
             setupAppFocusObservation()
+            SyntaxHighlighting.precompile(for: path)
             return
         }
         guard data.count <= Self.maxHexBytes else {
