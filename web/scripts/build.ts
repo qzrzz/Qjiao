@@ -126,19 +126,23 @@ export async function buildAndPublishDocs(): Promise<void> {
   writeFileSync(resolve(DOCS_DIR, ".nojekyll"), "");
   console.log(chalk.green("✔ 已生成 .nojekyll 文件\n"));
 
-  // 6. 确保 latest.json 静态数据文件存在
-  console.log(chalk.blue("📄 步骤 6/6: 检查静态 latest.json 发布文件..."));
-  const docsLatestJsonPath = resolve(DOCS_DIR, "latest.json");
-  if (!existsSync(docsLatestJsonPath)) {
-    const fallbackLatestJson = {
-      tag_name: "",
-      html_url: "https://github.com/qzrzz/Qjiao/releases/latest",
-      assets: [],
+  // 6. 确保 download.json 静态数据文件存在
+  console.log(chalk.blue("📄 步骤 6/6: 检查静态 download.json 发布文件..."));
+  const docsDownloadJsonPath = resolve(DOCS_DIR, "download.json");
+  if (!existsSync(docsDownloadJsonPath)) {
+    const fallbackDownloadJson = {
+      schemaVersion: 1,
+      version: "",
+      tag: "",
+      publishedAt: "",
+      htmlUrl: "https://github.com/qzrzz/Qjiao/releases/latest",
+      dmg: { name: "", url: "" },
+      zip: { name: "", url: "" },
     };
-    writeFileSync(docsLatestJsonPath, JSON.stringify(fallbackLatestJson, null, 2) + "\n");
-    console.log(chalk.yellow(`⚠️ 未找到现存 latest.json，已写入默认保底静态页数据: ${chalk.gray("docs/latest.json")}`));
+    writeFileSync(docsDownloadJsonPath, JSON.stringify(fallbackDownloadJson, null, 2) + "\n");
+    console.log(chalk.yellow(`⚠️ 未找到现存 download.json，已写入默认保底静态页数据: ${chalk.gray("docs/download.json")}`));
   } else {
-    console.log(chalk.green(`✔ 静态 Release 数据页构建就绪: ${chalk.gray("docs/latest.json")}`));
+    console.log(chalk.green(`✔ 静态 Release 数据页构建就绪: ${chalk.gray("docs/download.json")}`));
   }
 
   console.log(

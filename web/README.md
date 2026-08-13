@@ -21,4 +21,11 @@ bun run build
 - `src/Feature/`：按功能组拆分的独立组件与对应 Figma 切图。
 - `src/styles.css`：响应式视觉样式。
 - `build/webp-assets-vite-plugin.ts`：生产构建图片的 WebP 转换插件。
-- `public/`：页面图标和 Open Graph 图片。
+- `public/`：页面图标、Open Graph 图片，以及发布脚本写入的 `download.json`。
+
+官网下载按钮读取根目录 `download.json`（由 `bun run release` 在 GitHub
+Release 成功后写入）。需要单独刷新清单、不走完整发布时：
+
+```bash
+bun run update-latest
+```

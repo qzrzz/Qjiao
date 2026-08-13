@@ -15,6 +15,13 @@ import {
 import { createHash } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { extractReleaseNotes } from "./changelog";
+import {
+  DOWNLOAD_MANIFEST_RELATIVE_PATHS,
+  LEGACY_LATEST_JSON_RELATIVE_PATHS,
+  buildDownloadManifest,
+  isDownloadManifest,
+  writeDownloadManifestFiles,
+} from "./download-manifest";
 import { generateAppcast } from "./generate-appcast";
 import { die, need, say } from "./lib";
 
@@ -476,6 +483,23 @@ if (
 
 await persistReleaseCache(identity, tag, zipPath, appcastPath);
 
+say("Writing website download manifest…");
+const downloadManifest = buildDownloadManifest({
+  repository: GITHUB_REPOSITORY,
+  version,
+  tag,
+  publishedAt: await readPublishedAt(tag),
+});
+const writtenDownloadPaths = writeDownloadManifestFiles(
+  downloadManifest,
+  GITHUB_REPOSITORY,
+);
+if (!isDownloadManifest(downloadManifest) || !downloadManifest.dmg.url) {
+  die("generated website download manifest is invalid");
+}
+await commitAndPushWebsiteDownloadManifest(version);
+say(`Website download manifest: ${writtenDownloadPaths[0]}`);
+
 say(`Qjiao ${version} is live on GitHub:`);
 console.log(
   `  release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}`,
@@ -483,6 +507,7 @@ console.log(
 console.log(
   `  latest:  https://github.com/${GITHUB_REPOSITORY}/releases/latest`,
 );
+console.log(`  dmg:     ${downloadManifest.dmg.url}`);
 
 /** 读取当前 Release 配置中的版本、构建号和源码提交。 */
 async function readReleaseIdentity(): Promise<IReleaseIdentity> {
@@ -1546,6 +1571,63 @@ function parseNotarySubmission(output: string): INotarySubmission {
     // 统一交由下方错误处理，避免输出可能包含环境信息的原始异常对象。
   }
   die("notarytool returned an invalid JSON response");
+}
+
+/** 读取已发布 GitHub Release 的时间，失败时用当前时间兜底。 */
+async function readPublishedAt(tag: string): Promise<string> {
+  const result =
+    await $`gh release view ${tag} --repo ${GITHUB_REPOSITORY} --json publishedAt`
+      .quiet()
+      .nothrow();
+  if (result.exitCode === 0) {
+    try {
+      const value = JSON.parse(result.stdout.toString()) as {
+        publishedAt?: unknown;
+      };
+      if (typeof value.publishedAt === "string" && value.publishedAt) {
+        return value.publishedAt;
+      }
+    } catch {
+      // 解析失败时用本地时间，不阻断已成功的 GitHub 发布。
+    }
+  }
+  return new Date().toISOString();
+}
+
+/** 将官网下载清单提交并推送，让 GitHub Pages 能立刻提供直链。 */
+async function commitAndPushWebsiteDownloadManifest(
+  version: string,
+): Promise<void> {
+  const paths = [
+    ...DOWNLOAD_MANIFEST_RELATIVE_PATHS,
+    ...LEGACY_LATEST_JSON_RELATIVE_PATHS,
+  ];
+  const status = (
+    await $`git -c core.fsmonitor=false status --porcelain ${paths}`.text()
+  ).trim();
+  if (!status) {
+    say("Website download manifest is already committed.");
+    return;
+  }
+
+  await $`git add ${paths}`;
+  const commit = await $`git commit -m ${`chore(release): 更新官网下载清单 ${version}`}`
+    .nothrow();
+  if (commit.exitCode !== 0) {
+    console.error(
+      "warning: failed to commit website download manifest; commit it manually",
+    );
+    return;
+  }
+
+  const push = await $`git push origin HEAD`.nothrow();
+  if (push.exitCode !== 0) {
+    console.error(
+      "warning: failed to push website download manifest; push the commit manually",
+    );
+    return;
+  }
+  say(`Pushed website download manifest for ${version}.`);
 }
 
 /** 创建指向当前提交的版本标签，并将标签推送到 origin。 */

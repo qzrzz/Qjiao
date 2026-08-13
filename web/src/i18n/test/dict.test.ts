@@ -31,10 +31,10 @@ describe("i18n dict 路径解析逻辑测试", () => {
     expect(getLangUrl("ja", "ja")).toBe("./");
   });
 
-  test("根据当前所在语言，应精确计算根目录下静态文件 (如 latest.json) 的相对路径", () => {
-    expect(getRootRelativePath("latest.json", "en")).toBe("./latest.json");
-    expect(getRootRelativePath("latest.json", "zh-Hans")).toBe("../latest.json");
-    expect(getRootRelativePath("latest.json", "ja")).toBe("../latest.json");
+  test("根据当前所在语言，应精确计算根目录下静态文件 (如 download.json) 的相对路径", () => {
+    expect(getRootRelativePath("download.json", "en")).toBe("./download.json");
+    expect(getRootRelativePath("download.json", "zh-Hans")).toBe("../download.json");
+    expect(getRootRelativePath("download.json", "ja")).toBe("../download.json");
   });
 });
 
