@@ -527,22 +527,8 @@ struct RightSidebarView: View {
                     }
                 )
             }
-        case .files:
-            FileTreePanel(
-                manager: manager,
-                model: fileTree,
-                findModel: filesFind,
-                git: git,
-                session: manager.selectedSession,
-                currentFilePath: openFilePath,
-                openFile: { manager.openFile($0) },
-                openToSide: { manager.openFileToSide($0) },
-                onRename: { manager.fileRenamed(from: $0, to: $1) },
-                onImageBuild: { paths in
-                    imageBuildSession = .fromFileTree(paths: paths)
-                }
-            )
-        case .cwd:
+        case .files, .cwd:
+            // 共用同一面板：切 Files ↔ CWD 不拆 @State / 滚动钉住。
             FileTreePanel(
                 manager: manager,
                 model: fileTree,

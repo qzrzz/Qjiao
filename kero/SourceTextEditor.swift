@@ -165,6 +165,13 @@ struct SourceTextEditor: NSViewRepresentable {
             }
         }
 
+        // First real size is when the viewport exists. Plugin setup happens
+        // earlier (`viewDidMoveToWindow`), often with `visibleRange == .zero`.
+        let coordinator = context.coordinator
+        scrollView.onFirstVisibleLayout = { [weak coordinator] in
+            coordinator?.noteEditorBecameVisible()
+        }
+
         // Only grab focus on mount when this pane is the focused one, so an
         // unfocused split doesn't steal the caret.
         if isFocused {
@@ -287,6 +294,10 @@ struct SourceTextEditor: NSViewRepresentable {
             syntaxHighlighter = coordinator
         }
 
+        func noteEditorBecameVisible() {
+            syntaxHighlighter?.refreshVisibleHighlighting()
+        }
+
         func updateSyntaxTheme(_ configuration: SyntaxHighlighting.ThemeConfiguration) {
             guard syntaxThemeKey != configuration.key else { return }
             syntaxThemeKey = configuration.key
@@ -400,6 +411,9 @@ final class FocusReportingTextView: STTextView {
 /// its saved position instead of visibly jumping there afterward.
 private final class RestorableScrollView: NSScrollView {
     var restoreOnFirstLayout: (() -> Void)?
+    /// Fires once the scroll view has a non-empty frame, after any saved
+    /// scroll offset has been applied.
+    var onFirstVisibleLayout: (() -> Void)?
     private var lastViewportSize: NSSize = .zero
     private var geometryUpdateScheduled = false
 
@@ -427,9 +441,15 @@ private final class RestorableScrollView: NSScrollView {
             scheduleEditorGeometryUpdate()
         }
         logScroller("layout")
-        if bounds.width > 0, bounds.height > 0, let restore = restoreOnFirstLayout {
-            restoreOnFirstLayout = nil
-            restore()
+        if bounds.width > 0, bounds.height > 0 {
+            if let restore = restoreOnFirstLayout {
+                restoreOnFirstLayout = nil
+                restore()
+            }
+            if let firstVisible = onFirstVisibleLayout {
+                onFirstVisibleLayout = nil
+                firstVisible()
+            }
         }
     }
 

@@ -130,6 +130,18 @@ enum SyntaxHighlighting {
         )
     }
 
+    /// Start compiling the language's highlights query in the background so it
+    /// is ready (or closer to ready) when the editor view mounts. No-op for
+    /// unknown types and for languages already cached or compiling.
+    @MainActor
+    static func precompile(for path: String) {
+        guard let language = language(for: path) else { return }
+        HighlightQueryCache.loadHighlights(
+            language,
+            data: highlightsData(for: language)
+        ) { _ in }
+    }
+
     /// Ghostty 的 ANSI 颜色以 `RRGGBB` 字符串提供，转为 AppKit 颜色供 Neon 使用。
     private static func nsColor(_ hex: String) -> NSColor {
         let value = Int(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
