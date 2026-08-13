@@ -205,6 +205,7 @@ extension L10n {
         "Close": "閉じる",
         "Close All": "すべて閉じる",
         "Close Diffs": "すべてのDiffを閉じる",
+        "Close Empty Tabs": "空のタブを閉じる",
         "Close filter (Esc)": "フィルターを閉じる (Esc)",
         "Close Files": "すべてのファイルを閉じる",
         "Close find bar": "検索バーを閉じる",

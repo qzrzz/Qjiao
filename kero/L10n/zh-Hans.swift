@@ -219,6 +219,7 @@ extension L10n {
         "Close": "关闭",
         "Close All": "全部关闭",
         "Close Diffs": "关闭全部 Diff",
+        "Close Empty Tabs": "关闭空标签",
         "Close filter (Esc)": "关闭筛选 (Esc)",
         "Close Files": "关闭全部文件",
         "Close find bar": "关闭查找栏",
