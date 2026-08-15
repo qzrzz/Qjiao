@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// 构建、签名、公证 Qjiao，并将全部发布资产上传到 GitHub Releases。
+// 构建、签名、公证 Qjiao，再用 QRls 发布到 R2（Sparkle 主源）。
 import { $ } from "bun";
 import {
   constants as fsConstants,
@@ -25,6 +25,13 @@ import {
 } from "./download-manifest";
 import { generateAppcast } from "./generate-appcast";
 import { die, need, say } from "./lib";
+import {
+  PUBLISH_GITHUB,
+  R2_ONLINE_URL,
+  SPARKLE_FEED_URL,
+  publishWithQrls,
+  r2PublicUrl,
+} from "./qrls-publish";
 
 /** 公证提交返回的必要字段。 */
 interface INotarySubmission {
@@ -117,7 +124,7 @@ const SIGN_IDENTITY =
 const NOTARY_PROFILE = process.env.NOTARY_PROFILE ?? "NOTARY";
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "qzrzz/Qjiao";
 const SPARKLE_ACCOUNT = process.env.SPARKLE_ACCOUNT ?? "qjiao";
-const UPDATE_PIPELINE_VERSION = "5";
+const UPDATE_PIPELINE_VERSION = "6";
 const FORCE_RELEASE = process.env.FORCE !== "0";
 const ARCHIVE_RETRIES = readPositiveInteger(
   "ARCHIVE_RETRIES",
@@ -151,7 +158,9 @@ need("lipo");
 need("xattr");
 if (process.env.PUBLISH !== "0") {
   need("git");
-  need("gh");
+  if (PUBLISH_GITHUB) {
+    need("gh");
+  }
   const changes = (
     await $`git -c core.fsmonitor=false status --porcelain`.text()
   ).trim();
@@ -398,7 +407,7 @@ if (
       "SPARKLE_PRIVATE_KEY_FILE must point to the exported Sparkle private key",
     );
   }
-  const downloadUrlPrefix = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/`;
+  const downloadUrlPrefix = `${R2_ONLINE_URL}/`;
   await generateAppcast(UPDATES_DIR, {
     downloadUrlPrefix,
     edKeyFile: sparklePrivateKeyFile,
@@ -422,7 +431,7 @@ if (
 }
 
 if (process.env.PUBLISH === "0") {
-  say("PUBLISH=0: artifacts are ready without creating a GitHub Release.");
+  say("PUBLISH=0: artifacts are ready without publishing to R2.");
   process.exit(0);
 }
 
@@ -438,46 +447,36 @@ if (
   await completeReleaseStep(releaseState, "tag-pushed");
 }
 
-const releaseAssetPaths = [
-  dmgPath,
-  zipPath,
-  notesPath,
-  appcastPath,
-  ...listGeneratedDeltaPaths(),
-];
-const releaseAssetNames = releaseAssetPaths.map((path) => basename(path));
+const publishedZipUrl = r2PublicUrl(zipName);
+const publishedDmgUrl = r2PublicUrl(dmgName);
 if (
   await shouldResumeStep(releaseState, "release-published", () =>
-    validatePublishedRelease(tag, releaseAssetNames),
+    validatePublishedR2(version, build, publishedZipUrl),
   )
 ) {
-  say(`Resuming: GitHub Release ${tag} is already complete.`);
+  say("Resuming: R2 release artifacts are already live.");
 } else {
   allowExistingArtifactAdoption = false;
-  const existingRelease =
-    (
-      await $`gh release view ${tag} --repo ${GITHUB_REPOSITORY}`
-        .quiet()
-        .nothrow()
-    ).exitCode === 0;
-  if (existingRelease && !FORCE_RELEASE) {
-    die(`${tag} already exists and FORCE=0 prevents replacing its assets`);
+  say(`Publishing ${tag} to R2 via QRls (${R2_ONLINE_URL})…`);
+  const qrlsResult = await publishWithQrls({
+    name: APP_NAME,
+    version,
+    build,
+    repository: GITHUB_REPOSITORY,
+    dmgPath,
+    zipPath,
+    notesPath,
+    appcastPath,
+    deltaPaths: listGeneratedDeltaPaths(),
+    changelog: existsSync(notesPath) ? readFileSync(notesPath, "utf8") : "",
+    force: FORCE_RELEASE,
+    statePath: join(RELEASE_CACHE_DIR, ".qrls-state.json"),
+  });
+  if (qrlsResult.sparkle?.appcast) {
+    await Bun.write(appcastPath, qrlsResult.sparkle.appcast);
   }
-  say(`Publishing ${tag} to GitHub Releases…`);
-  if (!existingRelease) {
-    await $`gh release create ${tag} --repo ${GITHUB_REPOSITORY} --verify-tag --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
-  }
-  for (const [index, assetPath] of releaseAssetPaths.entries()) {
-    await uploadReleaseAsset(
-      tag,
-      assetPath,
-      index + 1,
-      releaseAssetPaths.length,
-    );
-  }
-  await $`gh release edit ${tag} --repo ${GITHUB_REPOSITORY} --draft=false --latest --title ${`${APP_NAME} ${version}`} --notes-file ${notesPath}`;
-  if (!(await validatePublishedRelease(tag, releaseAssetNames))) {
-    die(`GitHub Release ${tag} is still a draft or missing required assets`);
+  if (!(await validatePublishedR2(version, build, publishedZipUrl))) {
+    die(`R2 appcast at ${SPARKLE_FEED_URL} is missing ${version} (${build})`);
   }
   await completeReleaseStep(releaseState, "release-published");
 }
@@ -491,9 +490,12 @@ const downloadManifest = await buildDownloadManifestWithFiles({
   version,
   build,
   tag,
-  publishedAt: await readPublishedAt(tag),
+  publishedAt: new Date().toISOString(),
+  htmlUrl: `https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}`,
   dmgPath,
   zipPath,
+  dmgUrl: publishedDmgUrl,
+  zipUrl: publishedZipUrl,
 });
 const writtenDownloadPaths = writeDownloadManifestFiles(
   downloadManifest,
@@ -505,14 +507,15 @@ if (!isDownloadManifest(downloadManifest) || !downloadManifest.dmg.url) {
 await commitAndPushWebsiteDownloadManifest(version);
 say(`Website download manifest: ${writtenDownloadPaths.join(", ")}`);
 
-say(`Qjiao ${version} is live on GitHub:`);
-console.log(
-  `  release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}`,
-);
-console.log(
-  `  latest:  https://github.com/${GITHUB_REPOSITORY}/releases/latest`,
-);
-console.log(`  dmg:     ${downloadManifest.dmg.url}`);
+say(`Qjiao ${version} is live on R2:`);
+console.log(`  feed: ${SPARKLE_FEED_URL}`);
+console.log(`  dmg:  ${downloadManifest.dmg.url}`);
+console.log(`  zip:  ${downloadManifest.zip.url}`);
+if (PUBLISH_GITHUB) {
+  console.log(
+    `  github: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}`,
+  );
+}
 
 /** 读取当前 Release 配置中的版本、构建号和源码提交。 */
 async function readReleaseIdentity(): Promise<IReleaseIdentity> {
@@ -693,20 +696,25 @@ function assertBuildIsNewerThanCache(build: string, version: string): void {
   }
 }
 
-/** 生成前后强制历史完整 ZIP 指向其自身的 GitHub tag。 */
+/** 当前版本 ZIP 改写到 R2；历史 item 恢复 generate_appcast 之前的原始 URL。 */
 async function normalizeAppcastArchiveUrls(path: string): Promise<void> {
   const original = readFileSync(path, "utf8");
+  const previousZipByVersion = readPreviousAppcastZipUrls();
   const normalized = original.replace(
     /<item>[\s\S]*?<\/item>/g,
     (item): string => {
-      const version = item.match(
+      const itemVersion = item.match(
         /<sparkle:shortVersionString>([^<]+)<\/sparkle:shortVersionString>/,
       )?.[1];
-      if (!version || !/^[0-9A-Za-z.+-]+$/.test(version)) return item;
+      if (!itemVersion || !/^[0-9A-Za-z.+-]+$/.test(itemVersion)) return item;
 
-      const archiveUrl = expectedArchiveUrl(version);
+      const archiveUrl =
+        itemVersion === version
+          ? r2PublicUrl(`${ARTIFACT_PREFIX}-${itemVersion}.zip`)
+          : previousZipByVersion.get(itemVersion);
+      if (!archiveUrl) return item;
       return item
-        .replace(/<title>[^<]*<\/title>/, `<title>${version}</title>`)
+        .replace(/<title>[^<]*<\/title>/, `<title>${itemVersion}</title>`)
         .replace(/(<enclosure\s+url=")[^"]+\.zip(")/, `$1${archiveUrl}$2`);
     },
   );
@@ -715,14 +723,19 @@ async function normalizeAppcastArchiveUrls(path: string): Promise<void> {
   }
 }
 
-/** 构造项目约定的按版本 tag 托管地址。 */
-function expectedArchiveUrl(version: string): string {
-  const tag = `v${version}`;
-  const name = `${ARTIFACT_PREFIX}-${version}.zip`;
-  return (
-    `https://github.com/${GITHUB_REPOSITORY}/releases/download/` +
-    `${encodeURIComponent(tag)}/${encodeURIComponent(name)}`
-  );
+/** 读取本地 Sparkle 缓存里各历史版本的完整 ZIP 地址。 */
+function readPreviousAppcastZipUrls(): Map<string, string> {
+  const urls = new Map<string, string>();
+  if (!existsSync(RELEASE_CACHE_APPCAST_PATH)) return urls;
+  const previous = readFileSync(RELEASE_CACHE_APPCAST_PATH, "utf8");
+  for (const match of previous.matchAll(/<item>[\s\S]*?<\/item>/g)) {
+    const itemVersion = match[0].match(
+      /<sparkle:shortVersionString>([^<]+)<\/sparkle:shortVersionString>/,
+    )?.[1];
+    const archiveUrl = match[0].match(/<enclosure\s+url="([^"]+\.zip)"/)?.[1];
+    if (itemVersion && archiveUrl) urls.set(itemVersion, archiveUrl);
+  }
+  return urls;
 }
 
 /** 正式发布成功后，把当前完整 ZIP 和 appcast 原子写入 release/。 */
@@ -1305,55 +1318,77 @@ async function validateUpdateArtifacts(
   ) {
     return false;
   }
-  if (!validateAppcastArchiveUrls(appcast)) return false;
-  for (const name of listReferencedDeltaNames(appcast, tag)) {
+  if (!validateAppcastArchiveUrls(appcast, version)) return false;
+  if (!appcast.includes("sparkle:edSignature=")) return false;
+  for (const name of listReferencedDeltaNames(appcast)) {
     const path = join(UPDATES_DIR, name);
     if (!existsSync(path) || Bun.file(path).size === 0) return false;
   }
   return true;
 }
 
-/** 验证每个历史完整 ZIP 仍指向其自身的版本 tag。 */
-function validateAppcastArchiveUrls(appcast: string): boolean {
+/** 当前版本 ZIP 必须指向 R2；其余 item 只要有 https ZIP 即可。 */
+function validateAppcastArchiveUrls(appcast: string, currentVersion: string): boolean {
   let itemCount = 0;
+  let sawCurrent = false;
   for (const match of appcast.matchAll(/<item>[\s\S]*?<\/item>/g)) {
     const item = match[0];
-    const version = item.match(
+    const itemVersion = item.match(
       /<sparkle:shortVersionString>([^<]+)<\/sparkle:shortVersionString>/,
     )?.[1];
     const archiveUrl = item.match(/<enclosure\s+url="([^"]+\.zip)"/)?.[1];
-    if (!version || archiveUrl !== expectedArchiveUrl(version)) return false;
+    if (!itemVersion || !archiveUrl || !/^https?:\/\//.test(archiveUrl)) {
+      return false;
+    }
+    if (itemVersion === currentVersion) {
+      if (archiveUrl !== r2PublicUrl(`${ARTIFACT_PREFIX}-${itemVersion}.zip`)) {
+        return false;
+      }
+      sawCurrent = true;
+    }
     itemCount += 1;
   }
-  return itemCount > 0;
+  return itemCount > 0 && sawCurrent;
 }
 
-/** 提取 appcast 当前托管地址引用的 delta 文件名。 */
-function listReferencedDeltaNames(appcast: string, tag: string): string[] {
+/** 提取 appcast 引用的、应存在于本次 updates 目录的 delta 文件名。 */
+function listReferencedDeltaNames(appcast: string): string[] {
   const names = new Set<string>();
   for (const match of appcast.matchAll(/\burl="([^"]+\.delta)"/g)) {
     try {
       const url = new URL(match[1].replaceAll("&amp;", "&"));
-      const parts = url.pathname
-        .split("/")
-        .filter(Boolean)
-        .map(decodeURIComponent);
-      if (
-        url.hostname === "github.com" &&
-        parts.length === 6 &&
-        `${parts[0]}/${parts[1]}`.toLowerCase() ===
-          GITHUB_REPOSITORY.toLowerCase() &&
-        parts[2] === "releases" &&
-        parts[3] === "download" &&
-        parts[4] === tag
-      ) {
-        names.add(parts[5]);
-      }
+      const name = decodeURIComponent(
+        url.pathname.split("/").filter(Boolean).pop() ?? "",
+      );
+      if (name.endsWith(".delta")) names.add(name);
     } catch {
       // 非法 URL 会在 Sparkle 实际读取前由其他 appcast 验证发现。
     }
   }
   return [...names];
+}
+
+/** 复验 R2 上的 appcast 已包含当前版本且 enclosure 指向 R2 ZIP。 */
+async function validatePublishedR2(
+  currentVersion: string,
+  currentBuild: string,
+  zipUrl: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(SPARKLE_FEED_URL, { redirect: "follow" });
+    if (!response.ok) return false;
+    const appcast = await response.text();
+    return (
+      appcast.includes(`<sparkle:version>${currentBuild}</sparkle:version>`) &&
+      appcast.includes(
+        `<sparkle:shortVersionString>${currentVersion}</sparkle:shortVersionString>`,
+      ) &&
+      (appcast.includes(zipUrl) ||
+        appcast.includes(zipUrl.replaceAll("&", "&amp;")))
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** 验证本地及远端标签都指向当前提交。 */
@@ -1575,7 +1610,7 @@ function parseNotarySubmission(output: string): INotarySubmission {
   } catch {
     // 统一交由下方错误处理，避免输出可能包含环境信息的原始异常对象。
   }
-  die("notarytool returned an invalid JSON response");
+  return die("notarytool returned an invalid JSON response");
 }
 
 /** 读取已发布 GitHub Release 的时间，失败时用当前时间兜底。 */

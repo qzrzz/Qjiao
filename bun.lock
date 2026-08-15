@@ -8,6 +8,7 @@
         "@types/bun": "latest",
         "chalk": "6.0.0",
         "qpage": "link:qpage",
+        "qrls": "link:qrls",
         "woff2": "^1.0.0",
       },
     },
@@ -28,6 +29,8 @@
     "nan": ["nan@2.28.0", "https://registry.npmmirror.com/nan/-/nan-2.28.0.tgz", {}, "sha512-fTsDz99OTq2sVePhGdp4qQhggZFtKr64ZNVyVajRKtMOkJxYekplBh577PiJB12v/D3s2E5cGtOI45LWp6rnLQ=="],
 
     "qpage": ["qpage@link:qpage", { "bin": { "qpage": "./dist/cli.js" } }],
+
+    "qrls": ["qrls@link:qrls", {}],
 
     "undici-types": ["undici-types@8.3.0", "https://registry.npmmirror.com/undici-types/-/undici-types-8.3.0.tgz", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
 

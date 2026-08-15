@@ -75,6 +75,10 @@ export interface IBuildDownloadManifestFromFilesInput {
   htmlUrl?: string;
   dmgPath?: string;
   zipPath?: string;
+  /** 覆盖默认 GitHub 直链，例如 R2 公开地址 */
+  dmgUrl?: string;
+  /** 覆盖默认 GitHub 直链，例如 R2 公开地址 */
+  zipUrl?: string;
 }
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -215,13 +219,13 @@ export async function buildDownloadManifestWithFiles(
     htmlUrl,
     dmg: {
       name: dmgName,
-      url: releaseAssetUrl(input.repository, tag, dmgName),
+      url: input.dmgUrl || releaseAssetUrl(input.repository, tag, dmgName),
       size: dmgSize,
       sha256: dmgSha256,
     },
     zip: {
       name: zipName,
-      url: releaseAssetUrl(input.repository, tag, zipName),
+      url: input.zipUrl || releaseAssetUrl(input.repository, tag, zipName),
       size: zipSize,
       sha256: zipSha256,
     },
@@ -241,6 +245,9 @@ export function toLegacyLatestJson(
 ): ILegacyLatestJson {
   const notesName = `${manifest.name.toLowerCase()}-${manifest.version}.md`;
   const appcastName = "appcast.xml";
+  const assetBase = publicDirectoryUrl(manifest.dmg.url || manifest.zip.url);
+  const siblingUrl = (name: string): string =>
+    assetBase ? `${assetBase}/${name}` : releaseAssetUrl(repository, manifest.tag, name);
   return {
     tag_name: manifest.tag,
     html_url: manifest.htmlUrl,
@@ -248,11 +255,7 @@ export function toLegacyLatestJson(
     assets: [
       {
         name: appcastName,
-        browser_download_url: releaseAssetUrl(
-          repository,
-          manifest.tag,
-          appcastName,
-        ),
+        browser_download_url: siblingUrl(appcastName),
       },
       {
         name: manifest.dmg.name,
@@ -260,11 +263,7 @@ export function toLegacyLatestJson(
       },
       {
         name: notesName,
-        browser_download_url: releaseAssetUrl(
-          repository,
-          manifest.tag,
-          notesName,
-        ),
+        browser_download_url: siblingUrl(notesName),
       },
       {
         name: manifest.zip.name,
@@ -272,6 +271,21 @@ export function toLegacyLatestJson(
       },
     ],
   };
+}
+
+/**
+ * 取安装包 URL 所在目录，供同目录的 appcast / notes 拼接。
+ * @param assetUrl DMG 或 ZIP 的公开地址
+ */
+function publicDirectoryUrl(assetUrl: string): string {
+  if (!assetUrl) return "";
+  try {
+    const url = new URL(assetUrl);
+    url.pathname = url.pathname.replace(/\/[^/]*$/, "");
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
 }
 
 /**
