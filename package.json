@@ -2,25 +2,26 @@
   "name": "Qjiao-monorepo",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "web"
-  ],
   "type": "module",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
+    "debug": "bun run scripts/debug.ts",
     "version+": "bun run scripts/bump-version.ts && bun run scripts/update-changelog.ts",
     "release": "bun run scripts/release.ts",
-    "web:build": "cd ./web && npm run build",
-    "web:update-latest": "cd ./web && bun run update-latest",
-    "web:preview": "cd ./docs && vite preview ",
     "appcast": "bun run scripts/generate-appcast.ts",
     "vendor:material-icons": "bun run scripts/vendor-material-icons.ts",
     "vendor:terminal-app-icons": "bun run scripts/vendor-terminal-app-icons.ts",
-    "vendor:jxl": "bash scripts/vendor-jxl.sh"
+    "vendor:jxl": "bash scripts/vendor-jxl.sh",
+    "web:dev": "qpage --dev ./web ./docs",
+    "web:build": "qpage ./web ./docs",
+    "web:preview": "qpage --preview ./web ./docs",
+    "web:i18n:codex": "codex exec 根据./web/translate.md完成翻译任务",
+    "web:i18n:gemini": "agy -p 根据./web/translate.md完成翻译任务"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "chalk": "6.0.0",
+    "qpage": "link:qpage",
     "woff2": "^1.0.0"
   }
 }
