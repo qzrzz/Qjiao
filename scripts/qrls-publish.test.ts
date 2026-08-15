@@ -28,6 +28,26 @@ test("r2PublicUrl 使用稳定公开前缀", () => {
   );
 });
 
+test("能从 generate_appcast 的 item 子元素版本格式读到签名", () => {
+  const dir = mkdtempSync(join(tmpdir(), "qjiao-qrls-"));
+  const appcastPath = join(dir, "appcast.xml");
+  writeFileSync(
+    appcastPath,
+    `<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <item>
+      <sparkle:version>149</sparkle:version>
+      <sparkle:shortVersionString>1.1.49</sparkle:shortVersionString>
+      <enclosure url="https://download.qzrzz.com/qjiao/qjiao-1.1.49.zip" length="10" type="application/octet-stream" sparkle:edSignature="official-zip-sig"/>
+    </item>
+  </channel>
+</rss>`,
+  );
+  const signatures = readSparkleSignatures(appcastPath, "149");
+  expect(signatures.zipSignature).toBe("official-zip-sig");
+});
+
 test("从 generate_appcast 产物读取当前 build 的 ZIP 与 delta 签名", () => {
   const dir = mkdtempSync(join(tmpdir(), "qjiao-qrls-"));
   const appcastPath = join(dir, "appcast.xml");

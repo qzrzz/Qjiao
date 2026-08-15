@@ -5,8 +5,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import {
+  GithubTarget,
+  Logger,
+  S3Target,
   parseSparkleAppcast,
   qrls,
+  resolveTargetsConfig,
   type IFileInput,
   type IQRlsVersionResult,
 } from "qrls";
@@ -141,7 +145,7 @@ export async function publishWithQrls(
     input.changelog ||
     (existsSync(input.notesPath) ? readFileSync(input.notesPath, "utf8") : "");
 
-  return qrls({
+  const result = await qrls({
     name: input.name,
     version: input.version,
     buildVersion: input.build,
@@ -161,6 +165,9 @@ export async function publishWithQrls(
       publishFeedTo: PUBLISH_GITHUB ? ["r2", "github"] : ["r2"],
       enclosure: "zip",
       mergeExisting: true,
+      existingAppcast: existsSync(input.appcastPath)
+        ? readFileSync(input.appcastPath, "utf8")
+        : undefined,
       maximumVersions: 10,
       title: `${input.name} Updates`,
       language: "en",
@@ -184,4 +191,74 @@ export async function publishWithQrls(
         : {}),
     },
   });
+
+  const appcast = await uploadOfficialSparkleFeed(
+    input.appcastPath,
+    input.version,
+    input.repository,
+  );
+  result.sparkle = {
+    origin: "r2",
+    feedUrl: SPARKLE_FEED_URL,
+    enclosureUrl: r2PublicUrl(basename(input.zipPath)),
+    publishedTo: PUBLISH_GITHUB ? ["r2", "github"] : ["r2"],
+    appcast,
+  };
+  return result;
+}
+
+/**
+ * 把本机已签名的 appcast.xml 发到 R2，并按需镜像到 GitHub
+ * @param appcastPath 本地 generate_appcast 产物
+ * @param version 当前营销版本，用于 GitHub tag
+ * @param repository GitHub owner/repo
+ */
+export async function uploadOfficialSparkleFeed(
+  appcastPath: string,
+  version: string,
+  repository: string,
+): Promise<string> {
+  if (!existsSync(appcastPath)) {
+    throw new Error(`找不到已签名的 appcast: ${appcastPath}`);
+  }
+  const xml = readFileSync(appcastPath, "utf8");
+  if (!xml.includes("sparkle:edSignature=")) {
+    throw new Error("拒绝发布没有 EdDSA 签名的 appcast");
+  }
+  if (
+    !xml.includes(`<sparkle:shortVersionString>${version}</sparkle:shortVersionString>`) &&
+    !xml.includes(`sparkle:shortVersionString="${version}"`)
+  ) {
+    throw new Error(`appcast 中没有版本 ${version}`);
+  }
+
+  const logger = new Logger(true);
+  const target = resolveTargetsConfig({
+    r2: {
+      onlineUrl: R2_ONLINE_URL,
+      bucket: R2_BUCKET,
+      path: R2_PATH,
+    },
+    ...(PUBLISH_GITHUB ? { github: { repo: repository } } : {}),
+  });
+  const context = {
+    options: {
+      name: "Qjiao",
+      version,
+      variants: {},
+      target,
+    },
+    variants: {},
+    logger,
+  };
+  if (!target.r2) {
+    throw new Error("缺少 R2 配置，无法上传 appcast");
+  }
+  const r2 = new S3Target("r2", target.r2);
+  await r2.uploadManifests(context, { "appcast.xml": xml });
+  if (PUBLISH_GITHUB && target.github) {
+    const github = new GithubTarget(target.github);
+    await github.uploadManifests(context, { "appcast.xml": xml });
+  }
+  return xml;
 }
