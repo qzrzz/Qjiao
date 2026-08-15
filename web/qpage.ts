@@ -20,7 +20,8 @@ export const page: IPageMeta = {
   icon: UrlIcon,
   iconFull: UrlIconFull,
   metaDesc: "macOS 文件复制工具。海量小文件、外置磁盘与 NAS 也能快速复制，FastCopy macOS 版本",
-  githubRepo: "https://github.com/qzrzz/QCopy",
+  githubRepo: "https://github.com/qzrzz/Qjiao",
+  downloadBase: "https://download.qzrzz.com/qjiao",
   mainScreenshotImage: UrlMainScreenshotImage,
 };
 
