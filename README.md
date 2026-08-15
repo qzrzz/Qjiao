@@ -108,7 +108,7 @@
 - 独立产品标识与 Sparkle 自动更新；本机 Developer ID 签名、公证、DMG/ZIP、delta，经 QRls 发布到 Cloudflare R2（订阅 `https://download.qzrzz.com/qjiao/appcast.xml`），并镜像同一份 appcast 到 GitHub 供旧版升级。
 - 产品官网 `web/` 使用 QPage 生成静态着陆页，支持简体中文、English、日本語、한국어、Tiếng Việt、Português、Español、Deutsch、Français、Русский。
 - `version+` 脚本由 `scripts/update-changelog.ts` 调用 pi AI 生成版本更新记录并写入 CHANGELOG.md（与 pbxproj 中的 MARKETING_VERSION 严格一致）。
-- 发布脚本生成规范的 `download.json`（包含应用名称、版本号、构建号、发布时间、DMG 与 ZIP 的 **R2 直链**、字节大小及 SHA-256 校验和），同时输出至 `web/download.json` 与 `docs/download.json`（并同步 `docs/latest.json`）；支持在清单缺失时根据现有发布信息自动生成保底清单。
+- 安装包清单由 QRls 写入 R2 的 `download.json`（版本、构建号、DMG/ZIP 直链、大小与 SHA-256）；官网通过 `downloadBase` 读取，不再由发布脚本写回仓库。
 - `debug` 本机测试构建（`npm run debug` / `bun run debug`）：编译 Debug 版并以单进程、单窗口启动；`--record` 用 xctrace Time Profiler 追踪（启动 `.app`，避免内部二进制与 Launch Services 双开），`--gui` 打开匹配版本的 Instruments，`--heap` 启用 `MallocStackLogging` 做堆内存/泄漏分析。
 
 ## 上游移植记录

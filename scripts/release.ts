@@ -15,14 +15,6 @@ import {
 import { createHash } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { extractReleaseNotes } from "./changelog";
-import {
-  DOWNLOAD_MANIFEST_RELATIVE_PATHS,
-  LEGACY_LATEST_JSON_RELATIVE_PATHS,
-  buildDownloadManifest,
-  buildDownloadManifestWithFiles,
-  isDownloadManifest,
-  writeDownloadManifestFiles,
-} from "./download-manifest";
 import { generateAppcast } from "./generate-appcast";
 import { die, need, say } from "./lib";
 import {
@@ -380,7 +372,6 @@ if (
       appcastPath,
       version,
       build,
-      tag,
     ),
   )
 ) {
@@ -415,17 +406,15 @@ if (
     versions: [build],
   });
   await normalizeAppcastArchiveUrls(appcastPath);
-  if (
-    !(await validateUpdateArtifacts(
-      zipPath,
-      notesPath,
-      appcastPath,
-      version,
-      build,
-      tag,
-    ))
-  ) {
-    die("generated Sparkle update artifacts failed validation");
+  const updateFailure = describeUpdateArtifactFailure(
+    zipPath,
+    notesPath,
+    appcastPath,
+    version,
+    build,
+  );
+  if (updateFailure) {
+    die(`generated Sparkle update artifacts failed validation: ${updateFailure}`);
   }
   await completeReleaseStep(releaseState, "updates-generated");
 }
@@ -483,34 +472,11 @@ if (
 
 await persistReleaseCache(identity, tag, zipPath, appcastPath);
 
-say("Writing website download manifest…");
-const downloadManifest = await buildDownloadManifestWithFiles({
-  repository: GITHUB_REPOSITORY,
-  name: APP_NAME,
-  version,
-  build,
-  tag,
-  publishedAt: new Date().toISOString(),
-  htmlUrl: `https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}`,
-  dmgPath,
-  zipPath,
-  dmgUrl: publishedDmgUrl,
-  zipUrl: publishedZipUrl,
-});
-const writtenDownloadPaths = writeDownloadManifestFiles(
-  downloadManifest,
-  GITHUB_REPOSITORY,
-);
-if (!isDownloadManifest(downloadManifest) || !downloadManifest.dmg.url) {
-  die("generated website download manifest is invalid");
-}
-await commitAndPushWebsiteDownloadManifest(version);
-say(`Website download manifest: ${writtenDownloadPaths.join(", ")}`);
-
 say(`Qjiao ${version} is live on R2:`);
 console.log(`  feed: ${SPARKLE_FEED_URL}`);
-console.log(`  dmg:  ${downloadManifest.dmg.url}`);
-console.log(`  zip:  ${downloadManifest.zip.url}`);
+console.log(`  dmg:  ${publishedDmgUrl}`);
+console.log(`  zip:  ${publishedZipUrl}`);
+console.log(`  download.json: ${r2PublicUrl("download.json")}`);
 if (PUBLISH_GITHUB) {
   console.log(
     `  github: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}`,
@@ -1304,10 +1270,30 @@ async function validateUpdateArtifacts(
   appcastPath: string,
   version: string,
   build: string,
-  tag: string,
 ): Promise<boolean> {
+  return (
+    describeUpdateArtifactFailure(
+      zipPath,
+      notesPath,
+      appcastPath,
+      version,
+      build,
+    ) === null
+  );
+}
+
+/** 说明本地 Sparkle 产物为何不能作为当前版本发布。 */
+function describeUpdateArtifactFailure(
+  zipPath: string,
+  notesPath: string,
+  appcastPath: string,
+  version: string,
+  build: string,
+): string | null {
   for (const path of [zipPath, notesPath, appcastPath]) {
-    if (!existsSync(path) || Bun.file(path).size === 0) return false;
+    if (!existsSync(path) || Bun.file(path).size === 0) {
+      return `missing ${path}`;
+    }
   }
   const appcast = readFileSync(appcastPath, "utf8");
   if (
@@ -1316,15 +1302,21 @@ async function validateUpdateArtifacts(
       `<sparkle:shortVersionString>${version}</sparkle:shortVersionString>`,
     )
   ) {
-    return false;
+    return `appcast is missing version ${version} (build ${build})`;
   }
-  if (!validateAppcastArchiveUrls(appcast, version)) return false;
-  if (!appcast.includes("sparkle:edSignature=")) return false;
-  for (const name of listReferencedDeltaNames(appcast)) {
+  if (!validateAppcastArchiveUrls(appcast, version)) {
+    return `current ZIP URL must be ${r2PublicUrl(`${ARTIFACT_PREFIX}-${version}.zip`)}`;
+  }
+  if (!appcast.includes("sparkle:edSignature=")) {
+    return "appcast is missing sparkle:edSignature";
+  }
+  for (const name of listCurrentDeltaNames(appcast, version)) {
     const path = join(UPDATES_DIR, name);
-    if (!existsSync(path) || Bun.file(path).size === 0) return false;
+    if (!existsSync(path) || Bun.file(path).size === 0) {
+      return `missing current delta ${name}`;
+    }
   }
-  return true;
+  return null;
 }
 
 /** 当前版本 ZIP 必须指向 R2；其余 item 只要有 https ZIP 即可。 */
@@ -1351,18 +1343,25 @@ function validateAppcastArchiveUrls(appcast: string, currentVersion: string): bo
   return itemCount > 0 && sawCurrent;
 }
 
-/** 提取 appcast 引用的、应存在于本次 updates 目录的 delta 文件名。 */
-function listReferencedDeltaNames(appcast: string): string[] {
+/** 只收集当前版本 item 里的 delta；历史 delta 仍留在旧 Release，不必在本次 updates 目录。 */
+function listCurrentDeltaNames(appcast: string, currentVersion: string): string[] {
   const names = new Set<string>();
-  for (const match of appcast.matchAll(/\burl="([^"]+\.delta)"/g)) {
-    try {
-      const url = new URL(match[1].replaceAll("&amp;", "&"));
-      const name = decodeURIComponent(
-        url.pathname.split("/").filter(Boolean).pop() ?? "",
-      );
-      if (name.endsWith(".delta")) names.add(name);
-    } catch {
-      // 非法 URL 会在 Sparkle 实际读取前由其他 appcast 验证发现。
+  for (const match of appcast.matchAll(/<item>[\s\S]*?<\/item>/g)) {
+    const item = match[0];
+    const itemVersion = item.match(
+      /<sparkle:shortVersionString>([^<]+)<\/sparkle:shortVersionString>/,
+    )?.[1];
+    if (itemVersion !== currentVersion) continue;
+    for (const delta of item.matchAll(/\burl="([^"]+\.delta)"/g)) {
+      try {
+        const url = new URL(delta[1].replaceAll("&amp;", "&"));
+        const name = decodeURIComponent(
+          url.pathname.split("/").filter(Boolean).pop() ?? "",
+        );
+        if (name.endsWith(".delta")) names.add(name);
+      } catch {
+        // 非法 URL 会在 Sparkle 实际读取前由其他校验发现。
+      }
     }
   }
   return [...names];
@@ -1611,63 +1610,6 @@ function parseNotarySubmission(output: string): INotarySubmission {
     // 统一交由下方错误处理，避免输出可能包含环境信息的原始异常对象。
   }
   return die("notarytool returned an invalid JSON response");
-}
-
-/** 读取已发布 GitHub Release 的时间，失败时用当前时间兜底。 */
-async function readPublishedAt(tag: string): Promise<string> {
-  const result =
-    await $`gh release view ${tag} --repo ${GITHUB_REPOSITORY} --json publishedAt`
-      .quiet()
-      .nothrow();
-  if (result.exitCode === 0) {
-    try {
-      const value = JSON.parse(result.stdout.toString()) as {
-        publishedAt?: unknown;
-      };
-      if (typeof value.publishedAt === "string" && value.publishedAt) {
-        return value.publishedAt;
-      }
-    } catch {
-      // 解析失败时用本地时间，不阻断已成功的 GitHub 发布。
-    }
-  }
-  return new Date().toISOString();
-}
-
-/** 将官网下载清单提交并推送，让 GitHub Pages 能立刻提供直链。 */
-async function commitAndPushWebsiteDownloadManifest(
-  version: string,
-): Promise<void> {
-  const paths = [
-    ...DOWNLOAD_MANIFEST_RELATIVE_PATHS,
-    ...LEGACY_LATEST_JSON_RELATIVE_PATHS,
-  ];
-  const status = (
-    await $`git -c core.fsmonitor=false status --porcelain ${paths}`.text()
-  ).trim();
-  if (!status) {
-    say("Website download manifest is already committed.");
-    return;
-  }
-
-  await $`git add ${paths}`;
-  const commit = await $`git commit -m ${`chore(release): 更新官网下载清单 ${version}`}`
-    .nothrow();
-  if (commit.exitCode !== 0) {
-    console.error(
-      "warning: failed to commit website download manifest; commit it manually",
-    );
-    return;
-  }
-
-  const push = await $`git push origin HEAD`.nothrow();
-  if (push.exitCode !== 0) {
-    console.error(
-      "warning: failed to push website download manifest; push the commit manually",
-    );
-    return;
-  }
-  say(`Pushed website download manifest for ${version}.`);
 }
 
 /** 创建指向当前提交的版本标签，并将标签推送到 origin。 */
