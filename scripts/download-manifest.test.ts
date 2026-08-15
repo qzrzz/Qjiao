@@ -208,6 +208,47 @@ describe("download-manifest 测试套件", () => {
     );
     expect(docsContent.version).toBe("1.1.48");
     expect(docsContent.dmg.sha256).toBe("abcdef");
+
+    const legacy = JSON.parse(
+      readFileSync(join(tempTestDir, "docs/latest.json"), "utf-8"),
+    );
+    expect(legacy.assets[0].browser_download_url).toBe(
+      "https://github.com/qzrzz/Qjiao/releases/download/v1.1.48/appcast.xml",
+    );
+  });
+
+  test("R2 直链清单派生的 latest.json 与 DMG 同目录", () => {
+    const manifest = buildDownloadManifest({
+      repository,
+      name: "Qjiao",
+      version: "1.1.49",
+      build: "149",
+      tag: "v1.1.49",
+      publishedAt: "2026-08-15T00:00:00.000Z",
+      dmg: {
+        name: "qjiao-1.1.49.dmg",
+        url: "https://download.qzrzz.com/qjiao/qjiao-1.1.49.dmg",
+        size: 1,
+        sha256: "a",
+      },
+      zip: {
+        name: "qjiao-1.1.49.zip",
+        url: "https://download.qzrzz.com/qjiao/qjiao-1.1.49.zip",
+        size: 2,
+        sha256: "b",
+      },
+    });
+    const written = writeDownloadManifestFiles(manifest, repository, tempTestDir);
+    expect(written).toContain("docs/latest.json");
+    const legacy = JSON.parse(
+      readFileSync(join(tempTestDir, "docs/latest.json"), "utf-8"),
+    );
+    expect(legacy.assets[0].browser_download_url).toBe(
+      "https://download.qzrzz.com/qjiao/appcast.xml",
+    );
+    expect(legacy.assets[1].browser_download_url).toBe(
+      "https://download.qzrzz.com/qjiao/qjiao-1.1.49.dmg",
+    );
   });
 
   test("若无 download.json 时根据现有信息自动生成", async () => {

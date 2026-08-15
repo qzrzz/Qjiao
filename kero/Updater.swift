@@ -10,10 +10,10 @@ import SwiftUI
 /// App-wide Sparkle updater. A single instance owns the update lifecycle; the
 /// "Check for Updates…" menu item and the Settings toggle both drive it.
 ///
-/// The feed URL and the public EdDSA key are read from Info.plist, injected via
-/// the `INFOPLIST_KEY_SUFeedURL` and `INFOPLIST_KEY_SUPublicEDKey` build
-/// settings. See RELEASING.md for generating the signing keys and publishing
-/// updates.
+/// The feed URL and the public EdDSA key are read from Info.plist
+/// (`SUFeedURL`, `SUPublicEDKey`). New builds subscribe to the R2 appcast;
+/// older builds still read GitHub `/releases/latest/download/appcast.xml`,
+/// which the release script mirrors. See RELEASING.md.
 @MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()

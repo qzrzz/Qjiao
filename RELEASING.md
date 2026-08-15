@@ -1,31 +1,34 @@
 # Qjiao 本地发布流程
 
-Qjiao 完全在本机编译、签名、公证和打包。GitHub 只用于托管 Release
-资产，不运行 GitHub Actions：
+Qjiao 完全在本机编译、签名、公证和打包。分发改走 [QRls](../QRls)，
+主发 Cloudflare R2；GitHub 只镜像同一份订阅，给旧版 App 升级：
 
 ```text
 本机 Xcode-beta
   → arm64 Release 构建与 Developer ID 签名
   → Apple 公证并装订票据
-  → 生成 DMG、Sparkle ZIP 与 appcast
-  → 本机 gh 上传 GitHub Release
+  → 生成 DMG、Sparkle ZIP、delta 与签名
+  → QRls 上传到 R2（origin），并镜像 appcast 到 GitHub
 ```
 
-新用户从 GitHub Release 下载公证后的 DMG。已安装用户通过 Sparkle
-读取以下稳定地址：
+新用户和本版之后的 Sparkle 读取：
 
 ```text
-https://github.com/qzrzz/Qjiao/releases/latest/download/appcast.xml
+https://download.qzrzz.com/qjiao/appcast.xml
 ```
 
-每个 Release 至少包含四项基础资产：
+1.1.48 及更早的已安装用户仍读 GitHub
+`/releases/latest/download/appcast.xml`。发布时会把**同一份**
+appcast（enclosure 已指向 R2）镜像到该地址，所以旧版可以升到本版，
+之后改走 R2。
+
+R2 上至少有：
 
 - `qjiao-<version>.dmg`：用户下载和拖入 Applications。
 - `qjiao-<version>.zip`：Sparkle 安装的完整更新。
 - `qjiao-<version>.md`：应用内更新说明。
-- `appcast.xml`：保留历史项目的 Sparkle 更新源。
-- `qjiao-<version>_from_<build>.delta`：从缓存旧版本升级时使用的
-  Sparkle 差分更新；有可用基线时才生成。
+- `appcast.xml`：稳定订阅，`Cache-Control: no-cache`。
+- `Qjiao<new>-<old>.delta`：有本地基线时才生成。
 
 ## 一次性本机配置
 
@@ -194,11 +197,12 @@ bun run release
 7. 从本机 `release/` 读取最多三个旧版 ZIP，生成并签名 Sparkle
    delta，再追加当前版本到本地 appcast。
 8. 自动创建并推送 `v<MARKETING_VERSION>` Git 标签。
-9. 使用本机 `gh` 创建 GitHub Release，上传基础资产和 delta。
+9. 调用 QRls：主发 R2（`sparkle.origin=r2`），默认同时把同一份
+   appcast 和安装包镜像到 GitHub Releases。
 10. 正式发布验证成功后，将当前 ZIP、appcast 和 SHA-256 清单原子保存
     到 `release/`，并淘汰最旧缓存。
 11. 写入 `web/download.json` 与 `docs/download.json`（并同步旧版
-    `docs/latest.json`），包含应用名、版本号、构建号、发布时间、DMG/ZIP 直链及文件大小与 SHA-256 校验和，提交并推送供官网直链最新安装包。
+    `docs/latest.json`），直链指向 R2，提交并推送供官网下载。
 
 Apple 返回 `Invalid` 时，脚本会立即调用 `notarytool log` 输出具体
 文件和原因，并停止执行，不会继续 staple。
@@ -208,23 +212,32 @@ Apple 返回 `Invalid` 时，脚本会立即调用 `notarytool log` 输出具体
 
 发布完成后检查：
 
-- `https://github.com/qzrzz/Qjiao/releases/latest` 有四项基础资产，
-  有旧版本基线时还包含 `.delta`。
-- `web/download.json` 与 `docs/download.json` 的 `dmg.url` 指向当前版本公证 DMG，且包含对应的 SHA-256 与字节大小。
+- `https://download.qzrzz.com/qjiao/appcast.xml` 含当前 `sparkle:version`，
+  enclosure 指向 R2 上的 ZIP。
+- `web/download.json` 与 `docs/download.json` 的 `dmg.url` 指向 R2 公证 DMG，
+  且包含对应的 SHA-256 与字节大小。
 - DMG 能通过 Gatekeeper 并正常启动。
-- 使用旧版 Qjiao 执行 **Check for Updates…** 能看到新版本。
+- 使用旧版 Qjiao 执行 **Check for Updates…** 能看到新版本（经 GitHub 镜像订阅）。
 
 ## 本地试打包
 
-只生成签名、公证后的资产，不创建 GitHub Release：
+只生成签名、公证后的资产，不调用 QRls、不上传 R2：
 
 ```sh
 PUBLISH=0 bun run release
 ```
 
 产物位于 `build/`。此模式不需要 `git` 或 `gh`，不会创建标签，也
-不会读取或修改 GitHub，也不会写入 `docs/download.json`；未正式发布
-的 ZIP 不会进入 `release/` 缓存。
+不会写入 `docs/download.json`；未正式发布的 ZIP 不会进入 `release/` 缓存。
+
+只发 R2、不同步 GitHub（旧版 App 将收不到这次更新）：
+
+```sh
+PUBLISH_GITHUB=0 bun run release
+```
+
+R2 公开前缀、桶名可用环境变量覆盖：`R2_ONLINE_URL`、`R2_BUCKET`、
+`R2_PATH`。凭据读 `~/.config/qrls/qrls.config.json` 或 `R2_*` 环境变量。
 
 ## 中断后继续发布
 
@@ -241,7 +254,7 @@ PUBLISH=0 bun run release
 版本、构建号或 Release configuration 改变时完整重建。App 源码指纹
 改变时从 archive 重建；CHANGELOG 改变时只重新生成更新产物；仅 Web、
 文档或其他不参与 App 构建的 commit 改变时，保留 App、DMG 和公证
-结果，只刷新 Git 标签与 GitHub Release。
+结果，只刷新 Git 标签与 QRls 上传。
 
 脚本仍会重新验证对应文件的版本、arm64 架构、代码签名、公证票据或
 远端资产，验证通过才跳过。可恢复的步骤包括：
@@ -253,7 +266,7 @@ PUBLISH=0 bun run release
 5. DMG secure timestamp 签名。
 6. Apple 公证与票据装订。
 7. Sparkle ZIP、版本说明与 appcast。
-8. Git 标签和 GitHub Release。
+8. Git 标签和 QRls 发布（R2，默认镜像 GitHub）。
 
 例如公证连接超时后，直接重新执行：
 
@@ -268,10 +281,8 @@ bun run release
 验证并复用该 DMG，然后重新请求 secure timestamp，不会重新创建
 磁盘映像。单次执行默认会对 Xcode 归档中的瞬时 CodeSign 失败和 DMG
 timestamp 签名各重试 3 次；归档重试会保留 DerivedData，复用已经完成的编译。
-GitHub Release 的基础资产及差分包会逐个上传，日志显示当前文件、
-大小、序号和等待时长。GitHub CLI 本身不提供准确的字节上传百分比。
-全部上传完成后，脚本会显式退出 Draft 状态，并在写入发布断点前复验
-正式发布状态。
+QRls 会并行上传 R2（以及默认的 GitHub 镜像）。上传完成后，脚本会
+拉取 R2 上的 appcast，确认当前版本和 ZIP 地址已就绪，再写入发布断点。
 
 生成 Sparkle 更新时，脚本只读取本机 `release/`，不从 GitHub 下载
 旧 appcast 或 ZIP。缓存保留最近三个成功发布版本，以 build、文件大小
@@ -327,7 +338,11 @@ RESET_RELEASE=1 bun run release
 | `APPLE_APP_SPECIFIC_PASSWORD` | —                          | Apple 公证专用密码     |
 | `SPARKLE_PRIVATE_KEY_FILE`    | 登录钥匙串                 | Sparkle 私钥备份       |
 | `SPARKLE_ACCOUNT`             | `qjiao`                    | Sparkle 钥匙串账户     |
-| `GITHUB_REPOSITORY`           | `qzrzz/Qjiao`              | 上传目标仓库           |
+| `GITHUB_REPOSITORY`           | `qzrzz/Qjiao`              | Git 标签 / 可选镜像仓库 |
+| `R2_ONLINE_URL`               | `https://download.qzrzz.com/qjiao` | Sparkle 与官网直链前缀 |
+| `R2_BUCKET`                   | `qzrzz-download`           | Cloudflare R2 桶名     |
+| `R2_PATH`                     | `qjiao`                    | R2 对象键前缀          |
+| `PUBLISH_GITHUB=0`            | 镜像到 GitHub              | 只发 R2，不镜像订阅    |
 | `RELEASE_CACHE_DIR`           | `release`                  | 本地 Sparkle 历史目录  |
 | `PUBLISH=0`                   | —                          | 只生成本地产物         |
 | `FORCE=0`                     | `1`                        | 禁止覆盖同版本发布     |
@@ -343,9 +358,8 @@ RESET_RELEASE=1 bun run release
 REUSE_BUILD=1 bun run release
 ```
 
-脚本会将同名本地和远端标签移动到当前提交，并覆盖该 GitHub Release
-的基础资产、差分包与版本说明；不会删除其他标签或 Release。需要临时禁止
-覆盖时执行：
+脚本会将同名本地和远端标签移动到当前提交，并由 QRls `force` 覆盖
+R2 / GitHub 上的同名资产；不会删除其他标签。需要临时禁止覆盖时执行：
 
 ```sh
 FORCE=0 bun run release
