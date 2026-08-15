@@ -201,8 +201,8 @@ bun run release
    appcast 和安装包镜像到 GitHub Releases。
 10. 正式发布验证成功后，将当前 ZIP、appcast 和 SHA-256 清单原子保存
     到 `release/`，并淘汰最旧缓存。
-11. 写入 `web/download.json` 与 `docs/download.json`（并同步旧版
-    `docs/latest.json`），直链指向 R2，提交并推送供官网下载。
+11. QRls 把 `download.json` 发到 R2（`https://download.qzrzz.com/qjiao/download.json`），
+    官网通过 `page.downloadBase` 读取，发布脚本不再写入仓库内清单。
 
 Apple 返回 `Invalid` 时，脚本会立即调用 `notarytool log` 输出具体
 文件和原因，并停止执行，不会继续 staple。
@@ -214,8 +214,7 @@ Apple 返回 `Invalid` 时，脚本会立即调用 `notarytool log` 输出具体
 
 - `https://download.qzrzz.com/qjiao/appcast.xml` 含当前 `sparkle:version`，
   enclosure 指向 R2 上的 ZIP。
-- `web/download.json` 与 `docs/download.json` 的 `dmg.url` 指向 R2 公证 DMG，
-  且包含对应的 SHA-256 与字节大小。
+- `https://download.qzrzz.com/qjiao/download.json` 含当前版本的 DMG / ZIP 直链。
 - DMG 能通过 Gatekeeper 并正常启动。
 - 使用旧版 Qjiao 执行 **Check for Updates…** 能看到新版本（经 GitHub 镜像订阅）。
 
@@ -228,7 +227,7 @@ PUBLISH=0 bun run release
 ```
 
 产物位于 `build/`。此模式不需要 `git` 或 `gh`，不会创建标签，也
-不会写入 `docs/download.json`；未正式发布的 ZIP 不会进入 `release/` 缓存。
+也不会调用 QRls；未正式发布的 ZIP 不会进入 `release/` 缓存。
 
 只发 R2、不同步 GitHub（旧版 App 将收不到这次更新）：
 
