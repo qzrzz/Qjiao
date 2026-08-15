@@ -119,6 +119,150 @@
     font-size: 18px;
 }
 
+.heroIcon {
+    position: relative;
+    overflow: hidden;
+    border-radius: 0;
+}
+
+/* 原画板 248px，按 QPage `.heroIcon` 在各断点的边长等比缩放 */
+.heroIconArtwork {
+    position: absolute;
+    inset: 0;
+    width: 248px;
+    height: 248px;
+    transform: scale(calc(256 / 248));
+    transform-origin: 0 0;
+}
+@media (max-width: 860px) {
+.heroIconArtwork {
+        transform: scale(calc(120 / 248));
+}
+}
+@media (max-width: 520px) {
+.heroIconArtwork {
+        transform: scale(calc(96 / 248));
+}
+}
+.heroIconBackground {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.heroIconMaskGroup {
+    position: absolute;
+    top: 24.21875px;
+    left: 24.21875px;
+    width: 199.5625px;
+    height: 199.5625px;
+    isolation: isolate;
+    -webkit-mask-mode: alpha;
+    mask-mode: alpha;
+    -webkit-mask-position: 0 0;
+    mask-position: 0 0;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: 199.5625px 199.5625px;
+    mask-size: 199.5625px 199.5625px;
+}
+.heroIconBlendBackdrop {
+    position: absolute;
+    z-index: 0;
+    top: -24.21875px;
+    left: -24.21875px;
+    width: 248px;
+    height: 248px;
+    max-width: none;
+    object-fit: cover;
+    pointer-events: none;
+}
+.heroIconGlow {
+    position: absolute;
+    z-index: 1;
+    display: flex;
+    width: 262.352px;
+    height: 260.977px;
+    align-items: center;
+    justify-content: center;
+    mix-blend-mode: multiply;
+}
+.heroIconGlowRotated {
+    position: relative;
+    width: 127.633px;
+    height: 242.43px;
+    transform: rotate(45.49deg);
+}
+.heroIconGlowRotated img {
+    position: absolute;
+    top: -29.066px;
+    left: -29.063px;
+    width: 185.758px;
+    height: 300.555px;
+    max-width: none;
+}
+.heroIconGlow--top {
+    top: -111.719px;
+    left: -105.379px;
+}
+.heroIconGlow--bottom {
+    top: 35.359px;
+    left: 10.414px;
+}
+.heroIconPepperMotion {
+    position: absolute;
+    z-index: 2;
+    top: 35.359px;
+    left: 20.586px;
+    display: flex;
+    width: 238.968px;
+    height: 238.968px;
+    align-items: center;
+    justify-content: center;
+    will-change: transform;
+    transform: translate(83.797px, 100.266px);
+    animation: heroPepper 8s infinite;
+}
+.heroIconPepper {
+    width: 172.434px;
+    height: 172.434px;
+    filter: drop-shadow(-16px -7px 37px rgba(10, 46, 12, 0.62));
+    transform: rotate(-33.51deg);
+}
+.heroIconPepper img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* 对齐 web-old motion：4s 正向 + 4s 反向，中间点 14.77% */
+@keyframes heroPepper {
+0% {
+        transform: translate(83.797px, 100.266px);
+        animation-timing-function: linear;
+}
+7.385% {
+        transform: translate(44.58px, 42.501px);
+        animation-timing-function: cubic-bezier(0, 0, 0, 0.947);
+}
+50% {
+        transform: translate(12.109px, -5.328px);
+        animation-timing-function: cubic-bezier(1, 0.053, 1, 1);
+}
+92.615% {
+        transform: translate(44.58px, 42.501px);
+        animation-timing-function: linear;
+}
+100% {
+        transform: translate(83.797px, 100.266px);
+}
+}
+@media (prefers-reduced-motion: reduce) {
+.heroIconPepperMotion {
+        animation: none;
+        transform: translate(12.109px, -5.328px);
+}
+}
+
 .downloadButton,
 .heroPrimaryBtn.downloadButton {
     display: inline-flex;
@@ -1090,37 +1234,46 @@ video.hero-shot {
     color: #fff;
     background: rgba(255, 255, 255, 0.1);
 }
-
+/* 移动模式集中在独立文件中，桌面基础样式保持稳定且便于按端维护。 */
 @media (max-width: 860px) {
     :root {
         --feature-group-gap: 28px;
-        --page-gutter: 16px;
+        --page-gutter: 24px;
+        --card-radius: 20px;
     }
 
-    .hero {
-        min-height: auto;
-        padding: 48px 16px 28px;
+    /* 顶栏保留关键操作，收起占用横向空间的章节导航。 */
+    .stickyHeader {
+        padding: 8px max(var(--page-gutter), env(safe-area-inset-right)) 8px
+            max(var(--page-gutter), env(safe-area-inset-left));
     }
 
-    .heroIcon {
-        width: 120px;
-        height: 120px;
-        border-radius: 28px;
+    .stickyHeader .header-main {
+        gap: 10px;
     }
 
-    .featureCard--left:not(.featureCard--mediaOnly),
-    .featureCard--right:not(.featureCard--mediaOnly) {
-        grid-template-columns: 1fr;
+    .stickyHeaderBrand {
+        min-width: 0;
     }
 
-    .featureCard--right:not(.featureCard--mediaOnly) .featureCard__info {
-        order: 0;
+    .stickyHeaderBrand img {
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
     }
 
-    .featureCard,
-    .featureCard__media,
-    .featureCard__shot {
-        min-height: 200px;
+    .stickyHeaderBrand .heroTitle {
+        overflow: hidden;
+        padding: 4px;
+        font-size: 19px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .stickyHeaderActions,
+    .stickyHeaderNav {
+        gap: 8px;
+        flex-wrap: nowrap;
     }
 
     .stickyHeaderNav
@@ -1130,8 +1283,125 @@ video.hero-shot {
         display: none;
     }
 
+    .stickyHeaderLink.download {
+        min-width: 0;
+    }
+
+    .headerProductsLayer {
+        max-height: calc(100dvh - 52px);
+        overflow-y: auto;
+        padding: 10px var(--page-gutter) 14px;
+        overscroll-behavior: contain;
+    }
+
+    .langDropdownTrigger {
+        padding: 0 8px;
+    }
+
+    /* Hero 在窄屏降低视觉体量，并让媒体始终保持原始比例。 */
+    .hero {
+        min-height: auto;
+        padding: 48px var(--page-gutter) 28px;
+    }
+
+    .heroInner {
+        width: 100%;
+    }
+
+    .heroIcon {
+        width: 120px;
+        height: 120px;
+        margin-bottom: 20px;
+        border-radius: 28px;
+    }
+
+    .heroTitle {
+        font-size: clamp(44px, 12vw, 64px);
+    }
+
+    .heroTagline {
+        max-width: 34rem;
+        font-size: 17px;
+    }
+
+    .donwload-info {
+        flex-wrap: wrap;
+        row-gap: 2px;
+        white-space: normal;
+    }
+
+    .heroMedia {
+        padding-bottom: 20px;
+    }
+
+    img.hero-shot,
+    video.hero-shot {
+        width: 100%;
+        height: auto;
+        border-radius: 16px;
+    }
+
+    video.hero-shot {
+        aspect-ratio: 756 / 491;
+        object-fit: cover;
+    }
+
+    /* 内容区加入统一安全边距，长文与媒体不会贴住屏幕边缘。 */
+    .featureCollection {
+        padding-inline: var(--page-gutter);
+        scroll-margin-top: 60px;
+    }
+
+    .featureCollection + .featureCollection {
+        margin-top: 56px;
+    }
+
+    .pageSectionHeading {
+        margin-top: 36px;
+        margin-bottom: 28px;
+    }
+
+    .pageSectionHeading h2 {
+        font-size: clamp(30px, 8vw, 38px);
+    }
+
+    .pageSectionHeading p {
+        margin-top: 12px;
+        font-size: 17px;
+        line-height: 1.65;
+    }
+
+    .featureCard .featureCard-text {
+        margin-top: 18px;
+    }
+
+    .featureCard .featureCard-text h3 {
+        font-size: 21px;
+    }
+
+    .featureCard .featureCard-text p {
+        font-size: 16px;
+        line-height: 1.6;
+    }
+
+    .featureCard.style-right,
+    .featureCard.style-right .featureCard__media {
+        align-items: stretch;
+    }
+
+    .featureCard.style-right .featureCard-text {
+        text-align: left;
+    }
+
+    .featureCard__shot {
+        width: 100%;
+        height: auto;
+    }
+
+    /* 页脚改为纵向信息流，产品卡片保持足够大的触控区域。 */
     .siteFooter {
         margin-top: 64px;
+        padding-bottom: max(28px, env(safe-area-inset-bottom));
     }
 
     .siteFooterHero {
@@ -1142,30 +1412,164 @@ video.hero-shot {
         padding: 40px 0;
     }
 
+    .siteFooterBrand img {
+        width: 76px;
+        height: 76px;
+    }
+
+    .siteFooterTagline {
+        margin-left: 0;
+        font-size: 17px;
+    }
+
     .siteFooterProductGrid,
     .siteFooterProductGrid--compact {
         grid-template-columns: 1fr;
     }
 
+    .siteFooterProduct {
+        min-height: 76px;
+    }
+
     .siteFooterDirectory {
-        grid-template-columns: repeat(2, minmax(160px, 200px));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 40px;
     }
 }
 
 @media (max-width: 520px) {
+    :root {
+        --feature-group-gap: 24px;
+        --page-gutter: 20px;
+    }
+
+    .headerProducts,
+    .headerProductsLayer {
+        display: none;
+    }
+
+    .stickyHeaderActions,
+    .stickyHeaderNav {
+        gap: 4px;
+    }
+
+    .stickyHeaderLink--action {
+        padding-inline: 10px;
+    }
+
+    .hero {
+        padding-top: 40px;
+    }
+
+    .heroIcon {
+        width: 96px;
+        height: 96px;
+        border-radius: 23px;
+    }
+
+    .heroTitle {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        font-size: clamp(38px, 13vw, 52px);
+    }
+
+    .heroTagline {
+        font-size: 16px;
+    }
+
+    .heroActions {
+        width: 100%;
+        margin-top: 26px;
+    }
+
+    .heroPrimaryBtn,
+    .heroSecondaryBtn {
+        width: 100%;
+        min-height: 50px;
+    }
+
+    .heroPrimaryBtn.downloadButton {
+        width: 100%;
+    }
+
+    .pageSectionHeading {
+        margin-top: 30px;
+        margin-bottom: 24px;
+    }
+
+    .featureCard.style-bottom .featureCard__media {
+        align-items: stretch;
+    }
+
+    .featureCard.style-bottom .featureCard-text {
+        text-align: left;
+    }
+
     .siteFooterHeroActions {
         width: 100%;
+        flex-direction: column;
     }
 
     .siteFooterPrimaryAction,
     .siteFooterSecondaryAction {
-        flex: 1;
+        width: 100%;
+        min-height: 48px;
+    }
+
+    .siteFooterProducts {
+        padding: 40px 0 44px;
+    }
+
+    .siteFooterProduct {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 10px;
+        padding: 14px;
+        border-radius: 18px;
+    }
+
+    .siteFooterProduct img,
+    .siteFooterProductGrid--compact .siteFooterProduct img {
+        width: 54px;
+        height: 54px;
+    }
+
+    .siteFooterProductPlatforms {
+        grid-column: auto;
+        justify-self: end;
+        padding-right: 0;
     }
 
     .siteFooterDirectory {
         grid-template-columns: 1fr;
         gap: 40px;
+        padding: 40px 0 48px;
+    }
+
+    .siteFooterBottom {
+        font-size: 14px;
+    }
+}
+
+/* 触屏设备不依赖 hover，聚焦态仍保留键盘可访问反馈。 */
+@media (hover: none) and (pointer: coarse) {
+    .stickyHeaderBrand:hover,
+    .siteFooterProduct:hover {
+        transform: none;
+    }
+}
+
+/* 系统要求减少动态效果时，关闭装饰性滚动和过渡动画。 */
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
     }
 }
 :root {
