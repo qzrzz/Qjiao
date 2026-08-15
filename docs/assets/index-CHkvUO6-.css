@@ -1575,6 +1575,7 @@ video.hero-shot {
 :root {
   --brand-color: linear-gradient(#a7f9c0 -5.99999%, #fff 50%);
 }
+
 .heroTitle {
   font-size: 90px;
 }
@@ -1583,8 +1584,9 @@ video.hero-shot {
   width: min(calc(100% - 160px), 1200px);
 }
 
+/* 视频按桌面构图裁切，宽度随容器收缩以免窄屏横向溢出 */
 video.featureCard__shot {
-  width: 962px;
+  width: min(962px, 100%);
   height: auto;
 }
 
@@ -1592,8 +1594,7 @@ video.featureCard__shot {
   pointer-events: none;
   -webkit-user-select: none;
   user-select: none;
-  border-radius: 16px;
-  width: auto;
+  width: min(962px, 100%);
   height: 300px;
   overflow: hidden;
   border-bottom: 1px solid #70707073;
@@ -1609,6 +1610,7 @@ video.featureCard__shot {
 .featureCard .featureCard__shot {
   z-index: 1;
   position: relative;
+  max-width: 100%;
 }
 
 #section-fdl .featureCard .featureCard-text::after {
@@ -1619,12 +1621,93 @@ video.featureCard__shot {
   position: absolute;
   content: "";
   z-index: -1;
-
   background: linear-gradient(143.475deg, #204832 16.76%, #3d764c00 59.15%);
   border-radius: 22px;
   width: 800px;
   height: 600px;
-  position: absolute;
   top: -36px;
   left: -36px;
+}
+
+/* 对齐 QPage 860px 断点，收回桌面固定尺寸 */
+@media (max-width: 860px) {
+  .heroTitle {
+    font-size: clamp(44px, 12vw, 64px);
+  }
+
+  /* 左右边距改由框架 --page-gutter 承担，避免 80px 再叠一层 */
+  .homePage {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  /* flex 子项默认 min-width:auto，大图会把卡片撑出视口 */
+  .hero,
+  .heroInner,
+  .heroMedia,
+  .featureCollection,
+  .featureCard,
+  .featureCard__media,
+  .featureCard__video_box {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .heroTagline,
+  .pageSectionHeading p,
+  .featureCard .featureCard-text p {
+    overflow-wrap: break-word;
+  }
+
+  .featureCard {
+    overflow-x: clip;
+  }
+
+  img.featureCard__shot,
+  video.featureCard__shot,
+  img.hero-shot,
+  video.hero-shot {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .featureCard__video_box {
+    width: 100%;
+    height: clamp(200px, 38vw, 300px);
+    border-radius: 12px;
+    border-bottom: none;
+  }
+
+  video.featureCard__shot {
+    height: 100%;
+    object-fit: cover;
+    object-position: top center;
+  }
+
+  /* 背景光晕贴合文案，不再使用 800px 绝对宽度 */
+  .featureCard .featureCard-text::after {
+    top: -16px;
+    right: 0;
+    left: 0;
+    width: auto;
+    height: 260px;
+    border-radius: 18px;
+  }
+}
+
+@media (max-width: 520px) {
+  .heroTitle {
+    font-size: clamp(38px, 13vw, 52px);
+  }
+
+  /* 小屏展示完整演示视频，不再按桌面比例裁切 */
+  .featureCard__video_box {
+    height: auto;
+  }
+
+  video.featureCard__shot {
+    height: auto;
+    object-fit: contain;
+  }
 }
