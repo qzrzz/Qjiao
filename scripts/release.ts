@@ -461,9 +461,6 @@ if (
     force: FORCE_RELEASE,
     statePath: join(RELEASE_CACHE_DIR, ".qrls-state.json"),
   });
-  if (qrlsResult.sparkle?.appcast) {
-    await Bun.write(appcastPath, qrlsResult.sparkle.appcast);
-  }
   if (!(await validatePublishedR2(version, build, publishedZipUrl))) {
     die(`R2 appcast at ${SPARKLE_FEED_URL} is missing ${version} (${build})`);
   }
@@ -1367,6 +1364,22 @@ function listCurrentDeltaNames(appcast: string, currentVersion: string): string[
   return [...names];
 }
 
+/** 兼容 generate_appcast 的子元素写法与 enclosure 属性写法。 */
+function appcastHasVersion(
+  appcast: string,
+  currentVersion: string,
+  currentBuild: string,
+): boolean {
+  const hasBuild =
+    appcast.includes(`<sparkle:version>${currentBuild}</sparkle:version>`) ||
+    appcast.includes(`sparkle:version="${currentBuild}"`);
+  const hasVersion =
+    appcast.includes(
+      `<sparkle:shortVersionString>${currentVersion}</sparkle:shortVersionString>`,
+    ) || appcast.includes(`sparkle:shortVersionString="${currentVersion}"`);
+  return hasBuild && hasVersion;
+}
+
 /** 复验 R2 上的 appcast 已包含当前版本且 enclosure 指向 R2 ZIP。 */
 async function validatePublishedR2(
   currentVersion: string,
@@ -1378,12 +1391,10 @@ async function validatePublishedR2(
     if (!response.ok) return false;
     const appcast = await response.text();
     return (
-      appcast.includes(`<sparkle:version>${currentBuild}</sparkle:version>`) &&
-      appcast.includes(
-        `<sparkle:shortVersionString>${currentVersion}</sparkle:shortVersionString>`,
-      ) &&
+      appcastHasVersion(appcast, currentVersion, currentBuild) &&
       (appcast.includes(zipUrl) ||
-        appcast.includes(zipUrl.replaceAll("&", "&amp;")))
+        appcast.includes(zipUrl.replaceAll("&", "&amp;"))) &&
+      appcast.includes("sparkle:edSignature=")
     );
   } catch {
     return false;
