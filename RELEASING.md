@@ -197,8 +197,8 @@ bun run release
 9. 使用本机 `gh` 创建 GitHub Release，上传基础资产和 delta。
 10. 正式发布验证成功后，将当前 ZIP、appcast 和 SHA-256 清单原子保存
     到 `release/`，并淘汰最旧缓存。
-11. 写入 `docs/download.json` 与 `web/public/download.json`（并同步旧版
-    `latest.json`），提交并推送，供官网直链最新 DMG。
+11. 写入 `web/download.json` 与 `docs/download.json`（并同步旧版
+    `docs/latest.json`），包含应用名、版本号、构建号、发布时间、DMG/ZIP 直链及文件大小与 SHA-256 校验和，提交并推送供官网直链最新安装包。
 
 Apple 返回 `Invalid` 时，脚本会立即调用 `notarytool log` 输出具体
 文件和原因，并停止执行，不会继续 staple。
@@ -210,7 +210,7 @@ Apple 返回 `Invalid` 时，脚本会立即调用 `notarytool log` 输出具体
 
 - `https://github.com/qzrzz/Qjiao/releases/latest` 有四项基础资产，
   有旧版本基线时还包含 `.delta`。
-- `docs/download.json` 的 `dmg.url` 指向当前版本公证 DMG。
+- `web/download.json` 与 `docs/download.json` 的 `dmg.url` 指向当前版本公证 DMG，且包含对应的 SHA-256 与字节大小。
 - DMG 能通过 Gatekeeper 并正常启动。
 - 使用旧版 Qjiao 执行 **Check for Updates…** 能看到新版本。
 
