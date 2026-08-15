@@ -110,9 +110,10 @@
 ### 工程与发布
 
 - 独立产品标识与 Sparkle 自动更新；本机 Developer ID 签名、公证、DMG/ZIP、delta 与 GitHub Releases 发布脚本。
+- 产品官网 `web/` 使用 QPage 生成静态着陆页，支持简体中文、English、日本語、한국어、Tiếng Việt、Português、Español、Deutsch、Français、Русский。
 - `version+` 脚本由 `scripts/update-changelog.ts` 调用 pi AI 生成版本更新记录并写入 CHANGELOG.md（与 pbxproj 中的 MARKETING_VERSION 严格一致）。
-- 产品官网 `web/`（Vite + React）：中/英/日、功能介绍与响应式布局。
-- 官网下载读取 `docs/download.json` 直链最新公证 DMG；发布脚本在 GitHub Release 成功后写入该清单（并同步 `web/public/download.json`）后提交推送，GitHub Pages 即可直接下载安装包。
+- 发布脚本生成规范的 `download.json`（包含应用名称、版本号、构建号、发布时间、DMG 与 ZIP 的下载直链、字节大小及 SHA-256 校验和），同时输出至 `web/download.json` 与 `docs/download.json`（并同步 `docs/latest.json`）；支持在清单缺失时根据现有发布信息自动生成保底清单。
+- `debug` 本机测试构建（`npm run debug` / `bun run debug`）：编译 Debug 版并以单进程、单窗口启动；`--record` 用 xctrace Time Profiler 追踪（启动 `.app`，避免内部二进制与 Launch Services 双开），`--gui` 打开匹配版本的 Instruments，`--heap` 启用 `MallocStackLogging` 做堆内存/泄漏分析。
 
 ## 上游移植记录
 

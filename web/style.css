@@ -1,0 +1,56 @@
+:root {
+  --brand-color: linear-gradient(#a7f9c0 -5.99999%, #fff 50%);
+}
+.heroTitle {
+  font-size: 90px;
+}
+
+.homePage {
+  width: min(calc(100% - 160px), 1200px);
+}
+
+video.featureCard__shot {
+  width: 962px;
+  height: auto;
+}
+
+.featureCard__video_box {
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  border-radius: 16px;
+  width: auto;
+  height: 300px;
+  overflow: hidden;
+  border-bottom: 1px solid #70707073;
+  border-radius: 0;
+  box-shadow: 0 12px 32px #00000073;
+}
+
+.featureCard .featureCard-text {
+  z-index: 1;
+  position: relative;
+}
+
+.featureCard .featureCard__shot {
+  z-index: 1;
+  position: relative;
+}
+
+#section-fdl .featureCard .featureCard-text::after {
+  display: none;
+}
+
+.featureCard .featureCard-text::after {
+  position: absolute;
+  content: "";
+  z-index: -1;
+
+  background: linear-gradient(143.475deg, #204832 16.76%, #3d764c00 59.15%);
+  border-radius: 22px;
+  width: 800px;
+  height: 600px;
+  position: absolute;
+  top: -36px;
+  left: -36px;
+}

@@ -19,6 +19,7 @@ import {
   DOWNLOAD_MANIFEST_RELATIVE_PATHS,
   LEGACY_LATEST_JSON_RELATIVE_PATHS,
   buildDownloadManifest,
+  buildDownloadManifestWithFiles,
   isDownloadManifest,
   writeDownloadManifestFiles,
 } from "./download-manifest";
@@ -484,11 +485,15 @@ if (
 await persistReleaseCache(identity, tag, zipPath, appcastPath);
 
 say("Writing website download manifest…");
-const downloadManifest = buildDownloadManifest({
+const downloadManifest = await buildDownloadManifestWithFiles({
   repository: GITHUB_REPOSITORY,
+  name: APP_NAME,
   version,
+  build,
   tag,
   publishedAt: await readPublishedAt(tag),
+  dmgPath,
+  zipPath,
 });
 const writtenDownloadPaths = writeDownloadManifestFiles(
   downloadManifest,
@@ -498,7 +503,7 @@ if (!isDownloadManifest(downloadManifest) || !downloadManifest.dmg.url) {
   die("generated website download manifest is invalid");
 }
 await commitAndPushWebsiteDownloadManifest(version);
-say(`Website download manifest: ${writtenDownloadPaths[0]}`);
+say(`Website download manifest: ${writtenDownloadPaths.join(", ")}`);
 
 say(`Qjiao ${version} is live on GitHub:`);
 console.log(
