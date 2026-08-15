@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.49]
+
+### Added
+
+- Serve a direct link to the latest DMG on the official website, backed by a release manifest (`download.json`) that the release script regenerates after each GitHub release.
+
 ## [1.1.48]
 
 ### Added

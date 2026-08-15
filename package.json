@@ -22,6 +22,8 @@
     "@types/bun": "latest",
     "chalk": "6.0.0",
     "qpage": "link:qpage",
+    "qrls": "link:qrls",
+    "qzrzz-com": "link:qzrzz-com",
     "woff2": "^1.0.0"
   }
 }

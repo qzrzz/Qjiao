@@ -47,7 +47,7 @@
 		</dict>
 	</array>
 	<key>SUFeedURL</key>
-	<string>https://github.com/qzrzz/Qjiao/releases/latest/download/appcast.xml</string>
+	<string>https://download.qzrzz.com/qjiao/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>rIu1scWZ0i+1pucGPQPhBmKpHUNjrJuiU2jDHHRAA20=</string>
 </dict>
