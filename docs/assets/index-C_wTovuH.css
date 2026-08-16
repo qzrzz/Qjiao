@@ -64,6 +64,7 @@
     justify-content: center;
     color: rgba(255, 255, 255, 0.62);
     outline: none;
+    gap: 4px;
 }
 .platformIcon hd-icon {
     width: 15px;
