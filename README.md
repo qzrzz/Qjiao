@@ -1,20 +1,96 @@
-# 🫑 Qjiao
+<p align="center">
+  <img src="icon/icon-512.png" width="128" alt="Qjiao">
+</p>
 
-围绕项目文件夹的终端工具。
+<h1 align="center">Qjiao</h1>
 
-[http://qzrzz.com/Qjiao/](http://qzrzz.com/Qjiao/)
+<p align="center">
+  <strong>青椒终端</strong> · 面向新手的终端工作区<br>
+  终端、Agent、文件管理、代码编辑与运行、Git、图片处理<br>
+  原生 · 免费 · 开源
+</p>
 
+<p align="center">
+  <a href="https://qzrzz.com/Qjiao">官网</a> ·
+  <a href="https://github.com/qzrzz/Qjiao/releases/latest">下载</a> ·
+  <a href="https://kero.sh">Kero</a> ·
+  <a href="./LICENSE">GPLv3</a>
+</p>
 
-基于 Kero 的二次开发以适配自己使用习惯和喜欢。
+<p align="center">
+  <img src="web/assets/workspace.png" alt="Qjiao 工作区" width="920">
+</p>
 
-> [https://kero.sh](https://kero.sh) A native terminal workspace for macOS.
+围绕项目文件夹的 macOS 原生终端工作区。基于 [Kero](https://kero.sh) 二次开发，按自己的使用习惯扩展。
 
+**目录**：[下载](#下载) · [开发](#开发) · [仓库结构](#仓库结构) · [技术架构](#技术架构) · [FAQ](#faq) · [增加功能](#增加功能) · [上游移植](#上游移植记录)
+
+## 下载
+
+- 官网：[https://qzrzz.com/Qjiao](https://qzrzz.com/Qjiao)
+- GitHub Releases：[最新安装包](https://github.com/qzrzz/Qjiao/releases/latest)
+- 应用内 Sparkle 订阅：`https://download.qzrzz.com/qjiao/appcast.xml`
+
+发布走本机签名与公证，经 QRls 上传到 Cloudflare R2。流程见 [RELEASING.md](./RELEASING.md)。
+
+## 开发
+
+本仓库是 monorepo。应用本体是 Swift / Xcode；脚本与官网用 **bun** + **TypeScript 6**。
+
+```sh
+bun install
+bun run dev      # Debug 编译并在前台运行
+bun run debug    # Debug 单窗口（可加 --record / --gui / --heap）
+bun run web:dev  # 官网本地预览
+```
+
+需要本机已安装 bun，以及 Xcode（当前开发环境为 `Xcode-beta.app`）。
+
+| 脚本 | 作用 |
+| --- | --- |
+| `bun run dev` | 编译 Debug 并前台跑二进制，输出日志与崩溃栈 |
+| `bun run debug` | 单进程、单窗口测试；`--record` Time Profiler，`--gui` Instruments，`--heap` 堆分析 |
+| `bun run version+` | 升版本号，并由 AI 写入 `CHANGELOG.md` |
+| `bun run release` | 签名、公证、打包、发布 |
+| `bun run web:build` | 用 QPage 生成静态官网到 `docs/` |
+
+## 仓库结构
+
+```text
+kero/                 应用源码（历史目录名，来自 Kero）
+Qjiao.xcodeproj/      Xcode 工程
+scripts/              bun 脚本：dev / debug / release / changelog
+web/                  QPage 官网源（i18n、资源、下载清单）
+docs/                 官网构建产物
+Vendor/               libghostty、STTextView、TreeSitter
+icon/                 App 图标
+CHANGELOG.md          应用内更新说明的源
+RELEASING.md          本机发布流程
+```
+
+项目配置落在 `~/.config/qjiao/`（Debug 为 `qjiao-dev`），与正式版互不覆盖。
+
+## 技术架构
+
+| 层 | 选型 |
+| --- | --- |
+| UI | SwiftUI + AppKit，递归分屏与项目侧栏 |
+| 终端 | Ghostty（`Vendor/libghostty-spm`），`TERM_PROGRAM=ghostty` |
+| 编辑器 | STTextView + Tree-sitter 语法高亮 |
+| 浏览器 / Diff | WKWebView、Pierre Diffs |
+| 图片 | 内置 `oxipng` / `cwebp` / `cjxl` 等，Image Build 导出 |
+| 脚本 | bun + TypeScript 6（`scripts/`） |
+| 官网 | QPage → `docs/`，多语言静态页 |
+| 发布 | QRls → Cloudflare R2，Sparkle 自动更新 |
+| 文案 | `L10n.t`，英文为 key；`zh-Hans` / `ja` |
+
+二次开发增量见下方「增加功能」；从上游 [Kero](https://github.com/egoist/kero) 移植时不带 git 记录，对照基线写在「上游移植记录」。
 
 ## FAQ
 
-- Q: 为什么比 Kero 体积大
-  A: 内置了中文等宽字体在内的许多字体（ SourceHanSansCN-VF-Mono1200.ttf, InterVariable.ttf），还内置了 cwebp, oxipng, cjxl 等图片处理工具
+**为什么比 Kero 体积大？**
 
+内置了中文等宽字体（`SourceHanSansCN-VF-Mono1200.ttf`、`InterVariable.ttf`），以及 `cwebp`、`oxipng`、`cjxl` 等图片处理工具。
 
 ## LICENSE
 
@@ -54,6 +130,8 @@
 - 事件驱动刷新（仓库元数据 + 工作区监听）加低频心跳兜底，替代固定短间隔轮询；切换仓库时保留旧内容直至新结果就绪，减少闪烁；两仓库来回切换时立即恢复上次解析的内容（单槽快照），不再显示上一个仓库的旧状态。
 - **刷新分级提速**：工作区文件事件 / 终端命令完成 / cd / 切换标签等高频路径只跑 rev-parse + status 快路径（3 个子进程），提交历史、分支、remote、stash 等详情（含大仓库上比 status 更贵的 `git log --name-status`）由 HEAD/refs 元数据事件（commit/checkout/branch 才会触发）、提交历史展开时按需加载与低频心跳补齐；快路径期间 UI 保留旧详情展示不闪烁。10s 定时不再与内部心跳重复全量扫（root 未变时跳过），Git 标签页外的事件刷新不再带详情。
 - Git 操作进度反馈：更多操作菜单（Fetch/Pull/Push/Stash 等）、分支切换、提交选项菜单、初始化仓库按钮均有进行中指示；发起新操作自动折叠上一条操作输出。
+- trackingBar 加高；待 push 数量徽章改为强调色按钮，点击执行 Push。
+- **分叉分支拉取**：`git pull --ff-only`（含 Sync）因本地与远程分叉失败时，操作横幅提供「变基拉取」按钮（`git pull --rebase`）；更多操作菜单也可主动选择 Pull (Rebase)。
 - **操作中切换项目立刻跟新**：root 变化时脱离旧 commit/stage 的 `isBusy`，高优先级扫描新仓库，Git 面板不再等旧操作跑完才切换。
 - **Commit Staged 加速**：操作前 HEAD/branch 校验改为轻量 `rev-parse`（不再全量 `git status`）；mutation 后先快路径更新变更列表（跳过 log/stash 等详情，空闲再补全）；全量扫描详情命令并行。
 - **修复无提交仓库首次 Commit 误拒**：unborn 分支上 `rev-parse --abbrev-ref HEAD` 失败，操作前 HEAD 稳定性校验误报「Branch or HEAD changed」；改为 `symbolic-ref --short HEAD` 读取分支名，与 porcelain `# branch.head` 对齐。

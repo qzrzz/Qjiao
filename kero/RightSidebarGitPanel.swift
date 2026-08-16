@@ -18,6 +18,8 @@ private enum GitActionTarget: Equatable {
     case discard(path: String)
     case commit
     case sync
+    case push
+    case pullRebase
     case branchMenu
     case moreMenu
     case commitMenu
@@ -292,6 +294,10 @@ struct GitPanel: View {
                 beginGitAction(.moreMenu) { model.pull() }
             }
             .disabled(model.isInteractionLocked || !model.hasUpstream)
+            Button(L10n.t("Pull (Rebase)")) {
+                beginGitAction(.moreMenu) { model.pullRebase() }
+            }
+            .disabled(model.isInteractionLocked || !model.hasUpstream)
             if model.hasUpstream {
                 Button(L10n.t("Push")) {
                     beginGitAction(.moreMenu) { model.push() }
@@ -355,9 +361,9 @@ struct GitPanel: View {
     @ViewBuilder
     private var trackingBar: some View {
         if let branch = model.branch {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Image(systemName: model.hasUpstream ? "arrow.triangle.2.circlepath" : "icloud.slash")
-                    .font(SidebarTypography.micro())
+                    .font(SidebarTypography.caption())
                     .foregroundStyle(.tertiary)
                 Text(model.upstream ?? (branch == "detached HEAD" ? L10n.t("Detached HEAD") : L10n.t("Unpublished branch")))
                     .font(SidebarTypography.section())
@@ -366,16 +372,26 @@ struct GitPanel: View {
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
                 if model.behind > 0 {
-                    badge("↓\(model.behind)", label: "\(model.behind) incoming commits")
+                    badge(
+                        "↓\(model.behind)",
+                        label: L10n.format("%lld incoming commits", model.behind)
+                    )
                 }
                 if model.ahead > 0 {
-                    badge("↑\(model.ahead)", label: "\(model.ahead) outgoing commits")
+                    GitTrackingPushBadge(
+                        count: model.ahead,
+                        enabled: !model.isInteractionLocked,
+                        showsProgress: activeActionTarget == .push,
+                        action: {
+                            beginGitAction(.push) { model.push() }
+                        }
+                    )
                 }
             }
-            .frame(height: SidebarTypography.rowMinHeight)
+            .frame(minHeight: max(30, SidebarTypography.rowMinHeight + 8))
             .padding(.horizontal, 12)
-            .padding(.bottom, 6)
-            .accessibilityElement(children: .combine)
+            .padding(.bottom, 8)
+            .accessibilityElement(children: .contain)
         }
     }
 
@@ -454,6 +470,43 @@ struct GitPanel: View {
                     }
                     .frame(maxHeight: 96)
                     .accessibilityLabel(L10n.t("Git Output"))
+                }
+                if model.canPullWithRebase {
+                    Text(L10n.t("Branches have diverged. Rebase local commits onto the remote branch."))
+                        .font(SidebarTypography.section())
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                    Button {
+                        beginGitAction(.pullRebase) { model.pullRebase() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            if activeActionTarget == .pullRebase {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .frame(width: 11, height: 11)
+                            } else {
+                                Image(systemName: "arrow.triangle.merge")
+                                    .font(SidebarTypography.caption(.semibold))
+                            }
+                            Text(L10n.t("Pull with Rebase"))
+                                .font(SidebarTypography.caption(.medium))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Color.primary.opacity(0.10))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.isInteractionLocked)
+                    .padding(.top, 6)
+                    .macTooltip(L10n.t("Rebase local commits onto the remote branch"), position: .top)
+                    .accessibilityLabel(L10n.t("Pull with Rebase"))
                 }
             }
             .foregroundStyle(operationColor(operation))
@@ -1711,7 +1764,7 @@ struct GitPanel: View {
 
     private func badge(_ text: String, label: String) -> some View {
         Text(text)
-            .font(SidebarTypography.caption(.medium))
+            .font(SidebarTypography.caption(.medium).monospacedDigit())
             .foregroundStyle(.secondary)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
@@ -1753,6 +1806,53 @@ struct GitPanel: View {
 }
 
 // MARK: - Git chrome controls (hover + Tooltip)
+
+/// trackingBar 上的待 push 数量徽章：强调色可点击，发起 `git push`。
+private struct GitTrackingPushBadge: View {
+    let count: Int
+    let enabled: Bool
+    let showsProgress: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .frame(width: 10, height: 10)
+                }
+                Text("↑\(count)")
+                    .font(SidebarTypography.caption(.semibold).monospacedDigit())
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(.white.opacity((enabled && !showsProgress) ? 1 : 0.85))
+            .background(
+                Capsule().fill(Color(nsColor: Theme.cursor).opacity(fillOpacity))
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled || showsProgress)
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+        .macTooltip((enabled && !showsProgress) ? L10n.t("Push") : nil, position: .top)
+        .accessibilityLabel(
+            showsProgress
+                ? L10n.format("%@, in progress", L10n.t("Push"))
+                : L10n.format("%lld outgoing commits", count)
+        )
+        .accessibilityHint(L10n.t("Push"))
+    }
+
+    private var fillOpacity: Double {
+        guard enabled && !showsProgress else { return 0.3 }
+        return isHovering ? 1.0 : 0.85
+    }
+}
 
 /// Git 面板主操作按钮（Commit / Sync）：hover 提亮，并显示 macTooltip，支持工作中转圈。
 private struct GitPrimaryActionButton: View {
