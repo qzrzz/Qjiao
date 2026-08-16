@@ -1711,3 +1711,10 @@ video.featureCard__shot {
     object-fit: contain;
   }
 }
+
+@media (max-width: 860px) {
+  .featureCard .featureCard-text {
+
+    padding-left: 20px;
+  }
+}

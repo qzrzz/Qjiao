@@ -2,6 +2,9 @@
 
 围绕项目文件夹的终端工具。
 
+[http://qzrzz.com/Qjiao/](http://qzrzz.com/Qjiao/)
+
+
 基于 Kero 的二次开发以适配自己使用习惯和喜欢。
 
 > [https://kero.sh](https://kero.sh) A native terminal workspace for macOS.
