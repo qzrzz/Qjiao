@@ -160,6 +160,12 @@ final class GitStatusModel: nonisolated ObservableObject {
             case .failed: return L10n.format("%@ failed", label)
             }
         }
+
+        /// `git pull --ff-only` 因本地与远程分叉而失败时为 true。
+        var isDivergingFastForwardFailure: Bool {
+            guard case .failed = state else { return false }
+            return GitStatusModel.isDivergingFastForwardFailure(output)
+        }
     }
 
     @Published private(set) var rootPath = ""
@@ -1132,16 +1138,34 @@ final class GitStatusModel: nonisolated ObservableObject {
         )
     }
 
-    func pull() {
+    func pull(rebase: Bool = false) {
         guard hasUpstream else {
             failImmediately(L10n.t("This branch has no upstream to pull from"))
             return
         }
         perform(
-            label: L10n.t("Pull"),
-            commands: [["pull", "--ff-only"]],
+            label: rebase ? L10n.t("Pull (Rebase)") : L10n.t("Pull"),
+            commands: [rebase ? ["pull", "--rebase"] : ["pull", "--ff-only"]],
             requiresStableUpstream: true
         )
+    }
+
+    /// `git pull --ff-only` 因分叉失败后，用 rebase 把本地提交接到远程之上。
+    func pullRebase() {
+        pull(rebase: true)
+    }
+
+    /// 当前失败操作是分叉导致的 fast-forward 拒绝，且可以发起 `git pull --rebase`。
+    var canPullWithRebase: Bool {
+        guard isRepo, hasUpstream, !isBusy, repositoryOperation == nil else { return false }
+        return operation?.isDivergingFastForwardFailure == true
+    }
+
+    nonisolated static func isDivergingFastForwardFailure(_ output: String) -> Bool {
+        let lower = output.lowercased()
+        return lower.contains("not possible to fast-forward")
+            || lower.contains("diverging branches")
+            || lower.contains("cannot fast-forward")
     }
 
     func push() {
