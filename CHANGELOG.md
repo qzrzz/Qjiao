@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.50]
+
+### Added
+
+- Add "Pull (Rebase)" to the Git panel: when `git pull --ff-only` (including Sync) fails because local and remote branches have diverged, the operation banner offers a rebase pull (`git pull --rebase`), and the more-actions menu exposes it proactively.
+
 ## [1.1.49]
 
 ### Added

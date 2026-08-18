@@ -1,7 +1,295 @@
 
+.featureImages {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin-top: 12px;
+}
+.featureCard__media > .featureImages:first-child {
+    margin-top: 0;
+}
+.featureImages__viewport {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+.featureImages__scroller {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    outline: none;
+    cursor: grab;
+    /* 默认把纵向交给页面；横向由 JS 在判定方向后再接管 */
+    touch-action: pan-y;
+    /* 左右淡出提示还能继续滑 */
+    --fade-start: 0;
+    --fade-end: 0;
+    mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        #000 calc(var(--fade-start) * 28px),
+        #000 calc(100% - var(--fade-end) * 28px),
+        transparent 100%
+    );
+}
+.featureImages__scroller::-webkit-scrollbar {
+    display: none;
+}
+.featureImages__scroller:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.22);
+    outline-offset: 4px;
+    border-radius: 8px;
+}
+.featureImages.is-panning .featureImages__scroller {
+    cursor: grabbing;
+    scroll-snap-type: none;
+}
+.featureImages.is-scrolling .featureImages__scroller {
+    scroll-snap-type: x mandatory;
+}
+.featureImages__list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 16px;
+    width: max-content;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.featureImages__item {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+}
+.featureImages__shot {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    flex-shrink: 0;
+    -webkit-user-drag: none;
+    user-select: none;
+    pointer-events: none;
+}
+.featureImages__nav {
+    position: absolute;
+    top: 50%;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(8, 10, 14, 0.56);
+    color: #fff;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    transform: translateY(-50%);
+    cursor: pointer;
+}
+.featureImages__nav--prev {
+    left: 10px;
+}
+.featureImages__nav--next {
+    right: 10px;
+}
+.featureImages__nav hd-icon {
+    width: 22px;
+    height: 22px;
+    font-size: 22px;
+}
+.featureImages__nav:hover {
+    background: rgba(16, 18, 22, 0.82);
+    border-color: rgba(255, 255, 255, 0.28);
+}
+.featureImages__nav:disabled {
+    opacity: 0.28;
+    cursor: default;
+}
+.featureImages__nav:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.4);
+    outline-offset: 2px;
+}
+.featureImages__chrome {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 16px;
+    min-height: 18px;
+}
+.featureImages__track {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 14px;
+    cursor: pointer;
+}
+.featureImages__track:before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    transform: translateY(-50%);
+}
+.featureImages__thumb {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: 4px;
+    min-width: 36px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.58);
+    transform: translateY(-50%);
+    cursor: grab;
+    touch-action: none;
+}
+.featureImages__track:hover .featureImages__thumb,
+.featureImages.is-thumbing .featureImages__thumb {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.88);
+}
+.featureImages.is-thumbing .featureImages__thumb {
+    cursor: grabbing;
+}
+.featureImages__indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+.featureImages__dots {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.featureImages__dot {
+    width: 6px;
+    height: 6px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.22);
+    cursor: pointer;
+    transition:
+        width 0.2s ease,
+        background 0.2s ease;
+}
+.featureImages__dot--active {
+    width: 16px;
+    background: rgba(255, 255, 255, 0.88);
+}
+.featureImages__count {
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    white-space: nowrap;
+}
+.featureCard.style-right .featureImages__chrome,
+.featureCard.style-bottom .featureImages__chrome {
+    flex-direction: row;
+}
+
+.fetaList {
+    --feta-line: rgb(59 70 82);
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    width: 100%;
+    margin: 24px 0 0;
+    margin-bottom: 48px;
+    padding: 0;
+    list-style: none;
+    overflow: hidden;
+    /* 外框四边完整描边，圆角由容器自己画，避免底角被格子直角边框裁切 */
+    border: 1px solid var(--feta-line);
+    border-radius: 16px;
+}
+.fetaItem {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: 112px;
+    padding: 35px 14px;
+    text-align: center;
+    background: #212932;
+    /* 格线画在上/左，末行末列不再叠一层底/右边框 */
+    box-shadow:
+        -1px 0 0 var(--feta-line),
+        0 -1px 0 var(--feta-line);
+.icon-box {
+        background: linear-gradient(#1f2124e3 30%, #161819cf 60%);
+        display: flex;
+        border-radius: 100px;
+        place-content: center;
+        place-items: center;
+        width: 52px;
+        height: 52px;
+        margin-bottom: 12px;
+        margin-bottom: 0.3em;
+        box-shadow:
+            rgb(0 0 0 / 12%) 0px 2px 4px 0px,
+            rgb(0 0 0 / 22%) 0px 6px 8px 0px,
+            rgba(213, 229, 255, 0.165) 0px 1px 1px 0px inset,
+            rgba(255, 255, 255, 0.08) 0px -1px 0px 0px inset,
+            rgba(255, 255, 255, 0.03) 0px -3px 3px 0px inset;
+}
+}
+.fetaItem__icon,
+.fetaItem__iconImg {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+.fetaItem__icon {
+    color: rgb(158 187 220);
+    font-size: 24px;
+    line-height: 1;
+}
+.fetaItem__iconImg {
+    object-fit: contain;
+}
+.fetaItem__name {
+    color: rgb(159 181 197 / 92%);
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 1px;
+    line-height: 1.35;
+}
+
 .featureCard {
     display: flex;
     flex-direction: column;
+    min-width: 0;
+}
+.featureCard__media {
+    min-width: 0;
+    max-width: 100%;
+}
+.featureCard > .fetaList {
+    align-self: stretch;
+}
+.featureCard > .fetaList:first-child {
+    margin-top: 0;
 }
 .featureCard .featureCard-text {
     margin-top: 24px;
@@ -108,6 +396,9 @@
     border-top-color: rgba(12, 14, 18, 0.96);
     transform: translateX(-50%);
 }
+.platformIconLabel {
+    white-space: nowrap;
+}
 .platformIcon:hover .platformIconTip,
 .platformIcon:focus-visible .platformIconTip {
     opacity: 1;
@@ -118,6 +409,37 @@
     width: 18px;
     height: 18px;
     font-size: 18px;
+}
+
+.headerProducts {
+    display: flex;
+    flex-shrink: 0;
+    place-items: center;
+}
+.headerProductsLayer {
+.author-bar {
+        width: 100%;
+        display: flex;
+        place-items: center;
+        margin-top: 14px;
+        place-content: flex-end;
+.siteFooterAuthor {
+            padding: 4px 8px;
+            padding-right: 14px;
+            border-radius: 22px;
+            background: rgba(255, 255, 255, 0.07);
+            font-size: 12px;
+            border: 1px solid var(--surface-border);
+img {
+                width: 22px;
+                height: 22px;
+                border-radius: 0;
+}
+&:hover {
+                background: rgba(255, 255, 255, 0.15);
+}
+}
+}
 }
 
 .heroIcon {
@@ -264,21 +586,20 @@
 }
 }
 
-.downloadButton,
-.heroPrimaryBtn.downloadButton {
+.downloadButtonGroup {
     display: inline-flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 0 10px;
+    align-items: stretch;
     position: relative;
     min-width: 170px;
     background: #fff;
 }
+.downloadButtonGroup.heroPrimaryBtn {
+    padding: 0;
+    overflow: visible;
+}
 
-/* Hover 渐变层 */
-.downloadButton::before,
-.heroPrimaryBtn.downloadButton::before {
+/* Hover 渐变铺在整组上，主按钮和右侧下拉共用 */
+.downloadButtonGroup::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -288,21 +609,151 @@
     pointer-events: none;
     border-radius: inherit;
 }
-.downloadButton:hover::before,
-.heroPrimaryBtn.downloadButton:hover::before {
+.downloadButtonGroup:hover::before,
+.downloadButtonGroup.is-open::before,
+.downloadButtonGroup.is-downloading::before {
     opacity: 1;
 }
-
-/* 保证按钮内容位于渐变层上方 */
-.downloadButton > *,
-.heroPrimaryBtn.downloadButton > * {
+.downloadButtonGroup > * {
     position: relative;
-
     z-index: 1;
 }
-
-/* ------------------- */
-.downloadButton .download-title .version {
+.downloadButtonGroup .downloadMenu {
+    z-index: 20;
+}
+.downloadButton,
+.heroPrimaryBtn .downloadButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    gap: 8px;
+    min-width: 0;
+    min-height: 48px;
+    padding: 0 10px;
+    border-radius: inherit;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-decoration: none;
+}
+.downloadButtonGroup.has-variants .downloadButton {
+    border-radius: 999px 0 0 999px;
+    padding-right: 8px;
+}
+.downloadMenuTrigger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 30px;
+    padding: 0;
+    padding-right: 16px;
+    border: none;
+    border-radius: 0 999px 999px 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.downloadMenuTrigger::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -10px;
+    width: 1px;
+    height: 15px;
+    margin: auto;
+    background: rgb(0 0 0 / 17%);
+}
+.downloadMenuChevron {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+    line-height: 1;
+    transition: transform 0.15s ease;
+}
+.downloadMenuTrigger.is-open .downloadMenuChevron {
+    transform: rotate(180deg);
+}
+.downloadMenu {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: max(100%, 260px);
+    padding: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+    color: #111;
+}
+.downloadMenuItem {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    color: rgba(0, 0, 0, 0.78);
+    font-size: 13px;
+    font-weight: 550;
+    text-decoration: none;
+    text-align: left;
+}
+.downloadMenuItem:hover,
+.downloadMenuItem.is-active {
+    color: #111;
+    background: rgba(0, 0, 0, 0.06);
+}
+.downloadMenuItemIcon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    font-size: 16px;
+    line-height: 1;
+}
+.downloadMenuItemText {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1;
+}
+.downloadMenuItemLabel {
+    white-space: nowrap;
+}
+.downloadMenuItemHint {
+    color: rgba(0, 0, 0, 0.45);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.downloadMenuItemSize {
+    color: rgba(0, 0, 0, 0.42);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.downloadMenuItemCheck {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    font-size: 16px;
+    line-height: 1;
+}
+.downloadMenuItemCheck hd-icon {
+    width: 16px;
+    height: 16px;
+}
+.downloadButton .download-title .ext {
     font-weight: normal;
     margin-left: 0.4em;
     opacity: 0.8;
@@ -311,7 +762,6 @@
     width: auto;
     flex: auto;
     padding-right: 8px;
-
     white-space: nowrap;
     display: flex;
     place-content: center;
@@ -507,6 +957,8 @@ video.hero-shot {
     justify-content: center;
     width: 100%;
     padding: 10px 24px;
+    /* 保证页头内的语言菜单显示在产品展开层之上。 */
+    z-index: 101;
     background: rgba(0, 0, 0, 0.78);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(18px) saturate(1.2);
@@ -625,6 +1077,7 @@ video.hero-shot {
     justify-content: center;
     min-height: min(calc(100vh - 200px), 820px);
     padding: 72px 24px 42px;
+    z-index: 30;
 }
 
 .heroBk {
@@ -1016,6 +1469,10 @@ video.hero-shot {
     letter-spacing: -0.01em;
 }
 
+.headerProductsMenuIcon {
+    display: none;
+}
+
 .headerProductsTrigger:hover,
 .headerProductsTrigger--open {
     color: #fff;
@@ -1138,7 +1595,7 @@ video.hero-shot {
     align-items: center;
     min-height: 56px;
     padding-top: 20px;
-    color: rgba(255, 255, 255, 0.36);
+    color: rgba(255, 255, 255, 0.6);
     border-top: 1px solid var(--surface-border);
     font-size: 15px;
 }
@@ -1288,6 +1745,32 @@ video.hero-shot {
         min-width: 0;
     }
 
+    /* 窄屏顶栏空间不够放「更多产品」文字，改成菜单图标。 */
+    .headerProductsLabel,
+    .headerProductsChevron {
+        display: none;
+    }
+
+    .headerProductsMenuIcon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        font-size: 20px;
+        line-height: 1;
+        flex-shrink: 0;
+    }
+
+    .headerProductsTrigger {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        line-height: 0;
+        align-items: center;
+        justify-content: center;
+    }
+
     .headerProductsLayer {
         max-height: calc(100dvh - 52px);
         overflow-y: auto;
@@ -1385,6 +1868,31 @@ video.hero-shot {
         line-height: 1.6;
     }
 
+    .fetaList {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin-top: 20px;
+        border-radius: 14px;
+    }
+
+    .fetaItem {
+        min-height: 96px;
+        padding: 18px 12px;
+    }
+
+    .fetaItem__icon,
+    .fetaItem__iconImg {
+        width: 24px;
+        height: 24px;
+    }
+
+    .fetaItem__icon {
+        font-size: 24px;
+    }
+
+    .fetaItem__name {
+        font-size: 14px;
+    }
+
     .featureCard.style-right,
     .featureCard.style-right .featureCard__media {
         align-items: stretch;
@@ -1397,6 +1905,25 @@ video.hero-shot {
     .featureCard__shot {
         width: 100%;
         height: auto;
+    }
+
+    .featureImages__nav {
+        width: 44px;
+        height: 44px;
+    }
+
+    .featureImages__chrome {
+        gap: 10px;
+    }
+
+    .featureImages__dots {
+        display: none;
+    }
+
+    .featureImages__shot {
+        width: auto;
+        max-width: none;
+        max-height: none;
     }
 
     /* 页脚改为纵向信息流，产品卡片保持足够大的触控区域。 */
@@ -1444,11 +1971,6 @@ video.hero-shot {
         --page-gutter: 20px;
     }
 
-    .headerProducts,
-    .headerProductsLayer {
-        display: none;
-    }
-
     .stickyHeaderActions,
     .stickyHeaderNav {
         gap: 4px;
@@ -1489,7 +2011,8 @@ video.hero-shot {
         min-height: 50px;
     }
 
-    .heroPrimaryBtn.downloadButton {
+    .heroPrimaryBtn.downloadButton,
+    .heroPrimaryBtn.downloadButtonGroup {
         width: 100%;
     }
 
