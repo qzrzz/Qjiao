@@ -30,22 +30,26 @@ struct WindowChromeAccessor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            if let window = view.window {
-                context.coordinator.attach(window)
-            }
+            context.coordinator.attach(from: view)
         }
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        if let window = view.window {
-            context.coordinator.attach(window)
-        }
+        context.coordinator.attach(from: view)
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        coordinator.detach()
     }
 
     @MainActor
     final class Coordinator {
-        private weak var window: NSWindow?
+        /// Host view only. Never store a weak `NSWindow`: SwiftUI can call
+        /// `updateNSView` while the window is deallocating, and
+        /// `objc_storeWeak` then aborts (`Cannot form weak reference`).
+        private weak var hostView: NSView?
+        private var attachedWindowID: ObjectIdentifier?
         private var observers: [NSObjectProtocol] = []
         private let onAttach: (NSWindow) -> Void
 
@@ -53,14 +57,19 @@ struct WindowChromeAccessor: NSViewRepresentable {
             self.onAttach = onAttach
         }
 
-        func attach(_ window: NSWindow) {
+        func attach(from view: NSView) {
+            guard let window = view.window, window.isRegisteredWithApp else { return }
+
             // SwiftUI background layers can become translucent through the
             // Appearance setting, so the AppKit window must not flatten them
             // onto an opaque system background first.
             window.isOpaque = false
             window.backgroundColor = .clear
-            guard self.window !== window else { return }
-            self.window = window
+            guard attachedWindowID != ObjectIdentifier(window) else { return }
+
+            detach()
+            hostView = view
+            attachedWindowID = ObjectIdentifier(window)
             onAttach(window)
             // Keep the window non-movable globally. With hidden title bar +
             // fullSizeContentView, `isMovable == true` lets AppKit claim
@@ -72,8 +81,12 @@ struct WindowChromeAccessor: NSViewRepresentable {
             window.isMovableByWindowBackground = false
             reposition()
             // The initial system layout can land after us; catch up.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.reposition() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.reposition() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.reposition()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.reposition()
+            }
 
             let names: [Notification.Name] = [
                 NSWindow.didResizeNotification,
@@ -95,8 +108,17 @@ struct WindowChromeAccessor: NSViewRepresentable {
             }
         }
 
+        func detach() {
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            observers.removeAll()
+            hostView = nil
+            attachedWindowID = nil
+        }
+
         private func reposition() {
-            guard let window else { return }
+            guard let window = hostView?.window, window.isRegisteredWithApp else { return }
             // 拖窗进行中不要把 isMovable 打回 false，否则会中断 performWindowDrag。
             if WindowDragSession.activeCount == 0 {
                 window.isMovable = false
@@ -344,6 +366,12 @@ extension Notification.Name {
 }
 
 extension NSWindow {
+    /// Still in `NSApp.windows`. False during close/dealloc; pointer compare
+    /// only, so a tearing-down window is not messaged.
+    fileprivate var isRegisteredWithApp: Bool {
+        NSApp.windows.contains { $0 === self }
+    }
+
     /// Mirrors what a standard title bar does on double-click, honoring the
     /// "Double-click a window's title bar to" setting in System Settings.
     /// The global default is absent when set to Zoom, which is the default.

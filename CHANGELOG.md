@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [Unreleased]
+
+### Fixed
+
+- Fix a crash when closing a window: SwiftUI could update window chrome while `NSWindow` was deallocating, and forming a weak reference to that window aborted the process.
+
 ## [1.1.50]
 
 ### Added

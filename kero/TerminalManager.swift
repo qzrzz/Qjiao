@@ -354,6 +354,9 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Called as soon as SwiftUI gives this manager an AppKit window. A
     /// launch-time Finder request may have been queued before that happened.
     func attach(to window: NSWindow) {
+        // SwiftUI may invoke the chrome accessor while NSWindow is
+        // deallocating; forming a weak reference then aborts.
+        guard NSApp.windows.contains(where: { $0 === window }) else { return }
         self.window = window
         let directories = Self.takePendingDirectories()
         if !directories.isEmpty, let startupProjectID,

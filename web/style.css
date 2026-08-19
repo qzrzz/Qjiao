@@ -39,6 +39,10 @@ video.featureCard__shot {
   max-width: 100%;
 }
 
+.featureCard.style-center .featureCard__media {
+    width: 900px;
+}
+
 #section-fdl .featureCard .featureCard-text::after {
   display: none;
 }

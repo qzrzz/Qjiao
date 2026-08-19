@@ -1,7 +1,7 @@
 import { IPageMeta, ISection, IQPageConfig } from "qpage";
 
 export const config: IQPageConfig = {
-  defaultLang: "zh-Hans",
+
 };
 
 import UrlIcon from "./icons/icon-512.png";
