@@ -12,12 +12,11 @@
     "vendor:material-icons": "bun run scripts/vendor-material-icons.ts",
     "vendor:terminal-app-icons": "bun run scripts/vendor-terminal-app-icons.ts",
     "vendor:jxl": "bash scripts/vendor-jxl.sh",
-    "web:dev": "qpage --dev ./web ./docs",
-    "web:build": "qpage ./web ./docs",
-    "web:preview": "qpage --preview ./web ./docs",
+    "web:dev": "qpage --dev ./web ./dist-web",
+    "web:build": "qpage ./web ./dist-web",
+    "web:preview": "qpage --preview ./web ./dist-web",
     "web:i18n:codex": "codex exec 根据./web/translate.md完成翻译任务",
-    "web:i18n:gemini": "agy -p 根据./web/translate.md完成翻译任务",
-    "web:publish": "bun run qzrzz-com up ./docs ./Qjiao",
+    "web:publish": "bun run qzrzz-com up ./dist-web ./Qjiao",
     "web:build-publish": "bun run bun web:build && bun run web:publish"
   },
   "devDependencies": {
