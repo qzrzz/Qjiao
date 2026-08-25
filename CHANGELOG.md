@@ -11,6 +11,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.53]
+
+### Added
+
+- Add a dedicated line-wrapping toggle for Markdown files in the editor status bar, independent of the global source-editor wrap setting (wraps by default).
+- Reload files rewritten by external tools into the editor immediately, keeping the editor and Markdown preview in sync.
+
+### Changed
+
+- Always underline links in the Markdown preview, with a hover brightness effect.
+
+### Fixed
+
+- Fix editor and Hex editor scroll bars reverting to the legacy inset style on tab switches and SwiftUI relayouts, and overlay scroller knobs drifting off the trailing/bottom edges: keep the system-preferred overlay scroller style and re-pin knobs to the current bounds after tiling.
+- Fix Markdown split panes not filling the available height.
+
 ## [1.1.52]
 
 ### Added

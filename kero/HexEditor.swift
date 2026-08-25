@@ -247,7 +247,7 @@ struct HexEditorView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
+        let scrollView = PreferredScrollerScrollView()
         scrollView.wantsLayer = true
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true

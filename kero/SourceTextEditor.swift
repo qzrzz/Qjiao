@@ -584,10 +584,118 @@ final class FocusReportingTextView: STTextView {
     }
 }
 
+/// NSScrollView that stays on the system-preferred scroller style.
+///
+/// AppKit otherwise falls back to inset legacy scrollers when the view is
+/// briefly off-window — which happens on every tab switch, and on some
+/// SwiftUI relayouts. Legacy bars reserve a thick strip, so the horizontal
+/// scroller in particular appears to change shape and steal space from the
+/// document. Overlay knobs that were faded out also keep the frame they had
+/// at hide time; pinning them to the current edges after `tile()` keeps
+/// them on the trailing / bottom edge instead of mid-document.
+class PreferredScrollerScrollView: NSScrollView {
+    private var styleObserver: (any NSObjectProtocol)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        observePreferredScrollerStyle()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        observePreferredScrollerStyle()
+    }
+
+    deinit {
+        if let styleObserver {
+            NotificationCenter.default.removeObserver(styleObserver)
+        }
+    }
+
+    override var scrollerStyle: NSScroller.Style {
+        get { super.scrollerStyle }
+        set {
+            let preferred = NSScroller.preferredScrollerStyle
+            super.scrollerStyle = preferred == .overlay ? .overlay : newValue
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyPreferredScrollerStyle()
+    }
+
+    override func tile() {
+        super.tile()
+        pinOverlayScrollersToBounds()
+    }
+
+    func applyPreferredScrollerStyle() {
+        let preferred = NSScroller.preferredScrollerStyle
+        if super.scrollerStyle != preferred {
+            super.scrollerStyle = preferred
+        }
+        tile()
+    }
+
+    private func observePreferredScrollerStyle() {
+        styleObserver = NotificationCenter.default.addObserver(
+            forName: NSScroller.preferredScrollerStyleDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.applyPreferredScrollerStyle()
+            }
+        }
+        applyPreferredScrollerStyle()
+    }
+
+    /// Overlay scrollers that were hidden when the viewport changed keep the
+    /// frame they had, so they come back on the editor's *old* trailing or
+    /// bottom edge. Force them onto the current bounds after AppKit tiles.
+    private func pinOverlayScrollersToBounds() {
+        guard scrollerStyle == .overlay else { return }
+        let bounds = self.bounds
+        guard bounds.width > 0, bounds.height > 0 else { return }
+
+        if let scroller = verticalScroller {
+            var frame = scroller.frame
+            if frame.width <= 0 {
+                frame.size.width = NSScroller.scrollerWidth(
+                    for: scroller.controlSize,
+                    scrollerStyle: .overlay
+                )
+            }
+            frame.origin.x = bounds.maxX - frame.width
+            frame.origin.y = bounds.minY
+            frame.size.height = bounds.height
+            if scroller.frame != frame {
+                scroller.frame = frame
+            }
+        }
+        if let scroller = horizontalScroller {
+            var frame = scroller.frame
+            if frame.height <= 0 {
+                frame.size.height = NSScroller.scrollerWidth(
+                    for: scroller.controlSize,
+                    scrollerStyle: .overlay
+                )
+            }
+            frame.origin.x = bounds.minX
+            frame.origin.y = bounds.maxY - frame.height
+            frame.size.width = bounds.width
+            if scroller.frame != frame {
+                scroller.frame = frame
+            }
+        }
+    }
+}
+
 /// NSScrollView that runs a one-shot restoration during its first real layout
 /// pass — before the first paint — so a restored file opens already scrolled to
 /// its saved position instead of visibly jumping there afterward.
-private final class RestorableScrollView: NSScrollView {
+private final class RestorableScrollView: PreferredScrollerScrollView {
     var restoreOnFirstLayout: (() -> Void)?
     /// Fires once the scroll view has a non-empty frame, after any saved
     /// scroll offset has been applied.
@@ -611,11 +719,23 @@ private final class RestorableScrollView: NSScrollView {
         """)
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            scheduleEditorGeometryUpdate()
+        }
+    }
+
     override func layout() {
         super.layout()
         let viewportSize = contentView.bounds.size
         if viewportSize != lastViewportSize {
             lastViewportSize = viewportSize
+            // Place overlay knobs on the new edges *before* restoring the
+            // saved scroll offset, which would otherwise flash them at the
+            // previous size — most visibly the horizontal bar jumping off
+            // the bottom after a tab switch.
+            tile()
             scheduleEditorGeometryUpdate()
         }
         logScroller("layout")

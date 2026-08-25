@@ -25,6 +25,7 @@ struct MarkdownFileViewerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("markdownPreviewEnabled") private var isPreviewEnabled = false
     @AppStorage("markdownPreviewSplitFraction") private var splitFraction: Double = 0.5
+    @AppStorage("markdownWrapLines") private var markdownWrapLines = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,7 +50,7 @@ struct MarkdownFileViewerView: View {
 
                 HStack(spacing: 0) {
                     editor
-                        .frame(width: leftWidth)
+                        .frame(width: leftWidth, height: geometry.size.height)
 
                     if showPreview {
                         HorizontalSplitHandle(
@@ -63,9 +64,10 @@ struct MarkdownFileViewerView: View {
                             palette: previewPalette,
                             onOpenURL: openPreviewURL
                         )
-                        .frame(width: rightWidth)
+                        .frame(width: rightWidth, height: geometry.size.height)
                     }
                 }
+                .frame(width: totalWidth, height: geometry.size.height)
             }
 
             if settings.showEditorStatusBar {
@@ -93,7 +95,7 @@ struct MarkdownFileViewerView: View {
             syntaxTheme: SyntaxHighlighting.theme(
                 themeName: themeName, dark: colorScheme == .dark
             ),
-            wrapLines: settings.wrapLines,
+            wrapLines: markdownWrapLines,
             isFocused: isFocused,
             onFocused: onFocused,
             onSplit: onSplit,
@@ -593,8 +595,12 @@ private enum MarkdownPreviewChrome {
           h2 { font-size: 1.45em; border-bottom: 1px solid var(--md-border); padding-bottom: 0.25em; }
           h3 { font-size: 1.2em; }
           p, ul, ol, blockquote, pre, table { margin: 0 0 1em; }
-          a { color: var(--md-accent); text-decoration: none; }
-          a:hover { text-decoration: underline; }
+          a {
+            color: var(--md-accent);
+            text-decoration: underline;
+            text-underline-offset: 0.18em;
+          }
+          a:hover { filter: brightness(1.18); }
           ul, ol { padding-left: 1.6em; }
           li { margin: 0.2em 0; }
           li input[type="checkbox"] { margin-right: 0.4em; }

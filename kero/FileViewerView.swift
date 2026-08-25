@@ -747,6 +747,7 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
             isDirty = false
             saveError = nil
             hasExternalConflict = false
+            noteTextChanged()
             onReloadEditorText?()
         } else {
             // 本地有改动：显示冲突提示条
@@ -1001,6 +1002,7 @@ struct EditorStatusBar: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var scriptRunner = ScriptRunner.shared
     @AppStorage("markdownPreviewEnabled") private var isMarkdownPreviewEnabled = false
+    @AppStorage("markdownWrapLines") private var markdownWrapLines = true
     @State private var formatters: [EditorFormatter] = []
     @State private var formattingID: String?
     @State private var formatterError: String?
@@ -1020,13 +1022,17 @@ struct EditorStatusBar: View {
                     .macTooltip(L10n.t("Selection Summary"), position: .top)
             }
             Button {
-                settings.wrapLines.toggle()
+                if file.isMarkdownFile {
+                    markdownWrapLines.toggle()
+                } else {
+                    settings.wrapLines.toggle()
+                }
             } label: {
                 Image(systemName: "text.line.3.summary")
             }
             .buttonStyle(.plain)
-            .foregroundStyle(settings.wrapLines ? Color(nsColor: Theme.accent) : .secondary)
-            .macTooltip(settings.wrapLines ? L10n.t("Disable Line Wrapping") : L10n.t("Enable Line Wrapping"), shortcut: "⌥Z", position: .top)
+            .foregroundStyle(isWrapEnabled ? Color(nsColor: Theme.accent) : .secondary)
+            .macTooltip(isWrapEnabled ? L10n.t("Disable Line Wrapping") : L10n.t("Enable Line Wrapping"), shortcut: "⌥Z", position: .top)
             .accessibilityLabel(L10n.t("Toggle line wrapping"))
 
             if file.isMarkdownFile {
@@ -1106,6 +1112,10 @@ struct EditorStatusBar: View {
         .frame(height: 24)
         .background(Color.primary.opacity(0.035))
         .task(id: file.path) { formatters = EditorFormatter.detectAll(for: file.path) }
+    }
+
+    private var isWrapEnabled: Bool {
+        file.isMarkdownFile ? markdownWrapLines : settings.wrapLines
     }
 
     private func format(with formatter: EditorFormatter) {
