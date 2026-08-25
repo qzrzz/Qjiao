@@ -84,6 +84,8 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     @Published var saveError: String?
     /// 当前选择的行数与字符数，供底部状态栏展示。
     @Published private(set) var selectionSummary: String?
+    /// 文本变更代数。`text` 本身不发布，预览等旁路视图靠这个感知编辑。
+    @Published private(set) var textRevision: UInt64 = 0
 
     /// 当文件在外部被修改且本地有未保存内容时为 true，触发冲突提示条。
     @Published var hasExternalConflict = false
@@ -110,6 +112,22 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     var onReloadHexData: (() -> Void)?
     /// 当外部触发精确定位（如从搜索结果点击跳转）时的回调
     var onJumpToSelection: ((NSRange) -> Void)?
+    /// Markdown 预览：把编辑器当前可见的源码行（1-based，可含小数）同步到预览。
+    var onMarkdownScrollToPreview: ((Double) -> Void)?
+    /// Markdown 预览：把预览当前可见块对应的源码行同步回编辑器。
+    var onMarkdownScrollToEditor: ((Double) -> Void)?
+    /// 预览刚打开或 HTML 重渲后，请编辑器再发一次当前可见行。
+    var emitMarkdownEditorVisibleLine: (() -> Void)?
+    /// 程序化滚动后的回声抑制截止时间（`systemUptime`）。
+    private var markdownScrollEchoUntil: TimeInterval = 0
+
+    func beginMarkdownScrollEchoSuppression(for duration: TimeInterval = 0.32) {
+        markdownScrollEchoUntil = ProcessInfo.processInfo.systemUptime + duration
+    }
+
+    var isMarkdownScrollEchoSuppressed: Bool {
+        ProcessInfo.processInfo.systemUptime < markdownScrollEchoUntil
+    }
 
     private static let maxTextBytes = 5 << 20
     /// 十六进制编辑器可打开的最大字节数（64 MiB），超过则提示无法打开。
@@ -561,6 +579,21 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         return ext.isEmpty ? "Plain Text" : ext.uppercased()
     }
 
+    /// Markdown 源文件：可切换左右预览。
+    var isMarkdownFile: Bool {
+        guard case .text = content else { return false }
+        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+        case "md", "markdown", "mdown", "mkd", "mdx":
+            return true
+        default:
+            return false
+        }
+    }
+
+    func noteTextChanged() {
+        textRevision &+= 1
+    }
+
     /// 重新读取磁盘内容并清除未保存状态。
     /// 光标/选区保存在 `editorState`，由挂载的编辑器在同步时恢复。
     func reloadFromDisk() {
@@ -591,6 +624,7 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         hasExternalConflict = false
         saveError = nil
         lastDiskModificationDate = currentDiskModificationDate()
+        noteTextChanged()
         onReloadEditorText?()
     }
 
@@ -811,6 +845,16 @@ struct FileViewerView: View {
                     onNewBrowserTab: onNewBrowserTab,
                     onNewBrowserPane: onNewBrowserPane
                 )
+            } else if file.isMarkdownFile {
+                MarkdownFileViewerView(
+                    file: file,
+                    themeName: themeName,
+                    isFocused: isFocused,
+                    onFocused: onFocused,
+                    onSplit: onSplit,
+                    onNewBrowserTab: onNewBrowserTab,
+                    onNewBrowserPane: onNewBrowserPane
+                )
             } else {
                 VStack(spacing: 0) {
                     if file.hasExternalConflict {
@@ -951,11 +995,12 @@ struct FileSaveErrorBar: View {
 }
 
 /// 源码编辑器底部状态栏：保存状态、文件大小、选择摘要、语法与可用格式化工具。
-private struct EditorStatusBar: View {
+struct EditorStatusBar: View {
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject var file: FileTab
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var scriptRunner = ScriptRunner.shared
+    @AppStorage("markdownPreviewEnabled") private var isMarkdownPreviewEnabled = false
     @State private var formatters: [EditorFormatter] = []
     @State private var formattingID: String?
     @State private var formatterError: String?
@@ -983,6 +1028,27 @@ private struct EditorStatusBar: View {
             .foregroundStyle(settings.wrapLines ? Color(nsColor: Theme.accent) : .secondary)
             .macTooltip(settings.wrapLines ? L10n.t("Disable Line Wrapping") : L10n.t("Enable Line Wrapping"), shortcut: "⌥Z", position: .top)
             .accessibilityLabel(L10n.t("Toggle line wrapping"))
+
+            if file.isMarkdownFile {
+                Button {
+                    isMarkdownPreviewEnabled.toggle()
+                } label: {
+                    Image(systemName: "square.split.2x1")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(
+                    isMarkdownPreviewEnabled
+                        ? Color(nsColor: Theme.accent)
+                        : .secondary
+                )
+                .macTooltip(
+                    isMarkdownPreviewEnabled
+                        ? L10n.t("Hide Markdown Preview")
+                        : L10n.t("Show Markdown Preview"),
+                    position: .top
+                )
+                .accessibilityLabel(L10n.t("Toggle Markdown Preview"))
+            }
 
             Text(file.languageLabel)
                 .macTooltip(L10n.t("Language Mode"), position: .top)

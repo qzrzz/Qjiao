@@ -161,3 +161,49 @@ struct VerticalSplitHandle: View {
         fraction = next
     }
 }
+
+/// 竖直分割条：拖动改变左右区域的宽度占比；双击恢复默认比例。
+///
+/// `availableWidth` 是分割条两侧内容区的总宽度（不含固定 chrome），
+/// 用于把像素位移换算成 fraction。
+struct HorizontalSplitHandle: View {
+    @Binding var fraction: Double
+    let range: ClosedRange<Double>
+    let defaultFraction: Double
+    /// 左半 + 右半内容区合计宽度，拖动时用位移 / 此值更新比例。
+    let availableWidth: CGFloat
+
+    @State private var baseline: Double?
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color(nsColor: Theme.divider))
+                .frame(width: 1)
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 7)
+                .contentShape(Rectangle())
+                .pointerStyle(.columnResize)
+                .gesture(
+                    DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { value in
+                            let span = max(availableWidth, 1)
+                            let base = baseline ?? fraction
+                            baseline = base
+                            fraction = min(
+                                max(base + value.translation.width / span, range.lowerBound),
+                                range.upperBound
+                            )
+                            NSCursor.columnResize.set()
+                        }
+                        .onEnded { _ in baseline = nil }
+                )
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded { fraction = defaultFraction }
+                )
+        }
+        .frame(width: 7)
+        .accessibilityLabel(L10n.t("Resize Markdown Preview"))
+    }
+}

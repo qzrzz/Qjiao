@@ -257,9 +257,13 @@ struct SourceTextEditor: NSViewRepresentable {
     final class Coordinator: NSObject, STTextViewDelegate {
         private let file: FileTab
         private weak var textView: STTextView?
+        private weak var scrollView: NSScrollView?
         private weak var syntaxHighlighter: SyntaxHighlightCoordinator?
         private var syntaxThemeKey: String?
         private var scrollObserver: (any NSObjectProtocol)?
+        private var lineStarts: [Int] = [0]
+        private var lineStartsRevision: UInt64 = .max
+        private var lastEmittedMarkdownLine: Double = -1
         /// Last-applied focus state, so `updateNSView` can act only on the
         /// unfocused→focused edge.
         var wasFocused = false
@@ -270,12 +274,19 @@ struct SourceTextEditor: NSViewRepresentable {
 
         func attach(textView: STTextView, scrollView: NSScrollView) {
             self.textView = textView
+            self.scrollView = scrollView
             textView.textDelegate = self
             file.onReloadEditorText = { [weak self] in
                 self?.reloadTextFromFile()
             }
             file.onJumpToSelection = { [weak self] range in
                 self?.jumpToSelection(range)
+            }
+            file.onMarkdownScrollToEditor = { [weak self] line in
+                self?.scrollToMarkdownLine(line)
+            }
+            file.emitMarkdownEditorVisibleLine = { [weak self] in
+                self?.emitVisibleMarkdownLine(force: true)
             }
             scrollObserver = NotificationCenter.default.addObserver(
                 forName: NSView.boundsDidChangeNotification,
@@ -286,6 +297,7 @@ struct SourceTextEditor: NSViewRepresentable {
                     guard let self, let clipView = scrollView?.contentView else { return }
                     self.file.editorState.scrollX = clipView.bounds.origin.x
                     self.file.editorState.scrollY = clipView.bounds.origin.y
+                    self.emitVisibleMarkdownLine(force: false)
                 }
             }
         }
@@ -316,6 +328,7 @@ struct SourceTextEditor: NSViewRepresentable {
             guard newText != file.text else { return }
             file.text = newText
             file.refreshDirtyState()
+            file.noteTextChanged()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -362,6 +375,95 @@ struct SourceTextEditor: NSViewRepresentable {
                 textView.scrollRangeToVisible(targetRange)
                 textView.centerSelectionInVisibleArea(nil)
             }
+        }
+
+        private func currentLineStarts() -> [Int] {
+            if lineStartsRevision != file.textRevision {
+                lineStarts = MarkdownSourceLine.starts(in: file.text)
+                lineStartsRevision = file.textRevision
+            }
+            return lineStarts
+        }
+
+        private func emitVisibleMarkdownLine(force: Bool) {
+            guard file.isMarkdownFile, let textView else { return }
+            if !force, file.isMarkdownScrollEchoSuppressed { return }
+            let line = visibleMarkdownLine(in: textView)
+            if !force, abs(line - lastEmittedMarkdownLine) < 0.08 { return }
+            lastEmittedMarkdownLine = line
+            file.onMarkdownScrollToPreview?(line)
+        }
+
+        /// 视口顶部对应的源码行（1-based，含行内小数），供预览按块插值而不是跟像素。
+        private func visibleMarkdownLine(in textView: STTextView) -> Double {
+            let starts = currentLineStarts()
+            if let scrollView,
+               let document = scrollView.documentView
+            {
+                let clip = scrollView.contentView.bounds
+                let maxY = document.frame.height
+                if maxY > clip.height, clip.maxY >= maxY - 2 {
+                    return Double(starts.count)
+                }
+            }
+            let y = textView.visibleRect.minY
+            let layout = textView.textLayoutManager
+            let point = CGPoint(x: max(textView.visibleRect.midX, 1), y: y + 0.5)
+            guard let fragment = layout.textLayoutFragment(for: point) else {
+                return 1
+            }
+            var location = fragment.rangeInElement.location
+            var lineY = fragment.layoutFragmentFrame.minY
+            var lineHeight = max(fragment.layoutFragmentFrame.height, 1)
+            for lineFragment in fragment.textLineFragments {
+                let top = fragment.layoutFragmentFrame.minY + lineFragment.typographicBounds.minY
+                let height = max(lineFragment.typographicBounds.height, 1)
+                if y + 0.5 < top { break }
+                lineY = top
+                lineHeight = height
+                if let mapped = layout.location(
+                    fragment.rangeInElement.location,
+                    offsetBy: lineFragment.characterRange.location
+                ) {
+                    location = mapped
+                }
+                if y + 0.5 < top + height { break }
+            }
+            let offset = layout.offset(from: layout.documentRange.location, to: location)
+            let line = MarkdownSourceLine.line(forUTF16Offset: offset, starts: starts)
+            let fraction = min(max((y - lineY) / lineHeight, 0), 0.99)
+            return Double(line) + Double(fraction)
+        }
+
+        private func scrollToMarkdownLine(_ line: Double) {
+            guard let textView, let scrollView else { return }
+            file.beginMarkdownScrollEchoSuppression()
+            let starts = currentLineStarts()
+            let whole = max(1, Int(line.rounded(.down)))
+            let fraction = min(max(line - Double(whole), 0), 0.99)
+            let length = (file.text as NSString).length
+            let offset = min(MarkdownSourceLine.utf16Offset(ofLine: whole, starts: starts), length)
+            textView.scrollRangeToVisible(NSRange(location: offset, length: 0))
+
+            let layout = textView.textLayoutManager
+            guard let location = layout.location(
+                layout.documentRange.location,
+                offsetBy: offset
+            ) else { return }
+            let range = NSTextRange(location: location)
+            layout.ensureLayout(for: range)
+            var targetY: CGFloat?
+            layout.enumerateTextSegments(in: range, type: .standard, options: []) { _, frame, _, _ in
+                targetY = frame.minY + frame.height * CGFloat(fraction)
+                return false
+            }
+            guard let targetY else { return }
+            let clip = scrollView.contentView
+            let maxY = max(0, (scrollView.documentView?.frame.height ?? 0) - clip.bounds.height)
+            var origin = clip.bounds.origin
+            origin.y = min(max(targetY, 0), maxY)
+            clip.setBoundsOrigin(origin)
+            scrollView.reflectScrolledClipView(clip)
         }
     }
 }
