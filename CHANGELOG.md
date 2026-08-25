@@ -11,6 +11,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.52]
+
+### Added
+
+- Add Markdown image insertion: paste (⌘V) or drag image files into a Markdown editor to write them to a sibling `assets/` folder and insert `![](assets/…)`; sources already inside `./assets` are reused without copying.
+
+### Fixed
+
+- Fix Markdown preview failing to load images and links whose paths contain spaces or special characters: percent-encode each URL path segment, resolve relative paths safely, and support `<url>` / title syntax for images and links.
+
 ## [1.1.51]
 
 ### Added

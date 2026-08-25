@@ -115,6 +115,7 @@ struct SourceTextEditor: NSViewRepresentable {
         textView.isIncrementalSearchingEnabled = true
         apply(to: textView, scrollView: scrollView)
         textView.text = file.text
+        textView.markdownFilePath = file.isMarkdownFile ? file.path : nil
 
         // Tree-sitter syntax highlighting (STPluginNeon), for file types with
         // a bundled grammar. Added after the text is set so the plugin's
@@ -193,6 +194,8 @@ struct SourceTextEditor: NSViewRepresentable {
             onNewBrowserTab
         (textView as? FocusReportingTextView)?.splitTarget.onNewBrowserPane =
             onNewBrowserPane
+        (textView as? FocusReportingTextView)?.markdownFilePath =
+            file.isMarkdownFile ? file.path : nil
         apply(to: textView, scrollView: scrollView)
         context.coordinator.updateSyntaxTheme(syntaxTheme)
         // Take focus on the unfocused→focused edge (keyboard navigation moving
@@ -476,6 +479,22 @@ final class FocusReportingTextView: STTextView {
     /// Owns the split context-menu items, kept off the text view so its own
     /// menu validation doesn't disable them.
     let splitTarget = SplitMenuTarget()
+    /// Markdown 源文件路径：非 nil 时启用图片粘贴 / 拖入（写入同级 assets/）。
+    var markdownFilePath: String? {
+        didSet {
+            if markdownFilePath != nil {
+                registerForDraggedTypes(Self.markdownImageDragTypes)
+            }
+        }
+    }
+
+    private static let markdownImageDragTypes: [NSPasteboard.PasteboardType] = [
+        .fileURL,
+        .png,
+        .tiff,
+        NSPasteboard.PasteboardType("NSFilenamesPboardType"),
+        NSPasteboard.PasteboardType("public.file-url"),
+    ]
 
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
@@ -492,9 +511,66 @@ final class FocusReportingTextView: STTextView {
 
     /// 只接受纯文本：外部富文本的字体/颜色混入源码文档后，会污染该处
     /// 的 typing attributes（光标停在那里输入的文字带异常样式），并随
-    /// 再次复制继续扩散。
+    /// 再次复制继续扩散。Markdown 编辑额外拦截图片粘贴，落到 assets/。
     override func paste(_ sender: Any?) {
+        if insertMarkdownImages(from: NSPasteboard.general) { return }
         _ = readSelection(from: NSPasteboard.general, type: .string)
+    }
+
+    /// 剪贴板只有图片、没有文本时系统 Paste 菜单会禁用 ⌘V；在此拦截以便粘贴到 assets/。
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if markdownFilePath != nil,
+           flags == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "v",
+           MarkdownImageInsert.canAccept(NSPasteboard.general)
+        {
+            paste(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        if markdownFilePath != nil, MarkdownImageInsert.canAccept(sender.draggingPasteboard) {
+            return .copy
+        }
+        return super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let operation = super.draggingUpdated(sender)
+        if markdownFilePath != nil, MarkdownImageInsert.canAccept(sender.draggingPasteboard) {
+            return .copy
+        }
+        return operation
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        if insertMarkdownImages(from: sender.draggingPasteboard) {
+            return true
+        }
+        if markdownFilePath != nil, MarkdownImageInsert.canAccept(sender.draggingPasteboard) {
+            NSSound.beep()
+            return true
+        }
+        return super.performDragOperation(sender)
+    }
+
+    @discardableResult
+    private func insertMarkdownImages(from pasteboard: NSPasteboard) -> Bool {
+        guard let path = markdownFilePath,
+              MarkdownImageInsert.canAccept(pasteboard)
+        else { return false }
+        guard let snippet = MarkdownImageInsert.snippet(
+            from: pasteboard,
+            markdownPath: path
+        ) else {
+            NSSound.beep()
+            return true
+        }
+        insertText(snippet, replacementRange: NSRange(location: NSNotFound, length: 0))
+        return true
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

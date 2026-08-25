@@ -53,20 +53,46 @@ nonisolated enum MarkdownHTML {
     }
 
     static func isSafeURL(_ raw: String) -> Bool {
-        let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = trimmed.removingPercentEncoding ?? trimmed
         if url.isEmpty { return false }
         if url.hasPrefix("#") { return true }
         if url.hasPrefix("/") || url.hasPrefix("./") || url.hasPrefix("../") {
             return true
         }
         if !url.contains(":") { return true }
-        guard let scheme = URL(string: url)?.scheme?.lowercased() else { return false }
+        guard let scheme = URL(string: url.replacingOccurrences(of: " ", with: "%20"))?
+            .scheme?.lowercased()
+        else { return false }
         switch scheme {
         case "http", "https", "mailto", "file":
             return true
         default:
             return false
         }
+    }
+
+    /// 相对路径按段 percent-encode，保证带空格的 `img src` 能被自定义 scheme 加载。
+    static func encodeResourceURL(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let decoded = trimmed.removingPercentEncoding ?? trimmed
+        if decoded.hasPrefix("http://")
+            || decoded.hasPrefix("https://")
+            || decoded.hasPrefix("mailto:")
+            || decoded.hasPrefix("file:")
+        {
+            var allowed = CharacterSet.urlFragmentAllowed
+            allowed.insert(charactersIn: ":/?#[]@!$&'()*+,;=-._~")
+            return decoded.addingPercentEncoding(withAllowedCharacters: allowed) ?? decoded
+        }
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "?#")
+        return decoded
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map { part in
+                String(part).addingPercentEncoding(withAllowedCharacters: allowed) ?? String(part)
+            }
+            .joined(separator: "/")
     }
 }
 
@@ -606,39 +632,63 @@ nonisolated private struct Parser {
     }
 
     private func replaceImages(_ text: String) -> String {
-        replacePattern(
+        var result = replacePattern(
             text,
-            pattern: "!\\[([^\\]]*)\\]\\(([^)\\s]+)(?:\\s+\"([^\"]*)\")?\\)"
-        ) { match in
-            let alt = MarkdownHTML.escape(match[1])
-            let url = match[2]
-            guard MarkdownHTML.isSafeURL(url) else {
-                return MarkdownHTML.escape("![\(match[1])](\(match[2]))")
-            }
-            let title = match[3]
-            let titleAttr = title.isEmpty
-                ? ""
-                : " title=\"\(MarkdownHTML.escapeAttribute(title))\""
-            return "<img src=\"\(MarkdownHTML.escapeAttribute(url))\" alt=\"\(alt)\"\(titleAttr)>"
+            pattern: "!\\[([^\\]]*)\\]\\(\\s*<([^>]+)>\\s*(?:\"([^\"]*)\")?\\s*\\)"
+        ) { emitImage($0) }
+        result = replacePattern(
+            result,
+            pattern: "!\\[([^\\]]*)\\]\\(\\s*([^)\\s]+)\\s*(?:\"([^\"]*)\")?\\s*\\)"
+        ) { emitImage($0) }
+        result = replacePattern(
+            result,
+            pattern: "!\\[([^\\]]*)\\]\\(\\s*([^)]+?)\\s*\\)"
+        ) { emitImage($0) }
+        return result
+    }
+
+    private func emitImage(_ match: [String]) -> String {
+        let alt = MarkdownHTML.escape(match[1])
+        let url = match[2].trimmingCharacters(in: .whitespaces)
+        guard MarkdownHTML.isSafeURL(url) else {
+            return MarkdownHTML.escape("![\(match[1])](\(match[2]))")
         }
+        let title = match.count > 3 ? match[3] : ""
+        let titleAttr = title.isEmpty
+            ? ""
+            : " title=\"\(MarkdownHTML.escapeAttribute(title))\""
+        let src = MarkdownHTML.escapeAttribute(MarkdownHTML.encodeResourceURL(url))
+        return "<img src=\"\(src)\" alt=\"\(alt)\"\(titleAttr)>"
     }
 
     private func replaceLinks(_ text: String) -> String {
-        replacePattern(
+        var result = replacePattern(
             text,
-            pattern: "(?<!!)\\[([^\\]]+)\\]\\(([^)\\s]+)(?:\\s+\"([^\"]*)\")?\\)"
-        ) { match in
-            let label = match[1]
-            let url = match[2]
-            guard MarkdownHTML.isSafeURL(url) else {
-                return "[\(label)](\(MarkdownHTML.escape(url)))"
-            }
-            let title = match[3]
-            let titleAttr = title.isEmpty
-                ? ""
-                : " title=\"\(MarkdownHTML.escapeAttribute(title))\""
-            return "<a href=\"\(MarkdownHTML.escapeAttribute(url))\"\(titleAttr)>\(label)</a>"
+            pattern: "(?<!!)\\[([^\\]]+)\\]\\(\\s*<([^>]+)>\\s*(?:\"([^\"]*)\")?\\s*\\)"
+        ) { emitLink($0) }
+        result = replacePattern(
+            result,
+            pattern: "(?<!!)\\[([^\\]]+)\\]\\(\\s*([^)\\s]+)\\s*(?:\"([^\"]*)\")?\\s*\\)"
+        ) { emitLink($0) }
+        result = replacePattern(
+            result,
+            pattern: "(?<!!)\\[([^\\]]+)\\]\\(\\s*([^)]+?)\\s*\\)"
+        ) { emitLink($0) }
+        return result
+    }
+
+    private func emitLink(_ match: [String]) -> String {
+        let label = match[1]
+        let url = match[2].trimmingCharacters(in: .whitespaces)
+        guard MarkdownHTML.isSafeURL(url) else {
+            return "[\(label)](\(MarkdownHTML.escape(url)))"
         }
+        let title = match.count > 3 ? match[3] : ""
+        let titleAttr = title.isEmpty
+            ? ""
+            : " title=\"\(MarkdownHTML.escapeAttribute(title))\""
+        let href = MarkdownHTML.escapeAttribute(MarkdownHTML.encodeResourceURL(url))
+        return "<a href=\"\(href)\"\(titleAttr)>\(label)</a>"
     }
 
     private func replaceAutolinks(_ text: String) -> String {

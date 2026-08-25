@@ -481,27 +481,22 @@ private final class MarkdownPreviewResourceHandler: NSObject, WKURLSchemeHandler
             )
             return
         }
-        if url.path == "/" || url.path.isEmpty {
-            let data = Data()
-            let response = URLResponse(
-                url: url,
-                mimeType: "text/html",
-                expectedContentLength: 0,
-                textEncodingName: "utf-8"
-            )
-            urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive(data)
-            urlSchemeTask.didFinish()
-            return
-        }
-
-        let relative = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let target = rootDirectory.appendingPathComponent(relative).standardizedFileURL
-        let root = rootDirectory.standardizedFileURL
-        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
-        guard target.path == root.path || target.path.hasPrefix(rootPath) else {
+        guard let target = localFile(for: url) else {
+            if url.path == "/" || url.path.isEmpty {
+                let data = Data()
+                let response = URLResponse(
+                    url: url,
+                    mimeType: "text/html",
+                    expectedContentLength: 0,
+                    textEncodingName: "utf-8"
+                )
+                urlSchemeTask.didReceive(response)
+                urlSchemeTask.didReceive(data)
+                urlSchemeTask.didFinish()
+                return
+            }
             urlSchemeTask.didFailWithError(
-                NSError(domain: NSURLErrorDomain, code: NSURLErrorNoPermissionsToReadFile)
+                NSError(domain: NSURLErrorDomain, code: NSURLErrorFileDoesNotExist)
             )
             return
         }
@@ -524,6 +519,27 @@ private final class MarkdownPreviewResourceHandler: NSObject, WKURLSchemeHandler
     }
 
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+
+    /// 把 `qjiao-md://preview/assets/foo%20bar.png` 解到 Markdown 目录下的真实文件。
+    private func localFile(for requestURL: URL) -> URL? {
+        var relative = requestURL.path(percentEncoded: false)
+        if relative.hasPrefix("/") {
+            relative = String(relative.dropFirst())
+        }
+        if relative.isEmpty { return nil }
+        if let decoded = relative.removingPercentEncoding {
+            relative = decoded
+        }
+        let target = URL(fileURLWithPath: relative, relativeTo: rootDirectory)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let root = rootDirectory.resolvingSymlinksInPath().standardizedFileURL
+        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard target.path == root.path || target.path.hasPrefix(rootPath) else {
+            return nil
+        }
+        return target
+    }
 
     private func mimeType(for ext: String) -> String {
         switch ext.lowercased() {
