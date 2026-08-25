@@ -11,7 +11,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
-## [Unreleased]
+## [1.1.51]
+
+### Added
+
+- Add Markdown preview: toggle a live split next to the source from the editor status bar, drag the divider, and keep editor/preview scroll aligned by content block rather than pixels.
 
 ### Fixed
 
