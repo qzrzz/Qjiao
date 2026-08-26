@@ -137,10 +137,6 @@ struct ContentView: View {
             manager.reloadActiveProjectTheme()
             // Tab Agent 角标依赖全局轮询；Info 面板也会 activate，幂等。
             AgentWatcher.shared.activate(manager: manager)
-            NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { event in
-                FileTreeModel.isDraggingFromTree = false
-                return event
-            }
         }
     }
 
@@ -390,7 +386,7 @@ private struct MainHeaderView: View {
     private static let tabNewSpacing: CGFloat = 4
     /// Tabs 行上下各一条拖窗热区高度。
     private static let tabEdgeDragHeight: CGFloat = 8
-    /// 顶栏总高：上沿拖窗带（多层含额外 8pt）+ 中间标签行 + 下沿（8pt + 4pt）。
+    /// 顶栏总高：上沿拖窗带 + 中间标签行 + 下沿拖窗带（多层上下空白只加在 wrap）。
     private var headerHeight: CGFloat {
         headerTopDragHeight + headerBottomDragHeight
             + max(tabStripHeight, TabStripMetrics.rowHeight)
@@ -409,9 +405,17 @@ private struct MainHeaderView: View {
         Self.tabEdgeDragHeight + wrapChromeTopInset
     }
 
-    /// 顶栏最下沿拖窗带：8pt + Tabs 底部 4pt 空白。
+    /// 多层时 Tabs 底部再加 14pt 空白。
+    private var wrapChromeBottomInset: CGFloat {
+        settings.tabsLayoutMode == .wrap
+            && (manager.selectedProject?.tabs.isEmpty == false)
+            ? TabStripMetrics.wrapBottomInset
+            : 0
+    }
+
+    /// 顶栏最下沿拖窗带：默认 8pt；多层再加 14pt。
     private var headerBottomDragHeight: CGFloat {
-        Self.tabEdgeDragHeight + TabStripMetrics.tabBottomInset
+        Self.tabEdgeDragHeight + wrapChromeBottomInset
     }
 
     /// 左侧栏开关占用宽度（按钮 + 右侧间距）；仅在 Tabs 栏展示时计入。
@@ -530,7 +534,7 @@ private struct MainHeaderView: View {
                 .background { HeaderWindowDragBand() }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // Tabs 下方 8pt + 4pt：整行可拖窗口，右键切换布局。
+                // Tabs 下方 8pt（多层再加 14pt）：整行可拖窗口，右键切换布局。
                 HeaderWindowDragBand(height: headerBottomDragHeight)
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -950,14 +954,20 @@ private enum TabStripMetrics {
     static let compressedTabMaxWidth: CGFloat = 140
     /// 换行模式最小宽度：不随标题伸缩；有余量时均分填满容器。
     static let wrapTabMinWidth: CGFloat = 240
-    /// 单行 Tab 高度（条目上下各 +2pt）。
-    static let rowHeight: CGFloat = 30
+    /// 滚动 / 弹性模式的单行 Tab 高度。
+    static let rowHeight: CGFloat = 26
+    /// 多层模式的单行 Tab 高度（比默认高 4pt）。
+    static let wrapRowHeight: CGFloat = 30
+    /// 滚动 / 弹性模式条目上下内边距。
+    static let tabVerticalPadding: CGFloat = 5
+    /// 多层模式条目上下内边距（图标 16 + 7×2 = 30）。
+    static let wrapTabVerticalPadding: CGFloat = 7
     /// 换行模式最多排几行。
     static let maxWrapRows = 3
     /// 换行模式第一行 Tab 上方的空白（可拖窗口）。
     static let wrapTopInset: CGFloat = 8
-    /// Tabs 下方额外空白（可拖窗口，右键切换布局）。
-    static let tabBottomInset: CGFloat = 4
+    /// 多层模式 Tabs 下方额外空白（可拖窗口，右键切换布局）。
+    static let wrapBottomInset: CGFloat = 14
     /// 仅图标态固定宽度：图标 + 左右内边距。
     static let iconOnlyWidth: CGFloat = 32
     /// 分配宽度低于此值时切换为仅图标（无标题、无关闭）。
@@ -1068,7 +1078,7 @@ private enum TabStripMetrics {
     /// 换行内容的总高度（可超过 3 行，供纵向滚动）。
     static func wrapContentHeight(rowCount: Int) -> CGFloat {
         let rows = max(rowCount, 1)
-        return CGFloat(rows) * rowHeight + CGFloat(max(rows - 1, 0)) * interTabSpacing
+        return CGFloat(rows) * wrapRowHeight + CGFloat(max(rows - 1, 0)) * interTabSpacing
     }
 
     /// 换行视口高度：最多 3 行。
@@ -1454,7 +1464,7 @@ private struct SessionTabsView: View {
         if isWrap {
             TabWrapLayout(
                 spacing: TabStripMetrics.interTabSpacing,
-                rowHeight: TabStripMetrics.rowHeight
+                rowHeight: TabStripMetrics.wrapRowHeight
             ) {
                 tabBandItems
             }
@@ -1477,7 +1487,7 @@ private struct SessionTabsView: View {
             HeaderWindowDragBand()
             TabWrapLayout(
                 spacing: TabStripMetrics.interTabSpacing,
-                rowHeight: TabStripMetrics.rowHeight
+                rowHeight: TabStripMetrics.wrapRowHeight
             ) {
                 tabBandItems
             }
@@ -1494,14 +1504,14 @@ private struct SessionTabsView: View {
             widths: Array(repeating: tabWidth, count: project.tabs.count),
             availableWidth: max(maxStripWidth, 1)
         )
-        let rowStep = TabStripMetrics.rowHeight + TabStripMetrics.interTabSpacing
+        let rowStep = TabStripMetrics.wrapRowHeight + TabStripMetrics.interTabSpacing
         ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
             let used = CGFloat(row.count) * tabWidth
                 + CGFloat(max(row.count - 1, 0)) * TabStripMetrics.interTabSpacing
             let remainder = max(0, stripWidth - used)
             if remainder > 1 {
                 HeaderWindowDragBand()
-                    .frame(width: remainder, height: TabStripMetrics.rowHeight)
+                    .frame(width: remainder, height: TabStripMetrics.wrapRowHeight)
                     .offset(
                         x: used,
                         y: CGFloat(rowIndex) * rowStep
@@ -1926,15 +1936,15 @@ private struct SessionTabsView: View {
             performScroll(to: id, anchor: nil, using: proxy, animated: animated)
             return
         }
-        let rowStep = TabStripMetrics.rowHeight + TabStripMetrics.interTabSpacing
+        let rowStep = TabStripMetrics.wrapRowHeight + TabStripMetrics.interTabSpacing
         let tabMinY = CGFloat(rowIndex) * rowStep
-        let tabMaxY = tabMinY + TabStripMetrics.rowHeight
+        let tabMaxY = tabMinY + TabStripMetrics.wrapRowHeight
         let safeMinY = stripGeometry.contentOffsetY + (overflow.top ? fadeWidth : 0)
         let safeMaxY = stripGeometry.contentOffsetY + stripGeometry.containerHeight
             - (overflow.bottom ? fadeWidth : 0)
         let availableSpace = max(
             1,
-            stripGeometry.containerHeight - TabStripMetrics.rowHeight
+            stripGeometry.containerHeight - TabStripMetrics.wrapRowHeight
         )
         let anchor: UnitPoint
         if tabMinY < safeMinY - 0.5 {
@@ -2364,6 +2374,13 @@ private struct TabRenameChrome: View {
     @State private var draft: String
     @State private var finished = false
     @FocusState private var focused: Bool
+    @ObservedObject private var settings = AppSettings.shared
+
+    private var verticalPadding: CGFloat {
+        settings.tabsLayoutMode == .wrap
+            ? TabStripMetrics.wrapTabVerticalPadding
+            : TabStripMetrics.tabVerticalPadding
+    }
 
     init(
         systemImage: String,
@@ -2403,8 +2420,7 @@ private struct TabRenameChrome: View {
                 .onChange(of: focused) { if !focused { finish(apply: true) } }
         }
         .padding(.horizontal, 8)
-        // 与 TabItemChrome 一致：条目高度 30pt。
-        .padding(.vertical, 7)
+        .padding(.vertical, verticalPadding)
         .background(RoundedRectangle(cornerRadius: 6).fill(Theme.primaryColor.opacity(0.09)))
         .onAppear { DispatchQueue.main.async { focused = true } }
     }
@@ -2734,7 +2750,14 @@ private struct TabItemChrome: View {
     let select: () -> Void
     let close: () -> Void
 
+    @ObservedObject private var settings = AppSettings.shared
     @State private var isHovering = false
+
+    private var verticalPadding: CGFloat {
+        settings.tabsLayoutMode == .wrap
+            ? TabStripMetrics.wrapTabVerticalPadding
+            : TabStripMetrics.tabVerticalPadding
+    }
     /// 当前显示宽度会立即扩张，但会延迟收缩，给标题的短暂变化留出缓冲。
     @State private var retainedWidth = defaultMinWidth
     @State private var shrinkTask: Task<Void, Never>?
@@ -2844,8 +2867,7 @@ private struct TabItemChrome: View {
                 }
                 .padding(.leading, iconOnly ? 7 : 9)
                 .padding(.trailing, iconOnly ? 7 : 5)
-                // 条目高度 30pt：图标 16 + 上下各 7pt。
-                .padding(.vertical, 7)
+                .padding(.vertical, verticalPadding)
                 .frame(maxWidth: .infinity, alignment: iconOnly ? .center : .leading)
                 .animation(Self.trailingLayoutAnimation, value: showsCloseButton)
             }

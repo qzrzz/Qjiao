@@ -38,22 +38,14 @@ struct TasksPanel: View {
 
     var body: some View {
         let _ = l10n.language
-        ZStack(alignment: .topTrailing) {
-            Group {
-                if hasAnyTaskSection {
-                    taskList
-                } else {
-                    emptyTasks
-                }
+        Group {
+            if hasAnyTaskSection {
+                taskList
+            } else {
+                emptyTasks
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-            SidebarRefreshButton(isRefreshing: model.isRefreshing) {
-                model.refresh()
-            }
-            .padding(.top, 6)
-            .padding(.trailing, 6)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: model.packageScripts.count) { oldCount, newCount in
             sidebarAutoCollapse(
                 oldCount: oldCount, newCount: newCount, isCollapsed: $packageScriptsCollapsed

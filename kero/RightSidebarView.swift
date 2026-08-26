@@ -295,6 +295,7 @@ struct RightSidebarView: View {
         // 每 5 拍（10s）重新解析一次 gitRoot：覆盖 Agent 在进程内 chdir（worktree
         // 跟随）等不产生 OSC 7 / 事件的变化，避免大仓库每 2s 全量跑 7 个 git 子进程。
         .onReceive(refreshTimer) { _ in
+            guard manager.isPanelVisible else { return }
             gitSyncTick += 1
             // 定时路径只重新解析 gitRoot（覆盖 Agent 进程内 chdir 等不产生事件
             // 的变化）；root 未变时不重复刷新——GitStatusModel 内部心跳 + watcher

@@ -19,6 +19,17 @@ final class FileTreeModel: nonisolated ObservableObject {
     /// 静态状态记录：标记当前是否正在从右侧边栏文件目录树中拖拽文件/文件夹
     static var isDraggingFromTree: Bool = false
     static var activeTreeDragPasteboardChangeCount: Int? = nil
+    private static var dragEndMonitorInstalled = false
+
+    /// 全局鼠标抬起时清掉树拖拽标记。只装一次，避免 ContentView.onAppear 重复叠加 monitor。
+    static func installDragEndMonitor() {
+        guard !dragEndMonitorInstalled else { return }
+        dragEndMonitorInstalled = true
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { event in
+            assumeMainActor { isDraggingFromTree = false }
+            return event
+        }
+    }
 
     /// 文件排序依据
     enum FileSortCriteria: String, CaseIterable, Identifiable {

@@ -11,6 +11,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.55]
+
+### Changed
+
+- Compact single-row tab strips (scroll and elastic layouts) from 30pt to 26pt tab items with tighter vertical padding, while wrap-layout rows keep their 30pt height; the window-drag band below the tabs now matches each layout's height.
+- Remove the Tasks panel's floating refresh button — tasks keep refreshing automatically.
+
+### Fixed
+
+- Fix UI stutter after long-running sessions: the display-cycle layout protection no longer symbolizes the call stack on every window layout pass, batches same-frame layout requests per window, and falls back to nesting-depth detection when the private observer API is unavailable; the file-tree drag-end mouse monitor is now installed once at launch instead of once per window.
+- Skip the periodic git-root re-parse tick while the right sidebar panel is hidden, avoiding needless git subprocess runs.
+
 ## [1.1.54]
 
 ### Added

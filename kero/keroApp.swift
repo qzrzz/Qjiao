@@ -26,6 +26,7 @@ struct keroApp: App {
         SubprocessRunner.boostFileDescriptorLimit()
         SubprocessRunner.startFDMonitor()
         DisplayCycleLayoutProtection.install()
+        FileTreeModel.installDragEndMonitor()
         TerminalFont.registerBundledFonts()
         TerminalNotificationService.shared.configure()
         // 确保启动时已从 config 同步语言（AppSettings.shared 会触发加载）。
