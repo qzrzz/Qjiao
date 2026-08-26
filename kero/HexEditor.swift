@@ -1109,9 +1109,7 @@ struct HexEditorStatusBar: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Label(file.isDirty ? L10n.t("Unsaved") : L10n.t("Saved"), systemImage: file.isDirty ? "circle" : "checkmark.circle")
-                .foregroundStyle(.secondary)
-                .macTooltip(file.isDirty ? L10n.t("Unsaved Changes") : L10n.t("Saved to Disk"), shortcut: "⌘S", position: .top)
+            FileSaveStatusButton(file: file)
             Text(file.editorFileSize)
                 .monospacedDigit()
                 .macTooltip(L10n.t("File Size"), position: .top)

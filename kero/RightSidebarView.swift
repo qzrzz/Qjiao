@@ -7,9 +7,10 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// 右侧下半区底栏 tab（框架阶段仅切换空壳）。
+/// 右侧下半区底栏 tab。
 private enum RightBottomPanel: String, CaseIterable, Identifiable {
     case system
+    case tasks
     case note
 
     var id: String { rawValue }
@@ -17,6 +18,7 @@ private enum RightBottomPanel: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .system: return L10n.t("System")
+        case .tasks: return L10n.t("Tasks")
         case .note: return L10n.t("Note")
         }
     }
@@ -24,6 +26,7 @@ private enum RightBottomPanel: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .system: return "cpu"
+        case .tasks: return "play.square"
         case .note: return "note.text"
         }
     }
@@ -176,7 +179,7 @@ private enum SidebarTabLayout {
 
 /// Right sidebar: hidden by default, toggled from the terminal's corner
 /// button or ⇧⌘B. 上半区 Start / Project / Info / Files / CWD / Git；
-/// 下半区 System / Note；中间可拖分割。
+/// 下半区 System / Tasks / Note；中间可拖分割。
 struct RightSidebarView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject private var themeChanges = Theme.changes
@@ -185,7 +188,7 @@ struct RightSidebarView: View {
     @StateObject private var fileTree = FileTreeModel()
     @StateObject private var filesFind = FilesFindModel()
     @StateObject private var git = GitStatusModel()
-    /// 项目根路径 + npm scripts（Project tab）。
+    /// 项目根路径 + npm scripts（Project tab 与底部 Tasks tab 共用）。
     @StateObject private var projectInfo = ProjectPanelModel()
     /// 当前终端 cwd / 进程 / 端口（Info tab）。
     @StateObject private var sessionInfo = SessionInfoModel()
@@ -194,9 +197,9 @@ struct RightSidebarView: View {
     @AppStorage("rightSidebarWidth") private var width: Double = 240
     /// 上半区占「可分割内容高度」的比例；默认 70%。收起下半区时仍保留，便于展开还原。
     @AppStorage("rightSidebarTopFraction") private var topFraction: Double = 0.70
-    /// 下半区是否收起为仅显示 System/Note tabs（内容高度为 0）。
+    /// 下半区是否收起为仅显示 System/Tasks/Note tabs（内容高度为 0）。
     @AppStorage("rightSidebarBottomCollapsed") private var bottomCollapsed = false
-    /// 下半区底栏选中项：system / note。
+    /// 下半区底栏选中项：system / tasks / note。
     @AppStorage("rightSidebarBottomTab") private var bottomTabRaw: String = RightBottomPanel.system.rawValue
     @State private var wasCWDVisible = false
     /// Git root 跟随节流计数：2s timer 每 5 拍（10s）重新解析一次 gitRoot（含
@@ -369,7 +372,12 @@ struct RightSidebarView: View {
                     )
                 }
             default:
-                break
+                if isTasksPanelActive {
+                    manager.updatePackageScriptPorts(
+                        with: projectInfo.ports,
+                        shellPids: manager.selectedProject?.sessions.compactMap(\.shellPid) ?? []
+                    )
+                }
             }
         }
         // 脚本/命令新建的 session 的 shell pid 异步出现；就绪后立即重扫，
@@ -385,11 +393,14 @@ struct RightSidebarView: View {
             } else {
                 syncNoteBinding()
             }
+            syncModels(reloadActivePanel: isTasksPanelActive)
         }
         .onChange(of: bottomCollapsed) {
             syncSystemPolling()
             if bottomCollapsed {
                 noteModel.flush()
+            } else {
+                syncModels(reloadActivePanel: isTasksPanelActive)
             }
         }
         .sheet(item: $imageBuildSession) { session in
@@ -425,7 +436,19 @@ struct RightSidebarView: View {
         systemInfo.setActive(active)
     }
 
-    /// 上下分区主体：上半现有面板、可拖分割；下半区顶部是 System/Note tabs，
+    /// 下半区 Tasks tab 是否正在展示内容。
+    private var isTasksPanelActive: Bool {
+        manager.isPanelVisible && !bottomCollapsed && bottomTab == .tasks
+    }
+
+    /// Project 面板或 Tasks 面板需要项目根脚本数据时为 true。
+    private var shouldSyncProjectInfo: Bool {
+        guard manager.isPanelVisible, manager.selectedProject != nil else { return false }
+        if manager.panelTab == .start || manager.panelTab == .project { return true }
+        return isTasksPanelActive
+    }
+
+    /// 上下分区主体：上半现有面板、可拖分割；下半区顶部是 System/Tasks/Note tabs，
     /// 其下为内容（可收起到 0，仅留 tabs）。
     private var splitBody: some View {
         GeometryReader { geo in
@@ -573,12 +596,34 @@ struct RightSidebarView: View {
         }
     }
 
-    /// 下半区内容：System 为 CLI 指标；Note 为按项目的纯文本草稿。
+    /// 下半区内容：System 为 CLI 指标；Tasks 为项目脚本任务；Note 为按项目的纯文本草稿。
     @ViewBuilder
     private var bottomPanelContent: some View {
         switch bottomTab {
         case .system:
             SystemPanel(model: systemInfo)
+        case .tasks:
+            if let project = manager.selectedProject {
+                TasksPanel(
+                    model: projectInfo,
+                    project: project,
+                    manager: manager,
+                    runPackageScript: { name, mode in
+                        manager.runPackageScript(
+                            name, mode: mode, directory: projectInfo.rootPath
+                        )
+                    },
+                    openPackageJSON: {
+                        let root = projectInfo.rootPath
+                        guard !root.isEmpty else { return }
+                        manager.openFile(
+                            (root as NSString).appendingPathComponent("package.json")
+                        )
+                    }
+                )
+            } else {
+                TasksPanelNoProject()
+            }
         case .note:
             NotePanel(
                 model: noteModel,
@@ -865,13 +910,10 @@ struct RightSidebarView: View {
         gitRefreshIfSameRoot: Bool = true,
         gitIncludeDetails: Bool? = nil
     ) {
-        let projectPanelActive = manager.isPanelVisible
-            && (manager.panelTab == .start || manager.panelTab == .project)
-            && manager.selectedProject != nil
         let infoPanelActive = manager.isPanelVisible
             && manager.panelTab == .info
             && manager.selectedSession != nil
-        projectInfo.setFileMonitoringActive(projectPanelActive)
+        projectInfo.setFileMonitoringActive(shouldSyncProjectInfo)
         sessionInfo.setFileMonitoringActive(infoPanelActive)
 
         guard let project = manager.selectedProject, manager.isPanelVisible else { return }
@@ -900,6 +942,18 @@ struct RightSidebarView: View {
             }
         }
 
+        if shouldSyncProjectInfo {
+            // 项目根 + 全 session shell 的进程/端口并集。
+            // Project tab 与底部 Tasks tab 共用同一份脚本数据。
+            let root = projectRoot(for: project, fallback: session)
+            let shellPids = project.sessions.compactMap(\.shellPid)
+            projectInfo.sync(
+                root: root,
+                shellPids: shellPids,
+                reloadScripts: reloadActivePanel
+            )
+        }
+
         let cwdVisible = showsCWD
         if manager.panelTab == .files, cwdVisible, !wasCWDVisible {
             manager.panelTab = .cwd
@@ -910,16 +964,10 @@ struct RightSidebarView: View {
             manager.panelTab = .files
             return
         }
+
         switch manager.panelTab {
         case .start, .project:
-            // 项目根 + 全 session shell 的进程/端口并集。
-            let root = projectRoot(for: project, fallback: session)
-            let shellPids = project.sessions.compactMap(\.shellPid)
-            projectInfo.sync(
-                root: root,
-                shellPids: shellPids,
-                reloadScripts: reloadActivePanel
-            )
+            break
         case .info:
             // 当前终端 cwd 的 scripts + 本 session 进程/端口。
             guard let session else { return }

@@ -165,6 +165,9 @@ private enum WindowDragSession {
 /// 打不中。拖窗优先原生 `performWindowDrag`（多桌面手感更好）；失败则按屏幕
 /// 坐标手动平移。全局 `isMovable == false`，仅在原生拖窗期间短暂打开。
 private class WindowDragNSView: NSView {
+    /// 顶栏 Tabs 空白处右键额外提供布局切换。
+    var includeTabsLayoutMenu = false
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         commonInit()
@@ -252,6 +255,30 @@ private class WindowDragNSView: NSView {
 
         let menu = NSMenu(title: L10n.t("Window Settings"))
 
+        if includeTabsLayoutMenu {
+            let submenu = NSMenu()
+            let current = AppSettings.shared.tabsLayoutMode
+            for mode in TabsLayoutMode.allCases {
+                let item = NSMenuItem(
+                    title: mode.displayName,
+                    action: #selector(selectTabsLayout(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = mode.rawValue
+                item.state = current == mode ? .on : .off
+                submenu.addItem(item)
+            }
+            let layoutItem = NSMenuItem(
+                title: L10n.t("Tabs Layout"),
+                action: nil,
+                keyEquivalent: ""
+            )
+            layoutItem.submenu = submenu
+            menu.addItem(layoutItem)
+            menu.addItem(.separator())
+        }
+
         // 1. 窗口置顶（勾选项）
         let topItem = NSMenuItem(
             title: L10n.t("Keep Window on Top"),
@@ -274,6 +301,13 @@ private class WindowDragNSView: NSView {
         menu.addItem(sizeItem)
 
         return menu
+    }
+
+    @objc private func selectTabsLayout(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = TabsLayoutMode(rawValue: raw)
+        else { return }
+        AppSettings.shared.tabsLayoutMode = mode
     }
 
     @objc private func toggleAlwaysOnTop(_ sender: Any) {
@@ -354,11 +388,17 @@ private class WindowDragNSView: NSView {
 /// 仅空白背景应放置此视图；交互控件（Tabs / 按钮 / 输入框）放在其外，
 /// 以免与拖窗抢鼠标流。全局 `isMovable` 关闭时，只有本区域能移动窗口。
 struct WindowDragArea: NSViewRepresentable {
+    var includeTabsLayoutMenu = false
+
     func makeNSView(context: Context) -> NSView {
-        WindowDragNSView(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
+        let view = WindowDragNSView(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
+        view.includeTabsLayoutMenu = includeTabsLayoutMenu
+        return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? WindowDragNSView)?.includeTabsLayoutMenu = includeTabsLayoutMenu
+    }
 }
 
 extension Notification.Name {

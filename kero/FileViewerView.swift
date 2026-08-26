@@ -100,6 +100,8 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     /// 监听当前文件和所在目录变动的 DispatchSource 实例列表
     private nonisolated(unsafe) var watcherSources: [DispatchSourceFileSystemObject] = []
     private nonisolated(unsafe) var watchDebounceWorkItem: DispatchWorkItem?
+    /// `afterDelay` 自动保存的待执行任务。
+    private nonisolated(unsafe) var autoSaveWorkItem: DispatchWorkItem?
     private var activeCancellables = Set<AnyCancellable>()
 
     /// The editor's scroll view while this file is on screen, so a pane-move
@@ -222,9 +224,15 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         if isDirty != dirty {
             isDirty = dirty
         }
+        if isDirty {
+            scheduleAutoSaveIfNeeded()
+        } else {
+            cancelAutoSave()
+        }
     }
 
     func save() {
+        cancelAutoSave()
         guard isDirty else { return }
         switch content {
         case .text:
@@ -592,6 +600,54 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
 
     func noteTextChanged() {
         textRevision &+= 1
+        scheduleAutoSaveIfNeeded()
+    }
+
+    /// VS Code `afterDelay`：距上次编辑 `files.auto-save-delay` 毫秒后保存。
+    func scheduleAutoSaveIfNeeded() {
+        cancelAutoSave()
+        guard AppSettings.shared.fileAutoSave == .afterDelay else { return }
+        guard canAutoSave else { return }
+        let delay = AppSettings.shared.fileAutoSaveDelay
+        let work = DispatchWorkItem { [weak self] in
+            self?.performAutoSave()
+        }
+        autoSaveWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .milliseconds(max(0, delay)),
+            execute: work
+        )
+    }
+
+    /// VS Code `onFocusChange`：编辑器失去焦点时保存。
+    func saveOnEditorFocusLost() {
+        guard AppSettings.shared.fileAutoSave == .onFocusChange else { return }
+        performAutoSave()
+    }
+
+    /// VS Code `onWindowChange`：窗口失去焦点时保存。
+    func saveOnWindowLostFocus() {
+        guard AppSettings.shared.fileAutoSave == .onWindowChange else { return }
+        performAutoSave()
+    }
+
+    private var canAutoSave: Bool {
+        guard isDirty, !hasExternalConflict else { return false }
+        switch content {
+        case .text, .hex: return true
+        default: return false
+        }
+    }
+
+    private func performAutoSave() {
+        cancelAutoSave()
+        guard canAutoSave else { return }
+        save()
+    }
+
+    private func cancelAutoSave() {
+        autoSaveWorkItem?.cancel()
+        autoSaveWorkItem = nil
     }
 
     /// 重新读取磁盘内容并清除未保存状态。
@@ -682,6 +738,8 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
     private nonisolated func stopFileWatcher() {
         watchDebounceWorkItem?.cancel()
         watchDebounceWorkItem = nil
+        autoSaveWorkItem?.cancel()
+        autoSaveWorkItem = nil
         let sources = watcherSources
         watcherSources = []
         sources.forEach { $0.cancel() }
@@ -693,6 +751,21 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.checkDiskChanges()
+            }
+            .store(in: &activeCancellables)
+        NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let window = note.object as? NSWindow,
+                      window.identifier?.rawValue.hasPrefix("main") == true
+                else { return }
+                self?.saveOnWindowLostFocus()
+            }
+            .store(in: &activeCancellables)
+        NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.saveOnWindowLostFocus()
             }
             .store(in: &activeCancellables)
     }
@@ -752,6 +825,7 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         } else {
             // 本地有改动：显示冲突提示条
             hasExternalConflict = true
+            cancelAutoSave()
         }
     }
 
@@ -801,6 +875,7 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         } else {
             // 本地有改动：显示冲突提示条
             hasExternalConflict = true
+            cancelAutoSave()
         }
     }
 }
@@ -831,6 +906,7 @@ struct FileViewerView: View {
     }
 
     var body: some View {
+        Group {
         switch file.content {
         case .text:
             let themeName = colorScheme == .dark
@@ -937,6 +1013,13 @@ struct FileViewerView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        }
+        .onChange(of: isFocused) { _, focused in
+            if !focused { file.saveOnEditorFocusLost() }
+        }
+        .onDisappear {
+            file.saveOnEditorFocusLost()
+        }
     }
 }
 
@@ -995,6 +1078,63 @@ struct FileSaveErrorBar: View {
     }
 }
 
+/// 状态栏保存按钮：点击弹出立即保存 / 自动保存勾选。
+struct FileSaveStatusButton: View {
+    @ObservedObject var file: FileTab
+    @ObservedObject private var settings = AppSettings.shared
+
+    var body: some View {
+        Menu {
+            Button(L10n.t("Save Now")) {
+                file.save()
+            }
+            .keyboardShortcut("s", modifiers: .command)
+            .disabled(!file.isDirty)
+
+            Toggle(L10n.t("Auto Save"), isOn: autoSaveBinding)
+        } label: {
+            Label(statusTitle, systemImage: statusImage)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .macTooltip(statusTooltip, shortcut: "⌘S", position: .top)
+        .accessibilityLabel(statusTitle)
+    }
+
+    private var autoSaveBinding: Binding<Bool> {
+        Binding(
+            get: { settings.isAutoSaveEnabled },
+            set: { settings.setAutoSaveEnabled($0) }
+        )
+    }
+
+    private var statusTitle: String {
+        if file.isDirty {
+            return L10n.t("Unsaved")
+        }
+        if settings.isAutoSaveEnabled {
+            return L10n.t("Auto Saved")
+        }
+        return L10n.t("Saved")
+    }
+
+    private var statusImage: String {
+        file.isDirty ? "circle" : "checkmark.circle"
+    }
+
+    private var statusTooltip: String {
+        if file.isDirty {
+            return L10n.t("Unsaved Changes")
+        }
+        if settings.isAutoSaveEnabled {
+            return L10n.t("Auto Saved")
+        }
+        return L10n.t("Saved to Disk")
+    }
+}
+
 /// 源码编辑器底部状态栏：保存状态、文件大小、选择摘要、语法与可用格式化工具。
 struct EditorStatusBar: View {
     @ObservedObject private var themeChanges = Theme.changes
@@ -1009,9 +1149,7 @@ struct EditorStatusBar: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Label(file.isDirty ? L10n.t("Unsaved") : L10n.t("Saved"), systemImage: file.isDirty ? "circle" : "checkmark.circle")
-                .foregroundStyle(.secondary)
-                .macTooltip(file.isDirty ? L10n.t("Unsaved Changes") : L10n.t("Saved to Disk"), shortcut: "⌘S", position: .top)
+            FileSaveStatusButton(file: file)
             Text(file.editorFileSize)
                 .monospacedDigit()
                 .macTooltip(L10n.t("File Size"), position: .top)

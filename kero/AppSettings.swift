@@ -58,12 +58,14 @@ enum PackageManagerCommand: String, CaseIterable, Identifiable {
     }
 }
 
-/// 主内容区 Tabs 布局模式（滚动 / 弹性压缩）。
+/// 主内容区 Tabs 布局模式（滚动 / 弹性压缩 / 换行）。
 enum TabsLayoutMode: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
     /// 溢出时横向滚动；选中项自动滚入视口。
     case scroll = "scroll"
     /// 优先压缩非激活 Tab（左先右后），尽量保持首个 Tab 可见；极端溢出仍可滚动（默认）。
     case elastic = "elastic"
+    /// 保持标签自然宽度并换行，最多 3 行；再多则在 3 行视口内纵向滚动。
+    case wrap = "wrap"
 
     var id: String { rawValue }
 
@@ -71,6 +73,7 @@ enum TabsLayoutMode: String, CaseIterable, Identifiable, Codable, Sendable, Hash
         switch self {
         case .scroll: return L10n.t("Scroll")
         case .elastic: return L10n.t("Elastic")
+        case .wrap: return L10n.t("Wrap")
         }
     }
 }
@@ -86,6 +89,40 @@ enum GitOperationMode: String, CaseIterable, Identifiable, Codable, Sendable, Ha
         switch self {
         case .simple: return L10n.t("Simple")
         case .traditional: return L10n.t("Traditional")
+        }
+    }
+}
+
+/// 文件自动保存时机，对齐 VS Code `files.autoSave`。
+enum FileAutoSaveMode: String, CaseIterable, Identifiable, Codable, Sendable, Hashable {
+    case off = "off"
+    case afterDelay = "afterDelay"
+    case onFocusChange = "onFocusChange"
+    case onWindowChange = "onWindowChange"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .off: return L10n.t("off")
+        case .afterDelay: return L10n.t("afterDelay")
+        case .onFocusChange: return L10n.t("onFocusChange")
+        case .onWindowChange: return L10n.t("onWindowChange")
+        }
+    }
+}
+
+extension AppSettings {
+    /// 文件菜单 / 状态栏勾选：任意非 off 模式视为已开启自动保存。
+    var isAutoSaveEnabled: Bool { fileAutoSave != .off }
+
+    func setAutoSaveEnabled(_ enabled: Bool) {
+        if enabled {
+            if fileAutoSave == .off {
+                fileAutoSave = .afterDelay
+            }
+        } else {
+            fileAutoSave = .off
         }
     }
 }
@@ -217,7 +254,7 @@ final class AppSettings: nonisolated ObservableObject {
         }
     }
 
-    /// 主内容 Tabs 布局：滚动或弹性压缩。默认弹性；写入 `ui.tabs-layout`。
+    /// 主内容 Tabs 布局：滚动、弹性压缩或换行。默认弹性；写入 `ui.tabs-layout`。
     @Published var tabsLayoutMode: TabsLayoutMode {
         didSet { save() }
     }
@@ -298,6 +335,27 @@ final class AppSettings: nonisolated ObservableObject {
     @Published var wrapLines: Bool {
         didSet { save() }
     }
+
+    /// 文件自动保存模式，对齐 VS Code `files.autoSave`。默认关闭。
+    @Published var fileAutoSave: FileAutoSaveMode {
+        didSet { save() }
+    }
+
+    /// `afterDelay` 模式下距上次编辑多少毫秒后保存。默认 1000。
+    @Published var fileAutoSaveDelay: Int {
+        didSet {
+            let clamped = min(max(fileAutoSaveDelay, Self.autoSaveDelayRange.lowerBound),
+                              Self.autoSaveDelayRange.upperBound)
+            if clamped != fileAutoSaveDelay {
+                fileAutoSaveDelay = clamped
+                return
+            }
+            save()
+        }
+    }
+
+    static let autoSaveDelayRange = 0...60_000
+    static let defaultAutoSaveDelay = 1000
 
     /// 是否在源码编辑器底部显示文件与格式化状态栏。
     @Published var showEditorStatusBar: Bool {
@@ -630,6 +688,13 @@ final class AppSettings: nonisolated ObservableObject {
         tabSwitcherSortByRecency = toml["terminal.tab-switcher-sort-by-recency"]?.bool ?? false
         useBundledChineseTerminalFont = toml["terminal.use-bundled-chinese-font"]?.bool ?? true
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
+        fileAutoSave = toml["files.auto-save"]?.string
+            .flatMap(FileAutoSaveMode.init(rawValue:)) ?? .off
+        let delay = toml["files.auto-save-delay"]?.double.map(Int.init)
+            ?? Self.defaultAutoSaveDelay
+        fileAutoSaveDelay = Self.autoSaveDelayRange.contains(delay)
+            ? delay
+            : Self.defaultAutoSaveDelay
         showEditorStatusBar = toml["editor.show-status-bar"]?.bool ?? true
         // 兼容上一版只有一个 editor.theme 的配置，将它迁移到匹配的亮色或暗色选项。
         let legacyEditorTheme = toml["editor.theme"]?.string
@@ -816,6 +881,8 @@ final class AppSettings: nonisolated ObservableObject {
         visualEffectState = "followsApp"
         visualEffectAlpha = 1
         wrapLines = false
+        fileAutoSave = .off
+        fileAutoSaveDelay = Self.defaultAutoSaveDelay
         showEditorStatusBar = true
         editorThemeLight = ""
         editorThemeDark = ""
@@ -922,6 +989,12 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if wrapLines {
             lines.append("editor.wrap-lines = true")
+        }
+        if fileAutoSave != .off {
+            lines.append("files.auto-save = \(TOML.quote(fileAutoSave.rawValue))")
+        }
+        if fileAutoSaveDelay != Self.defaultAutoSaveDelay {
+            lines.append("files.auto-save-delay = \(fileAutoSaveDelay)")
         }
         if !showEditorStatusBar {
             lines.append("editor.show-status-bar = false")

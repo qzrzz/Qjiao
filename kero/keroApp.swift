@@ -124,6 +124,7 @@ private struct WindowRootView: View {
 private struct KeroCommands: Commands {
     @FocusedObject private var manager: TerminalManager?
     @ObservedObject private var l10n = L10n.shared
+    @ObservedObject private var settings = AppSettings.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -174,6 +175,8 @@ private struct KeroCommands: Commands {
             }
             .keyboardShortcut("s", modifiers: .command)
             .disabled(manager == nil)
+
+            Toggle(L10n.t("Auto Save"), isOn: autoSaveMenuBinding)
         }
 
         CommandGroup(after: .pasteboard) {
@@ -466,5 +469,13 @@ private struct KeroCommands: Commands {
                 .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control)
             }
         }
+    }
+
+    /// 文件菜单「Auto Save」：勾选开启 afterDelay，取消则关闭。设置里选了其它模式时菜单仍显示为已开启。
+    private var autoSaveMenuBinding: Binding<Bool> {
+        Binding(
+            get: { settings.isAutoSaveEnabled },
+            set: { settings.setAutoSaveEnabled($0) }
+        )
     }
 }

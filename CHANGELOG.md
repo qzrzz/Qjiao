@@ -11,6 +11,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.54]
+
+### Added
+
+- Add a "Wrap" tabs layout mode: tabs keep their natural width and flow onto up to 3 rows (min 240pt, evenly filling the container), with vertical scrolling and edge fades when overflowing; switch layouts via right-click on the empty tab strip area.
+- Add file auto-save (aligned with VS Code `files.autoSave`): off, after a delay, on editor focus change, or on window focus change, with a configurable delay (default 1000ms); configure in Settings → Editor or the File menu "Auto Save" toggle.
+- Add a Tasks panel to the right sidebar bottom section for running npm scripts and Gradle / Just / Cargo / CMake / Makefile tasks from the project root, while browsing Files or Git panels.
+
+### Changed
+
+- Unify content-area tab item height to 30pt, matching the wrap layout row metrics.
+
 ## [1.1.53]
 
 ### Added

@@ -374,6 +374,9 @@ private struct EmptyStatePromptView: View {
 private struct MainHeaderView: View {
     @ObservedObject var manager: TerminalManager
     @ObservedObject var tabSplitDrag: TabSplitDragController
+    @ObservedObject private var settings = AppSettings.shared
+    /// 换行模式由 SessionTabsView 上报；其它模式保持单行高度。
+    @State private var tabStripHeight: CGFloat = TabStripMetrics.rowHeight
 
     /// 左侧栏收起时，为红绿灯预留的宽度（不含开关左边距）。
     private static let trafficLightInset: CGFloat = 68
@@ -387,8 +390,29 @@ private struct MainHeaderView: View {
     private static let tabNewSpacing: CGFloat = 4
     /// Tabs 行上下各一条拖窗热区高度。
     private static let tabEdgeDragHeight: CGFloat = 8
-    /// 顶栏总高：上下拖窗带 + 中间标签行。
-    private static let headerHeight: CGFloat = 42
+    /// 顶栏总高：上沿拖窗带（多层含额外 8pt）+ 中间标签行 + 下沿（8pt + 4pt）。
+    private var headerHeight: CGFloat {
+        headerTopDragHeight + headerBottomDragHeight
+            + max(tabStripHeight, TabStripMetrics.rowHeight)
+    }
+
+    /// 多层时第一行 Tab 下移 8pt，「+」与右侧按钮对齐第一行。
+    private var wrapChromeTopInset: CGFloat {
+        settings.tabsLayoutMode == .wrap
+            && (manager.selectedProject?.tabs.isEmpty == false)
+            ? TabStripMetrics.wrapTopInset
+            : 0
+    }
+
+    /// 顶栏最上沿拖窗带：普通 8pt；多层再加 8pt，且不放进 Tabs 的 mask/TimelineView。
+    private var headerTopDragHeight: CGFloat {
+        Self.tabEdgeDragHeight + wrapChromeTopInset
+    }
+
+    /// 顶栏最下沿拖窗带：8pt + Tabs 底部 4pt 空白。
+    private var headerBottomDragHeight: CGFloat {
+        Self.tabEdgeDragHeight + TabStripMetrics.tabBottomInset
+    }
 
     /// 左侧栏开关占用宽度（按钮 + 右侧间距）；仅在 Tabs 栏展示时计入。
     private static var leftToggleWidth: CGFloat {
@@ -443,10 +467,10 @@ private struct MainHeaderView: View {
             )
 
             VStack(spacing: 0) {
-                // Tabs 上方 8pt：整行可拖窗口（不压在 Tab 上）。
-                HeaderWindowDragBand(height: Self.tabEdgeDragHeight)
+                // Tabs 上方拖窗带（多层为 16pt）。真正接鼠标的是 header 顶 overlay。
+                HeaderWindowDragBand(height: headerTopDragHeight)
 
-                HStack(spacing: 0) {
+                HStack(alignment: .top, spacing: 0) {
                     HeaderWindowDragBand(width: leadingInset)
 
                     if showLeftToggle {
@@ -460,7 +484,7 @@ private struct MainHeaderView: View {
                     }
 
                     if let project = manager.selectedProject {
-                        HStack(spacing: Self.tabNewSpacing) {
+                        HStack(alignment: .top, spacing: Self.tabNewSpacing) {
                             if !project.tabs.isEmpty {
                                 SessionTabsView(
                                     manager: manager,
@@ -502,14 +526,37 @@ private struct MainHeaderView: View {
                         HeaderWindowDragBand(width: HeaderTabActionMetrics.edgePadding)
                     }
                 }
+                // 「+」/ 右侧工具下方、行尾空白：多层顶栏变高后仍可拖窗口。
+                .background { HeaderWindowDragBand() }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // Tabs 下方 8pt：整行可拖窗口。
-                HeaderWindowDragBand(height: Self.tabEdgeDragHeight)
+                // Tabs 下方 8pt + 4pt：整行可拖窗口，右键切换布局。
+                HeaderWindowDragBand(height: headerBottomDragHeight)
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .background {
+                if let project = manager.selectedProject {
+                    HeaderStripHeightBinder(
+                        project: project,
+                        stripMaxWidth: stripMaxWidth,
+                        height: $tabStripHeight
+                    )
+                } else {
+                    Color.clear.onAppear {
+                        tabStripHeight = TabStripMetrics.rowHeight
+                    }
+                }
+            }
         }
-        .frame(height: Self.headerHeight)
+        .frame(height: headerHeight)
+        .animation(.easeInOut(duration: 0.12), value: headerHeight)
+        // 叠在 Tabs / TimelineView / mask 之上，保证顶沿 / 底沿空白一定能拖窗口。
+        .overlay(alignment: .top) {
+            HeaderWindowDragBand(height: headerTopDragHeight)
+        }
+        .overlay(alignment: .bottom) {
+            HeaderWindowDragBand(height: headerBottomDragHeight)
+        }
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color(nsColor: Theme.divider))
@@ -519,17 +566,48 @@ private struct MainHeaderView: View {
     }
 }
 
+/// 观察当前项目的 Tab 与布局模式，把换行后的条带高度写回顶栏。
+/// 不能靠 SessionTabsView 的 preference：它在 TimelineView 内部，冒泡不到这里。
+private struct HeaderStripHeightBinder: View {
+    @ObservedObject var project: Project
+    @ObservedObject private var settings = AppSettings.shared
+    let stripMaxWidth: CGFloat
+    @Binding var height: CGFloat
+
+    var body: some View {
+        let next = TabStripMetrics.stripHeight(
+            mode: settings.tabsLayoutMode,
+            tabCount: project.tabs.count,
+            availableWidth: stripMaxWidth
+        )
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+            .onAppear { apply(next) }
+            .onChange(of: next) { _, value in apply(value) }
+    }
+
+    private func apply(_ next: CGFloat) {
+        if abs(next - height) > 0.5 {
+            height = next
+        }
+    }
+}
+
 /// 顶栏拖窗热区：由 SwiftUI 固定尺寸，`WindowDragArea` 叠在上面填满。
 /// 避免纯 NSViewRepresentable 在 GeometryReader 里偶发 bounds 为空/撑破。
 private struct HeaderWindowDragBand: View {
     var width: CGFloat? = nil
     var height: CGFloat? = nil
+    /// 顶栏空白右键可切换 Tabs 布局；其它 WindowDragArea 保持窗口菜单。
+    var includeTabsLayoutMenu = true
 
     var body: some View {
         ZStack {
             // 尺寸锚点：SwiftUI 先占位，NSView 才能稳定拿到非零 frame。
             Color.clear
-            WindowDragArea()
+            WindowDragArea(includeTabsLayoutMenu: includeTabsLayoutMenu)
         }
         .frame(width: width)
         .frame(maxWidth: width == nil ? .infinity : nil)
@@ -870,6 +948,16 @@ private enum TabStripMetrics {
     static let relaxedTabMaxWidth: CGFloat = 220
     /// 标签条已满（滚动模式）时的单 Tab 最大宽度。
     static let compressedTabMaxWidth: CGFloat = 140
+    /// 换行模式最小宽度：不随标题伸缩；有余量时均分填满容器。
+    static let wrapTabMinWidth: CGFloat = 240
+    /// 单行 Tab 高度（条目上下各 +2pt）。
+    static let rowHeight: CGFloat = 30
+    /// 换行模式最多排几行。
+    static let maxWrapRows = 3
+    /// 换行模式第一行 Tab 上方的空白（可拖窗口）。
+    static let wrapTopInset: CGFloat = 8
+    /// Tabs 下方额外空白（可拖窗口，右键切换布局）。
+    static let tabBottomInset: CGFloat = 4
     /// 仅图标态固定宽度：图标 + 左右内边距。
     static let iconOnlyWidth: CGFloat = 32
     /// 分配宽度低于此值时切换为仅图标（无标题、无关闭）。
@@ -949,6 +1037,144 @@ private enum TabStripMetrics {
             return ElasticTabSlot(width: resolved, iconOnly: iconOnly)
         }
     }
+
+    /// 按自然宽度从左到右装满一行再换行；单枚过宽也独占一行。
+    static func packWrapRows(widths: [CGFloat], availableWidth: CGFloat) -> [[Int]] {
+        var rows: [[Int]] = []
+        var current: [Int] = []
+        var used: CGFloat = 0
+        let limit = max(availableWidth, 1)
+        for (index, width) in widths.enumerated() {
+            let extra = current.isEmpty ? width : used + interTabSpacing + width
+            if !current.isEmpty, extra > limit + 0.5 {
+                rows.append(current)
+                current = [index]
+                used = width
+            } else {
+                current.append(index)
+                used = extra
+            }
+        }
+        if !current.isEmpty {
+            rows.append(current)
+        }
+        return rows
+    }
+
+    static func wrapRowCount(widths: [CGFloat], availableWidth: CGFloat) -> Int {
+        max(packWrapRows(widths: widths, availableWidth: availableWidth).count, 1)
+    }
+
+    /// 换行内容的总高度（可超过 3 行，供纵向滚动）。
+    static func wrapContentHeight(rowCount: Int) -> CGFloat {
+        let rows = max(rowCount, 1)
+        return CGFloat(rows) * rowHeight + CGFloat(max(rows - 1, 0)) * interTabSpacing
+    }
+
+    /// 换行视口高度：最多 3 行。
+    static func wrapViewportHeight(rowCount: Int) -> CGFloat {
+        wrapContentHeight(rowCount: min(max(rowCount, 1), maxWrapRows))
+    }
+
+    /// 一行按最小宽度最多能放下的 Tab 数。
+    static func wrapTabsPerFullRow(availableWidth: CGFloat) -> Int {
+        let slot = wrapTabMinWidth + interTabSpacing
+        guard slot > 0, availableWidth > 0 else { return 1 }
+        return max(1, Int(floor((availableWidth + interTabSpacing) / slot)))
+    }
+
+    /// 均分容器宽度：单行按实际枚数填满；多行按满行枚数均分（末行同宽，右侧可留白）。
+    static func wrapFilledWidth(tabCount: Int, availableWidth: CGFloat) -> CGFloat {
+        let floorWidth = min(wrapTabMinWidth, max(availableWidth, iconOnlyWidth))
+        guard availableWidth > 0, tabCount > 0 else { return floorWidth }
+        let perRow = min(wrapTabsPerFullRow(availableWidth: availableWidth), tabCount)
+        let spacing = interTabSpacing * CGFloat(max(perRow - 1, 0))
+        let filled = (availableWidth - spacing) / CGFloat(perRow)
+        // 向下取整，避免 3 枚 × 均分宽因浮点略超容器而挤到下一行。
+        return min(availableWidth, max(floorWidth, filled.rounded(.down)))
+    }
+
+    /// 顶栏标签条高度：非换行始终单行；换行按填满后的宽度排行，最多 3 行。
+    static func stripHeight(
+        mode: TabsLayoutMode,
+        tabCount: Int,
+        availableWidth: CGFloat
+    ) -> CGFloat {
+        guard mode == .wrap, availableWidth > 0, tabCount > 0 else {
+            return rowHeight
+        }
+        let tabWidth = wrapFilledWidth(
+            tabCount: tabCount,
+            availableWidth: availableWidth
+        )
+        let widths = Array(repeating: tabWidth, count: tabCount)
+        return wrapViewportHeight(
+            rowCount: wrapRowCount(widths: widths, availableWidth: availableWidth)
+        )
+    }
+}
+
+/// 标签从左到右排列，满行换到下一行。高度是全部行（由父级裁成最多 3 行并滚动）。
+private struct TabWrapLayout: Layout {
+    var spacing: CGFloat
+    var rowHeight: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let available = proposal.width ?? widths.reduce(0, +)
+        let rows = TabStripMetrics.packWrapRows(
+            widths: widths,
+            availableWidth: available
+        )
+        let rowCount = max(rows.count, 1)
+        let contentWidth: CGFloat
+        if rows.count <= 1 {
+            contentWidth = rowContentWidth(rows.first ?? [], widths: widths)
+        } else {
+            contentWidth = available
+        }
+        return CGSize(
+            width: contentWidth,
+            height: TabStripMetrics.wrapContentHeight(rowCount: rowCount)
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let rows = TabStripMetrics.packWrapRows(
+            widths: widths,
+            availableWidth: bounds.width
+        )
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for index in row {
+                let width = widths[index]
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: width, height: rowHeight)
+                )
+                x += width + spacing
+            }
+            y += rowHeight + spacing
+        }
+    }
+
+    private func rowContentWidth(_ row: [Int], widths: [CGFloat]) -> CGFloat {
+        guard !row.isEmpty else { return 0 }
+        let tabs = row.reduce(CGFloat.zero) { $0 + widths[$1] }
+        return tabs + spacing * CGFloat(row.count - 1)
+    }
 }
 
 /// Horizontal tabs for one project — terminal sessions and open files.
@@ -1004,6 +1230,8 @@ private struct SessionTabsView: View {
     private struct StripOverflow: Equatable {
         var left = false
         var right = false
+        var top = false
+        var bottom = false
     }
 
     /// Scroll 几何快照：边缘淡入 + 是否挤满（用于压缩 Tab 宽限）。
@@ -1011,11 +1239,17 @@ private struct SessionTabsView: View {
         var overflow = StripOverflow()
         var contentWidth: CGFloat = 0
         var containerWidth: CGFloat = 0
+        var containerHeight: CGFloat = 0
         var contentOffsetX: CGFloat = 0
+        var contentOffsetY: CGFloat = 0
     }
 
     private var isElastic: Bool {
         settings.tabsLayoutMode == .elastic
+    }
+
+    private var isWrap: Bool {
+        settings.tabsLayoutMode == .wrap
     }
 
     /// 顶栏即时选中（可领先内容区一拍）：本地点击 > Project chrome > 内容选中。
@@ -1032,10 +1266,45 @@ private struct SessionTabsView: View {
     }
 
     /// 条带显示宽度：内容与上限取小；硬宽度，避免 ScrollView 把右侧工具顶走。
+    /// 换行模式始终铺满可用宽度，由 Tab 均分填满。
     private var stripWidth: CGFloat {
         guard maxStripWidth > 0 else { return 0 }
+        if isWrap {
+            return maxStripWidth
+        }
         guard contentWidth > 0 else { return maxStripWidth }
         return min(contentWidth, maxStripWidth)
+    }
+
+    /// 换行模式当前需要的行数（按实测或自然宽估算）。
+    private var wrapRowCount: Int {
+        guard isWrap, maxStripWidth > 0, !project.tabs.isEmpty else { return 1 }
+        let widths = project.tabs.map(wrapWidth(for:))
+        return TabStripMetrics.wrapRowCount(
+            widths: widths,
+            availableWidth: maxStripWidth
+        )
+    }
+
+    /// 换行视口高度（最多 3 行）；其它模式保持单行。顶部 8pt 空白在顶栏 overlay。
+    private var displayedStripHeight: CGFloat {
+        guard isWrap else { return TabStripMetrics.rowHeight }
+        return TabStripMetrics.wrapViewportHeight(rowCount: wrapRowCount)
+    }
+
+    private func wrapWidth(for tab: PaneTab) -> CGFloat {
+        if let frozen = draggedTabLayouts[tab.id] {
+            return frozen.width
+        }
+        return wrapFixedWidth
+    }
+
+    /// 换行模式均分后的统一宽度（不随标题变）。
+    private var wrapFixedWidth: CGFloat {
+        TabStripMetrics.wrapFilledWidth(
+            tabCount: project.tabs.count,
+            availableWidth: maxStripWidth
+        )
     }
 
     /// Tab frame 与拖拽位置都在 global 坐标系中，使用所有 Tab 的底边作为条带底部。
@@ -1083,11 +1352,54 @@ private struct SessionTabsView: View {
         return nil
     }
 
+    /// 换行模式按相邻 Tab 的行列换序：同行看中线，跨行看垂直中线。
+    private func wrapSortTarget(for source: UUID, at location: CGPoint) -> UUID? {
+        guard let sourceIndex = project.tabs.firstIndex(where: { $0.id == source }) else {
+            return nil
+        }
+
+        if sourceIndex > 0 {
+            let previousID = project.tabs[sourceIndex - 1].id
+            if let previousFrame = tabFrames[previousID] {
+                let sameRow =
+                    abs(location.y - previousFrame.midY) <= previousFrame.height / 2 + 2
+                let before = sameRow
+                    ? location.x < previousFrame.midX - horizontalSortHysteresis
+                    : location.y < previousFrame.midY
+                if before {
+                    return previousID
+                }
+            }
+        }
+
+        let nextIndex = sourceIndex + 1
+        if nextIndex < project.tabs.count {
+            let nextID = project.tabs[nextIndex].id
+            if let nextFrame = tabFrames[nextID] {
+                let sameRow =
+                    abs(location.y - nextFrame.midY) <= nextFrame.height / 2 + 2
+                let after = sameRow
+                    ? location.x > nextFrame.midX + horizontalSortHysteresis
+                    : location.y > nextFrame.midY
+                if after {
+                    return nextID
+                }
+            }
+        }
+
+        return nil
+    }
+
     var body: some View {
         // 弹性模式用轻量时钟跟踪终端动态标题，以便重算宽度分配。
         TimelineView(.periodic(from: .now, by: isElastic ? 0.45 : 3600)) { _ in
             tabStrip
         }
+        // 高度写在 TimelineView 外面：其 content 闭包里的 preference 不会冒泡到顶栏。
+        .preference(
+            key: TabStripDisplayedHeightKey.self,
+            value: displayedStripHeight
+        )
         .onChange(of: settings.tabsLayoutMode) { _, _ in
             recomputeElasticSlots()
         }
@@ -1107,74 +1419,144 @@ private struct SessionTabsView: View {
         .onAppear { recomputeElasticSlots() }
     }
 
+    @ViewBuilder
+    private var tabBandItems: some View {
+        ForEach(project.tabs) { tab in
+            paneTabItem(for: tab)
+            .id(tab.id)
+            .contextMenu { tabContextMenu(for: tab) }
+            .background {
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: TabFramePreferenceKey.self,
+                        value: [tab.id: geo.frame(in: .global)]
+                    )
+                }
+            }
+            // 源 Tab 只保留布局占位；可见内容由下方的浮动预览绘制。
+            // 这样其它 Tab 可以平滑让位，而源 Tab 不会被 HStack 的重排动画拖慢。
+            .opacity(draggedTabID == tab.id ? 0 : 1)
+            // 占满 Tab 热区，避免透明间隙把事件漏给其它拖动手势。
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                    .onChanged { value in
+                        updateTabDrag(source: tab.id, location: value.location)
+                    }
+                    .onEnded { _ in endTabDrag() },
+                including: renamingTabID == tab.id ? .subviews : .all
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var tabBand: some View {
+        if isWrap {
+            TabWrapLayout(
+                spacing: TabStripMetrics.interTabSpacing,
+                rowHeight: TabStripMetrics.rowHeight
+            ) {
+                tabBandItems
+            }
+        } else {
+            HStack(spacing: TabStripMetrics.interTabSpacing) {
+                tabBandItems
+            }
+        }
+    }
+
+    /// 超过 3 行才需要纵向滚动；否则 ScrollView 会吞掉行尾空白的拖窗命中。
+    private var wrapNeedsVerticalScroll: Bool {
+        wrapRowCount > TabStripMetrics.maxWrapRows
+    }
+
+    /// 多层条带：Tab 叠在拖窗热区之上，行尾空白盖一层热区，避免 Layout 吞命中。
+    @ViewBuilder
+    private var wrapTabStripContent: some View {
+        ZStack(alignment: .topLeading) {
+            HeaderWindowDragBand()
+            TabWrapLayout(
+                spacing: TabStripMetrics.interTabSpacing,
+                rowHeight: TabStripMetrics.rowHeight
+            ) {
+                tabBandItems
+            }
+            .frame(width: stripWidth, alignment: .topLeading)
+            wrapRowDragFillers
+        }
+    }
+
+    /// 每一行 Tab 右侧的剩余宽度：明确铺拖窗热区，盖在 Layout 空白上。
+    @ViewBuilder
+    private var wrapRowDragFillers: some View {
+        let tabWidth = wrapFixedWidth
+        let rows = TabStripMetrics.packWrapRows(
+            widths: Array(repeating: tabWidth, count: project.tabs.count),
+            availableWidth: max(maxStripWidth, 1)
+        )
+        let rowStep = TabStripMetrics.rowHeight + TabStripMetrics.interTabSpacing
+        ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+            let used = CGFloat(row.count) * tabWidth
+                + CGFloat(max(row.count - 1, 0)) * TabStripMetrics.interTabSpacing
+            let remainder = max(0, stripWidth - used)
+            if remainder > 1 {
+                HeaderWindowDragBand()
+                    .frame(width: remainder, height: TabStripMetrics.rowHeight)
+                    .offset(
+                        x: used,
+                        y: CGFloat(rowIndex) * rowStep
+                    )
+            }
+        }
+    }
+
     private var tabStrip: some View {
         ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: TabStripMetrics.interTabSpacing) {
-                    ForEach(project.tabs) { tab in
-                        paneTabItem(for: tab)
-                        .id(tab.id)
-                        .contextMenu { tabContextMenu(for: tab) }
+            Group {
+                if isWrap {
+                    if wrapNeedsVerticalScroll {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            wrapTabStripContent
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .onScrollGeometryChange(for: StripGeometry.self) {
+                            stripGeometry(from: $0)
+                        } action: { _, new in
+                            applyStripGeometry(new)
+                        }
+                    } else {
+                        wrapTabStripContent
+                    }
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        tabBand
                         .background {
                             GeometryReader { geo in
                                 Color.clear.preference(
-                                    key: TabFramePreferenceKey.self,
-                                    value: [tab.id: geo.frame(in: .global)]
+                                    key: TabStripContentWidthKey.self,
+                                    value: geo.size.width
                                 )
                             }
                         }
-                        // 源 Tab 只保留布局占位；可见内容由下方的浮动预览绘制。
-                        // 这样其它 Tab 可以平滑让位，而源 Tab 不会被 HStack 的重排动画拖慢。
-                        .opacity(draggedTabID == tab.id ? 0 : 1)
-                        // 占满 Tab 热区，避免透明间隙把事件漏给其它拖动手势。
-                        .contentShape(Rectangle())
-                        .highPriorityGesture(
-                            DragGesture(minimumDistance: 4, coordinateSpace: .global)
-                                .onChanged { value in
-                                    updateTabDrag(source: tab.id, location: value.location)
-                                }
-                                .onEnded { _ in endTabDrag() },
-                            including: renamingTabID == tab.id ? .subviews : .all
-                        )
                     }
-                }
-                .background {
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: TabStripContentWidthKey.self,
-                            value: geo.size.width
-                        )
+                    .scrollBounceBehavior(.basedOnSize)
+                    .onScrollGeometryChange(for: StripGeometry.self) {
+                        stripGeometry(from: $0)
+                    } action: { _, new in
+                        applyStripGeometry(new)
                     }
                 }
             }
             .onPreferenceChange(TabStripContentWidthKey.self) { contentWidth = $0 }
-            .onScrollGeometryChange(for: StripGeometry.self) { geo in
-                StripGeometry(
-                    overflow: StripOverflow(
-                        left: geo.contentOffset.x > 0.5,
-                        right: geo.contentOffset.x + geo.containerSize.width < geo.contentSize.width - 0.5
-                    ),
-                    contentWidth: geo.contentSize.width,
-                    containerWidth: geo.containerSize.width,
-                    contentOffsetX: geo.contentOffset.x
-                )
-            } action: { _, new in
-                stripGeometry = new
-                overflow = new.overflow
-                // contentSize 亦同步内容宽，避免仅依赖 preference 时的首帧空档。
-                if new.contentWidth > 0 {
-                    contentWidth = new.contentWidth
-                }
-                if !isElastic {
-                    updateStripFullness(
-                        contentWidth: new.contentWidth,
-                        containerWidth: new.containerWidth
-                    )
+            .onChange(of: wrapNeedsVerticalScroll) { _, needsScroll in
+                if !needsScroll, overflow.top || overflow.bottom {
+                    overflow.top = false
+                    overflow.bottom = false
                 }
             }
             .onChange(of: project.tabs.count) { _, _ in
                 // 关 Tab 后可能立刻腾出空间，用条带上限估一次是否可恢复宽松宽度。
-                if !isElastic {
+                if !isElastic, !isWrap {
                     reevaluateStripFullnessAfterTabCountChange()
                 }
                 recomputeElasticSlots()
@@ -1226,28 +1608,50 @@ private struct SessionTabsView: View {
                 }
             }
             .mask {
-                HStack(spacing: 0) {
-                    LinearGradient(
-                        colors: [overflow.left ? .clear : .black, .black],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                    .frame(width: fadeWidth)
-                    // 动画只作用于渐隐条本身。不能挂在 ScrollView 上：
-                    // 溢出翻转（新建 Tab 恰好撑满条带时）会把新 Tab 插入、
-                    // 弹性宽度重排和滚入视口一起包进 0.15s 插值，
-                    // 表现为创建 Tab 时整条 Tabs 的异常尺寸变化动画。
-                    .animation(.easeInOut(duration: 0.15), value: overflow.left)
-                    Color.black
-                    LinearGradient(
-                        colors: [.black, overflow.right ? .clear : .black],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                    .frame(width: fadeWidth)
-                    .animation(.easeInOut(duration: 0.15), value: overflow.right)
+                if isWrap {
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [overflow.top ? .clear : .black, .black],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .frame(height: fadeWidth)
+                        .animation(.easeInOut(duration: 0.15), value: overflow.top)
+                        Color.black
+                        LinearGradient(
+                            colors: [.black, overflow.bottom ? .clear : .black],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .frame(height: fadeWidth)
+                        .animation(.easeInOut(duration: 0.15), value: overflow.bottom)
+                    }
+                } else {
+                    HStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [overflow.left ? .clear : .black, .black],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                        .frame(width: fadeWidth)
+                        // 动画只作用于渐隐条本身。不能挂在 ScrollView 上：
+                        // 溢出翻转（新建 Tab 恰好撑满条带时）会把新 Tab 插入、
+                        // 弹性宽度重排和滚入视口一起包进 0.15s 插值，
+                        // 表现为创建 Tab 时整条 Tabs 的异常尺寸变化动画。
+                        .animation(.easeInOut(duration: 0.15), value: overflow.left)
+                        Color.black
+                        LinearGradient(
+                            colors: [.black, overflow.right ? .clear : .black],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                        .frame(width: fadeWidth)
+                        .animation(.easeInOut(duration: 0.15), value: overflow.right)
+                    }
                 }
             }
             // 硬宽度 = min(内容, 上限)，不参与 HStack 弹性争夺。
-            .frame(width: stripWidth, alignment: .leading)
+            .frame(
+                width: stripWidth,
+                height: isWrap ? displayedStripHeight : nil,
+                alignment: .topLeading
+            )
             .clipped()
             .onPreferenceChange(TabFramePreferenceKey.self) { frames in
                 tabFrames = frames
@@ -1257,7 +1661,11 @@ private struct SessionTabsView: View {
                 }
             }
         }
-        .frame(width: stripWidth, alignment: .leading)
+        .frame(
+            width: stripWidth,
+            height: isWrap ? displayedStripHeight : nil,
+            alignment: .topLeading
+        )
         .overlay {
             draggedTabPreview
         }
@@ -1313,6 +1721,9 @@ private struct SessionTabsView: View {
                 slot?.iconOnly ?? false
             )
         }
+        if isWrap {
+            return (wrapFixedWidth, wrapFixedWidth, false)
+        }
         return (tabMinWidth, tabMaxWidth, false)
     }
 
@@ -1328,9 +1739,12 @@ private struct SessionTabsView: View {
            draggedTabSize.height > 0 {
             GeometryReader { geo in
                 let frame = geo.frame(in: .global)
-                let previewOriginY = isHorizontalDragMode
-                    ? draggedTabOriginY
-                    : locationY - draggedTabGrabOffsetY
+                let previewOriginY: CGFloat = {
+                    if isHorizontalDragMode, !isWrap {
+                        return draggedTabOriginY
+                    }
+                    return locationY - draggedTabGrabOffsetY
+                }()
                 paneTabItem(for: tab, isDragPreview: true)
                     .frame(
                         width: draggedTabSize.width,
@@ -1406,11 +1820,56 @@ private struct SessionTabsView: View {
         }
     }
 
+    private func stripGeometry(from geo: ScrollGeometry) -> StripGeometry {
+        let visible = geo.visibleRect
+        let wrapVertical = isWrap && wrapNeedsVerticalScroll
+        return StripGeometry(
+            overflow: StripOverflow(
+                left: !isWrap && geo.contentOffset.x > 0.5,
+                right: !isWrap
+                    && geo.contentOffset.x + geo.containerSize.width
+                        < geo.contentSize.width - 0.5,
+                top: wrapVertical && visible.minY > 0.5,
+                bottom: wrapVertical
+                    && visible.maxY < geo.contentSize.height - 0.5
+            ),
+            contentWidth: geo.contentSize.width,
+            containerWidth: geo.containerSize.width,
+            containerHeight: geo.containerSize.height,
+            contentOffsetX: geo.contentOffset.x,
+            contentOffsetY: visible.minY
+        )
+    }
+
+    private func applyStripGeometry(_ new: StripGeometry) {
+        stripGeometry = new
+        overflow = new.overflow
+        if new.contentWidth > 0 {
+            contentWidth = new.contentWidth
+        }
+        if !isElastic, !isWrap {
+            updateStripFullness(
+                contentWidth: new.contentWidth,
+                containerWidth: new.containerWidth
+            )
+        }
+    }
+
     /// 仅滚动到足以完整显示当前 Tab 的位置；已在视口内时保持现有偏移。
     private func scrollToSelectedTab(using proxy: ScrollViewProxy, animated: Bool = false) {
         guard let id = chromeSelectedID,
               let selectedIndex = project.tabs.firstIndex(where: { $0.id == id })
         else { return }
+
+        if isWrap {
+            scrollWrapSelectedTab(
+                id: id,
+                selectedIndex: selectedIndex,
+                using: proxy,
+                animated: animated
+            )
+            return
+        }
 
         guard stripGeometry.containerWidth > 0,
               let selectedSize = tabSizes[id] else {
@@ -1442,6 +1901,49 @@ private struct SessionTabsView: View {
             return
         }
 
+        performScroll(to: id, anchor: anchor, using: proxy, animated: animated)
+    }
+
+    /// 多层纵向滚动：把选中行滚出上下渐隐带，已在安全区内则不动。
+    private func scrollWrapSelectedTab(
+        id: UUID,
+        selectedIndex: Int,
+        using proxy: ScrollViewProxy,
+        animated: Bool
+    ) {
+        guard wrapNeedsVerticalScroll,
+              stripGeometry.containerHeight > 0
+        else {
+            performScroll(to: id, anchor: nil, using: proxy, animated: animated)
+            return
+        }
+        let tabWidth = wrapFixedWidth
+        let rows = TabStripMetrics.packWrapRows(
+            widths: Array(repeating: tabWidth, count: project.tabs.count),
+            availableWidth: max(maxStripWidth, 1)
+        )
+        guard let rowIndex = rows.firstIndex(where: { $0.contains(selectedIndex) }) else {
+            performScroll(to: id, anchor: nil, using: proxy, animated: animated)
+            return
+        }
+        let rowStep = TabStripMetrics.rowHeight + TabStripMetrics.interTabSpacing
+        let tabMinY = CGFloat(rowIndex) * rowStep
+        let tabMaxY = tabMinY + TabStripMetrics.rowHeight
+        let safeMinY = stripGeometry.contentOffsetY + (overflow.top ? fadeWidth : 0)
+        let safeMaxY = stripGeometry.contentOffsetY + stripGeometry.containerHeight
+            - (overflow.bottom ? fadeWidth : 0)
+        let availableSpace = max(
+            1,
+            stripGeometry.containerHeight - TabStripMetrics.rowHeight
+        )
+        let anchor: UnitPoint
+        if tabMinY < safeMinY - 0.5 {
+            anchor = UnitPoint(x: 0.5, y: min(1, fadeWidth / availableSpace))
+        } else if tabMaxY > safeMaxY + 0.5 {
+            anchor = UnitPoint(x: 0.5, y: max(0, 1 - fadeWidth / availableSpace))
+        } else {
+            return
+        }
         performScroll(to: id, anchor: anchor, using: proxy, animated: animated)
     }
 
@@ -1533,7 +2035,9 @@ private struct SessionTabsView: View {
         // 优先：越过相邻 Tab 中线 → 排序，并清掉分屏预览。
         // 不用 contains 命中任意 frame，避免重排中的 frame 互相覆盖时来回换序。
         if shouldShowHorizontalPreview,
-           let target = horizontalSortTarget(for: source, at: location) {
+           let target = (isWrap
+                ? wrapSortTarget(for: source, at: location)
+                : horizontalSortTarget(for: source, at: location)) {
             tabSplitDrag.setDropTarget(paneID: nil, edge: nil)
             NSCursor.closedHand.set()
             // 只让占位 Tab 与周围标签弹簧让位；浮动源 Tab 不进入这次动画，
@@ -1724,6 +2228,15 @@ private struct TabStripContentWidthKey: PreferenceKey {
     }
 }
 
+/// 标签条当前展示高度（单行或换行视口，最多 3 行）。
+private struct TabStripDisplayedHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = TabStripMetrics.rowHeight
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// A tab in the strip. Shows the focused pane's title/icon, with a small
 /// counter when the tab holds more than one pane. Observes the tab so focus
 /// and layout changes refresh it; the focused content is observed by the
@@ -1890,8 +2403,8 @@ private struct TabRenameChrome: View {
                 .onChange(of: focused) { if !focused { finish(apply: true) } }
         }
         .padding(.horizontal, 8)
-        // 与 TabItemChrome 一致：上下各 +1pt，整体高度 +2pt。
-        .padding(.vertical, 5)
+        // 与 TabItemChrome 一致：条目高度 30pt。
+        .padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 6).fill(Theme.primaryColor.opacity(0.09)))
         .onAppear { DispatchQueue.main.async { focused = true } }
     }
@@ -2331,8 +2844,8 @@ private struct TabItemChrome: View {
                 }
                 .padding(.leading, iconOnly ? 7 : 9)
                 .padding(.trailing, iconOnly ? 7 : 5)
-                // 内容页 Tabs 相对原先各边 +1pt，整体高度 +2pt。
-                .padding(.vertical, 5)
+                // 条目高度 30pt：图标 16 + 上下各 7pt。
+                .padding(.vertical, 7)
                 .frame(maxWidth: .infinity, alignment: iconOnly ? .center : .leading)
                 .animation(Self.trailingLayoutAnimation, value: showsCloseButton)
             }

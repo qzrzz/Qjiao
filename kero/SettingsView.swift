@@ -289,7 +289,7 @@ struct SettingsView: View {
 
                     settingWithDescription(
                         L10n.t("Tabs Layout"),
-                        L10n.t("Scroll overflows with a scrollbar; Elastic shrinks inactive tabs (left first) into icons before scrolling.")
+                        L10n.t("Scroll overflows with a scrollbar; Elastic shrinks inactive tabs (left first) into icons before scrolling; Wrap keeps tab width and flows onto up to 3 rows.")
                     ) {
                         Picker("", selection: $settings.tabsLayoutMode) {
                             ForEach(TabsLayoutMode.allCases) { mode in
@@ -673,6 +673,38 @@ struct SettingsView: View {
                 Group {
                 Toggle(L10n.t("Wrap lines to editor width"), isOn: $settings.wrapLines)
                 Toggle(L10n.t("Show editor status bar"), isOn: $settings.showEditorStatusBar)
+                settingWithDescription(
+                    L10n.t("Auto Save"),
+                    L10n.t("Automatically save files with unsaved changes.")
+                ) {
+                    Picker("", selection: $settings.fileAutoSave) {
+                        ForEach(FileAutoSaveMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                if settings.fileAutoSave == .afterDelay {
+                    settingWithDescription(
+                        L10n.t("Auto Save Delay"),
+                        L10n.t("Delay in milliseconds after the last edit. Used only when Auto Save is afterDelay.")
+                    ) {
+                        HStack(spacing: 6) {
+                            TextField(
+                                "",
+                                value: $settings.fileAutoSaveDelay,
+                                format: .number
+                            )
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 72)
+                            .monospacedDigit()
+                            Text(L10n.t("ms"))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
                 }
                 .settingsRowPadding()
             }
@@ -1036,6 +1068,8 @@ struct SettingsView: View {
             && settings.visualEffectState == "followsApp"
             && settings.visualEffectAlpha == 1
             && !settings.wrapLines
+            && settings.fileAutoSave == .off
+            && settings.fileAutoSaveDelay == AppSettings.defaultAutoSaveDelay
             && settings.displayFileSize
             && settings.filesFontFamily.isEmpty
             && settings.filesFontSize == AppSettings.defaultFilesFontSize
