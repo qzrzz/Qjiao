@@ -248,15 +248,17 @@ struct CommandPaletteView: View {
             )
         }
 
-        for (index, project) in manager.projects.enumerated() where project.id != manager.selectedProjectID {
+        let visible = manager.visibleProjects
+        for project in manager.projects where project.id != manager.selectedProjectID {
+            let visibleIndex = visible.firstIndex(where: { $0.id == project.id })
             items.append(
                 PaletteCommand(
                     id: "switch-project-\(project.id)",
                     title: "Switch to Project: \(project.name)",
                     systemImage: "folder",
-                    shortcut: index < 9 ? "⌘\(index + 1)" : nil
+                    shortcut: visibleIndex.flatMap { $0 < 9 ? "⌘\($0 + 1)" : nil }
                 ) {
-                    manager.selectProject(index: index)
+                    manager.revealProjectInSidebar(project)
                 }
             )
         }

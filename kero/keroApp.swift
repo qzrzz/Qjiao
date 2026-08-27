@@ -307,7 +307,7 @@ private struct KeroCommands: Commands {
 
             Divider()
 
-            ForEach(Array((manager?.projects ?? []).prefix(9).enumerated()), id: \.element.id) { index, project in
+            ForEach(Array((manager?.visibleProjects ?? []).prefix(9).enumerated()), id: \.element.id) { index, project in
                 Button(project.name) {
                     manager?.selectProject(index: index)
                 }

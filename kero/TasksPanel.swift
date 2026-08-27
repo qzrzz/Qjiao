@@ -330,7 +330,7 @@ private struct TasksGridSection: View {
     }
 }
 
-/// 两列网格中的单个任务按钮：点击运行/停止，右键更多操作。
+/// 两列网格中的单个任务按钮：操作与 Project 任务行一致（运行/停止、重新运行、打开网页）。
 private struct TaskGridCell: View {
     let script: UniversalProjectScript
     let record: TerminalManager.PackageScriptExecutionRecord?
@@ -340,6 +340,8 @@ private struct TaskGridCell: View {
     let openPackageJSON: (() -> Void)?
 
     @State private var isHovering = false
+    @State private var isHoveringActionBtn = false
+    @State private var isHoveringRestartBtn = false
     @State private var isHoveringBrowser = false
 
     private var status: TerminalManager.PackageScriptStatus {
@@ -362,37 +364,34 @@ private struct TaskGridCell: View {
     }
 
     var body: some View {
-        HStack(spacing: 5) {
-            statusIcon
+        HStack(spacing: 4) {
+            actionButton
+
             Text(script.name)
                 .font(SidebarTypography.secondary(.medium))
                 .foregroundStyle(isHovering || status == .running ? .primary : .secondary)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            rightContent
         }
-        .padding(.leading, 6)
-        .padding(.trailing, boundPort == nil ? 6 : 24)
+        .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, minHeight: SidebarTypography.rowMinHeight)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(cellFill)
         )
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .onTapGesture(perform: toggleRun)
+        .onTapGesture(count: 2) {
+            guard status == .idle else { return }
+            run(.normal)
+        }
         .onHover { isHovering = $0 }
         .macTooltip(tooltip, position: .bottom, delay: 0.8)
-        .overlay(alignment: .trailing) {
-            if let port = boundPort {
-                browserButton(port: port)
-                    .padding(.trailing, 4)
-            }
-        }
         .contextMenu {
             if let port = boundPort {
                 Button("Open http://localhost:\(port) in Browser") {
-                    if let url = URL(string: "http://localhost:\(port)") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    openLocalhost(port)
                 }
                 Divider()
             }
@@ -412,22 +411,8 @@ private struct TaskGridCell: View {
                 Button(L10n.t("Run with --prof")) { run(.withProf) }
             }
         }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(script.name)
-        .accessibilityValue(status == .running ? L10n.t("Stop") : L10n.t("Run"))
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { toggleRun() }
-    }
-
-    private func toggleRun() {
-        switch status {
-        case .idle:
-            run(.normal)
-        case .running:
-            stop()
-        case .stopping:
-            break
-        }
     }
 
     private var cellFill: Color {
@@ -442,47 +427,125 @@ private struct TaskGridCell: View {
     }
 
     @ViewBuilder
-    private var statusIcon: some View {
+    private var actionButton: some View {
         switch status {
         case .idle:
-            Image(systemName: "play.fill")
-                .font(SidebarTypography.micro(.semibold))
-                .foregroundStyle(Color(nsColor: Theme.cursor))
-                .frame(width: 12, height: 12)
+            Button {
+                run(.normal)
+            } label: {
+                Image(systemName: "play.fill")
+                    .font(SidebarTypography.micro(.semibold))
+                    .foregroundStyle(isHoveringActionBtn ? Color.white : Color(nsColor: Theme.cursor))
+                    .frame(width: 18, height: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(
+                                isHoveringActionBtn
+                                    ? Color(nsColor: Theme.cursor)
+                                    : (isHovering ? Color.primary.opacity(0.08) : Color.clear)
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringActionBtn = $0 }
+            .help(L10n.t("Run"))
+            .accessibilityLabel(L10n.t("Run"))
+
         case .running:
-            Image(systemName: "stop.fill")
-                .font(SidebarTypography.micro(.semibold))
-                .foregroundStyle(.red)
-                .frame(width: 12, height: 12)
+            Button {
+                stop()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(SidebarTypography.micro(.semibold))
+                    .foregroundStyle(isHoveringActionBtn ? Color.white : Color.red)
+                    .frame(width: 18, height: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isHoveringActionBtn ? Color.red : Color.red.opacity(0.12))
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringActionBtn = $0 }
+            .help(L10n.t("Stop"))
+            .accessibilityLabel(L10n.t("Stop"))
+
         case .stopping:
             ProgressView()
-                .controlSize(.mini)
-                .frame(width: 12, height: 12)
+                .controlSize(.small)
+                .frame(width: 18, height: 18)
         }
     }
 
-    private func browserButton(port: Int) -> some View {
-        Button {
-            if let url = URL(string: "http://localhost:\(port)") {
-                NSWorkspace.shared.open(url)
-            }
-        } label: {
-            Image(systemName: "globe")
-                .font(SidebarTypography.micro(.semibold))
-                .foregroundStyle(isHoveringBrowser ? Color.white : Color(nsColor: Theme.cursor))
-                .frame(width: 18, height: 18)
-                .background(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(
-                            isHoveringBrowser
-                                ? Color(nsColor: Theme.cursor)
-                                : Color(nsColor: Theme.cursor).opacity(0.12)
+    @ViewBuilder
+    private var rightContent: some View {
+        HStack(spacing: 2) {
+            if let port = boundPort {
+                Button {
+                    openLocalhost(port)
+                } label: {
+                    Image(systemName: "globe")
+                        .font(SidebarTypography.micro(.semibold))
+                        .foregroundStyle(isHoveringBrowser ? Color.white : Color(nsColor: Theme.cursor))
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(
+                                    isHoveringBrowser
+                                        ? Color(nsColor: Theme.cursor)
+                                        : Color(nsColor: Theme.cursor).opacity(0.12)
+                                )
                         )
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 4))
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringBrowser = $0 }
+                .help("Open http://localhost:\(port) in browser")
+                .accessibilityLabel("Open http://localhost:\(port) in browser")
+            }
+
+            switch status {
+            case .idle:
+                if let duration = record?.lastDuration {
+                    Text(formatScriptDuration(duration))
+                        .font(SidebarTypography.micro(.medium).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .padding(.trailing, 2)
+                }
+
+            case .running:
+                Button {
+                    restart(.normal)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(SidebarTypography.micro(.semibold))
+                        .foregroundStyle(isHoveringRestartBtn ? Color.white : Color(nsColor: Theme.cursor))
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(
+                                    isHoveringRestartBtn
+                                        ? Color(nsColor: Theme.cursor)
+                                        : (isHovering ? Color.primary.opacity(0.08) : Color.clear)
+                                )
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringRestartBtn = $0 }
+                .help(L10n.t("Restart"))
+                .accessibilityLabel(L10n.t("Restart"))
+
+            case .stopping:
+                EmptyView()
+            }
         }
-        .buttonStyle(.plain)
-        .onHover { isHoveringBrowser = $0 }
-        .help("Open http://localhost:\(port) in browser")
+    }
+
+    private func openLocalhost(_ port: Int) {
+        if let url = URL(string: "http://localhost:\(port)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }

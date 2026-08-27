@@ -103,6 +103,7 @@ RELEASING.md          本机发布流程
 ### 项目与工作区
 
 - 以项目文件夹为中心：侧栏管理多项目，支持描述、自定义图标（预置 / Emoji / SF Symbols / 本地文件）、归档与搜索（点击已归档项目仅激活查看，不自动取消归档，可通过 hover 图标或右键显式取消）。
+- 侧栏底部以分组 tabs 取代原先的已归档折叠区：默认「个人 / 工作 / 当前 / 已归档」；「当前」筛选正在打开的未归档项目，个人与工作为可归属分组，可新建自定义分组；右键或拖到 tab 上移动项目。
 - 新建项目走系统文件夹选择器（可新建目录）；支持 Finder 拖入、侧栏拖入、空状态拖入、Finder 服务「Open in Qjiao」、以及 `qjiao [path]` CLI。
 - 项目配置落在 `~/.config/qjiao/projects/{id}/`（Debug 为 `qjiao-dev`），会话快照在 `session.json`，与 Dev/正式版互不覆盖；关闭项目清理对应目录。
 - 左侧：窗口置顶、侧栏开关（⌘B）、一键打开文件夹、批量 AI 整理 / 归档 / 清理空项目。
@@ -123,6 +124,7 @@ RELEASING.md          本机发布流程
 - 兼容用户安装的 ghost-complete 等 PTY 补全代理；前台进程驱动 Tab 应用图标（含深浅色变体）。
 - 终端本地文件链接：⌘-点击链接时本地文件在 Finder 中显示、URL 走浏览器；⌘-右键文件链接可在 Qjiao 中新建文件标签/分屏打开（路径按 pane 工作目录解析，支持 `~`、`file:` 与 `:行:列` 后缀）。
 - 多 Tab 惰性启动 Shell，后台 Tab 降低 GPU 占用；访问过的项目其 Diff 视图保持挂载，切换项目不重建 WebKit（提速），恢复会话时保留文件/Diff 标签的上下文终端指向。
+- 退出后再启动时，工作目录已不存在、进程无法拉起、或恢复出来只会是空 shell 的终端不再落到家目录、也不留下 “Process exited” 死标签，直接关闭（分屏塌缩，空标签丢弃）；从未用过、没有可回放历史的终端也不会写入会话快照。
 
 ### Git
 
@@ -179,6 +181,7 @@ RELEASING.md          本机发布流程
 
 - 统一 LocalAI：本地 CLI（grok / codex / claude / agy / opencode / pi）或云端 API（OpenAI / DeepSeek / Anthropic / Gemini / OpenRouter / xAI / 兼容端点）；Key 存 Keychain。
 - **AI API 配置独立记录机制**：每个供应商各自的 Model、Base URL 与 API Key 独立保存与复用，切换供应商时自动恢复上一次的自定义参数，无需重复输入。
+- **全链路 CLI 探测与环境增强**：全面覆盖 npm、pnpm（`~/Library/pnpm` 等）、yarn、bun、nvm（多版本动态扫描）、fnm、volta、asdf、mise 等包管理器的全局 bin 目录及用户登录 Shell PATH，解决从 macOS GUI 启动时无法检测到 pi / codex / claude / opencode 等 CLI 工具以及子进程缺失 node / npm 运行环境的问题。
 - 能力：AI 选图标、AI 生成名称/描述/图标、AI Commit Message（语言与 Gitmoji 可配；上下文优先 staged；未跟踪文件仅提供文件路径，不读取正文）。
 - AgentWatcher：识别常见 Coding Agent 的 working / blocked / done，Tab 绿点、未读蓝点与项目角标；可配完成/阻塞音效。
 - Agent guarded pane：通过带终端 capability 的本地自动化协议查询/分屏/读写 Pane；Agent Prompt 仅发送给当前项目中仍在运行且未处于 blocked 状态的已识别 Agent，避免把自动输入注入错误终端。

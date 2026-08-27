@@ -56,7 +56,8 @@ final class LocalAIRegistry: nonisolated ObservableObject {
 
     /// 重新探测 PATH / 常见安装目录。
     func refresh() {
-        statuses = LocalAIExecutableLocator.probeAll()
+        LocalAIExecutableLocator.invalidateCache()
+        statuses = LocalAIExecutableLocator.probeAll(forceRefresh: true)
         syncFromSettings()
     }
 

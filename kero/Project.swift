@@ -224,10 +224,18 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             saveConfig()
         }
     }
-    /// 项目是否已归档，归档后会移至左侧边栏底部的归档栏中。
+    /// 项目是否已归档，归档后会出现在侧栏「已归档」tab。
     @Published var isArchived: Bool = false {
         didSet {
             saveConfig()
+        }
+    }
+    /// 用户分组 ID（个人 / 工作 / 自建分组）。`nil` 表示未分组，只出现在「当前」tab。
+    @Published var groupID: String? = nil {
+        didSet {
+            if groupID != oldValue {
+                saveConfig()
+            }
         }
     }
     /// 项目级 AI 写作语言覆盖；nil 表示跟随全局 `AppSettings.aiWritingLanguage`。
@@ -407,6 +415,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
                 projectDirectory: projectDirectory,
                 launchCommands: launchCommands,
                 isArchived: isArchived,
+                groupID: groupID,
                 aiWritingLanguage: aiWritingLanguage?.rawValue,
                 customGitPath: customGitPath
             ),
@@ -432,6 +441,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         if icon != config.icon { icon = config.icon }
         if theme != (config.theme ?? .global) { theme = config.theme ?? .global }
         if isArchived != (config.isArchived ?? false) { isArchived = config.isArchived ?? false }
+        if groupID != config.groupID { groupID = config.groupID }
         if launchCommands != (config.launchCommands ?? []) { launchCommands = config.launchCommands ?? [] }
         let aiLang = config.aiWritingLanguage.flatMap(AIWritingLanguage.init(rawValue:))
         if aiWritingLanguage != aiLang { aiWritingLanguage = aiLang }
@@ -652,14 +662,18 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// it in a tab — shared by new tabs and splits. `restoredHistory` seeds the
     /// scrollback when reopening a saved session.
     private func makeSession(
-        directory: String? = nil, restoredHistory: String? = nil, isLazy: Bool = false
+        directory: String? = nil,
+        restoredHistory: String? = nil,
+        isLazy: Bool = false,
+        restoreShouldDiscard: Bool = false
     ) -> TerminalSession {
         let session = TerminalSession(
             initialDirectory: directory
                 ?? selectedSession?.currentDirectoryPath
                 ?? (projectDirectory.isEmpty ? nil : projectDirectory),
             restoredHistory: restoredHistory,
-            isLazy: isLazy
+            isLazy: isLazy || restoreShouldDiscard,
+            restoreShouldDiscard: restoreShouldDiscard
         )
         configureProjectDirectoryDrop(for: session)
         session.onExited = { [weak self] session in
@@ -1262,6 +1276,19 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         return tab
     }
 
+    /// 关闭无法恢复的终端：工作目录没了，或恢复出来只会是空 shell。
+    /// 分屏会塌缩，只剩这些 pane 的标签会被丢掉。
+    func closeUnrestorableRestoredSessions() {
+        let sessions = sessions.filter(\.restoreShouldDiscard)
+        for session in sessions {
+            NSLog(
+                "qjiao: closing unrestorable terminal id=%@",
+                session.id.uuidString
+            )
+            closeContent(.session(session), terminate: true)
+        }
+    }
+
     /// Rebuilds a saved tab's pane layout — recreating its sessions (wired for
     /// exit + observation), files and diffs — then registers and appends it.
     /// Skips panes whose content can't be rebuilt; a tab with none is dropped.
@@ -1324,11 +1351,18 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     ) -> PaneContent {
         switch snap {
         case .session(let workingDirectory):
+            let resolved = Self.resolvedRestoreDirectory(
+                sessionDirectory: sessionDirectory,
+                workingDirectory: workingDirectory
+            )
+            let discard = resolved.missing
+                || TerminalSession.isEmptyRestoredHistory(restoredHistory)
             return .session(
                 makeSession(
-                    directory: sessionDirectory ?? workingDirectory,
+                    directory: resolved.directory,
                     restoredHistory: restoredHistory,
-                    isLazy: isLazy
+                    isLazy: isLazy || discard,
+                    restoreShouldDiscard: discard
                 )
             )
         case .file(let path, let editorState):
@@ -1360,6 +1394,25 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
                 commitStatus: status.first
             ))
         }
+    }
+
+    /// 恢复终端的工作目录：项目目录仍在则用它；否则用 pane 上次的目录。
+    /// 快照里写过具体路径但目录已经没了，就标记为无法恢复，而不是落到家目录。
+    private static func resolvedRestoreDirectory(
+        sessionDirectory: String?,
+        workingDirectory: String
+    ) -> (directory: String?, missing: Bool) {
+        if let sessionDirectory, !sessionDirectory.isEmpty,
+           TerminalSession.isUsableRestoreDirectory(sessionDirectory) {
+            return (sessionDirectory, false)
+        }
+        if !workingDirectory.isEmpty {
+            if TerminalSession.isUsableRestoreDirectory(workingDirectory) {
+                return (workingDirectory, false)
+            }
+            return (sessionDirectory ?? workingDirectory, true)
+        }
+        return (nil, false)
     }
 
     /// Inserts a newly created tab immediately after the current selection so

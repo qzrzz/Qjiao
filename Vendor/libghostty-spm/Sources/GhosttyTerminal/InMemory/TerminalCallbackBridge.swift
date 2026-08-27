@@ -218,6 +218,14 @@ final class TerminalCallbackBridge {
             delegate.terminalDidUpdateSearchSelected(selected < 0 ? nil : Int(selected))
             return true
 
+        case GHOSTTY_ACTION_SHOW_CHILD_EXITED:
+            // 宿主自己关掉 pane，不要把 “Process exited. Press any key”
+            // 留在无法恢复的 surface 上。
+            TerminalDebugLog.log(.lifecycle, "callback action=show_child_exited")
+            (delegate as? any TerminalSurfaceCloseDelegate)?
+                .terminalDidClose(processAlive: false)
+            return true
+
         default:
             TerminalDebugLog.log(
                 .actions,

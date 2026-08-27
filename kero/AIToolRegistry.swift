@@ -94,113 +94,50 @@ final class AIToolRegistry: nonisolated ObservableObject {
     /// 全局单例，与 `AppSettings.shared` 同生命周期。
     static let shared = AIToolRegistry()
 
-    /// 常见 PATH 路径列表，用于探测 CLI 可执行文件。
-    private nonisolated static let commonPathDirectories: [String] = {
-        var dirs = [
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "/usr/bin",
-            "/bin",
-            "/usr/sbin",
-            "/sbin",
-        ]
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        dirs.append("\(home)/.bun/bin")
-        dirs.append("\(home)/.cargo/bin")
-        dirs.append("\(home)/.local/bin")
-        dirs.append("\(home)/.npm-global/bin")
-        // pi：curl 安装脚本在无系统 node 时自带的独立 node
-        dirs.append("\(home)/.local/share/pi-node/current/bin")
-        dirs.append("\(home)/.gemini/antigravity/bin")
-        dirs.append("\(home)/.antigravity/bin")
-        dirs.append("\(home)/.opencode/bin")
-        dirs.append("\(home)/.claude/bin")
+    /// AI 工具原型定义（用于在 refresh 时动态探测安装状态）。
+    private struct KnownToolPrototype: Sendable {
+        let id: String
+        let displayName: String
+        let kind: AIToolKind
+        let bundleId: String?
+        let cliCommand: String?
+        let symbolName: String
+    }
 
-        // 尝试解析用户 PATH 环境变量中的额外路径
-        if let envPath = ProcessInfo.processInfo.environment["PATH"] {
-            let envDirs = envPath.split(separator: ":").map(String.init)
-            for d in envDirs where !dirs.contains(d) {
-                dirs.append(d)
-            }
-        }
-        return dirs
-    }()
+    /// 所有已知预置 AI 工具的原型列表。
+    private static let knownPrototypes: [KnownToolPrototype] = [
+        // ── 桌面 GUI 应用
+        KnownToolPrototype(id: "desktop:com.openai.codex",                displayName: "Codex",            kind: .desktop, bundleId: "com.openai.codex",                cliCommand: nil, symbolName: "cpu"),
+        KnownToolPrototype(id: "desktop:com.openai.chat",                 displayName: "ChatGPT Desktop",  kind: .desktop, bundleId: "com.openai.chat",                 cliCommand: nil, symbolName: "message"),
+        KnownToolPrototype(id: "desktop:com.anthropic.claude",            displayName: "Claude Code",      kind: .desktop, bundleId: "com.anthropic.claude",            cliCommand: nil, symbolName: "sparkles"),
+        KnownToolPrototype(id: "desktop:com.anthropic.claudefordesktop",  displayName: "Claude Desktop",   kind: .desktop, bundleId: "com.anthropic.claudefordesktop",  cliCommand: nil, symbolName: "sparkles"),
+        KnownToolPrototype(id: "desktop:dev.opencode.app",                displayName: "OpenCode",         kind: .desktop, bundleId: "dev.opencode.app",                cliCommand: nil, symbolName: "curlybraces"),
+        KnownToolPrototype(id: "desktop:com.opencode.desktop",            displayName: "OpenCode App",     kind: .desktop, bundleId: "com.opencode.desktop",            cliCommand: nil, symbolName: "curlybraces"),
+        KnownToolPrototype(id: "desktop:com.google.antigravity",          displayName: "Antigravity",      kind: .desktop, bundleId: "com.google.antigravity",          cliCommand: nil, symbolName: "globe.americas"),
+        KnownToolPrototype(id: "desktop:com.gemini.antigravity",          displayName: "Antigravity App",  kind: .desktop, bundleId: "com.gemini.antigravity",          cliCommand: nil, symbolName: "globe.americas"),
+        KnownToolPrototype(id: "desktop:com.ollama.ollama",               displayName: "Ollama",           kind: .desktop, bundleId: "com.ollama.ollama",               cliCommand: nil, symbolName: "cpu"),
+        KnownToolPrototype(id: "desktop:ai.ollama.ollama",                displayName: "Ollama App",       kind: .desktop, bundleId: "ai.ollama.ollama",                cliCommand: nil, symbolName: "cpu"),
+
+        // ── 命令行 CLI 工具
+        KnownToolPrototype(id: "cli:codex",       displayName: "codex",       kind: .cli, bundleId: nil, cliCommand: "codex",       symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:agy",         displayName: "agy",         kind: .cli, bundleId: nil, cliCommand: "agy",         symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:claude",      displayName: "claude",      kind: .cli, bundleId: nil, cliCommand: "claude",      symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:opencode",    displayName: "opencode",    kind: .cli, bundleId: nil, cliCommand: "opencode",    symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:grok",        displayName: "grok",        kind: .cli, bundleId: nil, cliCommand: "grok",        symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:pi",          displayName: "pi",          kind: .cli, bundleId: nil, cliCommand: "pi",          symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:aider",       displayName: "aider",       kind: .cli, bundleId: nil, cliCommand: "aider",       symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:ollama",      displayName: "ollama",      kind: .cli, bundleId: nil, cliCommand: "ollama",      symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:copilot",     displayName: "copilot",     kind: .cli, bundleId: nil, cliCommand: "copilot",     symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:sgpt",        displayName: "sgpt",        kind: .cli, bundleId: nil, cliCommand: "sgpt",        symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:mods",        displayName: "mods",        kind: .cli, bundleId: nil, cliCommand: "mods",        symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:interpreter", displayName: "interpreter", kind: .cli, bundleId: nil, cliCommand: "interpreter", symbolName: "terminal"),
+        KnownToolPrototype(id: "cli:fabric",      displayName: "fabric",      kind: .cli, bundleId: nil, cliCommand: "fabric",      symbolName: "terminal"),
+    ]
 
     /// 检查指定 CLI 命令是否在系统 PATH 目录中可用，并返回绝对路径。
     private nonisolated static func findExecutable(name: String) -> String? {
-        let fm = FileManager.default
-        for dir in commonPathDirectories {
-            let path = "\(dir)/\(name)"
-            if fm.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-        return nil
+        LocalAIExecutableLocator.findExecutable(name: name)
     }
-
-    /// 所有已知 AI 工具原型定义（按桌面应用与 CLI 分组排列）。
-    private nonisolated static let knownTools: [AITool] = {
-        let ws = NSWorkspace.shared
-
-        /// 构造桌面 GUI 应用定义
-        func desktop(_ bundleId: String, name: String, symbol: String) -> AITool {
-            let url = ws.urlForApplication(withBundleIdentifier: bundleId)
-            return AITool(
-                id: "desktop:\(bundleId)",
-                displayName: name,
-                kind: .desktop,
-                bundleId: bundleId,
-                cliCommand: nil,
-                symbolName: symbol,
-                appURL: url,
-                executablePath: nil
-            )
-        }
-
-        /// 构造 CLI 工具定义
-        func cli(_ command: String, name: String, symbol: String) -> AITool {
-            let path = findExecutable(name: command)
-            return AITool(
-                id: "cli:\(command)",
-                displayName: name,
-                kind: .cli,
-                bundleId: nil,
-                cliCommand: command,
-                symbolName: symbol,
-                appURL: nil,
-                executablePath: path
-            )
-        }
-
-        return [
-            // ── 桌面 GUI 应用
-            desktop("com.openai.codex",                name: "Codex",            symbol: "cpu"),
-            desktop("com.openai.chat",                 name: "ChatGPT Desktop",  symbol: "message"),
-            desktop("com.anthropic.claude",            name: "Claude Code",      symbol: "sparkles"),
-            desktop("com.anthropic.claudefordesktop",  name: "Claude Desktop",   symbol: "sparkles"),
-            desktop("dev.opencode.app",                name: "OpenCode",         symbol: "curlybraces"),
-            desktop("com.opencode.desktop",            name: "OpenCode App",     symbol: "curlybraces"),
-            desktop("com.google.antigravity",          name: "Antigravity",      symbol: "globe.americas"),
-            desktop("com.gemini.antigravity",          name: "Antigravity App",  symbol: "globe.americas"),
-            desktop("com.ollama.ollama",               name: "Ollama",           symbol: "cpu"),
-            desktop("ai.ollama.ollama",                name: "Ollama App",       symbol: "cpu"),
-
-            // ── 命令行 CLI 工具
-            cli("codex",       name: "codex",       symbol: "terminal"),
-            cli("agy",         name: "agy",         symbol: "terminal"),
-            cli("claude",      name: "claude",      symbol: "terminal"),
-            cli("opencode",    name: "opencode",    symbol: "terminal"),
-            cli("grok",        name: "grok",        symbol: "terminal"),
-            cli("pi",          name: "pi",          symbol: "terminal"),
-            cli("aider",       name: "aider",       symbol: "terminal"),
-            cli("ollama",      name: "ollama",      symbol: "terminal"),
-            cli("copilot",     name: "copilot",     symbol: "terminal"),
-            cli("sgpt",        name: "sgpt",        symbol: "terminal"),
-            cli("mods",        name: "mods",        symbol: "terminal"),
-            cli("interpreter", name: "interpreter", symbol: "terminal"),
-            cli("fabric",      name: "fabric",      symbol: "terminal"),
-        ]
-    }()
 
     /// 系统中已检测到且可用的 AI 工具列表。
     @Published private(set) var installedTools: [AITool] = []
@@ -227,7 +164,43 @@ final class AIToolRegistry: nonisolated ObservableObject {
 
     /// 重新探测并刷新已安装的 AI 工具列表。
     func refresh() {
-        var list = Self.knownTools.filter(\.isInstalled)
+        var list: [AITool] = []
+        let ws = NSWorkspace.shared
+
+        for proto in Self.knownPrototypes {
+            switch proto.kind {
+            case .desktop:
+                guard let bundleId = proto.bundleId,
+                      let url = ws.urlForApplication(withBundleIdentifier: bundleId) else { continue }
+                list.append(
+                    AITool(
+                        id: proto.id,
+                        displayName: proto.displayName,
+                        kind: .desktop,
+                        bundleId: bundleId,
+                        cliCommand: nil,
+                        symbolName: proto.symbolName,
+                        appURL: url,
+                        executablePath: nil
+                    )
+                )
+            case .cli:
+                guard let cmd = proto.cliCommand,
+                      let execPath = Self.findExecutable(name: cmd) else { continue }
+                list.append(
+                    AITool(
+                        id: proto.id,
+                        displayName: proto.displayName,
+                        kind: .cli,
+                        bundleId: nil,
+                        cliCommand: cmd,
+                        symbolName: proto.symbolName,
+                        appURL: nil,
+                        executablePath: execPath
+                    )
+                )
+            }
+        }
 
         // 解析用户在设置面板中填写的自定义 CLI 工具名称
         for cmd in AppSettings.shared.customCLITools {

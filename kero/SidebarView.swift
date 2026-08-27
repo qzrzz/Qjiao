@@ -15,11 +15,15 @@ struct SidebarView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject private var l10n = L10n.shared
+    @ObservedObject private var groupStore = ProjectGroupStore.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @AppStorage("leftSidebarWidth") private var width: Double = 220
     @State private var draggedProjectID: UUID?
     @State private var projectFrames: [UUID: CGRect] = [:]
+    @State private var groupTabFrames: [String: CGRect] = [:]
+    @State private var dropTargetGroupID: String?
+    @State private var groupSearchText: String = ""
     /// 当前窗口是否置顶（`NSWindow.level == .floating`）。
     @State private var isWindowAlwaysOnTop = false
     /// Finder 等外部文件夹拖入侧栏时的高亮反馈。
@@ -59,19 +63,33 @@ struct SidebarView: View {
             GeometryReader { viewport in
                 ScrollView {
                     VStack(spacing: 3) {
-                        ForEach(Array(manager.activeProjects.enumerated()), id: \.element.id) { index, project in
-                            SidebarProjectRow(
-                                manager: manager,
-                                project: project,
-                                index: index,
-                                isSelected: project.id == manager.selectedProjectID,
-                                select: { manager.selectedProjectID = project.id },
-                                close: { manager.close(project) },
-                                isDragging: draggedProjectID == project.id,
-                                onDrag: { updateProjectDrag(source: project.id, location: $0) },
-                                onDragEnded: endProjectDrag
-                            )
-                            .background(ProjectFrameReader(projectID: project.id))
+                        if showsGroupSearch {
+                            SidebarGroupSearchField(text: $groupSearchText)
+                        }
+
+                        let visible = filteredVisibleProjects
+                        if visible.isEmpty {
+                            Text(emptyGroupText)
+                                .font(SidebarTypography.caption(.regular))
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 10)
+                        } else {
+                            ForEach(Array(visible.enumerated()), id: \.element.id) { index, project in
+                                SidebarProjectRow(
+                                    manager: manager,
+                                    project: project,
+                                    index: index,
+                                    isSelected: project.id == manager.selectedProjectID,
+                                    select: { manager.selectedProjectID = project.id },
+                                    close: { manager.close(project) },
+                                    isDragging: draggedProjectID == project.id,
+                                    onDrag: { updateProjectDrag(source: project.id, location: $0) },
+                                    onDragEnded: endProjectDrag
+                                )
+                                .background(ProjectFrameReader(projectID: project.id))
+                            }
                         }
                         // 动态填满最后一个项目行与底部栏之间的空白区域。
                         let dragAreaHeight = listDragAreaHeight(
@@ -87,12 +105,10 @@ struct SidebarView: View {
                 .scrollIndicators(.never)
             }
 
-            // 左侧边栏底部的项目归档区：通常收起，可展开显示归档列表
-            SidebarArchiveSection(
+            SidebarProjectGroupBar(
                 manager: manager,
-                draggedProjectID: draggedProjectID,
-                onDrag: updateProjectDrag(source:location:),
-                onDragEnded: endProjectDrag
+                groupStore: groupStore,
+                dropTargetGroupID: dropTargetGroupID
             )
 
             ZStack {
@@ -160,6 +176,40 @@ struct SidebarView: View {
             perform: handleFolderDrop
         )
         .onPreferenceChange(ProjectFramePreferenceKey.self) { projectFrames = $0 }
+        .onPreferenceChange(GroupTabFramePreferenceKey.self) { groupTabFrames = $0 }
+        .onChange(of: groupStore.selectedID) { _, _ in
+            groupSearchText = ""
+        }
+    }
+
+    private var showsGroupSearch: Bool {
+        groupStore.selectedID == ProjectGroup.archivedID
+            && !manager.archivedProjects.isEmpty
+    }
+
+    private var filteredVisibleProjects: [Project] {
+        let projects = manager.visibleProjects
+        let query = groupSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return projects }
+        return projects.filter { project in
+            project.name.localizedCaseInsensitiveContains(query)
+                || (project.description?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
+    private var emptyGroupText: String {
+        let query = groupSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
+            return L10n.t("No matching projects")
+        }
+        switch groupStore.selectedID {
+        case ProjectGroup.archivedID:
+            return L10n.t("No archived projects")
+        case ProjectGroup.currentID:
+            return L10n.t("No open projects")
+        default:
+            return L10n.t("No projects in this group")
+        }
     }
 
     /// 从 Finder 拖入文件夹到左侧边栏：已有同路径项目则激活，否则新建。
@@ -210,6 +260,11 @@ struct SidebarView: View {
     private func updateProjectDrag(source: UUID, location: CGPoint) {
         draggedProjectID = source
         NSCursor.closedHand.set()
+        if let tabID = groupTabFrames.first(where: { $0.value.contains(location) })?.key {
+            dropTargetGroupID = tabID
+            return
+        }
+        dropTargetGroupID = nil
         guard let target = projectFrames.first(where: {
             $0.key != source && $0.value.contains(location)
         })?.key else { return }
@@ -219,7 +274,15 @@ struct SidebarView: View {
     }
 
     private func endProjectDrag() {
+        if let source = draggedProjectID,
+           let tabID = dropTargetGroupID,
+           let project = manager.projects.first(where: { $0.id == source }) {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                manager.assign(project, toGroupID: tabID)
+            }
+        }
         draggedProjectID = nil
+        dropTargetGroupID = nil
         NSCursor.arrow.set()
     }
 
@@ -393,6 +456,28 @@ private struct ProjectFramePreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue()) { $1 }
+    }
+}
+
+private struct GroupTabFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+private struct GroupTabFrameReader: View {
+    let groupID: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            Color.clear.preference(
+                key: GroupTabFramePreferenceKey.self,
+                value: [groupID: frame]
+            )
+        }
     }
 }
 
@@ -673,6 +758,31 @@ private struct SidebarProjectRow: View {
         }
 
         Divider()
+        Menu(L10n.t("Move to Group")) {
+            ForEach(ProjectGroupStore.shared.userGroups) { group in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        manager.assign(project, toGroupID: group.id)
+                    }
+                } label: {
+                    if project.groupID == group.id, !project.isArchived {
+                        Label(group.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(group.displayName)
+                    }
+                }
+            }
+            if project.groupID != nil {
+                Divider()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        manager.ungroupProject(project)
+                    }
+                } label: {
+                    Label(L10n.t("Ungroup"), systemImage: "minus.circle")
+                }
+            }
+        }
         if project.isArchived {
             Button {
                 withAnimation(.easeInOut(duration: 0.15)) {
@@ -1080,166 +1190,263 @@ private struct SessionDirectoryLabel: View {
     }
 }
 
-/// 左侧边栏底部的项目归档区组件。通常收起，可点击展开显示已归档的项目列表。支持搜索与实时筛选。
-private struct SidebarArchiveSection: View {
-    @ObservedObject var manager: TerminalManager
-    let draggedProjectID: UUID?
-    let onDrag: (UUID, CGPoint) -> Void
-    let onDragEnded: () -> Void
-
-    @State private var isExpanded: Bool = false
-    @State private var searchText: String = ""
-    @FocusState private var isSearchFieldFocused: Bool
+/// 已归档 tab 顶部的搜索框。
+private struct SidebarGroupSearchField: View {
+    @Binding var text: String
+    @FocusState private var isFocused: Bool
 
     var body: some View {
-        let archivedProjects = manager.archivedProjects
-        if !archivedProjects.isEmpty {
-            // 根据搜索框关键词过滤已归档项目（比对项目名称和描述）
-            let filteredProjects = archivedProjects.filter { project in
-                let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-                if query.isEmpty { return true }
-                let nameMatch = project.name.localizedCaseInsensitiveContains(query)
-                let descMatch = project.description?.localizedCaseInsensitiveContains(query) ?? false
-                return nameMatch || descMatch
-            }
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .font(SidebarTypography.micro(.regular))
+                .foregroundStyle(.tertiary)
 
-            VStack(alignment: .leading, spacing: 2) {
-                // 归档栏 Header：显示图标、标题、数量与折叠箭头，点击触发展开/收起
+            TextField(L10n.t("Search archived projects..."), text: $text)
+                .textFieldStyle(.plain)
+                .font(SidebarTypography.secondary(.regular))
+                .focused($isFocused)
+
+            if !text.isEmpty {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isExpanded.toggle()
-                        if isExpanded {
-                            isSearchFieldFocused = true
-                        }
-                    }
+                    text = ""
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(SidebarTypography.micro(.medium))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 12, height: 12)
-
-                        Image(systemName: "archivebox")
-                            .font(SidebarTypography.secondary(.medium))
-                            .foregroundStyle(Theme.secondaryColor)
-
-                        Text(L10n.t("Archived"))
-                            .font(SidebarTypography.secondary(.medium))
-                            .foregroundStyle(Theme.secondaryColor)
-
-                        Spacer(minLength: 0)
-
-                        // 数量徽章：有搜索文本时显示筛选出的数量，否则显示总归档数
-                        Text("\(searchText.isEmpty ? archivedProjects.count : filteredProjects.count)")
-                            .font(SidebarTypography.micro(.medium).monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(
-                                Capsule()
-                                    .fill(Theme.primaryColor.opacity(0.06))
-                            )
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .contentShape(Rectangle())
+                    Image(systemName: "xmark.circle.fill")
+                        .font(SidebarTypography.micro(.regular))
+                        .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help(isExpanded ? L10n.t("Collapse Archived Projects") : L10n.t("Expand Archived Projects"))
-
-                // 展开时常驻显示搜索输入框和归档的项目列表
-                if isExpanded {
-                    VStack(spacing: 3) {
-                        // 展开后第一行：常驻搜索输入框，展开时自动聚焦
-                        HStack(spacing: 4) {
-                            Image(systemName: "magnifyingglass")
-                                .font(SidebarTypography.micro(.regular))
-                                .foregroundStyle(.tertiary)
-
-                            TextField(L10n.t("Search archived projects..."), text: $searchText)
-                                .textFieldStyle(.plain)
-                                .font(SidebarTypography.secondary(.regular))
-                                .focused($isSearchFieldFocused)
-                                .onAppear {
-                                    isSearchFieldFocused = true
-                                }
-
-                            if !searchText.isEmpty {
-                                Button {
-                                    searchText = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(SidebarTypography.micro(.regular))
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(Theme.primaryColor.opacity(0.05))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .stroke(isSearchFieldFocused ? Color(nsColor: Theme.cursor).opacity(0.5) : Theme.primaryColor.opacity(0.12), lineWidth: 1)
-                                )
-                        )
-                        .padding(.vertical, 2)
-
-                        if filteredProjects.isEmpty && !searchText.isEmpty {
-                            Text(L10n.t("No matching projects"))
-                                .font(SidebarTypography.caption(.regular))
-                                .foregroundStyle(.tertiary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 6)
-                                .padding(.leading, 4)
-                        } else {
-                            ForEach(Array(filteredProjects.enumerated()), id: \.element.id) { index, project in
-                                SidebarProjectRow(
-                                    manager: manager,
-                                    project: project,
-                                    index: index,
-                                    isSelected: project.id == manager.selectedProjectID,
-                                    // 选中已归档项目，不再自动解除归档
-                                    select: {
-                                        withAnimation(.easeInOut(duration: 0.15)) {
-                                            manager.selectedProjectID = project.id
-                                        }
-                                    },
-                                    close: { manager.close(project) },
-                                    isDragging: draggedProjectID == project.id,
-                                    onDrag: { location in onDrag(project.id, location) },
-                                    onDragEnded: onDragEnded
-                                )
-                            }
-                        }
-                    }
-                    .padding(.leading, 18)
-                    .transition(.opacity)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .clipped()
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color(nsColor: Theme.divider).opacity(0.6))
-                    .frame(height: 1)
-            }
-            .onAppear {
-                if manager.selectedProject?.isArchived == true {
-                    isExpanded = true
-                }
-            }
-            .onChange(of: manager.selectedProjectID) { _, newID in
-                if let newID, manager.projects.first(where: { $0.id == newID })?.isArchived == true {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        isExpanded = true
-                    }
-                }
             }
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Theme.primaryColor.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(
+                            isFocused
+                                ? Color(nsColor: Theme.cursor).opacity(0.5)
+                                : Theme.primaryColor.opacity(0.12),
+                            lineWidth: 1
+                        )
+                )
+        )
+        .padding(.bottom, 2)
+        .onAppear { isFocused = true }
+    }
+}
+
+/// 左侧边栏底部的项目分组 tabs：个人 / 工作 / 当前 / 已归档，以及用户自建分组。
+private struct SidebarProjectGroupBar: View {
+    @ObservedObject var manager: TerminalManager
+    @ObservedObject var groupStore: ProjectGroupStore
+    let dropTargetGroupID: String?
+
+    @ObservedObject private var l10n = L10n.shared
+    @State private var renamingGroupID: String?
+    @State private var renameDraft = ""
+    @FocusState private var renameFocused: Bool
+    @State private var isDeleteGroupPresented = false
+    @State private var pendingDeleteGroupID: String?
+
+    private static let barHeight: CGFloat = 34
+
+    var body: some View {
+        let _ = l10n.language
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color(nsColor: Theme.divider).opacity(0.6))
+                .frame(height: 1)
+
+            GeometryReader { geo in
+                let tabs = groupStore.tabs
+                let activeIndex = tabs.firstIndex { $0.id == groupStore.selectedID } ?? 0
+                let trailingReserve =
+                    SidebarTabLayout.collapseButtonSide + SidebarTabLayout.interTabSpacingWide
+                let layout = SidebarTabLayout.resolve(
+                    items: tabs.map {
+                        SidebarTabLayout.MeasureItem(
+                            title: $0.displayName,
+                            badgeCount: manager.projects(inGroupID: $0.id).count
+                        )
+                    },
+                    activeIndex: activeIndex,
+                    availableWidth: geo.size.width,
+                    trailingReserve: trailingReserve
+                )
+                HStack(alignment: .center, spacing: layout.spacing) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .center, spacing: layout.spacing) {
+                            ForEach(Array(tabs.enumerated()), id: \.element.id) { index, group in
+                                groupTab(group, showTitle: layout.showsTitle(at: index))
+                            }
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    addGroupButton
+                }
+                .padding(.horizontal, SidebarTabLayout.barHorizontalPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            }
+            .frame(height: Self.barHeight)
+            .background { WindowDragArea() }
+        }
+        .alert(
+            L10n.t("Delete Group?"),
+            isPresented: $isDeleteGroupPresented
+        ) {
+            Button(L10n.t("Delete Group"), role: .destructive) {
+                if let id = pendingDeleteGroupID {
+                    manager.deleteProjectGroup(id: id)
+                }
+                pendingDeleteGroupID = nil
+            }
+            Button(L10n.t("Cancel"), role: .cancel) {
+                pendingDeleteGroupID = nil
+            }
+        } message: {
+            Text(L10n.t("Projects in this group will move to Current."))
+        }
+    }
+
+    private var addGroupButton: some View {
+        Button {
+            let group = groupStore.addGroup()
+            beginRename(group)
+        } label: {
+            Image(systemName: "plus")
+                .font(SidebarTypography.caption(.medium))
+                .foregroundStyle(.secondary)
+                .frame(
+                    width: SidebarTabLayout.collapseButtonSide,
+                    height: SidebarTabLayout.collapseButtonSide
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .help(L10n.t("New Group"))
+    }
+
+    @ViewBuilder
+    private func groupTab(_ group: ProjectGroup, showTitle: Bool) -> some View {
+        let isSelected = groupStore.selectedID == group.id
+        let isDropTarget = dropTargetGroupID == group.id
+        let count = manager.projects(inGroupID: group.id).count
+        let isRenaming = renamingGroupID == group.id
+        let isActive = isSelected || isDropTarget
+
+        Group {
+            if isRenaming {
+                renameChip(group: group)
+            } else {
+                Button {
+                    groupStore.selectedID = group.id
+                } label: {
+                    SidebarTabChip(
+                        systemImage: group.systemImage,
+                        title: group.displayName,
+                        isActive: isActive,
+                        showTitle: showTitle,
+                        badgeCount: count
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(groupTabHelp(group))
+                .accessibilityLabel(group.displayName)
+                .accessibilityValue(isSelected ? "Selected" : "Not selected")
+            }
+        }
+        .background(GroupTabFrameReader(groupID: group.id))
+        .contextMenu { groupContextMenu(group) }
+    }
+
+    private func renameChip(group: ProjectGroup) -> some View {
+        HStack(alignment: .center, spacing: SidebarTabLayout.iconTitleSpacing) {
+            Image(systemName: group.systemImage)
+                .font(SidebarTypography.caption(.medium))
+                .frame(
+                    width: SidebarTabLayout.iconSide,
+                    height: SidebarTabLayout.iconSide
+                )
+            TextField("", text: $renameDraft)
+                .textFieldStyle(.plain)
+                .font(SidebarTypography.secondary(.medium))
+                .focused($renameFocused)
+                .frame(minWidth: 36, maxWidth: 80)
+                .onSubmit { commitRename(group) }
+                .onExitCommand { cancelRename() }
+                .onChange(of: renameFocused) { _, focused in
+                    if !focused, renamingGroupID == group.id {
+                        commitRename(group)
+                    }
+                }
+        }
+        .foregroundStyle(.primary)
+        .padding(.leading, SidebarTabLayout.horizontalPaddingWithTitle)
+        .padding(
+            .trailing,
+            SidebarTabLayout.horizontalPaddingWithTitle + SidebarTabLayout.trailingPaddingExtra
+        )
+        .frame(height: 24)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(0.09))
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func groupTabHelp(_ group: ProjectGroup) -> String {
+        switch group.kind {
+        case .current:
+            return L10n.t("Currently open projects")
+        case .archived:
+            return L10n.t("Archived projects")
+        case .user:
+            return group.displayName
+        }
+    }
+
+    @ViewBuilder
+    private func groupContextMenu(_ group: ProjectGroup) -> some View {
+        if group.isRenamable {
+            Button(L10n.t("Rename Group")) {
+                beginRename(group)
+            }
+        }
+        if group.isDeletable {
+            Button(L10n.t("Delete Group"), role: .destructive) {
+                pendingDeleteGroupID = group.id
+                isDeleteGroupPresented = true
+            }
+        }
+        if group.isRenamable || group.isDeletable {
+            Divider()
+        }
+        Button(L10n.t("New Group")) {
+            let created = groupStore.addGroup()
+            beginRename(created)
+        }
+    }
+
+    private func beginRename(_ group: ProjectGroup) {
+        guard group.isRenamable else { return }
+        renamingGroupID = group.id
+        renameDraft = group.displayName
+        DispatchQueue.main.async {
+            renameFocused = true
+        }
+    }
+
+    private func commitRename(_ group: ProjectGroup) {
+        groupStore.renameGroup(id: group.id, to: renameDraft)
+        renamingGroupID = nil
+        renameFocused = false
+    }
+
+    private func cancelRename() {
+        renamingGroupID = nil
+        renameFocused = false
     }
 }
 

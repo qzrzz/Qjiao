@@ -574,21 +574,7 @@ public final class JustTaskCache: @unchecked Sendable {
 public enum JustToolChecker {
     /// 检测系统中是否存在 executable 的 `just` 命令行工具
     public static var isJustInstalled: Bool {
-        let fm = FileManager.default
-        let commonPaths = [
-            "/usr/local/bin/just",
-            "/opt/homebrew/bin/just",
-            "/usr/bin/just",
-            "/bin/just",
-            "~/.cargo/bin/just"
-        ]
-        for path in commonPaths {
-            let expanded = (path as NSString).expandingTildeInPath
-            if fm.isExecutableFile(atPath: expanded) {
-                return true
-            }
-        }
-        return false
+        LocalAIExecutableLocator.findExecutable(name: "just") != nil
     }
 }
 
@@ -847,21 +833,7 @@ public final class CargoTaskCache: @unchecked Sendable {
 public enum CargoToolChecker {
     /// 检测系统中是否存在 executable 的 `cargo` 命令行工具
     public static var isCargoInstalled: Bool {
-        let fm = FileManager.default
-        let commonPaths = [
-            "~/.cargo/bin/cargo",
-            "/usr/local/bin/cargo",
-            "/opt/homebrew/bin/cargo",
-            "/usr/bin/cargo",
-            "/bin/cargo"
-        ]
-        for path in commonPaths {
-            let expanded = (path as NSString).expandingTildeInPath
-            if fm.isExecutableFile(atPath: expanded) {
-                return true
-            }
-        }
-        return false
+        LocalAIExecutableLocator.findExecutable(name: "cargo") != nil
     }
 }
 
@@ -1063,20 +1035,7 @@ public struct CargoScriptProvider: ProjectScriptProvider {
 public enum CMakeToolChecker {
     /// 检测系统中是否存在 executable 的 `cmake` 命令行工具
     public static var isCMakeInstalled: Bool {
-        let fm = FileManager.default
-        let commonPaths = [
-            "/usr/local/bin/cmake",
-            "/opt/homebrew/bin/cmake",
-            "/usr/bin/cmake",
-            "/bin/cmake"
-        ]
-        for path in commonPaths {
-            let expanded = (path as NSString).expandingTildeInPath
-            if fm.isExecutableFile(atPath: expanded) {
-                return true
-            }
-        }
-        return false
+        LocalAIExecutableLocator.findExecutable(name: "cmake") != nil
     }
 }
 
@@ -1249,20 +1208,7 @@ public final class MakefileTaskCache: @unchecked Sendable {
 public enum MakeToolChecker {
     /// 检测系统中是否存在 executable 的 `make` 命令行工具
     public static var isMakeInstalled: Bool {
-        let fm = FileManager.default
-        let commonPaths = [
-            "/usr/bin/make",
-            "/usr/local/bin/make",
-            "/opt/homebrew/bin/make",
-            "/bin/make"
-        ]
-        for path in commonPaths {
-            let expanded = (path as NSString).expandingTildeInPath
-            if fm.isExecutableFile(atPath: expanded) {
-                return true
-            }
-        }
-        return false
+        LocalAIExecutableLocator.findExecutable(name: "make") != nil
     }
 }
 

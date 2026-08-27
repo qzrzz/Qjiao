@@ -114,7 +114,29 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         return true
     }
 
-    init(initialDirectory: String? = nil, restoredHistory: String? = nil, isLazy: Bool = false) {
+    /// 恢复后没有可展示的内容（目录没了，或只是空 shell），应由 Project 关掉。
+    let restoreShouldDiscard: Bool
+
+    /// 空路径表示可回落到家目录；非空路径必须是已存在的目录。
+    static func isUsableRestoreDirectory(_ path: String?) -> Bool {
+        guard let path, !path.isEmpty else { return true }
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+    }
+
+    /// 没有可回放的滚动历史，恢复出来只会是空 shell。
+    static func isEmptyRestoredHistory(_ history: String?) -> Bool {
+        guard let history else { return true }
+        return history.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    init(
+        initialDirectory: String? = nil,
+        restoredHistory: String? = nil,
+        isLazy: Bool = false,
+        restoreShouldDiscard: Bool = false
+    ) {
         let shellPath = Self.loginShell()
         let directory = Self.validWorkingDirectory(initialDirectory)
         let artifacts = Self.makeLaunchArtifacts(
@@ -140,9 +162,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             : directoryName
         title = AppSettings.shared.zshIdleTitleStyle.formatTitle(for: directory) ?? defaultTitle
         lastHistorySnapshot = restoredHistory
+        self.restoreShouldDiscard = restoreShouldDiscard
         super.init()
 
-        if !isLazy {
+        if !isLazy, !restoreShouldDiscard {
             ensureInitialized()
         }
     }
@@ -950,6 +973,9 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
                 builder.withCustom("keybind", keybind)
             }
             builder.withCustom("command", "shell:\(command)")
+            // 子进程退出后立刻关 surface，避免恢复失败或 `exit` 后留下
+            // “Process exited. Press any key to close” 的死标签。
+            builder.withCustom("wait-after-command", "false")
             builder.withCustom("term", "xterm-256color")
             builder.withCustom("shell-integration", "none")
             builder.withCustom(

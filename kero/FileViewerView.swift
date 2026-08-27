@@ -1335,19 +1335,10 @@ private enum EditorFormatter: Identifiable {
 
     /// 在项目本地依赖之外，继续检测用户 PATH 中全局安装的格式化工具。
     private static func executable(named name: String) -> URL? {
-        let run = SubprocessRunner.run(
-            SubprocessRunner.Config(
-                executable: "/usr/bin/which",
-                arguments: [name],
-                timeout: 10
-            )
-        )
-        guard run.launched, !run.timedOut, run.exitCode == 0 else { return nil }
-        guard let path = String(data: run.stdout, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !path.isEmpty
-        else { return nil }
-        return URL(fileURLWithPath: path)
+        if let path = LocalAIExecutableLocator.findExecutable(name: name) {
+            return URL(fileURLWithPath: path)
+        }
+        return nil
     }
 
     /// 在目标文件所在目录运行工具，让格式化器按项目上下文解析配置、插件与忽略文件。
@@ -1379,36 +1370,11 @@ private enum EditorFormatter: Identifiable {
     }
 
     /// GUI 应用从 Finder 启动时通常没有终端 PATH；本地 npm 二进制的 shebang
-    /// 会通过 `/usr/bin/env node` 启动，因此需要补入用户交互式 shell 中的 Node 目录。
+    /// 会通过 `/usr/bin/env node` 启动，因此需要补入用户交互式 shell / 包管理器中的 Node 目录与增强 PATH。
     private static func formatterEnvironment() -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        guard let nodeDirectory = interactiveShellNodeDirectory() else { return environment }
-
-        let existingPath = environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        let directories = ([nodeDirectory.path] + existingPath.split(separator: ":").map(String.init))
-        environment["PATH"] = directories.joined(separator: ":")
+        environment["PATH"] = LocalAIExecutableLocator.augmentedPATH(environment["PATH"])
         return environment
-    }
-
-    /// 从用户的交互式 zsh 中读取 Node 位置，以兼容 nvm、fnm、Volta 与自定义安装目录。
-    private static func interactiveShellNodeDirectory() -> URL? {
-        let run = SubprocessRunner.run(
-            SubprocessRunner.Config(
-                executable: "/bin/zsh",
-                arguments: ["-ic", "command -v node"],
-                timeout: 20
-            )
-        )
-        guard run.launched, !run.timedOut, run.exitCode == 0 else { return nil }
-        guard let text = String(data: run.stdout, encoding: .utf8) else { return nil }
-
-        // shell 初始化脚本可能输出提示信息，从后向前选择实际存在的 Node 可执行文件。
-        for line in text.split(whereSeparator: \.isNewline).reversed() {
-            let path = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) else { continue }
-            return URL(fileURLWithPath: path).deletingLastPathComponent()
-        }
-        return nil
     }
 }
 

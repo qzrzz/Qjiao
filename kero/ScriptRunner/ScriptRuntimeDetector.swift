@@ -377,36 +377,7 @@ public struct ScriptRuntimeDetector: Sendable {
 
     /// 模拟底层 PATH 搜索可执行文件路径
     private static func findExecutablePath(name: String) -> String? {
-        let fm = FileManager.default
-
-        // 1. 优先检查常见安装路径
-        let home = NSHomeDirectory()
-        let commonPaths = [
-            "/usr/local/bin/\(name)",
-            "/opt/homebrew/bin/\(name)",
-            "/usr/bin/\(name)",
-            "\(home)/.cargo/bin/\(name)",
-            "\(home)/.bun/bin/\(name)",
-            "\(home)/.local/bin/\(name)"
-        ]
-        for path in commonPaths {
-            if fm.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-
-        // 2. 检索 PATH 环境变量
-        if let pathEnv = ProcessInfo.processInfo.environment["PATH"] {
-            let dirs = pathEnv.split(separator: ":").map(String.init)
-            for dir in dirs {
-                let candidate = (dir as NSString).appendingPathComponent(name)
-                if fm.isExecutableFile(atPath: candidate) {
-                    return candidate
-                }
-            }
-        }
-
-        return nil
+        LocalAIExecutableLocator.findExecutable(name: name)
     }
 
     /// 计算绝对路径相对于工作目录的相对路径

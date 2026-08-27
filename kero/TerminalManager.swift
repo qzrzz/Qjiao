@@ -94,6 +94,7 @@ final class TerminalManager: nonisolated ObservableObject {
     private var autosaveObservation: AnyCancellable?
     private var terminationObservation: AnyCancellable?
     private var projectListChangeObservation: AnyCancellable?
+    private var projectGroupStoreObservation: AnyCancellable?
     private static var isSynchronizingProjectList = false
     /// The stable terminal/editor responder displaced by the command palette's
     /// search field. AppKit field editors are deliberately excluded because a
@@ -226,6 +227,11 @@ final class TerminalManager: nonisolated ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] newStyle in
                 self?.applyZshIdleTitleStyleChange(newStyle)
+            }
+        projectGroupStoreObservation = ProjectGroupStore.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
             }
         // Every project/tab/selection change re-publishes through the manager,
         // so a debounced sink snapshots layout after mutations settle without
@@ -398,6 +404,7 @@ final class TerminalManager: nonisolated ObservableObject {
             } else {
                 selectedProjectID = existing.id
             }
+            revealProjectInSidebar(existing)
             return true
         }
 
@@ -422,6 +429,7 @@ final class TerminalManager: nonisolated ObservableObject {
 
     /// 将项目插入当前项目之后，并把它设为当前项目。
     private func insert(_ project: Project) {
+        applyGroupForNewProject(project)
         // Open the new project next to the current one rather than at the end.
         // Falls back to appending when nothing is selected yet.
         if let selectedProjectID,
@@ -431,7 +439,17 @@ final class TerminalManager: nonisolated ObservableObject {
             projects.append(project)
         }
         selectedProjectID = project.id
+        revealProjectInSidebar(project)
         broadcastProjectListChange()
+    }
+
+    /// 在用户分组 tab 下新建项目时归入该分组；「当前 / 已归档」保持未分组。
+    private func applyGroupForNewProject(_ project: Project) {
+        let groupID = ProjectGroupStore.shared.selectedID
+        guard groupID != ProjectGroup.currentID,
+              groupID != ProjectGroup.archivedID
+        else { return }
+        project.groupID = groupID
     }
 
     private func broadcastProjectListChange() {
@@ -469,6 +487,7 @@ final class TerminalManager: nonisolated ObservableObject {
                     project.theme = config.theme ?? .global
                     project.projectDirectory = config.projectDirectory ?? ""
                     project.isArchived = config.isArchived ?? false
+                    project.groupID = config.groupID
                     project.launchCommands = config.launchCommands ?? []
                     if let aiLangStr = config.aiWritingLanguage {
                         project.aiWritingLanguage = AIWritingLanguage(rawValue: aiLangStr)
@@ -578,6 +597,94 @@ final class TerminalManager: nonisolated ObservableObject {
         projects.filter { $0.isArchived }
     }
 
+    /// 当前侧栏 tab 下可见的项目。
+    var visibleProjects: [Project] {
+        projects(inGroupID: ProjectGroupStore.shared.selectedID)
+    }
+
+    /// 「当前」tab 是筛选：所有未归档（即侧栏里正在打开）的项目。
+    /// 用户分组只列出归入该组且未归档的项目；「已归档」列出已归档项目。
+    func projects(inGroupID id: String) -> [Project] {
+        switch id {
+        case ProjectGroup.currentID:
+            return activeProjects
+        case ProjectGroup.archivedID:
+            return archivedProjects
+        default:
+            return activeProjects.filter { $0.groupID == id }
+        }
+    }
+
+    /// 把项目归入用户分组，或拖到筛选 tab：已归档 = 归档，「当前」= 取消归档且保持原分组。
+    func assign(_ project: Project, toGroupID id: String) {
+        switch id {
+        case ProjectGroup.archivedID:
+            archiveProject(project)
+        case ProjectGroup.currentID:
+            if project.isArchived {
+                unarchiveProject(project)
+            } else {
+                selectedProjectID = project.id
+                ProjectGroupStore.shared.selectedID = ProjectGroup.currentID
+            }
+        default:
+            guard ProjectGroupStore.shared.group(id: id)?.kind == .user else { return }
+            if project.isArchived {
+                project.isArchived = false
+            }
+            project.groupID = id
+            selectedProjectID = project.id
+            if ProjectGroupStore.shared.selectedID != ProjectGroup.currentID {
+                ProjectGroupStore.shared.selectedID = id
+            }
+            objectWillChange.send()
+            broadcastProjectListChange()
+        }
+    }
+
+    /// 取消用户分组，项目回到「当前」tab（未归档列表）。
+    func ungroupProject(_ project: Project) {
+        guard project.groupID != nil else { return }
+        project.groupID = nil
+        if project.isArchived {
+            project.isArchived = false
+        }
+        selectedProjectID = project.id
+        ProjectGroupStore.shared.selectedID = ProjectGroup.currentID
+        objectWillChange.send()
+        broadcastProjectListChange()
+    }
+
+    /// 删除自建分组，并把仍属于该组的项目改为未分组。
+    func deleteProjectGroup(id: String) {
+        let members = projects.filter { $0.groupID == id }
+        guard ProjectGroupStore.shared.deleteGroup(id: id) else { return }
+        for project in members {
+            project.groupID = nil
+        }
+        objectWillChange.send()
+        broadcastProjectListChange()
+    }
+
+    /// 选中项目，并切到能看到它的侧栏 tab。
+    func revealProjectInSidebar(_ project: Project) {
+        selectedProjectID = project.id
+        let store = ProjectGroupStore.shared
+        if project.isArchived {
+            store.selectedID = ProjectGroup.archivedID
+            return
+        }
+        let current = store.selectedID
+        if current == ProjectGroup.currentID { return }
+        if current == ProjectGroup.archivedID {
+            store.selectedID = ProjectGroup.currentID
+            return
+        }
+        if project.groupID != current {
+            store.selectedID = ProjectGroup.currentID
+        }
+    }
+
     /// 将指定项目归档。
     /// - Parameter project: 需要归档的项目
     func archiveProject(_ project: Project) {
@@ -599,6 +706,7 @@ final class TerminalManager: nonisolated ObservableObject {
         guard project.isArchived else { return }
         project.isArchived = false
         selectedProjectID = project.id
+        revealProjectInSidebar(project)
         objectWillChange.send()
         broadcastProjectListChange()
     }
@@ -619,31 +727,33 @@ final class TerminalManager: nonisolated ObservableObject {
     }
 
 
-    /// 按索引选中未归档项目（对应快捷键 ⌘1 ~ ⌘9）。
-    /// - Parameter index: 未归档项目列表中的索引
+    /// 按索引选中当前侧栏 tab 中的项目（对应快捷键 ⌘1 ~ ⌘9）。
+    /// - Parameter index: 可见项目列表中的索引
     func selectProject(index: Int) {
-        let active = activeProjects
-        guard active.indices.contains(index) else { return }
-        selectedProjectID = active[index].id
+        let visible = visibleProjects
+        guard visible.indices.contains(index) else { return }
+        selectedProjectID = visible[index].id
     }
 
-    /// 循环切换上一个/下一个未归档项目。
+    /// 循环切换上一个/下一个可见项目。
     func selectNextProject() {
         shiftProjectSelection(by: 1)
     }
 
-    /// 循环切换上一个/下一个未归档项目。
+    /// 循环切换上一个/下一个可见项目。
     func selectPreviousProject() {
         shiftProjectSelection(by: -1)
     }
 
     private func shiftProjectSelection(by offset: Int) {
-        let active = activeProjects
-        guard !active.isEmpty,
-              let current = active.firstIndex(where: { $0.id == selectedProjectID })
-        else { return }
-        let next = (current + offset + active.count) % active.count
-        selectedProjectID = active[next].id
+        let visible = visibleProjects
+        guard !visible.isEmpty else { return }
+        if let current = visible.firstIndex(where: { $0.id == selectedProjectID }) {
+            let next = (current + offset + visible.count) % visible.count
+            selectedProjectID = visible[next].id
+        } else {
+            selectedProjectID = visible[0].id
+        }
     }
 
     // MARK: - Sessions
@@ -1589,8 +1699,9 @@ final class TerminalManager: nonisolated ObservableObject {
 
     /// Builds this window's layout snapshot and, alongside it, the scrollback
     /// to persist for its sessions. Each captured session gets a fresh
-    /// `historyKey` stored on both sides so restore can pair them; sessions
-    /// with no history (feature off, empty, or unserializable) get no key.
+    /// `historyKey` stored on both sides so restore can pair them. Unused
+    /// terminals and sessions with no replayable history are omitted — restoring
+    /// them would only yield an empty shell.
     private func makeWindowSnapshot(
         captureTerminalHistory: Bool
     ) -> (snapshot: SessionSnapshot, histories: [String: String]) {
@@ -1598,21 +1709,36 @@ final class TerminalManager: nonisolated ObservableObject {
         var histories: [String: String] = [:]
         let snapshot = SessionSnapshot(
             projects: projects.map { project in
-                let projectSessions = project.sessions
-                let tabs = project.tabs.map { tab -> ProjectSnapshot.TabSnapshot in
-                    let layout = Self.layoutSnapshot(
+                var savedTabs: [(
+                    tab: PaneTab,
+                    layout: ProjectSnapshot.LayoutSnapshot,
+                    paneIDs: [UUID],
+                    sessionIDs: [UUID]
+                )] = []
+                for tab in project.tabs {
+                    guard let built = Self.layoutSnapshot(
                         tab.layout,
                         captureTerminalHistory: captureTerminalHistory,
                         histories: &histories
-                    )
-                    let focusedPaneIndex = tab.allPanes.firstIndex {
-                        $0.id == tab.focusedPaneID
+                    ) else { continue }
+                    savedTabs.append((
+                        tab: tab,
+                        layout: built.snapshot,
+                        paneIDs: built.paneIDs,
+                        sessionIDs: built.sessionIDs
+                    ))
+                }
+                let savedSessionIDs = savedTabs.flatMap(\.sessionIDs)
+                let tabs = savedTabs.map { item in
+                    let focusedPaneIndex = item.paneIDs.firstIndex {
+                        $0 == item.tab.focusedPaneID
                     } ?? 0
                     return ProjectSnapshot.TabSnapshot(
-                        layout: layout, focusedPaneIndex: focusedPaneIndex,
-                        customName: tab.customName,
-                        contextSessionIndex: tab.contextSession.flatMap { context in
-                            projectSessions.firstIndex { $0.id == context.id }
+                        layout: item.layout,
+                        focusedPaneIndex: focusedPaneIndex,
+                        customName: item.tab.customName,
+                        contextSessionIndex: item.tab.contextSession.flatMap { context in
+                            savedSessionIDs.firstIndex { $0 == context.id }
                         }
                     )
                 }
@@ -1626,6 +1752,7 @@ final class TerminalManager: nonisolated ObservableObject {
                         projectDirectory: project.projectDirectory,
                         launchCommands: project.launchCommands,
                         isArchived: project.isArchived,
+                        groupID: project.groupID,
                         aiWritingLanguage: project.aiWritingLanguage?.rawValue,
                         customGitPath: project.customGitPath
                     ),
@@ -1641,7 +1768,7 @@ final class TerminalManager: nonisolated ObservableObject {
                     projectDirectory: nil,
                     isArchived: project.isArchived,
                     tabs: tabs,
-                    selectedTabIndex: project.tabs.firstIndex { $0.id == project.selectedTabID }
+                    selectedTabIndex: savedTabs.firstIndex { $0.tab.id == project.selectedTabID }
                 )
             },
             selectedProjectIndex: projects.firstIndex { $0.id == selectedProjectID },
@@ -1652,43 +1779,77 @@ final class TerminalManager: nonisolated ObservableObject {
         return (snapshot, histories)
     }
 
+    private struct LayoutSnapshotBuild {
+        var snapshot: SessionSnapshot.ProjectSnapshot.LayoutSnapshot
+        var paneIDs: [UUID]
+        var sessionIDs: [UUID]
+    }
+
+    /// 空终端（从未用过、或没有可回放历史）不写入快照，恢复出来也只是空白 shell。
     private static func layoutSnapshot(
         _ layout: PaneNode,
         captureTerminalHistory: Bool,
         histories: inout [String: String]
-    ) -> SessionSnapshot.ProjectSnapshot.LayoutSnapshot {
+    ) -> LayoutSnapshotBuild? {
         typealias ProjectSnapshot = SessionSnapshot.ProjectSnapshot
         switch layout {
         case .pane(let pane):
-            var historyKey: String?
-            if case .session(let session) = pane.content,
-               let history = session.serializedHistory(
-                   captureLive: captureTerminalHistory
-               ), !history.isEmpty {
+            if case .session(let session) = pane.content {
+                if session.appearsUnused { return nil }
+                guard let history = session.serializedHistory(
+                    captureLive: captureTerminalHistory
+                ), !history.isEmpty else { return nil }
                 let key = UUID().uuidString
                 histories[key] = history
-                historyKey = key
-            }
-            return .pane(ProjectSnapshot.PaneSnapshot(
-                content: contentSnapshot(pane.content),
-                weight: 1,
-                historyKey: historyKey
-            ))
-        case .split(let split):
-            return .split(
-                axis: split.axis,
-                fraction: Double(split.fraction),
-                first: layoutSnapshot(
-                    split.first,
-                    captureTerminalHistory: captureTerminalHistory,
-                    histories: &histories
-                ),
-                second: layoutSnapshot(
-                    split.second,
-                    captureTerminalHistory: captureTerminalHistory,
-                    histories: &histories
+                return LayoutSnapshotBuild(
+                    snapshot: .pane(ProjectSnapshot.PaneSnapshot(
+                        content: contentSnapshot(pane.content),
+                        weight: 1,
+                        historyKey: key
+                    )),
+                    paneIDs: [pane.id],
+                    sessionIDs: [session.id]
                 )
+            }
+            return LayoutSnapshotBuild(
+                snapshot: .pane(ProjectSnapshot.PaneSnapshot(
+                    content: contentSnapshot(pane.content),
+                    weight: 1,
+                    historyKey: nil
+                )),
+                paneIDs: [pane.id],
+                sessionIDs: []
             )
+        case .split(let split):
+            let first = layoutSnapshot(
+                split.first,
+                captureTerminalHistory: captureTerminalHistory,
+                histories: &histories
+            )
+            let second = layoutSnapshot(
+                split.second,
+                captureTerminalHistory: captureTerminalHistory,
+                histories: &histories
+            )
+            switch (first, second) {
+            case (let first?, let second?):
+                return LayoutSnapshotBuild(
+                    snapshot: .split(
+                        axis: split.axis,
+                        fraction: Double(split.fraction),
+                        first: first.snapshot,
+                        second: second.snapshot
+                    ),
+                    paneIDs: first.paneIDs + second.paneIDs,
+                    sessionIDs: first.sessionIDs + second.sessionIDs
+                )
+            case (let first?, nil):
+                return first
+            case (nil, let second?):
+                return second
+            case (nil, nil):
+                return nil
+            }
         }
     }
 
@@ -1776,6 +1937,7 @@ final class TerminalManager: nonisolated ObservableObject {
             project.projectDirectory = config?.projectDirectory ?? saved.projectDirectory ?? ""
             project.launchCommands = config?.launchCommands ?? []
             project.isArchived = config?.isArchived ?? saved.isArchived ?? false
+            project.groupID = config?.groupID
             project.aiWritingLanguage = config?.aiWritingLanguage
                 .flatMap(AIWritingLanguage.init(rawValue:))
             project.customGitPath = config?.customGitPath
@@ -1798,16 +1960,29 @@ final class TerminalManager: nonisolated ObservableObject {
             let restoredSessions = project.sessions
             for context in restoredContexts
             where restoredSessions.indices.contains(context.sessionIndex) {
-                context.tab.contextSession = restoredSessions[context.sessionIndex]
+                let session = restoredSessions[context.sessionIndex]
+                guard !session.restoreShouldDiscard else { continue }
+                context.tab.contextSession = session
             }
+            let intendedSelectedTabID: UUID? = {
+                if let index = saved.selectedTabIndex, project.tabs.indices.contains(index) {
+                    return project.tabs[index].id
+                }
+                return project.selectedTabID
+            }()
+            // 目录没了，或恢复出来只会是空 shell：关掉，不要占着标签。
+            project.closeUnrestorableRestoredSessions()
             if project.projectDirectory.isEmpty {
                 project.projectDirectory = project.sessions.first?.currentDirectoryPath ?? ""
             }
             // 确保项目配置在磁盘上最新
             project.saveConfig()
 
-            if let index = saved.selectedTabIndex, project.tabs.indices.contains(index) {
-                project.selectedTabID = project.tabs[index].id
+            if let intendedSelectedTabID,
+               project.tabs.contains(where: { $0.id == intendedSelectedTabID }) {
+                project.selectedTabID = intendedSelectedTabID
+            } else {
+                project.selectedTabID = project.tabs.first?.id
             }
             project.resetRecency()
             projects.append(project)
@@ -1827,6 +2002,7 @@ final class TerminalManager: nonisolated ObservableObject {
             project.projectDirectory = config.projectDirectory ?? ""
             project.launchCommands = config.launchCommands ?? []
             project.isArchived = config.isArchived ?? false
+            project.groupID = config.groupID
             project.aiWritingLanguage = config.aiWritingLanguage
                 .flatMap(AIWritingLanguage.init(rawValue:))
             project.customGitPath = config.customGitPath
@@ -1842,6 +2018,12 @@ final class TerminalManager: nonisolated ObservableObject {
             selectedProjectID = projects[index].id
         } else {
             selectedProjectID = projects.first?.id
+        }
+        if let selected = selectedProject {
+            let visible = projects(inGroupID: ProjectGroupStore.shared.selectedID)
+            if !visible.contains(where: { $0.id == selected.id }) {
+                revealProjectInSidebar(selected)
+            }
         }
         return true
     }

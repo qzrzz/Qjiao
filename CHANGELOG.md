@@ -11,6 +11,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.57]
+
+### Added
+
+- Add project groups to the left sidebar: the archived collapse area becomes a group tab bar (Personal / Work / Current / Archived); create, rename and delete custom groups, move a project onto a group by dragging it onto the group's tab or via the right-click "Move to Group" menu, and projects created while a user group tab is selected join that group; the Archived tab has a search filter.
+- Task grid cells in the Tasks panel now show the last run duration and a restart button while a task is running; double-click runs an idle task.
+
+### Changed
+
+- Replace the ad-hoc PATH lookups with a single executable locator that scans the user's login-shell PATH and common package-manager global bin directories (npm, pnpm, yarn, bun, nvm, fnm, volta, asdf, mise), backed by a short-lived cache; AI CLI detection, editor formatter lookup and subprocess PATH augmentation all share it, so CLIs installed through a shell are found even when Qjiao is launched from Finder.
+- On relaunch, close terminals that can't be restored — their working directory is gone, or they would only show an empty shell — instead of dropping them into the home directory or keeping them around as dead "Process exited" tabs (split panes collapse, empty tabs are dropped); tabs that were never used and have no replayable history no longer write a session snapshot.
+
+### Fixed
+
+- Fix restored terminals leaving dead "Process exited. Press any key to close" tabs behind when the restored command exits or fails to launch: the surface now closes as soon as the child process exits (wait-after-command disabled, `GHOSTTY_ACTION_SHOW_CHILD_EXITED` handled).
+
 ## [1.1.56]
 
 ### Changed

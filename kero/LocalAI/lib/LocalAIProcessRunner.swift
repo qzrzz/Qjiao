@@ -236,32 +236,6 @@ private final class LocalAIPipeBuffer: @unchecked Sendable {
 /// 仅为 PATH 拼接提供内部工具，避免与 Locator 循环依赖语义混淆。
 enum LocalAIExecutableLocatorPathBoost {
     static func augmentedPATH(_ existing: String?) -> String {
-        var dirs = [
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "/usr/bin",
-            "/bin",
-        ]
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        dirs += [
-            "\(home)/.local/bin",
-            "\(home)/.bun/bin",
-            "\(home)/.cargo/bin",
-            "\(home)/.npm-global/bin",
-            "\(home)/.local/share/pi-node/current/bin",
-            "\(home)/.grok/bin",
-            "\(home)/.opencode/bin",
-            "\(home)/.claude/bin",
-            "\(home)/.gemini/antigravity/bin",
-            "\(home)/.antigravity/bin",
-        ]
-        var seen = Set<String>()
-        var ordered: [String] = []
-        for d in dirs + (existing ?? "").split(separator: ":").map(String.init) {
-            guard !d.isEmpty, !seen.contains(d) else { continue }
-            seen.insert(d)
-            ordered.append(d)
-        }
-        return ordered.joined(separator: ":")
+        LocalAIExecutableLocator.augmentedPATH(existing)
     }
 }
