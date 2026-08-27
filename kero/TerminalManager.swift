@@ -68,10 +68,19 @@ final class TerminalManager: nonisolated ObservableObject {
             }
         }
         didSet {
+            if chromeSelectedProjectID != selectedProjectID {
+                chromeSelectedProjectID = selectedProjectID
+            }
             guard selectedProjectID != oldValue else { return }
             reloadActiveProjectTheme()
         }
     }
+
+    /// 侧栏即时选中态；用户点击时先更新这里，内容区 / 主题 / 右侧栏再跟进 `selectedProjectID`。
+    @Published private(set) var chromeSelectedProjectID: UUID?
+
+    /// 取消过期的延迟内容切换（快速连点时只应用最后一次）。
+    private var selectProjectGeneration = 0
     @Published var isPanelVisible = false
     @Published var panelTab: RightPanel = .files
     @Published var filePanelMode: FilePanelMode = .tree
@@ -443,13 +452,14 @@ final class TerminalManager: nonisolated ObservableObject {
         broadcastProjectListChange()
     }
 
-    /// 在用户分组 tab 下新建项目时归入该分组；「当前 / 已归档」保持未分组。
+    /// 在用户分组 tab 下新建项目时归入该分组；「当前 / 已归档」新建默认归入个人。
     private func applyGroupForNewProject(_ project: Project) {
         let groupID = ProjectGroupStore.shared.selectedID
-        guard groupID != ProjectGroup.currentID,
-              groupID != ProjectGroup.archivedID
-        else { return }
-        project.groupID = groupID
+        if groupID == ProjectGroup.currentID || groupID == ProjectGroup.archivedID {
+            project.groupID = ProjectGroup.personalID
+        } else {
+            project.groupID = groupID
+        }
     }
 
     private func broadcastProjectListChange() {
@@ -487,7 +497,7 @@ final class TerminalManager: nonisolated ObservableObject {
                     project.theme = config.theme ?? .global
                     project.projectDirectory = config.projectDirectory ?? ""
                     project.isArchived = config.isArchived ?? false
-                    project.groupID = config.groupID
+                    project.groupID = config.groupID ?? ProjectGroup.personalID
                     project.launchCommands = config.launchCommands ?? []
                     if let aiLangStr = config.aiWritingLanguage {
                         project.aiWritingLanguage = AIWritingLanguage(rawValue: aiLangStr)
@@ -602,17 +612,24 @@ final class TerminalManager: nonisolated ObservableObject {
         projects(inGroupID: ProjectGroupStore.shared.selectedID)
     }
 
-    /// 「当前」tab 是筛选：所有未归档（即侧栏里正在打开）的项目。
-    /// 用户分组只列出归入该组且未归档的项目；「已归档」列出已归档项目。
+    /// 「当前」tab 是筛选：未归档且仍有标签页的项目（`tabs.count > 0`）。
+    /// 用户分组只列出归入该组且未归档的项目（旧未分组项目默认归入「个人」）；「已归档」列出已归档项目。
     func projects(inGroupID id: String) -> [Project] {
         switch id {
         case ProjectGroup.currentID:
-            return activeProjects
+            return currentlyInUseProjects
         case ProjectGroup.archivedID:
             return archivedProjects
+        case ProjectGroup.personalID:
+            return activeProjects.filter { ($0.groupID ?? ProjectGroup.personalID) == ProjectGroup.personalID }
         default:
             return activeProjects.filter { $0.groupID == id }
         }
+    }
+
+    /// 当前正在用的项目：未归档，且项目里至少还有一个标签页。
+    var currentlyInUseProjects: [Project] {
+        projects.filter { !$0.isArchived && !$0.tabs.isEmpty }
     }
 
     /// 把项目归入用户分组，或拖到筛选 tab：已归档 = 归档，「当前」= 取消归档且保持原分组。
@@ -642,25 +659,25 @@ final class TerminalManager: nonisolated ObservableObject {
         }
     }
 
-    /// 取消用户分组，项目回到「当前」tab（未归档列表）。
+    /// 取消用户分组，项目回到「个人」分组。
     func ungroupProject(_ project: Project) {
-        guard project.groupID != nil else { return }
-        project.groupID = nil
+        guard (project.groupID ?? ProjectGroup.personalID) != ProjectGroup.personalID else { return }
+        project.groupID = ProjectGroup.personalID
         if project.isArchived {
             project.isArchived = false
         }
         selectedProjectID = project.id
-        ProjectGroupStore.shared.selectedID = ProjectGroup.currentID
+        ProjectGroupStore.shared.selectedID = ProjectGroup.personalID
         objectWillChange.send()
         broadcastProjectListChange()
     }
 
-    /// 删除自建分组，并把仍属于该组的项目改为未分组。
+    /// 删除自建分组，并把仍属于该组的项目归入个人分组。
     func deleteProjectGroup(id: String) {
         let members = projects.filter { $0.groupID == id }
         guard ProjectGroupStore.shared.deleteGroup(id: id) else { return }
         for project in members {
-            project.groupID = nil
+            project.groupID = ProjectGroup.personalID
         }
         objectWillChange.send()
         broadcastProjectListChange()
@@ -668,20 +685,21 @@ final class TerminalManager: nonisolated ObservableObject {
 
     /// 选中项目，并切到能看到它的侧栏 tab。
     func revealProjectInSidebar(_ project: Project) {
-        selectedProjectID = project.id
+        selectProject(id: project.id)
         let store = ProjectGroupStore.shared
         if project.isArchived {
             store.selectedID = ProjectGroup.archivedID
             return
         }
         let current = store.selectedID
-        if current == ProjectGroup.currentID { return }
-        if current == ProjectGroup.archivedID {
-            store.selectedID = ProjectGroup.currentID
-            return
+        if current == ProjectGroup.currentID {
+            if currentlyInUseProjects.contains(where: { $0.id == project.id }) {
+                return
+            }
         }
-        if project.groupID != current {
-            store.selectedID = ProjectGroup.currentID
+        let targetGroupID = project.groupID ?? ProjectGroup.personalID
+        if current != targetGroupID {
+            store.selectedID = targetGroupID
         }
     }
 
@@ -727,12 +745,36 @@ final class TerminalManager: nonisolated ObservableObject {
     }
 
 
+    /// 用户驱动的项目切换：先更新侧栏选中态，下一 runloop 再切换内容。
+    /// 新建 / 关闭 / 恢复等路径请继续直接写 `selectedProjectID`，以同步切换内容。
+    /// - Parameter paintChrome: 为 false 时不写 `chromeSelectedProjectID`（调用方已用本地 @State 抢先绘制）。
+    func selectProject(id: UUID, paintChrome: Bool = true) {
+        guard projects.contains(where: { $0.id == id }) else { return }
+        if paintChrome, chromeSelectedProjectID != id {
+            chromeSelectedProjectID = id
+        }
+        guard selectedProjectID != id else { return }
+
+        selectProjectGeneration += 1
+        let generation = selectProjectGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard generation == self.selectProjectGeneration else { return }
+            if paintChrome {
+                guard self.chromeSelectedProjectID == id else { return }
+            }
+            guard self.projects.contains(where: { $0.id == id }) else { return }
+            guard self.selectedProjectID != id else { return }
+            self.selectedProjectID = id
+        }
+    }
+
     /// 按索引选中当前侧栏 tab 中的项目（对应快捷键 ⌘1 ~ ⌘9）。
     /// - Parameter index: 可见项目列表中的索引
     func selectProject(index: Int) {
         let visible = visibleProjects
         guard visible.indices.contains(index) else { return }
-        selectedProjectID = visible[index].id
+        selectProject(id: visible[index].id)
     }
 
     /// 循环切换上一个/下一个可见项目。
@@ -748,11 +790,12 @@ final class TerminalManager: nonisolated ObservableObject {
     private func shiftProjectSelection(by offset: Int) {
         let visible = visibleProjects
         guard !visible.isEmpty else { return }
-        if let current = visible.firstIndex(where: { $0.id == selectedProjectID }) {
+        let currentID = chromeSelectedProjectID ?? selectedProjectID
+        if let current = visible.firstIndex(where: { $0.id == currentID }) {
             let next = (current + offset + visible.count) % visible.count
-            selectedProjectID = visible[next].id
+            selectProject(id: visible[next].id)
         } else {
-            selectedProjectID = visible[0].id
+            selectProject(id: visible[0].id)
         }
     }
 
@@ -1937,7 +1980,7 @@ final class TerminalManager: nonisolated ObservableObject {
             project.projectDirectory = config?.projectDirectory ?? saved.projectDirectory ?? ""
             project.launchCommands = config?.launchCommands ?? []
             project.isArchived = config?.isArchived ?? saved.isArchived ?? false
-            project.groupID = config?.groupID
+            project.groupID = config?.groupID ?? ProjectGroup.personalID
             project.aiWritingLanguage = config?.aiWritingLanguage
                 .flatMap(AIWritingLanguage.init(rawValue:))
             project.customGitPath = config?.customGitPath
@@ -2002,7 +2045,7 @@ final class TerminalManager: nonisolated ObservableObject {
             project.projectDirectory = config.projectDirectory ?? ""
             project.launchCommands = config.launchCommands ?? []
             project.isArchived = config.isArchived ?? false
-            project.groupID = config.groupID
+            project.groupID = config.groupID ?? ProjectGroup.personalID
             project.aiWritingLanguage = config.aiWritingLanguage
                 .flatMap(AIWritingLanguage.init(rawValue:))
             project.customGitPath = config.customGitPath
@@ -2019,6 +2062,7 @@ final class TerminalManager: nonisolated ObservableObject {
         } else {
             selectedProjectID = projects.first?.id
         }
+        chromeSelectedProjectID = selectedProjectID
         if let selected = selectedProject {
             let visible = projects(inGroupID: ProjectGroupStore.shared.selectedID)
             if !visible.contains(where: { $0.id == selected.id }) {

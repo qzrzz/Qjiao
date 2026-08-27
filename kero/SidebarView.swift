@@ -24,6 +24,8 @@ struct SidebarView: View {
     @State private var groupTabFrames: [String: CGRect] = [:]
     @State private var dropTargetGroupID: String?
     @State private var groupSearchText: String = ""
+    /// 侧栏点击抢先选中；内容区 `selectedProjectID` 跟上后清掉。
+    @State private var localChromeProjectID: UUID?
     /// 当前窗口是否置顶（`NSWindow.level == .floating`）。
     @State private var isWindowAlwaysOnTop = false
     /// Finder 等外部文件夹拖入侧栏时的高亮反馈。
@@ -81,8 +83,8 @@ struct SidebarView: View {
                                     manager: manager,
                                     project: project,
                                     index: index,
-                                    isSelected: project.id == manager.selectedProjectID,
-                                    select: { manager.selectedProjectID = project.id },
+                                    isSelected: project.id == displayedSelectedProjectID,
+                                    select: { selectProject(project) },
                                     close: { manager.close(project) },
                                     isDragging: draggedProjectID == project.id,
                                     onDrag: { updateProjectDrag(source: project.id, location: $0) },
@@ -180,6 +182,28 @@ struct SidebarView: View {
         .onChange(of: groupStore.selectedID) { _, _ in
             groupSearchText = ""
         }
+        .onChange(of: manager.selectedProjectID) { _, id in
+            if localChromeProjectID == id {
+                localChromeProjectID = nil
+            } else if localChromeProjectID != nil, id != localChromeProjectID {
+                localChromeProjectID = nil
+            }
+        }
+        .onChange(of: manager.chromeSelectedProjectID) { _, id in
+            if localChromeProjectID != nil, id != localChromeProjectID {
+                localChromeProjectID = nil
+            }
+        }
+    }
+
+    /// 侧栏即时选中：本地点击 > manager chrome > 内容选中。
+    private var displayedSelectedProjectID: UUID? {
+        localChromeProjectID ?? manager.chromeSelectedProjectID ?? manager.selectedProjectID
+    }
+
+    private func selectProject(_ project: Project) {
+        localChromeProjectID = project.id
+        manager.selectProject(id: project.id, paintChrome: false)
     }
 
     private var showsGroupSearch: Bool {
@@ -765,14 +789,14 @@ private struct SidebarProjectRow: View {
                         manager.assign(project, toGroupID: group.id)
                     }
                 } label: {
-                    if project.groupID == group.id, !project.isArchived {
+                    if (project.groupID ?? ProjectGroup.personalID) == group.id, !project.isArchived {
                         Label(group.displayName, systemImage: "checkmark")
                     } else {
                         Text(group.displayName)
                     }
                 }
             }
-            if project.groupID != nil {
+            if (project.groupID ?? ProjectGroup.personalID) != ProjectGroup.personalID {
                 Divider()
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
@@ -1265,15 +1289,18 @@ private struct SidebarProjectGroupBar: View {
                 let trailingReserve =
                     SidebarTabLayout.collapseButtonSide + SidebarTabLayout.interTabSpacingWide
                 let layout = SidebarTabLayout.resolve(
-                    items: tabs.map {
+                    items: tabs.enumerated().map { index, group in
                         SidebarTabLayout.MeasureItem(
-                            title: $0.displayName,
-                            badgeCount: manager.projects(inGroupID: $0.id).count
+                            title: group.displayName,
+                            badgeCount: index == activeIndex
+                                ? manager.projects(inGroupID: group.id).count
+                                : 0
                         )
                     },
                     activeIndex: activeIndex,
                     availableWidth: geo.size.width,
-                    trailingReserve: trailingReserve
+                    trailingReserve: trailingReserve,
+                    allTitlesExtraSlack: 56
                 )
                 HStack(alignment: .center, spacing: layout.spacing) {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -1348,7 +1375,7 @@ private struct SidebarProjectGroupBar: View {
                         title: group.displayName,
                         isActive: isActive,
                         showTitle: showTitle,
-                        badgeCount: count
+                        badgeCount: isActive ? count : 0
                     )
                 }
                 .buttonStyle(.plain)

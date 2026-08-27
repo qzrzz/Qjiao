@@ -7,6 +7,7 @@ import Combine
 import Foundation
 
 /// 侧栏项目分组。`current` / `archived` 是筛选 tab，不能当作归属写入项目；
+/// `current` 列出未归档且仍有标签页的项目。
 /// `user` 是可归属的分组（默认「个人」「工作」，也可新建）。
 enum ProjectGroupKind: String, Codable, Equatable, Sendable {
     case current

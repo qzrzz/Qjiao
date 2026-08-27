@@ -54,11 +54,15 @@ enum SidebarTabLayout {
     private static let measureSlack: CGFloat = 2
 
     /// 根据实际文案宽度决定展缩模式与 tab 间距。
+    ///
+    /// `allTitlesExtraSlack` 只加在「全部显示标题」的判定上：值越大，越早退回
+    /// 只显示激活项标题，避免窄栏里所有标题挤在一起。
     static func resolve(
         items: [MeasureItem],
         activeIndex: Int,
         availableWidth: CGFloat,
-        trailingReserve: CGFloat = 0
+        trailingReserve: CGFloat = 0,
+        allTitlesExtraSlack: CGFloat = 0
     ) -> Result {
         let count = items.count
         guard count > 0, availableWidth > 0 else {
@@ -77,10 +81,10 @@ enum SidebarTabLayout {
             return sum + barInsets + measureSlack
         }
 
-        if totalWidth(mode: .all, spacing: interTabSpacingWide) <= availableWidth {
+        if totalWidth(mode: .all, spacing: interTabSpacingWide) + allTitlesExtraSlack <= availableWidth {
             return Result(mode: .all, spacing: interTabSpacingWide, activeIndex: safeActive)
         }
-        if totalWidth(mode: .all, spacing: interTabSpacingNarrow) <= availableWidth {
+        if totalWidth(mode: .all, spacing: interTabSpacingNarrow) + allTitlesExtraSlack <= availableWidth {
             return Result(mode: .all, spacing: interTabSpacingNarrow, activeIndex: safeActive)
         }
         if totalWidth(mode: .activeOnly, spacing: interTabSpacingWide) <= availableWidth {

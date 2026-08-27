@@ -230,8 +230,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             saveConfig()
         }
     }
-    /// 用户分组 ID（个人 / 工作 / 自建分组）。`nil` 表示未分组，只出现在「当前」tab。
-    @Published var groupID: String? = nil {
+    /// 用户分组 ID（个人 / 工作 / 自建分组）。缺省时默认为个人分组。
+    @Published var groupID: String? = ProjectGroup.personalID {
         didSet {
             if groupID != oldValue {
                 saveConfig()
@@ -441,7 +441,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         if icon != config.icon { icon = config.icon }
         if theme != (config.theme ?? .global) { theme = config.theme ?? .global }
         if isArchived != (config.isArchived ?? false) { isArchived = config.isArchived ?? false }
-        if groupID != config.groupID { groupID = config.groupID }
+        let resolvedGroupID = config.groupID ?? ProjectGroup.personalID
+        if groupID != resolvedGroupID { groupID = resolvedGroupID }
         if launchCommands != (config.launchCommands ?? []) { launchCommands = config.launchCommands ?? [] }
         let aiLang = config.aiWritingLanguage.flatMap(AIWritingLanguage.init(rawValue:))
         if aiWritingLanguage != aiLang { aiWritingLanguage = aiLang }

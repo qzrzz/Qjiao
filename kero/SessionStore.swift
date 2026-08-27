@@ -22,8 +22,8 @@ struct ProjectConfig: Codable {
     var launchCommands: [ProjectLaunchCommand]? = nil
     /// 可选，记录项目是否已被归档。
     var isArchived: Bool? = nil
-    /// 可选，用户分组 ID（个人 / 工作 / 自建分组）；nil 表示未分组。
-    var groupID: String? = nil
+    /// 可选，用户分组 ID（个人 / 工作 / 自建分组）；旧配置缺省时默认为个人分组。
+    var groupID: String? = ProjectGroup.personalID
     /// 可选 AI 写作语言覆盖（`AIWritingLanguage.rawValue`）；nil 表示跟随全局设置。
     var aiWritingLanguage: String? = nil
     /// 可选指定 Git 仓库路径（位于项目目录的子文件夹或项目目录本身）。

@@ -11,6 +11,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.59]
+
+### Changed
+
+- Selecting a project in the sidebar is now instant: the row highlights immediately, while the content area, theme and right sidebar follow a beat later, so terminal mounting no longer stalls the click feedback; rapid clicks apply only the last selection.
+
+## [1.1.58]
+
+### Changed
+
+- Projects without an explicit group (including legacy projects created before groups existed) now default to the "Personal" group.
+- Restrict the "Current" group tab to projects actually in use: it now lists only unarchived projects that still have open tabs.
+- Show project-count badges only on the active group tab, and fall back to showing just the active tab's title sooner in narrow sidebars so all titles don't squeeze together.
+
 ## [1.1.57]
 
 ### Added
