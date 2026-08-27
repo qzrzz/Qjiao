@@ -15,6 +15,8 @@ the `libghostty-spm` build pipeline.
 - Preserve newer Ghostty's renamed internal-library outputs when extending its
   Darwin static-library build path.
 - Every patch in this directory must be safe to re-run.
+- Skip non-file entries in this directory (`assets/` holds the prebuilt
+  framedata blob used by `0003-prebuilt-framedata.sh`).
 - Patches here are applied automatically by `Script/build-ghostty.sh`, so they
   affect macOS, iOS, and Mac Catalyst builds equally.
 

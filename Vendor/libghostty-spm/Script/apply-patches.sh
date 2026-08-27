@@ -72,6 +72,7 @@ fi
 
 for patch_file in "$PATCH_DIR"/*; do
     [ -e "$patch_file" ] || continue
+    [ -f "$patch_file" ] || continue
 
     patch_name=$(basename "$patch_file")
     case "$patch_name" in

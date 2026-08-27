@@ -77,10 +77,10 @@ mkdir -p "$OUTPUT_DIR"
 
 case "$PLATFORM_GROUP" in
     macos)
+        # Qjiao ships arm64 only (ARCHS = arm64). The arm64e Ghostty patch
+        # has not been rebased onto tip yet.
         build_variant "macosx" \
-            "aarch64-macos" \
-            "arm64e-macos@apple_a12" \
-            "x86_64-macos"
+            "aarch64-macos"
         ;;
     ios)
         build_variant "iphoneos" \

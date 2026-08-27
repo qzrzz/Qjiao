@@ -36,15 +36,18 @@ public final class TerminalClipboardConfirmationRequest {
     /// Approves the pending paste or OSC 52 response.
     public func approve() { resolve(text: contents) }
 
-    /// Denies the request and completes it with an empty response.
-    public func deny() { resolve(text: "") }
+    /// Denies the request without handing clipboard contents to the terminal.
+    public func deny() {
+        guard !resolved else { return }
+        resolved = true
+        guard let surface = bridge?.rawSurface else { return }
+        TerminalClipboardIO.deny(surface, state)
+    }
 
     private func resolve(text: String) {
         guard !resolved else { return }
         resolved = true
         guard let surface = bridge?.rawSurface else { return }
-        text.withCString { cString in
-            TerminalClipboardIO.complete(surface, cString, state, true)
-        }
+        TerminalClipboardIO.complete(surface, text, state, true)
     }
 }

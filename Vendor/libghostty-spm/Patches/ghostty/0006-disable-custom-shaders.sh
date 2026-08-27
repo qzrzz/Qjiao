@@ -71,11 +71,11 @@ text = shared_path.read_text()
 # Gate glslang — wrap with custom_shaders check
 text = text.replace(
     '    // Glslang\n    if (b.lazyDependency("glslang", .{',
-    '    // Glslang — only needed for custom shaders\n    if (self.config.custom_shaders) if (b.lazyDependency("glslang", .{',
+    '    // Glslang — only needed for custom shaders\n    if (self.config.custom_shaders) {\n    if (b.lazyDependency("glslang", .{',
 )
 # Close the extra if at end of glslang block
 text = text.replace(
-    """            step.linkLibrary(glslang_dep.artifact("glslang"));
+    """            step.root_module.linkLibrary(glslang_dep.artifact("glslang"));
             try static_libs.append(
                 b.allocator,
                 glslang_dep.artifact("glslang").getEmittedBin(),
@@ -84,13 +84,14 @@ text = text.replace(
     }
 
     // Spirv-cross""",
-    """            step.linkLibrary(glslang_dep.artifact("glslang"));
+    """            step.root_module.linkLibrary(glslang_dep.artifact("glslang"));
             try static_libs.append(
                 b.allocator,
                 glslang_dep.artifact("glslang").getEmittedBin(),
             );
         }
-    };
+    }
+    }
 
     // Spirv-cross""",
 )
@@ -98,10 +99,10 @@ text = text.replace(
 # Gate spirv-cross — wrap with custom_shaders check
 text = text.replace(
     '    // Spirv-cross\n    if (b.lazyDependency("spirv_cross", .{',
-    '    // Spirv-cross — only needed for custom shaders\n    if (self.config.custom_shaders) if (b.lazyDependency("spirv_cross", .{',
+    '    // Spirv-cross — only needed for custom shaders\n    if (self.config.custom_shaders) {\n    if (b.lazyDependency("spirv_cross", .{',
 )
 text = text.replace(
-    """            step.linkLibrary(spirv_cross_dep.artifact("spirv_cross"));
+    """            step.root_module.linkLibrary(spirv_cross_dep.artifact("spirv_cross"));
             try static_libs.append(
                 b.allocator,
                 spirv_cross_dep.artifact("spirv_cross").getEmittedBin(),
@@ -110,13 +111,14 @@ text = text.replace(
     }
 
     // Sentry""",
-    """            step.linkLibrary(spirv_cross_dep.artifact("spirv_cross"));
+    """            step.root_module.linkLibrary(spirv_cross_dep.artifact("spirv_cross"));
             try static_libs.append(
                 b.allocator,
                 spirv_cross_dep.artifact("spirv_cross").getEmittedBin(),
             );
         }
-    };
+    }
+    }
 
     // Sentry""",
 )

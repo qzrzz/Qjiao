@@ -77,7 +77,8 @@ patch_file("src/build/SharedDeps.zig", [
         '    // cimgui\n'
         '    if (b.lazyDependency("dcimgui", .{',
         '    // cimgui — only needed for inspector\n'
-        '    if (self.config.inspector) if (b.lazyDependency("dcimgui", .{',
+        '    if (self.config.inspector) {\n'
+        '    if (b.lazyDependency("dcimgui", .{',
     ),
     # Close the extra if — find the end of the dcimgui block
     (
@@ -86,7 +87,8 @@ patch_file("src/build/SharedDeps.zig", [
         '\n'
         '    // Fonts',
         '        );\n'
-        '    };\n'
+        '    }\n'
+        '    }\n'
         '\n'
         '    // Fonts',
     ),

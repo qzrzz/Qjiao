@@ -246,7 +246,7 @@ old_create = """        // Create the CF release thread.
             CFReleaseThread.threadMain,
             .{cf_release_thread},
         );
-        cf_release_thr.setName("cf_release") catch {};
+        cf_release_thr.setName(global.io(), "cf_release") catch {};
 
         return .{"""
 
@@ -261,7 +261,7 @@ new_create = """        // On iOS the kqueue-based event loop used by the releas
             thr_obj.* = try .init(alloc);
             errdefer thr_obj.deinit();
             const thr = try std.Thread.spawn(.{}, CFReleaseThread.threadMain, .{thr_obj});
-            thr.setName("cf_release") catch {};
+            thr.setName(global.io(), "cf_release") catch {};
             cf_release_thread = thr_obj;
             cf_release_thr = thr;
         }
@@ -302,7 +302,7 @@ src = src.replace(old_deinit, new_deinit)
 old_end = """        // Send the items. If the send succeeds then we wake up the
         // thread to process the items. If the send fails then do a manual
         // cleanup.
-        if (self.cf_release_thread.mailbox.push(.{ .release = .{
+        if (self.cf_release_thread.mailbox.push(global.io(), .{ .release = .{
             .refs = items,
             .alloc = self.alloc,
         } }, .{ .forever = {} }) != 0) {
@@ -320,7 +320,7 @@ old_end = """        // Send the items. If the send succeeds then we wake up the
 new_end = """        // Offload to the background release thread when available.
         // On iOS cf_release_thread is nil, so we fall through to sync release.
         if (self.cf_release_thread) |thr_obj| {
-            if (thr_obj.mailbox.push(.{ .release = .{
+            if (thr_obj.mailbox.push(global.io(), .{ .release = .{
                 .refs = items,
                 .alloc = self.alloc,
             } }, .{ .forever = {} }) != 0) {

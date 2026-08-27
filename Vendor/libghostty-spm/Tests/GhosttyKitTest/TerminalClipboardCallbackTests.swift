@@ -9,12 +9,16 @@ import Testing
 struct TerminalClipboardCallbackTests {
     @Test
     func escalatedOSC52ReadWithoutDelegateIsDenied() {
-        let original = TerminalClipboardIO.complete
-        defer { TerminalClipboardIO.complete = original }
-        var recorded: (String, Bool)?
-        TerminalClipboardIO.complete = { _, string, _, confirmed in
-            recorded = (String(cString: string), confirmed)
+        let originalComplete = TerminalClipboardIO.complete
+        let originalDeny = TerminalClipboardIO.deny
+        defer {
+            TerminalClipboardIO.complete = originalComplete
+            TerminalClipboardIO.deny = originalDeny
         }
+        var completed = false
+        var denied = false
+        TerminalClipboardIO.complete = { _, _, _, _ in completed = true }
+        TerminalClipboardIO.deny = { _, _ in denied = true }
 
         let bridge = makeBridge()
         withTestState { state in
@@ -24,18 +28,22 @@ struct TerminalClipboardCallbackTests {
             )
         }
 
-        #expect(recorded?.0 == "")
-        #expect(recorded?.1 == true)
+        #expect(!completed)
+        #expect(denied)
     }
 
     @Test
     func unsafePasteIsDeniedWithoutDelegate() {
-        let original = TerminalClipboardIO.complete
-        defer { TerminalClipboardIO.complete = original }
-        var recorded: (String, Bool)?
-        TerminalClipboardIO.complete = { _, string, _, confirmed in
-            recorded = (String(cString: string), confirmed)
+        let originalComplete = TerminalClipboardIO.complete
+        let originalDeny = TerminalClipboardIO.deny
+        defer {
+            TerminalClipboardIO.complete = originalComplete
+            TerminalClipboardIO.deny = originalDeny
         }
+        var completed = false
+        var denied = false
+        TerminalClipboardIO.complete = { _, _, _, _ in completed = true }
+        TerminalClipboardIO.deny = { _, _ in denied = true }
 
         let bridge = makeBridge()
         withTestState { state in
@@ -45,16 +53,22 @@ struct TerminalClipboardCallbackTests {
             )
         }
 
-        #expect(recorded?.0 == "")
-        #expect(recorded?.1 == true)
+        #expect(!completed)
+        #expect(denied)
     }
 
     @Test
     func escalatedOSC52WriteIsDropped() {
-        let original = TerminalClipboardIO.complete
-        defer { TerminalClipboardIO.complete = original }
+        let originalComplete = TerminalClipboardIO.complete
+        let originalDeny = TerminalClipboardIO.deny
+        defer {
+            TerminalClipboardIO.complete = originalComplete
+            TerminalClipboardIO.deny = originalDeny
+        }
         var completed = false
+        var denied = false
         TerminalClipboardIO.complete = { _, _, _, _ in completed = true }
+        TerminalClipboardIO.deny = { _, _ in denied = true }
 
         let bridge = makeBridge()
         withTestState { state in
@@ -64,6 +78,7 @@ struct TerminalClipboardCallbackTests {
             )
         }
         #expect(!completed)
+        #expect(!denied)
     }
 
     @Test
@@ -72,7 +87,7 @@ struct TerminalClipboardCallbackTests {
         defer { TerminalClipboardIO.complete = original }
         var recorded: (String, Bool)?
         TerminalClipboardIO.complete = { _, string, _, confirmed in
-            recorded = (String(cString: string), confirmed)
+            recorded = (string, confirmed)
         }
 
         let recorder = ClipboardConfirmationRecorder()
@@ -91,12 +106,16 @@ struct TerminalClipboardCallbackTests {
 
     @Test
     func delegateCanDenyOSC52Read() {
-        let original = TerminalClipboardIO.complete
-        defer { TerminalClipboardIO.complete = original }
-        var recorded: (String, Bool)?
-        TerminalClipboardIO.complete = { _, string, _, confirmed in
-            recorded = (String(cString: string), confirmed)
+        let originalComplete = TerminalClipboardIO.complete
+        let originalDeny = TerminalClipboardIO.deny
+        defer {
+            TerminalClipboardIO.complete = originalComplete
+            TerminalClipboardIO.deny = originalDeny
         }
+        var completed = false
+        var denied = false
+        TerminalClipboardIO.complete = { _, _, _, _ in completed = true }
+        TerminalClipboardIO.deny = { _, _ in denied = true }
 
         let recorder = ClipboardConfirmationRecorder()
         let bridge = makeBridge(delegate: recorder)
@@ -107,16 +126,22 @@ struct TerminalClipboardCallbackTests {
             )
             recorder.requests.first?.deny()
         }
-        #expect(recorded?.0 == "")
-        #expect(recorded?.1 == true)
+        #expect(!completed)
+        #expect(denied)
     }
 
     @Test
     func requestResolvesAtMostOnce() {
-        let original = TerminalClipboardIO.complete
-        defer { TerminalClipboardIO.complete = original }
+        let originalComplete = TerminalClipboardIO.complete
+        let originalDeny = TerminalClipboardIO.deny
+        defer {
+            TerminalClipboardIO.complete = originalComplete
+            TerminalClipboardIO.deny = originalDeny
+        }
         var completions = 0
+        var denials = 0
         TerminalClipboardIO.complete = { _, _, _, _ in completions += 1 }
+        TerminalClipboardIO.deny = { _, _ in denials += 1 }
 
         let recorder = ClipboardConfirmationRecorder()
         let bridge = makeBridge(delegate: recorder)
@@ -130,6 +155,7 @@ struct TerminalClipboardCallbackTests {
             recorder.requests.first?.approve()
         }
         #expect(completions == 1)
+        #expect(denials == 0)
     }
 
     @Test
@@ -163,19 +189,22 @@ struct TerminalClipboardCallbackTests {
         TerminalClipboardIO.readString = { "line one\nline two" }
         var recorded: (String, Bool)?
         TerminalClipboardIO.complete = { _, string, _, confirmed in
-            recorded = (String(cString: string), confirmed)
+            recorded = (string, confirmed)
         }
 
         let bridge = makeBridge()
         var state = 0
-        let handled = withUnsafeMutablePointer(to: &state) { statePtr in
+        let result = withUnsafeMutablePointer(to: &state) { statePtr in
             terminalControllerReadClipboardCallback(
                 userdata: Unmanaged.passUnretained(bridge).toOpaque(),
                 clipboard: GHOSTTY_CLIPBOARD_STANDARD,
-                opaquePtr: UnsafeMutableRawPointer(statePtr)
+                opaquePtr: UnsafeMutableRawPointer(statePtr),
+                mimes: nil,
+                mimesLen: 0,
+                list: false
             )
         }
-        #expect(handled)
+        #expect(result == GHOSTTY_CLIPBOARD_READ_STARTED)
         #expect(recorded?.0 == "line one\nline two")
         #expect(recorded?.1 == false)
     }
@@ -201,19 +230,42 @@ struct TerminalClipboardCallbackTests {
         state: UnsafeMutableRawPointer
     ) {
         contents.withCString { cString in
-            terminalControllerConfirmReadClipboardCallback(
-                userdata: Unmanaged.passUnretained(bridge).toOpaque(),
-                string: cString,
-                opaquePtr: state,
-                request: request
-            )
+            "text/plain".withCString { mime in
+                var content = ghostty_clipboard_content_s(
+                    mime: mime,
+                    data: cString,
+                    len: contents.utf8.count
+                )
+                withUnsafePointer(to: &content) { contentsPtr in
+                    var confirm = ghostty_clipboard_confirm_s(
+                        contents: contentsPtr,
+                        contents_len: 1,
+                        available: nil,
+                        available_len: 0,
+                        name: nil,
+                        can_remember: false
+                    )
+                    withUnsafePointer(to: &confirm) { confirmPtr in
+                        terminalControllerConfirmReadClipboardCallback(
+                            userdata: Unmanaged.passUnretained(bridge).toOpaque(),
+                            confirm: confirmPtr,
+                            opaquePtr: state,
+                            request: request
+                        )
+                    }
+                }
+            }
         }
     }
 
     private func invokeWriteCallback(_ text: String, confirm: Bool) {
         text.withCString { data in
             "text/plain".withCString { mime in
-                let content = ghostty_clipboard_content_s(mime: mime, data: data)
+                let content = ghostty_clipboard_content_s(
+                    mime: mime,
+                    data: data,
+                    len: text.utf8.count
+                )
                 withUnsafePointer(to: content) { contentsPtr in
                     terminalControllerWriteClipboardCallback(
                         userdata: nil,

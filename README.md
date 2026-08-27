@@ -148,7 +148,8 @@ RELEASING.md          本机发布流程
 - stage / commit / discard、历史提交编辑（Reword / Amend / Drop 等）、大 Diff 虚拟化渲染；右侧 Git 标签显示变更数角标。
 - 多语言（L10n）完整覆盖 Git 操作完成提示（Commit/Push/Pull/Fetch/Stage/Discard/Stash 等状态与输出消息），支持中文与日文实时切换。
 - 扫描失败可强制刷新并自愈 fsmonitor；子进程统一超时与回收，彻底治理 Process / Pipe 文件描述符 (FD) 泄漏（显式关闭 stdin/stdout/stderr 读写句柄，Diff 视图统一下放 SubprocessRunner），解决长时间运行后因 FD 耗尽引发 `Bad file descriptor` (`NSPOSIXErrorDomain` code 9) 导致子进程创建失败的问题。
-- 修复 Ghostty 屏幕导出的目录 fd 泄漏：终端预览 / Agent 读屏改为 `ghostty_surface_read_text` 直接读 surface；Vendor 构建链增加 `0011-fix-tempdir-fd-leak.patch`，修复锁定的 Ghostty `35e1a016…` 在成功 `write_screen_file` 导出后未释放 TempDir 及其父目录句柄的问题；FD 巡检监控扩展到 release，rlimit 软上限最多提升至 65536。
+- 修复 Ghostty 屏幕导出的目录 fd 泄漏：终端预览 / Agent 读屏改为 `ghostty_surface_read_text` 直接读 surface；FD 巡检监控扩展到 release，rlimit 软上限最多提升至 65536。
+- 将嵌入式 Ghostty 从锁定提交 `35e1a016…` 更新到 [tip](https://github.com/ghostty-org/ghostty/releases/tag/tip) `b69f612`（2026-08-26）。上游已修好 TempDir 导出 fd 泄漏，因此去掉 `0011-fix-tempdir-fd-leak.patch`；剪贴板回调对齐新的 `ghostty_clipboard_complete_s` / `ghostty_surface_deny_clipboard_request` API。
 - Files 树可选 Git 状态装饰（默认关）。
 
 ### 文件、编辑与图片
