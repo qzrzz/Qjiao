@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.56]
+
+### Changed
+
+- Update the embedded Ghostty engine from the locked `35e1a016` commit to upstream tip `b69f612` (2026-08-26): upstream now fixes the TempDir export fd leak, so the local `0011-fix-tempdir-fd-leak.patch` is dropped, and clipboard callbacks are rebased onto the new `ghostty_clipboard_complete_s` / `ghostty_surface_deny_clipboard_request` API.
+
 ## [1.1.55]
 
 ### Changed
