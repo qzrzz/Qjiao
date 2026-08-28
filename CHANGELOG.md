@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.63]
+
+### Changed
+
+- In the "Wrap" tabs layout, keep the right-side action buttons (sidebar toggle, dropdown, new tab, zoom) in the header toolbar while the tabs fit on a single row; they only move into a vertical column next to the tab strip when the tabs actually wrap onto multiple rows, so a single-row wrap no longer reserves the taller header.
+
 ## [1.1.62]
 
 ### Added

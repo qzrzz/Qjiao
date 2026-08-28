@@ -380,11 +380,16 @@ private struct MainHeaderView: View {
     /// 顶栏总高：上沿拖窗带 + 中间标签行 + 下沿拖窗带（多层上下空白只加在 wrap）。
     private var headerHeight: CGFloat {
         let contentMinHeight: CGFloat
-        if settings.tabsLayoutMode == .wrap && (manager.selectedProject?.tabs.isEmpty == false) {
+        let isWrap = settings.tabsLayoutMode == .wrap
+        let hasTabs = manager.selectedProject?.tabs.isEmpty == false
+        let isMultiRow = tabStripHeight > TabStripMetrics.wrapRowHeight + 0.5
+        if isWrap && hasTabs && isMultiRow {
             let buttonCount: CGFloat = manager.isPaneZoomed ? 4 : 3
             let actionsHeight = buttonCount * HeaderTabActionMetrics.size
                 + (buttonCount - 1) * HeaderTabActionMetrics.spacing
             contentMinHeight = max(tabStripHeight, actionsHeight)
+        } else if isWrap && hasTabs {
+            contentMinHeight = TabStripMetrics.wrapRowHeight
         } else {
             contentMinHeight = max(tabStripHeight, TabStripMetrics.rowHeight)
         }
@@ -433,13 +438,13 @@ private struct MainHeaderView: View {
         return Self.trafficLightInset + Self.leftToggleLeadingPadding
     }
 
-    /// 右侧固定工具簇固有宽度（zoom 可选 + 下拉 + 侧栏；多层模式下工具按钮均移至 Tab 栏右侧垂直排列）。
+    /// 右侧固定工具簇固有宽度（zoom 可选 + 下拉 + 侧栏；多行垂直模式下工具按钮均移至 Tab 栏右侧垂直排列）。
     private static func trailingClusterWidth(
         isPaneZoomed: Bool,
         hasProject: Bool,
-        isWrapWithTabs: Bool
+        isVerticalActions: Bool
     ) -> CGFloat {
-        guard hasProject, !isWrapWithTabs else { return 0 }
+        guard hasProject, !isVerticalActions else { return 0 }
         var width =
             HeaderTabActionMetrics.size
             + HeaderTabActionMetrics.spacing
@@ -454,27 +459,40 @@ private struct MainHeaderView: View {
         GeometryReader { geo in
             let hasProject = manager.selectedProject != nil
             let showLeftToggle = !manager.isLeftSidebarVisible
-            let hasTabs = manager.selectedProject?.tabs.isEmpty == false
-            let isWrapWithTabs = settings.tabsLayoutMode == .wrap && hasTabs
+            let tabCount = manager.selectedProject?.tabs.count ?? 0
+            let isWrap = settings.tabsLayoutMode == .wrap && tabCount > 0
+
+            let leftToggleOccupied = showLeftToggle ? Self.leftToggleWidth : 0
+            let baseBudget = max(0, geo.size.width - leadingInset - leftToggleOccupied)
+
+            // 先按垂直预留估算可用宽度判断是否会排成多行（> 1 行）
+            let verticalActionsReserve = Self.tabNewSpacing + HeaderTabActionMetrics.size + HeaderTabActionMetrics.edgePadding
+            let tentativeVerticalWidth = max(0, baseBudget - verticalActionsReserve)
+            let isMultiRow = isWrap && TabStripMetrics.wrapRowCount(
+                tabCount: tabCount,
+                availableWidth: tentativeVerticalWidth
+            ) > 1
+
+            let isVerticalActions = isWrap && isMultiRow
+
             let trailingCluster = Self.trailingClusterWidth(
                 isPaneZoomed: manager.isPaneZoomed,
                 hasProject: hasProject,
-                isWrapWithTabs: isWrapWithTabs
+                isVerticalActions: isVerticalActions
             )
             // 标签/新建不得进入的右侧预留：工具簇 + 与「+」同宽的间距 + 外边距。
             let trailingReserve =
                 trailingCluster
                 + (trailingCluster > 0 ? Self.actionSpacing : 0)
-                + (isWrapWithTabs ? 0 : HeaderTabActionMetrics.edgePadding)
-            let leftToggleOccupied = showLeftToggle ? Self.leftToggleWidth : 0
+                + (isVerticalActions ? 0 : HeaderTabActionMetrics.edgePadding)
             let leftBudget = max(
                 0,
-                geo.size.width - leadingInset - leftToggleOccupied - trailingReserve
+                baseBudget - trailingReserve
             )
             let stripMaxWidth = max(
                 0,
                 leftBudget - Self.tabNewSpacing - HeaderTabActionMetrics.size
-                    - (isWrapWithTabs ? HeaderTabActionMetrics.edgePadding : 0)
+                    - (isVerticalActions ? HeaderTabActionMetrics.edgePadding : 0)
             )
 
             VStack(spacing: 0) {
@@ -504,7 +522,7 @@ private struct MainHeaderView: View {
                                     maxStripWidth: stripMaxWidth
                                 )
                             }
-                            if isWrapWithTabs {
+                            if isVerticalActions {
                                 VStack(spacing: HeaderTabActionMetrics.spacing) {
                                     HeaderIconButton(
                                         systemImage: "sidebar.right",
@@ -537,7 +555,7 @@ private struct MainHeaderView: View {
                     HeaderWindowDragBand()
 
                     if let project = manager.selectedProject {
-                        if !isWrapWithTabs {
+                        if !isVerticalActions {
                             HStack(spacing: Self.actionSpacing) {
                                 if manager.isPaneZoomed {
                                     HeaderIconButton(
@@ -1111,6 +1129,16 @@ private enum TabStripMetrics {
 
     static func wrapRowCount(widths: [CGFloat], availableWidth: CGFloat) -> Int {
         max(packWrapRows(widths: widths, availableWidth: availableWidth).count, 1)
+    }
+
+    static func wrapRowCount(tabCount: Int, availableWidth: CGFloat) -> Int {
+        guard availableWidth > 0, tabCount > 0 else { return 1 }
+        let tabWidth = wrapFilledWidth(
+            tabCount: tabCount,
+            availableWidth: availableWidth
+        )
+        let widths = Array(repeating: tabWidth, count: tabCount)
+        return wrapRowCount(widths: widths, availableWidth: availableWidth)
     }
 
     /// 换行内容的总高度（可超过 3 行，供纵向滚动）。
