@@ -11,6 +11,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.61]
+
+### Added
+
+- Add a "Delete Project" action to the sidebar project context menu and the command palette: it permanently removes the project from the list and deletes its local configuration and notes, after a confirmation dialog (hold ⌘ to skip the confirmation).
+
+### Changed
+
+- "Close Project" no longer deletes the project: it now only closes all of the project's tabs and terminal sessions and keeps the project in the list, while the new "Delete Project" action handles permanent removal; the close confirmation dialog text is updated accordingly.
+- Remove the last-run duration label from idle task cells in the Tasks panel.
+
+### Removed
+
+- Remove the "Open in Terminal" item from the sidebar project context menu.
+
 ## [1.1.59]
 
 ### Changed

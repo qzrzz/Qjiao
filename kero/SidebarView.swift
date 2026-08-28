@@ -85,7 +85,6 @@ struct SidebarView: View {
                                     index: index,
                                     isSelected: project.id == displayedSelectedProjectID,
                                     select: { selectProject(project) },
-                                    close: { manager.close(project) },
                                     isDragging: draggedProjectID == project.id,
                                     onDrag: { updateProjectDrag(source: project.id, location: $0) },
                                     onDragEnded: endProjectDrag
@@ -525,7 +524,6 @@ private struct SidebarProjectRow: View {
     let index: Int
     let isSelected: Bool
     let select: () -> Void
-    let close: () -> Void
     let isDragging: Bool
     let onDrag: (CGPoint) -> Void
     let onDragEnded: () -> Void
@@ -535,6 +533,7 @@ private struct SidebarProjectRow: View {
     @State private var isIconPickerPresented = false
     @State private var isEditingDescription = false
     @State private var isCloseConfirmationPresented = false
+    @State private var isDeleteConfirmationPresented = false
     @State private var isAISelectIconErrorPresented = false
     @State private var aiSelectIconError: String?
     @State private var isAIProjectMetaErrorPresented = false
@@ -660,10 +659,16 @@ private struct SidebarProjectRow: View {
             ProjectIconPicker(project: project)
         }
         .alert(L10n.t("Close Project?"), isPresented: $isCloseConfirmationPresented) {
-            Button(L10n.t("Delete Project"), role: .destructive, action: close)
+            Button(L10n.t("Close Project"), action: { manager.closeProject(project) })
             Button(L10n.t("Cancel"), role: .cancel) {}
         } message: {
-            Text(L10n.t("This will close the project and its terminal sessions."))
+            Text(L10n.t("This will close all tabs and terminal sessions in this project."))
+        }
+        .alert(L10n.t("Delete Project?"), isPresented: $isDeleteConfirmationPresented) {
+            Button(L10n.t("Delete Project"), role: .destructive, action: { manager.deleteProject(project) })
+            Button(L10n.t("Cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("This will remove the project from the list and delete its local configurations and notes."))
         }
         .alert(L10n.t("AI Select Icon"), isPresented: $isAISelectIconErrorPresented) {
             Button(L10n.t("OK"), role: .cancel) {
@@ -702,13 +707,6 @@ private struct SidebarProjectRow: View {
             openProjectDirectory()
         } label: {
             Label(L10n.t("Open in Finder"), systemImage: "finder")
-        }
-        Button {
-            manager.selectedProjectID = project.id
-            let dir = project.selectedSession?.currentDirectoryPath
-            manager.newSession(directory: dir)
-        } label: {
-            Label(L10n.t("Open in Terminal"), systemImage: "terminal")
         }
         Button {
             openConfigFolder()
@@ -826,7 +824,10 @@ private struct SidebarProjectRow: View {
         }
         Divider()
         Button(L10n.t("Close Project")) {
-            close()
+            requestClose()
+        }
+        Button(L10n.t("Delete Project"), role: .destructive) {
+            requestDelete()
         }
     }
 
@@ -1128,12 +1129,21 @@ private struct SidebarProjectRow: View {
         .labelStyle(.titleAndIcon)
     }
 
-    /// 普通点击要求确认；按住 Command 点击时直接关闭项目。
+    /// 点击关闭项目：若按住 Command 或无标签页时直接关闭，否则弹出确认对话框。
     private func requestClose() {
-        if NSEvent.modifierFlags.contains(.command) {
-            close()
+        if NSEvent.modifierFlags.contains(.command) || project.tabs.isEmpty {
+            manager.closeProject(project)
         } else {
             isCloseConfirmationPresented = true
+        }
+    }
+
+    /// 点击删除项目：若按住 Command 时直接删除，否则弹出确认对话框。
+    private func requestDelete() {
+        if NSEvent.modifierFlags.contains(.command) {
+            manager.deleteProject(project)
+        } else {
+            isDeleteConfirmationPresented = true
         }
     }
 
@@ -1591,7 +1601,7 @@ private struct SidebarMoreMenu: View {
         if alert.runModal() == .alertFirstButtonReturn {
             let count = emptyProjects.count
             for project in emptyProjects {
-                manager.close(project)
+                manager.deleteProject(project)
             }
 
             let resultAlert = NSAlert()

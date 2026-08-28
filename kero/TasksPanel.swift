@@ -507,12 +507,7 @@ private struct TaskGridCell: View {
 
             switch status {
             case .idle:
-                if let duration = record?.lastDuration {
-                    Text(formatScriptDuration(duration))
-                        .font(SidebarTypography.micro(.medium).monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                        .padding(.trailing, 2)
-                }
+                EmptyView()
 
             case .running:
                 Button {

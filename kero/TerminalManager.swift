@@ -553,7 +553,16 @@ final class TerminalManager: nonisolated ObservableObject {
         return project
     }
 
-    func close(_ project: Project) {
+    /// 关闭项目当前所属的所有标签页（包括文件、终端、Diff 等）
+    func closeProject(_ project: Project) {
+        project.closeAll()
+        if ProjectGroupStore.shared.selectedID == ProjectGroup.currentID, selectedProjectID == project.id {
+            selectedProjectID = currentlyInUseProjects.first?.id
+        }
+    }
+
+    /// 彻底删除项目：终止会话、从项目列表移除并删除本地配置和便签
+    func deleteProject(_ project: Project) {
         project.terminateAll()
         let projectID = project.id
         remove(project)
@@ -562,6 +571,11 @@ final class TerminalManager: nonisolated ObservableObject {
         DispatchQueue.main.async {
             ProjectConfigStore.removeAllData(for: projectID)
         }
+    }
+
+    /// 兼容旧调用：删除项目
+    func close(_ project: Project) {
+        deleteProject(project)
     }
 
     private func remove(_ project: Project) {

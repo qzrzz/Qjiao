@@ -242,8 +242,13 @@ struct CommandPaletteView: View {
 
         if let project = manager.selectedProject {
             items.append(
-                PaletteCommand(id: "close-project", title: "Close Project: \(project.name)", systemImage: "folder.badge.minus") {
-                    manager.close(project)
+                PaletteCommand(id: "close-project", title: L10n.format("Close Project: %@", project.name), systemImage: "folder.badge.minus") {
+                    manager.closeProject(project)
+                }
+            )
+            items.append(
+                PaletteCommand(id: "delete-project", title: L10n.format("Delete Project: %@", project.name), systemImage: "trash") {
+                    manager.deleteProject(project)
                 }
             )
         }
