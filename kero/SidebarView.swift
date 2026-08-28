@@ -891,6 +891,15 @@ private struct SidebarProjectRow: View {
         .frame(width: size, height: size)
     }
 
+    private var hasSubtitle: Bool {
+        if isEditingDescription { return true }
+        if let description = project.description,
+           !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return false
+    }
+
     private var rowContent: some View {
         HStack(spacing: 6) {
             projectIconSlot
@@ -907,14 +916,14 @@ private struct SidebarProjectRow: View {
                             commitRename()
                         }
                     }
-            } else if project.isArchived {
-                // 已归档项目：单行精简展示项目名称，隐藏第二行副标题
+            } else if project.isArchived || !hasSubtitle {
+                // 已归档项目或无描述项目：单行精简展示项目名称，隐藏第二行副标题
                 Text(project.name)
-                    .font(SidebarTypography.secondary())
+                    .font(project.isArchived ? SidebarTypography.secondary() : SidebarTypography.body())
                     .foregroundStyle(isSelected ? Theme.primaryColor : Theme.secondaryColor)
                     .lineLimit(1)
             } else {
-                // 未归档项目：保持标准双行呈现（项目名 + 副标题）
+                // 未归档且有描述（或正在编辑描述）：双行呈现（项目名 + 描述）
                 VStack(alignment: .leading, spacing: 1) {
                     Text(project.name)
                         .font(SidebarTypography.body())
@@ -1183,32 +1192,11 @@ private struct SidebarProjectRow: View {
                         saveDescription()
                     }
                 }
-        } else if let description = project.description, !description.isEmpty {
+        } else if let description = project.description,
+                  !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             Text(description)
                 .font(SidebarTypography.section())
                 .foregroundStyle(Theme.secondaryColor)
-                .lineLimit(1)
-        } else if project.sessions.count > 1 {
-            Text(L10n.format("%d sessions", project.sessions.count))
-                .font(SidebarTypography.section().monospacedDigit())
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-        } else if let session = project.selectedSession {
-            SessionDirectoryLabel(session: session)
-        }
-    }
-}
-
-/// Small subtitle showing a session's current directory; separate view so
-/// it observes the session's own published working directory.
-private struct SessionDirectoryLabel: View {
-    @ObservedObject var session: TerminalSession
-
-    var body: some View {
-        if let dir = session.directoryLabel {
-            Text(dir)
-                .font(SidebarTypography.section())
-                .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }
     }

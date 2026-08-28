@@ -229,55 +229,51 @@ private struct EmptyStatePromptView: View {
                         .foregroundStyle(Theme.secondaryColor.opacity(0.75))
                 }
 
-                // 按钮组：新建项目（高亮主按钮）与新建会话（次要按钮）
+                // 按钮组：无项目时显示「新建项目」；有项目但无打开会话时仅显示「新建会话」
                 HStack(spacing: 12) {
-                    // 高亮主按钮：新建项目 ⌘N
-                    Button(action: { manager.newProject() }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "folder.badge.plus")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text(L10n.t("New Project"))
-                                .font(SidebarTypography.body(.semibold))
-                            Text("⌘N")
-                                .font(SidebarTypography.micro(.medium))
-                                .opacity(0.75)
+                    if manager.selectedProject == nil {
+                        // 高亮主按钮：新建项目 ⌘N
+                        Button(action: { manager.newProject() }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "folder.badge.plus")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(L10n.t("New Project"))
+                                    .font(SidebarTypography.body(.semibold))
+                                Text("⌘N")
+                                    .font(SidebarTypography.micro(.medium))
+                                    .opacity(0.75)
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color(nsColor: Theme.cursor).opacity(0.88))
+                            }
+                            .foregroundStyle(Color.white)
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(nsColor: Theme.cursor).opacity(0.88))
+                        .buttonStyle(.plain)
+                    } else {
+                        // 高亮主按钮：新建会话 ⌘T
+                        Button(action: { manager.newSession() }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus.square")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(L10n.t("New Session"))
+                                    .font(SidebarTypography.body(.semibold))
+                                Text("⌘T")
+                                    .font(SidebarTypography.micro(.medium))
+                                    .opacity(0.75)
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color(nsColor: Theme.cursor).opacity(0.88))
+                            }
+                            .foregroundStyle(Color.white)
                         }
-                        .foregroundStyle(Color.white)
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-
-                    // 次要按钮：新建会话 ⌘T（若已有所选项目优先 newSession，无项目时新建项目）
-                    Button(action: {
-                        if manager.selectedProject != nil {
-                            manager.newSession()
-                        } else {
-                            manager.newProject()
-                        }
-                    }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus.square")
-                                .font(.system(size: 13, weight: .medium))
-                            Text(L10n.t("New Session"))
-                                .font(SidebarTypography.body(.medium))
-                            Text("⌘T")
-                                .font(SidebarTypography.micro(.medium))
-                                .opacity(0.75)
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Theme.secondaryColor.opacity(0.12))
-                        }
-                        .foregroundStyle(Theme.primaryColor)
-                    }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 40)
@@ -388,8 +384,16 @@ private struct MainHeaderView: View {
     private static let tabEdgeDragHeight: CGFloat = 8
     /// 顶栏总高：上沿拖窗带 + 中间标签行 + 下沿拖窗带（多层上下空白只加在 wrap）。
     private var headerHeight: CGFloat {
-        headerTopDragHeight + headerBottomDragHeight
-            + max(tabStripHeight, TabStripMetrics.rowHeight)
+        let contentMinHeight: CGFloat
+        if settings.tabsLayoutMode == .wrap && (manager.selectedProject?.tabs.isEmpty == false) {
+            let buttonCount: CGFloat = manager.isPaneZoomed ? 4 : 3
+            let actionsHeight = buttonCount * HeaderTabActionMetrics.size
+                + (buttonCount - 1) * HeaderTabActionMetrics.spacing
+            contentMinHeight = max(tabStripHeight, actionsHeight)
+        } else {
+            contentMinHeight = max(tabStripHeight, TabStripMetrics.rowHeight)
+        }
+        return headerTopDragHeight + headerBottomDragHeight + contentMinHeight
     }
 
     /// 多层时第一行 Tab 下移 8pt，「+」与右侧按钮对齐第一行。
@@ -405,7 +409,7 @@ private struct MainHeaderView: View {
         Self.tabEdgeDragHeight + wrapChromeTopInset
     }
 
-    /// 多层时 Tabs 底部再加 14pt 空白。
+    /// 多层时 Tabs 底部再加 10pt 空白。
     private var wrapChromeBottomInset: CGFloat {
         settings.tabsLayoutMode == .wrap
             && (manager.selectedProject?.tabs.isEmpty == false)
@@ -413,7 +417,7 @@ private struct MainHeaderView: View {
             : 0
     }
 
-    /// 顶栏最下沿拖窗带：默认 8pt；多层再加 14pt。
+    /// 顶栏最下沿拖窗带：默认 8pt；多层再加 10pt。
     private var headerBottomDragHeight: CGFloat {
         Self.tabEdgeDragHeight + wrapChromeBottomInset
     }
@@ -434,9 +438,13 @@ private struct MainHeaderView: View {
         return Self.trafficLightInset + Self.leftToggleLeadingPadding
     }
 
-    /// 右侧固定工具簇固有宽度（zoom 可选 + 下拉 + 侧栏）。
-    private static func trailingClusterWidth(isPaneZoomed: Bool, hasProject: Bool) -> CGFloat {
-        guard hasProject else { return 0 }
+    /// 右侧固定工具簇固有宽度（zoom 可选 + 下拉 + 侧栏；多层模式下工具按钮均移至 Tab 栏右侧垂直排列）。
+    private static func trailingClusterWidth(
+        isPaneZoomed: Bool,
+        hasProject: Bool,
+        isWrapWithTabs: Bool
+    ) -> CGFloat {
+        guard hasProject, !isWrapWithTabs else { return 0 }
         var width =
             HeaderTabActionMetrics.size
             + HeaderTabActionMetrics.spacing
@@ -451,15 +459,18 @@ private struct MainHeaderView: View {
         GeometryReader { geo in
             let hasProject = manager.selectedProject != nil
             let showLeftToggle = !manager.isLeftSidebarVisible
+            let hasTabs = manager.selectedProject?.tabs.isEmpty == false
+            let isWrapWithTabs = settings.tabsLayoutMode == .wrap && hasTabs
             let trailingCluster = Self.trailingClusterWidth(
                 isPaneZoomed: manager.isPaneZoomed,
-                hasProject: hasProject
+                hasProject: hasProject,
+                isWrapWithTabs: isWrapWithTabs
             )
             // 标签/新建不得进入的右侧预留：工具簇 + 与「+」同宽的间距 + 外边距。
             let trailingReserve =
                 trailingCluster
                 + (trailingCluster > 0 ? Self.actionSpacing : 0)
-                + HeaderTabActionMetrics.edgePadding
+                + (isWrapWithTabs ? 0 : HeaderTabActionMetrics.edgePadding)
             let leftToggleOccupied = showLeftToggle ? Self.leftToggleWidth : 0
             let leftBudget = max(
                 0,
@@ -468,6 +479,7 @@ private struct MainHeaderView: View {
             let stripMaxWidth = max(
                 0,
                 leftBudget - Self.tabNewSpacing - HeaderTabActionMetrics.size
+                    - (isWrapWithTabs ? HeaderTabActionMetrics.edgePadding : 0)
             )
 
             VStack(spacing: 0) {
@@ -497,7 +509,32 @@ private struct MainHeaderView: View {
                                     maxStripWidth: stripMaxWidth
                                 )
                             }
-                            NewTabButton(project: project)
+                            if isWrapWithTabs {
+                                VStack(spacing: HeaderTabActionMetrics.spacing) {
+                                    HeaderIconButton(
+                                        systemImage: "sidebar.right",
+                                        isActive: manager.isPanelVisible,
+                                        help: L10n.t("Toggle Right Sidebar (⇧⌘B)"),
+                                        helpAlignment: .trailing,
+                                        action: { manager.toggleSidebar() }
+                                    )
+                                    TabListButton(manager: manager, project: project)
+                                    NewTabButton(project: project)
+                                    if manager.isPaneZoomed {
+                                        HeaderIconButton(
+                                            systemImage: "arrow.down.forward.and.arrow.up.backward",
+                                            isActive: true,
+                                            help: L10n.t("Exit Pane Zoom (⇧⌘↩)"),
+                                            helpAlignment: .trailing,
+                                            action: { manager.togglePaneZoom() }
+                                        )
+                                    }
+                                }
+                                .fixedSize(horizontal: true, vertical: false)
+                                .padding(.trailing, HeaderTabActionMetrics.edgePadding)
+                            } else {
+                                NewTabButton(project: project)
+                            }
                         }
                     }
 
@@ -505,27 +542,29 @@ private struct MainHeaderView: View {
                     HeaderWindowDragBand()
 
                     if let project = manager.selectedProject {
-                        HStack(spacing: Self.actionSpacing) {
-                            if manager.isPaneZoomed {
+                        if !isWrapWithTabs {
+                            HStack(spacing: Self.actionSpacing) {
+                                if manager.isPaneZoomed {
+                                    HeaderIconButton(
+                                        systemImage: "arrow.down.forward.and.arrow.up.backward",
+                                        isActive: true,
+                                        help: L10n.t("Exit Pane Zoom (⇧⌘↩)"),
+                                        helpAlignment: .trailing,
+                                        action: { manager.togglePaneZoom() }
+                                    )
+                                }
+                                TabListButton(manager: manager, project: project)
                                 HeaderIconButton(
-                                    systemImage: "arrow.down.forward.and.arrow.up.backward",
-                                    isActive: true,
-                                    help: L10n.t("Exit Pane Zoom (⇧⌘↩)"),
+                                    systemImage: "sidebar.right",
+                                    isActive: manager.isPanelVisible,
+                                    help: L10n.t("Toggle Right Sidebar (⇧⌘B)"),
                                     helpAlignment: .trailing,
-                                    action: { manager.togglePaneZoom() }
+                                    action: { manager.toggleSidebar() }
                                 )
                             }
-                            TabListButton(manager: manager, project: project)
-                            HeaderIconButton(
-                                systemImage: "sidebar.right",
-                                isActive: manager.isPanelVisible,
-                                help: L10n.t("Toggle Right Sidebar (⇧⌘B)"),
-                                helpAlignment: .trailing,
-                                action: { manager.toggleSidebar() }
-                            )
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.trailing, HeaderTabActionMetrics.edgePadding)
                         }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.trailing, HeaderTabActionMetrics.edgePadding)
                     } else {
                         HeaderWindowDragBand(width: HeaderTabActionMetrics.edgePadding)
                     }
@@ -534,7 +573,7 @@ private struct MainHeaderView: View {
                 .background { HeaderWindowDragBand() }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // Tabs 下方 8pt（多层再加 14pt）：整行可拖窗口，右键切换布局。
+                // Tabs 下方 8pt（多层再加 10pt）：整行可拖窗口，右键切换布局。
                 HeaderWindowDragBand(height: headerBottomDragHeight)
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -952,8 +991,12 @@ private enum TabStripMetrics {
     static let relaxedTabMaxWidth: CGFloat = 220
     /// 标签条已满（滚动模式）时的单 Tab 最大宽度。
     static let compressedTabMaxWidth: CGFloat = 140
-    /// 换行模式最小宽度：不随标题伸缩；有余量时均分填满容器。
+    /// 换行模式单列阈值：可用宽度低于 320pt 时才排 1 列，>= 320pt 时最少 2 列。
+    static let wrapSingleColumnThreshold: CGFloat = 320
+    /// 换行模式目标宽度（用于计算 3 列及以上断点）。
     static let wrapTabMinWidth: CGFloat = 240
+    /// 换行模式单 Tab 均分保底宽度。
+    static let wrapTabMinColumnWidth: CGFloat = 120
     /// 滚动 / 弹性模式的单行 Tab 高度。
     static let rowHeight: CGFloat = 26
     /// 多层模式的单行 Tab 高度（比默认高 4pt）。
@@ -967,7 +1010,7 @@ private enum TabStripMetrics {
     /// 换行模式第一行 Tab 上方的空白（可拖窗口）。
     static let wrapTopInset: CGFloat = 8
     /// 多层模式 Tabs 下方额外空白（可拖窗口，右键切换布局）。
-    static let wrapBottomInset: CGFloat = 14
+    static let wrapBottomInset: CGFloat = 10
     /// 仅图标态固定宽度：图标 + 左右内边距。
     static let iconOnlyWidth: CGFloat = 32
     /// 分配宽度低于此值时切换为仅图标（无标题、无关闭）。
@@ -1086,22 +1129,26 @@ private enum TabStripMetrics {
         wrapContentHeight(rowCount: min(max(rowCount, 1), maxWrapRows))
     }
 
-    /// 一行按最小宽度最多能放下的 Tab 数。
+    /// 一行按最小宽度最多能放下的 Tab 数（320pt 以下才为 1 列，>= 320pt 时最少 2 列）。
     static func wrapTabsPerFullRow(availableWidth: CGFloat) -> Int {
+        guard availableWidth > 0 else { return 1 }
+        if availableWidth < wrapSingleColumnThreshold {
+            return 1
+        }
         let slot = wrapTabMinWidth + interTabSpacing
-        guard slot > 0, availableWidth > 0 else { return 1 }
-        return max(1, Int(floor((availableWidth + interTabSpacing) / slot)))
+        let calculated = Int(floor((availableWidth + interTabSpacing) / slot))
+        return max(2, calculated)
     }
 
     /// 均分容器宽度：单行按实际枚数填满；多行按满行枚数均分（末行同宽，右侧可留白）。
     static func wrapFilledWidth(tabCount: Int, availableWidth: CGFloat) -> CGFloat {
-        let floorWidth = min(wrapTabMinWidth, max(availableWidth, iconOnlyWidth))
-        guard availableWidth > 0, tabCount > 0 else { return floorWidth }
+        guard availableWidth > 0, tabCount > 0 else { return iconOnlyWidth }
         let perRow = min(wrapTabsPerFullRow(availableWidth: availableWidth), tabCount)
         let spacing = interTabSpacing * CGFloat(max(perRow - 1, 0))
         let filled = (availableWidth - spacing) / CGFloat(perRow)
-        // 向下取整，避免 3 枚 × 均分宽因浮点略超容器而挤到下一行。
-        return min(availableWidth, max(floorWidth, filled.rounded(.down)))
+        let minFloor = availableWidth < wrapSingleColumnThreshold ? iconOnlyWidth : wrapTabMinColumnWidth
+        // 向下取整，避免 2/3 枚 × 均分宽因浮点略超容器而挤到下一行。
+        return min(availableWidth, max(minFloor, filled.rounded(.down)))
     }
 
     /// 顶栏标签条高度：非换行始终单行；换行按填满后的宽度排行，最多 3 行。
