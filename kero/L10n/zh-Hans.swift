@@ -11,6 +11,16 @@ import Foundation
 extension L10n {
     /// English → 简体中文. Unlisted keys keep the English source.
     static let zhHans: [String: String] = [
+        "Trim Transparent Pixels": "剪裁透明像素",
+        "Trimmed transparent pixels: %@ → %@": "已剪裁周围透明像素：%@ → %@",
+        "Failed to load image for trimming.": "无法加载图片以进行裁剪。",
+        "The image is completely transparent.": "图片完全透明，无法裁剪。",
+        "No surrounding transparent pixels found.": "未检测到周围透明像素，无需裁剪。",
+        "Failed to crop image.": "裁剪图片失败。",
+        "Failed to save trimmed image.": "保存裁剪后的图片失败。",
+        "No valid image data found in clipboard.": "剪贴板中未找到有效图片数据。",
+        "Failed to parse clipboard image data.": "无法解析剪贴板图像数据。",
+        "Failed to import clipboard image: %@": "导入剪贴板图片失败：%@",
         "Reasoning Effort": "思考强度",
         "Low": "低 (Low)",
         "Medium": "中 (Medium)",

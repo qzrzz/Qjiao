@@ -11,6 +11,16 @@ import Foundation
 extension L10n {
     /// English → 日本語. Unlisted keys keep the English source.
     static let ja: [String: String] = [
+        "Trim Transparent Pixels": "透明ピクセルをトリミング",
+        "Trimmed transparent pixels: %@ → %@": "透明ピクセルをトリミングしました：%@ → %@",
+        "Failed to load image for trimming.": "トリミング用の画像を読み込めませんでした。",
+        "The image is completely transparent.": "画像が完全に透明なため、トリミングできません。",
+        "No surrounding transparent pixels found.": "周囲に透明ピクセルが見つかりませんでした。",
+        "Failed to crop image.": "画像のトリミングに失敗しました。",
+        "Failed to save trimmed image.": "トリミングした画像の保存に失敗しました。",
+        "No valid image data found in clipboard.": "クリップボードに有効な画像データが見つかりませんでした。",
+        "Failed to parse clipboard image data.": "クリップボードの画像データを解析できませんでした。",
+        "Failed to import clipboard image: %@": "クリップボード画像の取り込みに失敗しました: %@",
         "%lld unread": "%lld 件の未読",
         "(all themes)": "（すべてのテーマ）",
         "(Bundled)": "（同梱）",

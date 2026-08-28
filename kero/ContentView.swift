@@ -169,7 +169,7 @@ struct ContentView: View {
     /// its gaps — but a diff tab's own pane must stay clear so its web view
     /// (mounted in the stack behind) shows through.
     private var paneLayerIsOpaque: Bool {
-        guard let tab = activeTab else { return true }
+        guard let tab = activeTab else { return false }
         return tab.diffs.isEmpty
     }
 
@@ -191,7 +191,7 @@ struct ContentView: View {
     }
 }
 
-/// 无会话 / 无项目时的中心空白状态视图：包含 128pt 高清应用图标、支持拖入文件夹打开项目、高亮「新建项目」主按钮及「新建会话」次要按钮，统一全局背景色。
+/// 无会话 / 无项目时的中心空白状态视图：包含 128pt 高清应用图标、支持拖入文件夹打开项目、高亮「新建项目」主按钮及「新建会话」次要按钮。
 private struct EmptyStatePromptView: View {
     @ObservedObject var manager: TerminalManager
     let title: String
@@ -278,23 +278,18 @@ private struct EmptyStatePromptView: View {
             }
             .padding(.horizontal, 40)
             .padding(.vertical, 36)
-            .background {
-                // 背景保持与全局 Theme.background 完全一致，消除多余的半透明卡片色差
-                Color(nsColor: Theme.background)
-                    .overlay {
-                        if isDropTargeted {
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .strokeBorder(
-                                    Color(nsColor: Theme.cursor),
-                                    style: StrokeStyle(lineWidth: 2, dash: [6, 4])
-                                )
-                        }
-                    }
+            .overlay {
+                if isDropTargeted {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(
+                            Color(nsColor: Theme.cursor),
+                            style: StrokeStyle(lineWidth: 2, dash: [6, 4])
+                        )
+                }
             }
             .animation(.easeInOut(duration: 0.16), value: isDropTargeted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: Theme.background))
         .contentShape(Rectangle())
         .onDrop(
             of: [UTType.fileURL],

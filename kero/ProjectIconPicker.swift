@@ -996,6 +996,8 @@ struct ProjectIconPicker: View {
     /// 当前选中的用户文件路径（未 Apply 前的预览；Apply 后写入 project.icon）。
     @State private var selectedFilePath: String = ""
     @State private var fileImportError: String?
+    @State private var fileStatusMessage: String?
+    @State private var isTrimmingFile: Bool = false
     /// 共享后台任务（与项目列表右键同一套状态）。
     @ObservedObject private var aiIconTasks = LocalAIIconTaskStore.shared
     /// 本面板发起的 AI 任务成功后是否自动关闭（取消不关）。
@@ -1638,6 +1640,17 @@ struct ProjectIconPicker: View {
                 selectedFileCard
             }
 
+            if let fileStatusMessage {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(SidebarTypography.caption())
+                    Text(fileStatusMessage)
+                        .font(SidebarTypography.caption().monospacedDigit())
+                }
+                .foregroundStyle(.green)
+                .padding(.horizontal, 4)
+            }
+
             if let fileImportError {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -1803,17 +1816,34 @@ struct ProjectIconPicker: View {
 
             Divider()
 
-            HStack {
+            HStack(spacing: 12) {
                 Button(L10n.t("Choose Different…")) {
                     openImageFilePanel()
                 }
                 .buttonStyle(.borderless)
+
+                Button {
+                    trimSelectedFileTransparentPixels()
+                } label: {
+                    HStack(spacing: 4) {
+                        if isTrimmingFile {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "crop")
+                        }
+                        Text(L10n.t("Trim Transparent Pixels"))
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(isTrimmingFile)
 
                 Spacer()
 
                 Button(L10n.t("Clear Selection"), role: .destructive) {
                     selectedFilePath = ""
                     fileImportError = nil
+                    fileStatusMessage = nil
                 }
                 .buttonStyle(.borderless)
             }
@@ -1875,23 +1905,73 @@ struct ProjectIconPicker: View {
 
     private func importPickedFileURL(_ url: URL) {
         fileImportError = nil
+        fileStatusMessage = nil
         // 安全作用域：部分来源（如 iCloud/外接盘）需要 startAccessing。
         let accessed = url.startAccessingSecurityScopedResource()
         defer {
             if accessed { url.stopAccessingSecurityScopedResource() }
         }
         guard FileManager.default.fileExists(atPath: url.path) else {
-            fileImportError = "File not found."
+            fileImportError = L10n.t("File not found.")
             return
         }
         guard let managed = ProjectIconFileStore.importImage(
             from: url,
             projectID: project.id
         ) else {
-            fileImportError = "Failed to import image into the config folder."
+            fileImportError = L10n.t("Failed to import image into the config folder.")
             return
         }
         selectedFilePath = managed.path
+    }
+
+    /// 裁剪当前选中图片周围的透明像素并替换为紧凑的托管图标。
+    private func trimSelectedFileTransparentPixels() {
+        guard !selectedFilePath.isEmpty else { return }
+        fileImportError = nil
+        fileStatusMessage = nil
+        isTrimmingFile = true
+
+        let path = selectedFilePath
+        let projectID = project.id
+
+        Task {
+            do {
+                let fileURL = URL(fileURLWithPath: path)
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try ImageTrim.trimTransparentPixels(at: fileURL)
+                }.value
+
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("trimmed_\(UUID().uuidString).png")
+                try ImageTrim.writePNG(result.image, to: tempURL)
+
+                guard let managed = ProjectIconFileStore.importImage(from: tempURL, projectID: projectID) else {
+                    try? FileManager.default.removeItem(at: tempURL)
+                    throw ImageTrimError.saveFailed
+                }
+                try? FileManager.default.removeItem(at: tempURL)
+
+                await MainActor.run {
+                    selectedFilePath = managed.path
+                    ProjectIconThumbnailCache.clearCache()
+
+                    if case .file = project.icon {
+                        project.icon = .file(managed.path)
+                    }
+
+                    let origSize = "\(result.originalWidth)×\(result.originalHeight)"
+                    let newSize = "\(result.trimmedWidth)×\(result.trimmedHeight)"
+                    fileStatusMessage = L10n.format("Trimmed transparent pixels: %@ → %@", origSize, newSize)
+                    isTrimmingFile = false
+                }
+            } catch {
+                await MainActor.run {
+                    fileImportError = error.localizedDescription
+                    isTrimmingFile = false
+                }
+            }
+        }
     }
 
     private func applySelectedFile() {
@@ -1937,7 +2017,7 @@ struct ProjectIconPicker: View {
             return
         }
 
-        fileImportError = "剪贴板中未找到有效图片数据"
+        fileImportError = L10n.t("No valid image data found in clipboard.")
     }
 
     /// 将 NSImage 数据写入临时 PNG 文件并托管导入。
@@ -1946,7 +2026,7 @@ struct ProjectIconPicker: View {
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData),
               let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            fileImportError = "无法解析剪贴板图像数据"
+            fileImportError = L10n.t("Failed to parse clipboard image data.")
             return
         }
 
@@ -1956,7 +2036,7 @@ struct ProjectIconPicker: View {
             importPickedFileURL(tempURL)
             try? FileManager.default.removeItem(at: tempURL)
         } catch {
-            fileImportError = "导入剪贴板图片失败: \(error.localizedDescription)"
+            fileImportError = L10n.format("Failed to import clipboard image: %@", error.localizedDescription)
         }
     }
 
