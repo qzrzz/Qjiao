@@ -11,6 +11,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.62]
+
+### Added
+
+- Add a "Trim Transparent Pixels" action to the project icon picker: it detects and crops the transparent margins around an imported image, then reports the trimmed size or a specific error (completely transparent image, no transparent margins, etc.).
+
+### Fixed
+
+- Fix the empty state (no session / no project) painting an opaque background that duplicated the global theme: the redundant solid background is removed so the frosted-glass backdrop shows through, and the empty state now displays correctly when no tab is active.
+
 ## [1.1.61]
 
 ### Added
