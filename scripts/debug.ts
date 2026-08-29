@@ -230,10 +230,14 @@ async function buildDebugApp(): Promise<{ appPath: string; binaryPath: string }>
 
   console.log(chalk.yellow(`🔨 正在使用 Xcode 工具链编译 Debug 版本 (${scheme} - ${configuration})...`));
 
-  const buildResult = await $`xcodebuild -project ${projectPath} -scheme ${scheme} -configuration ${configuration} -derivedDataPath ${derivedDataPath} build`;
+  // 调试构建与 dev 保持相同的缓存策略：锁定 Package.resolved、减少构建日志，
+  // 并明确选择 Apple Silicon，避免 Xcode 反复匹配多个 macOS destination。
+  const buildResult = await $`xcodebuild -quiet -disableAutomaticPackageResolution -project ${projectPath} -scheme ${scheme} -configuration ${configuration} -destination "platform=macOS,arch=arm64" -derivedDataPath ${derivedDataPath} build`.nothrow();
 
   if (buildResult.exitCode !== 0) {
-    throw new Error(`项目编译失败 (Exit Code: ${buildResult.exitCode})`);
+    throw new Error(
+      `项目编译失败 (Exit Code: ${buildResult.exitCode})。若刚更新了 SwiftPM 依赖，请先执行：xcodebuild -resolvePackageDependencies -project Qjiao.xcodeproj -scheme Qjiao -derivedDataPath build/DerivedData`,
+    );
   }
 
   console.log(chalk.bold.green("✅ Debug 版本编译成功！"));

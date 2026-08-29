@@ -110,6 +110,15 @@ enum SidebarTabLayout {
         )
     }
 
+    /// 等宽分段中，完整标题（含图标、徽章和内边距）是否放得下。
+    static func canFitTitle(
+        _ title: String,
+        badgeCount: Int = 0,
+        availableWidth: CGFloat
+    ) -> Bool {
+        chipWidth(title: title, badgeCount: badgeCount) <= availableWidth
+    }
+
     private static func chipWidth(title: String?, badgeCount: Int = 0) -> CGFloat {
         var base: CGFloat = 0
         if let title {
@@ -153,6 +162,10 @@ struct SidebarTabChip: View {
     let isActive: Bool
     var showTitle: Bool = true
     var badgeCount: Int = 0
+    /// 由外层分段器提供可动画的选中底色时关闭。
+    var showsActiveBackground = true
+    /// 等宽分段器可允许标题在自身 segment 内压缩截断。
+    var allowsTitleTruncation = false
 
     var body: some View {
         HStack(alignment: .center, spacing: SidebarTabLayout.iconTitleSpacing) {
@@ -166,7 +179,9 @@ struct SidebarTabChip: View {
                 Text(title)
                     .font(SidebarTypography.secondary(.medium))
                     .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: !allowsTitleTruncation, vertical: false)
+                    .layoutPriority(allowsTitleTruncation ? -1 : 0)
             }
             if badgeCount > 0 {
                 let badgeText = badgeCount > 99 ? "99+" : "\(badgeCount)"
@@ -204,7 +219,7 @@ struct SidebarTabChip: View {
         .frame(height: 24)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isActive ? Color.primary.opacity(0.09) : .clear)
+                .fill(isActive && showsActiveBackground ? Color.primary.opacity(0.09) : .clear)
         )
         .contentShape(RoundedRectangle(cornerRadius: 6))
     }

@@ -717,6 +717,7 @@ struct CodeEditorOpenButton: View {
 
     /// 订阅注册表，编辑器列表或首选变化时自动刷新 UI。
     @ObservedObject private var registry = CodeEditorRegistry.shared
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         // 无任何已安装编辑器时整体隐藏。
@@ -767,9 +768,9 @@ struct CodeEditorOpenButton: View {
                         .allowsHitTesting(false)
                 }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.primary.opacity(0.05))
+            .glassEffect(
+                .regular.tint(QjiaoLiquidGlassPalette.standardTint(for: colorScheme)).interactive(),
+                in: .rect(cornerRadius: 6)
             )
         }
     }
@@ -826,6 +827,7 @@ struct AIToolOpenButton: View {
     var manager: TerminalManager? = nil
 
     @ObservedObject private var registry = AIToolRegistry.shared
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if let preferred = registry.preferredTool {
@@ -875,9 +877,9 @@ struct AIToolOpenButton: View {
                         .allowsHitTesting(false)
                 }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.primary.opacity(0.05))
+            .glassEffect(
+                .regular.tint(QjiaoLiquidGlassPalette.standardTint(for: colorScheme)).interactive(),
+                in: .rect(cornerRadius: 6)
             )
         }
     }
@@ -1010,9 +1012,11 @@ struct TopToolsOpenSection: View {
 
     var body: some View {
         if editorRegistry.preferredEditor != nil || aiRegistry.preferredTool != nil {
-            HStack(spacing: 6) {
-                CodeEditorOpenButton(path: path)
-                AIToolOpenButton(path: path, manager: manager)
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 6) {
+                    CodeEditorOpenButton(path: path)
+                    AIToolOpenButton(path: path, manager: manager)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 4)

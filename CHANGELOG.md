@@ -11,6 +11,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.64]
+
+### Changed
+
+- Use macOS 27 Liquid Glass for the selected state of main content tabs, the selected project row in the left sidebar, the right sidebar's top panel tabs, the empty-state "New Session" button and the code editor / AI tool open buttons: the tint adapts to light/dark mode (white / black at 6%), interactive glass adds click and hover feedback, and the sidebar project row gets a soft drop shadow.
+- The selected tab's glass is now drawn outside the tab strip's clipping mask so it can't be cut off, and the dragged tab preview keeps its own glass layer; the dragged-tab chrome no longer paints a translucent fill behind the glass.
+- Right sidebar top panel tabs now share a single glass surface with a clean fill for the active segment, and clicking a tab animates the selection highlight immediately while the (potentially heavy) panel content sync follows ~80ms later, so clicks always give instant feedback; stale rapid clicks are discarded in favor of the last selection.
+- Right sidebar top tabs auto-truncate their titles in narrow sidebars when the full title (icon, badge and padding) can't fit its segment, so equal-width segments no longer squeeze every title.
+- Animate the left sidebar project selection highlight (0.12s) before the content area follows, matching the main tab selection transition.
+
 ## [1.1.63]
 
 ### Changed

@@ -106,7 +106,7 @@ RELEASING.md          本机发布流程
 - 侧栏底部以分组 tabs 取代原先的已归档折叠区：默认「个人 / 工作 / 当前 / 已归档」；未显式分配分组的项目（含历史旧项目）默认归入「个人」；「当前」只列出仍有标签页的未归档项目，个人与工作为可归属分组，可新建自定义分组；右键或拖到 tab 上移动项目。
 - 新建项目走系统文件夹选择器（可新建目录）；支持 Finder 拖入、侧栏拖入、空状态拖入、Finder 服务「Open in Qjiao」、以及 `qjiao [path]` CLI。
 - 项目配置落在 `~/.config/qjiao/projects/{id}/`（Debug 为 `qjiao-dev`），会话快照在 `session.json`，与 Dev/正式版互不覆盖；关闭项目清理对应目录。
-- 左侧：窗口置顶、侧栏开关（⌘B）、一键打开文件夹、批量 AI 整理 / 归档 / 清理空项目。点击项目先响应侧栏选中态，内容区、主题与右侧栏下一拍再跟进，避免终端挂载卡住点击反馈。
+- 左侧：窗口置顶、侧栏开关（⌘B）、一键打开文件夹、批量 AI 整理 / 归档 / 清理空项目。点击项目先响应侧栏选中态，内容区、主题与右侧栏下一拍再跟进，避免终端挂载卡住点击反馈；当前打开项目使用 macOS 27 Liquid Glass 选中态并带有点击动态效果与淡投影，非强调玻璃按模式统一使用深色黑色 6%、明亮白色 6% tint。
 - 「使用自动标题」为独立开关，可与自定义项目名并存。
 - 命令面板可搜索并打开当前项目文件（遵守 Git ignore / 常见构建产物忽略）。
 
@@ -119,6 +119,7 @@ RELEASING.md          本机发布流程
 - 长时间运行后界面卡顿：display cycle 防护不再每次窗口布局都符号化调用栈，并把同一轮刷帧的布局请求按窗口合并；文件树拖拽结束的全局鼠标监听只注册一次。
 - 内容 Tabs 拖拽排序采用 Chrome 风格水平浮动预览：源 Tab 仅跟随鼠标横向移动，周围 Tab 以短响应弹簧动画让位，按相邻 Tab 中线触发换序，拖拽时屏蔽其他 Tab 的 hover 状态，标题、图标与选中底色保持同步；关闭按钮仅在当前 Tab hover 时显示，分栏标识在 Tab 右侧水平排列、垂直居中并保留 2pt 右边距，关闭按钮出现时快速过渡；拖拽期间锁定每个 Tab 的宽度，结束后再按最终顺序重算，避免宽度变化导致抖动；浮层带材质模糊底板，避免内容透底。非当前 Tab 拖过 Tabs 底部 20pt 后进入分屏拖拽模式，浮层改为二维跟随鼠标。
 - 终端默认点击移动光标、OSC 133 语义提示符；闲时标签标题可配置；可开关 Option-as-Alt、Vim 帮助条、字体加粗。
+- 主内容区当前 Tab 使用 macOS 27 Liquid Glass 选中态，并带有点击/悬停动态反馈；非当前 Tab 保持轻量平面样式。
 - 粘贴安全确认（OSC 52 / 可疑内容）；Finder 文件粘贴为 shell 路径；`TERM_PROGRAM=ghostty`，不强制注入 `LANG`。
 - 终端桌面通知带声音；点击通知自动激活窗口并跳转到发出通知的会话。
 - 兼容用户安装的 ghost-complete 等 PTY 补全代理；前台进程驱动 Tab 应用图标（含深浅色变体）。
@@ -171,6 +172,8 @@ RELEASING.md          本机发布流程
 ### 右侧栏
 
 - 上半：Project / Files / CWD / Git / Info；下半：System / Tasks / Note（可收起，分割比例可调）。
+- 顶部面板 Tabs 与 Project 的代码编辑器 / AI 工具打开按钮使用 macOS 27 液态玻璃；Tabs 整组共享玻璃材质，当前项保持清晰的选中填充，并在窄栏中自动收缩标签。
+- 无打开会话时的「新建会话」主操作使用强调色液态玻璃，保留快捷键与原有行为。
 - **Project**：路径、Launchers（终端 / 应用 / Finder / 网页 / Agent CLI）、npm scripts 与 Gradle / Just / Cargo / CMake / Makefile 任务、PACKAGE（版本与常用包管理命令）、进程与端口；包管理器可自动识别。
 - **Info**：当前会话 CWD 下的同类信息；跟随 Agent worktree。
 - **Tasks**：项目根目录下的 npm scripts 与 Gradle / Just / Cargo / CMake / Makefile 任务，可在查看 Files / Git 时直接运行。
@@ -199,6 +202,7 @@ RELEASING.md          本机发布流程
 
 ### 工程与发布
 
+- 开发构建脚本固定使用 `Package.resolved`、Apple Silicon destination，并默认收起 Xcode 的 target 图与资源处理日志；`bun run dev` 在 app 已覆盖全部工程输入时直接启动，`QJIAO_FORCE_BUILD=1 bun run dev` 可强制重建。依赖更新后可手动执行 `xcodebuild -resolvePackageDependencies -project Qjiao.xcodeproj -scheme Qjiao -derivedDataPath build/DerivedData` 刷新缓存。
 - 独立产品标识与 Sparkle 自动更新；本机 Developer ID 签名、公证、DMG/ZIP、delta，经 QRls 发布到 Cloudflare R2（订阅 `https://download.qzrzz.com/qjiao/appcast.xml`），并镜像同一份 appcast 到 GitHub 供旧版升级。
 - 产品官网 `web/` 使用 QPage 生成静态着陆页，支持简体中文、English、日本語、한국어、Tiếng Việt、Português、Español、Deutsch、Français、Русский；移动端通过 `web/style.css` 收回桌面固定标题/页宽/视频尺寸，避免窄屏撑破。
 - `version+` 脚本由 `scripts/update-changelog.ts` 调用 pi AI 生成版本更新记录并写入 CHANGELOG.md（与 pbxproj 中的 MARKETING_VERSION 严格一致）。

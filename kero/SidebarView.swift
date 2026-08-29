@@ -201,7 +201,9 @@ struct SidebarView: View {
     }
 
     private func selectProject(_ project: Project) {
-        localChromeProjectID = project.id
+        withAnimation(.easeInOut(duration: 0.12)) {
+            localChromeProjectID = project.id
+        }
         manager.selectProject(id: project.id, paintChrome: false)
     }
 
@@ -546,6 +548,12 @@ private struct SidebarProjectRow: View {
     @ObservedObject private var aiIconTasks = LocalAIIconTaskStore.shared
     @ObservedObject private var aiMetaTasks = LocalAIProjectMetaTaskStore.shared
     @ObservedObject private var agentWatcher = AgentWatcher.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// 左侧栏当前项目与主视图共用随模式切换的 tint，保持 Liquid Glass 色调一致。
+    private var projectGlassTint: Color {
+        QjiaoLiquidGlassPalette.standardTint(for: colorScheme)
+    }
 
     /// 项目侧栏状态枚举（按优先级降序：运行中 > Agent 阻塞待确认 > Agent 工作中 > Agent 未读 > 无状态）。
     private enum ProjectSidebarStatus: Equatable {
@@ -649,10 +657,27 @@ private struct SidebarProjectRow: View {
             }
         }
         .opacity(isDragging ? 0.65 : 1)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Theme.primaryColor.opacity(0.09) : (isHovering ? Theme.primaryColor.opacity(0.04) : .clear))
-        )
+        .background {
+            if isSelected {
+                // 玻璃放在行内容之外，内容本身不参与材质裁剪；interactive 负责悬停/按下反馈。
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(.clear)
+                    .glassEffect(
+                        .regular.tint(projectGlassTint).interactive(),
+                        in: .rect(cornerRadius: 6)
+                    )
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.10 : 0.05),
+                        radius: 4,
+                        x: 0,
+                        y: 1
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isHovering ? Theme.primaryColor.opacity(0.04) : .clear)
+            }
+        }
+        .animation(.easeInOut(duration: 0.12), value: isSelected)
         .onHover { isHovering = $0 }
         .contextMenu { projectContextMenu }
         .sheet(isPresented: $isIconPickerPresented) {
@@ -1624,4 +1649,3 @@ private final class SidebarMenuActionTarget: NSObject {
         closure()
     }
 }
-

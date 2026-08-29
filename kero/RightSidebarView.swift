@@ -57,6 +57,7 @@ struct RightSidebarView: View {
     @ObservedObject private var themeChanges = Theme.changes
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var l10n = L10n.shared
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var fileTree = FileTreeModel()
     @StateObject private var filesFind = FilesFindModel()
     @StateObject private var git = GitStatusModel()
@@ -79,6 +80,11 @@ struct RightSidebarView: View {
     @State private var gitSyncTick = 0
     /// 从 Files 树打开的 ImageBuild 会话
     @State private var imageBuildSession: ImageBuildSession?
+    /// 顶部 Tab 点击后立即驱动视觉反馈；实际面板切换稍后提交，避免刷新工作阻塞首帧动画。
+    @State private var pendingTopPanel: RightPanel?
+    /// 使过期的延迟面板切换失效，避免外部切换被旧点击覆盖。
+    @State private var topPanelSelectionGeneration = 0
+    @Namespace private var topTabSelectionNamespace
 
     private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
     /// 脚本/命令新建 session 的 shell pid 就绪通知（类型预绑定，减轻 body 类型检查开销）。
@@ -104,6 +110,11 @@ struct RightSidebarView: View {
 
     private var bottomTab: RightBottomPanel {
         RightBottomPanel(rawValue: bottomTabRaw) ?? .system
+    }
+
+    /// 动画中的视觉选中项优先于实际内容面板状态。
+    private var displayedTopPanel: RightPanel {
+        pendingTopPanel ?? manager.panelTab
     }
 
     /// Path of the file in the focused pane, so the tree can highlight it.
@@ -611,7 +622,7 @@ struct RightSidebarView: View {
     private var tabBar: some View {
         GeometryReader { geo in
             let items = topTabItems
-            let activeIndex = items.firstIndex { $0.panel == manager.panelTab } ?? 0
+            let activeIndex = items.firstIndex { $0.panel == displayedTopPanel } ?? 0
             let layout = SidebarTabLayout.resolve(
                 items: items.map {
                     SidebarTabLayout.MeasureItem(title: $0.title, badgeCount: $0.badgeCount)
@@ -619,29 +630,47 @@ struct RightSidebarView: View {
                 activeIndex: activeIndex,
                 availableWidth: geo.size.width
             )
+            // Button 外的 4pt 留白不参与标题布局。
+            let segmentContentWidth = max(
+                0,
+                (geo.size.width - SidebarTabLayout.barHorizontalPadding * 2) / CGFloat(items.count) - 8
+            )
             ZStack(alignment: .leading) {
                 // 右侧顶栏未被面板切换按钮占用的区域可拖动窗口。
                 WindowDragArea()
 
-                HStack(spacing: layout.spacing) {
-                    ForEach(Array(items.enumerated()), id: \.element.panel) { index, item in
-                        tabButton(
-                            item.panel,
-                            systemImage: item.systemImage,
-                            title: item.title,
-                            help: item.help,
-                            showTitle: layout.showsTitle(at: index),
-                            badgeCount: item.badgeCount
-                        )
+                // 让整组 tabs 共用一层玻璃；选中段只用填充，避免 glass-on-glass。
+                GlassEffectContainer(spacing: 0) {
+                    HStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.element.panel) { index, item in
+                            tabButton(
+                                item.panel,
+                                systemImage: item.systemImage,
+                                title: item.title,
+                                help: item.help,
+                                showTitle: layout.showsTitle(at: index)
+                                    && SidebarTabLayout.canFitTitle(
+                                        item.title,
+                                        badgeCount: item.badgeCount,
+                                        availableWidth: segmentContentWidth
+                                    ),
+                                badgeCount: item.badgeCount
+                            )
+                        }
                     }
-                    Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity)
+                    .glassEffect(
+                        .regular.tint(QjiaoLiquidGlassPalette.standardTint(for: colorScheme)).interactive(),
+                        in: .rect(cornerRadius: 8)
+                    )
                 }
                 .padding(.horizontal, SidebarTabLayout.barHorizontalPadding)
                 .padding(.top, 12)
                 .padding(.bottom, 4)
             }
         }
-        .frame(height: 41)
+        // 32pt 分段器（24pt 内容 + 上下各 4pt 内边距）及其上下留白。
+        .frame(height: 48)
         // 右侧 Tabs 顶栏空白区域允许拖拽移动窗口
         .background { WindowDragArea() }
     }
@@ -698,22 +727,63 @@ struct RightSidebarView: View {
         showTitle: Bool,
         badgeCount: Int = 0
     ) -> some View {
-        let isActive = manager.panelTab == panel
+        let isActive = displayedTopPanel == panel
         return Button {
-            manager.panelTab = panel
+            selectTopPanel(panel)
         } label: {
             SidebarTabChip(
                 systemImage: systemImage,
                 title: title,
                 isActive: isActive,
                 showTitle: showTitle,
-                badgeCount: badgeCount
+                badgeCount: badgeCount,
+                showsActiveBackground: false
             )
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(0.09))
+                    .matchedGeometryEffect(
+                        id: "right-sidebar-top-tab-selection",
+                        in: topTabSelectionNamespace
+                    )
+            }
+        }
+        // 4pt 留白位于 Button 外，使热区与选中底色保持同一尺寸。
+        .padding(4)
         .help(help)
         .accessibilityLabel(title)
         .accessibilityValue(isActive ? "Selected" : "Not selected")
+    }
+
+    /// 先在当前帧提交选中底色的滑动动画，再延迟提交内容面板；重击时旧任务会因
+    /// generation 或 pending 值已改变而自然放弃，确保只执行最后一次选择。
+    private func selectTopPanel(_ panel: RightPanel) {
+        guard displayedTopPanel != panel else { return }
+        let expectedPanel = manager.panelTab
+        topPanelSelectionGeneration += 1
+        let generation = topPanelSelectionGeneration
+        withAnimation(.smooth(duration: 0.08)) {
+            pendingTopPanel = panel
+        }
+        Task { @MainActor in
+            // 让 0.08s 的滑动先提交到屏幕，再开始可能较重的面板数据同步。
+            try? await Task.sleep(for: .milliseconds(80))
+            guard topPanelSelectionGeneration == generation,
+                  pendingTopPanel == panel
+            else { return }
+            // 快捷键、CWD 可见性同步等外部路径可能在等待期间改了面板。
+            // 此时保留外部选择，不让旧的点击意图把它覆盖掉。
+            guard manager.panelTab == expectedPanel else {
+                pendingTopPanel = nil
+                return
+            }
+            manager.panelTab = panel
+            pendingTopPanel = nil
+        }
     }
 
     private func syncModels(

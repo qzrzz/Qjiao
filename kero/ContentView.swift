@@ -266,10 +266,12 @@ private struct EmptyStatePromptView: View {
                             }
                             .padding(.horizontal, 18)
                             .padding(.vertical, 10)
-                            .background {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color(nsColor: Theme.cursor).opacity(0.88))
-                            }
+                            .glassEffect(
+                                .regular
+                                    .tint(Color(nsColor: Theme.cursor))
+                                    .interactive(),
+                                in: .rect(cornerRadius: 10)
+                            )
                             .foregroundStyle(Color.white)
                         }
                         .buttonStyle(.plain)
@@ -1746,6 +1748,10 @@ private struct SessionTabsView: View {
             height: isWrap ? displayedStripHeight : nil,
             alignment: .topLeading
         )
+        // 玻璃层必须放在条带的 mask/clipped 外，否则滚动视口会把边缘透镜一并截掉。
+        .background {
+            selectedTabGlassSurface
+        }
         .overlay {
             draggedTabPreview
         }
@@ -1762,6 +1768,26 @@ private struct SessionTabsView: View {
         }
         .onDisappear {
             elasticRecomputeTask?.cancel()
+        }
+    }
+
+    /// 在滚动条带外绘制当前 Tab 的玻璃面；位置沿用 Tab 的 global frame，避免被渐隐 mask 裁剪。
+    @ViewBuilder
+    private var selectedTabGlassSurface: some View {
+        GeometryReader { proxy in
+            if let selectedID = chromeSelectedID,
+               let frame = tabFrames[selectedID],
+               frame.width > 0,
+               frame.height > 0,
+               draggedTabID == nil || draggedTabID != selectedID {
+                MainTabGlassSurface()
+                    .frame(width: frame.width, height: frame.height)
+                    .position(
+                        x: frame.midX - proxy.frame(in: .global).minX,
+                        y: frame.midY - proxy.frame(in: .global).minY
+                    )
+                    .animation(.easeInOut(duration: 0.12), value: chromeSelectedID)
+            }
         }
     }
 
@@ -1825,7 +1851,12 @@ private struct SessionTabsView: View {
                     }
                     return locationY - draggedTabGrabOffsetY
                 }()
-                paneTabItem(for: tab, isDragPreview: true)
+                ZStack {
+                    if tab.id == chromeSelectedID {
+                        MainTabGlassSurface()
+                    }
+                    paneTabItem(for: tab, isDragPreview: true)
+                }
                     .frame(
                         width: draggedTabSize.width,
                         height: draggedTabSize.height,
@@ -1863,7 +1894,10 @@ private struct SessionTabsView: View {
     private func selectTabChromeFirst(_ id: UUID) {
         guard project.tabs.contains(where: { $0.id == id }) else { return }
         if localChromeTabID != id {
-            localChromeTabID = id
+            // 先动画切换主 Tab 的 Liquid Glass 选中态，再让项目内容异步跟进。
+            withAnimation(.easeInOut(duration: 0.12)) {
+                localChromeTabID = id
+            }
         }
         project.selectTab(id, paintChrome: false)
     }
@@ -2884,7 +2918,7 @@ private struct TabItemChrome: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(
                         isSelected
-                            ? Theme.primaryColor.opacity(0.09)
+                            ? .clear
                             : (showsHoverFill ? Theme.primaryColor.opacity(0.04) : .clear)
                     )
 
@@ -2944,10 +2978,11 @@ private struct TabItemChrome: View {
             .frame(maxWidth: .infinity, alignment: iconOnly ? .center : .leading)
             .contentShape(RoundedRectangle(cornerRadius: 6))
             .animation(Self.selectionAnimation, value: isSelected)
+            // 只裁剪 Tab 内容，玻璃层由外层单独绘制，避免 Liquid Glass 被裁掉。
+            .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .frame(width: displayWidth, alignment: .leading)
-        .clipped()
         // 未完整显示时在 Tab 上方展示完整标题；完整显示则不挂 tooltip。
         .modifier(TabTruncatedTitleTooltip(title: title, enabled: needsTitleTooltip))
         .onPreferenceChange(TabTitleSlotWidthKey.self) { titleSlotWidth = $0 }
@@ -3127,6 +3162,28 @@ private struct TabPaneCountBadge: View {
         .frame(height: 16, alignment: .center)
         .padding(.trailing, 2)
         .foregroundStyle(.tertiary)
+    }
+}
+
+/// 非强调 Liquid Glass 共用的 tint；按明暗模式分别使用黑色或白色 6%。
+enum QjiaoLiquidGlassPalette {
+    /// 深色模式压低玻璃亮度，明亮模式保持轻微的白色透光感。
+    static func standardTint(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.black.opacity(0.06) : Color.white.opacity(0.06)
+    }
+}
+
+/// 主内容 Tab 的 Liquid Glass 选中态；interactive 会提供按下、悬停时的系统动态反馈。
+private struct MainTabGlassSurface: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(.clear)
+            .glassEffect(
+                .regular.tint(QjiaoLiquidGlassPalette.standardTint(for: colorScheme)).interactive(),
+                in: .rect(cornerRadius: 6)
+            )
     }
 }
 
