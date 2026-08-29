@@ -31,6 +31,8 @@ struct keroApp: App {
         TerminalNotificationService.shared.configure()
         // 确保启动时已从 config 同步语言（AppSettings.shared 会触发加载）。
         _ = AppSettings.shared
+        // 尽早在后台探测 AI CLI，避免首次打开 Project 面板时在 SwiftUI 布局里才初始化。
+        _ = AIToolRegistry.shared
     }
 
     var body: some Scene {

@@ -200,8 +200,21 @@ nonisolated enum SubprocessRunner {
             killDescendants(of: pid, signal: SIGKILL)
         }
         // 最终回收，避免僵尸进程累积
-        process.waitUntilExit()
+        waitUntilExitWithoutPumping(process)
         return false
+    }
+
+    /// `Process.waitUntilExit()` 会在当前线程泵 CFRunLoop。SwiftUI 正在
+    /// 布局时泵 runloop 会嵌套 AttributeGraph 更新并 abort。后台线程执行
+    /// wait，调用方只 `DispatchGroup.wait`（不泵 runloop）。
+    private static func waitUntilExitWithoutPumping(_ process: Process) {
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            process.waitUntilExit()
+            group.leave()
+        }
+        group.wait()
     }
 
     /// 用 `pgrep -P` 递归查找子孙进程并发信号（尽力而为；失败静默）。
@@ -217,7 +230,7 @@ nonisolated enum SubprocessRunner {
         task.standardError = errPipe
         do {
             try task.run()
-            task.waitUntilExit()
+            waitUntilExitWithoutPumping(task)
         } catch {
             try? pipe.fileHandleForReading.close()
             try? pipe.fileHandleForWriting.close()

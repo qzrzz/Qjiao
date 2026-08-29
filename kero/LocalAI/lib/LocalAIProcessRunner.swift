@@ -234,7 +234,7 @@ private final class LocalAIPipeBuffer: @unchecked Sendable {
 }
 
 /// 仅为 PATH 拼接提供内部工具，避免与 Locator 循环依赖语义混淆。
-enum LocalAIExecutableLocatorPathBoost {
+nonisolated enum LocalAIExecutableLocatorPathBoost {
     static func augmentedPATH(_ existing: String?) -> String {
         LocalAIExecutableLocator.augmentedPATH(existing)
     }

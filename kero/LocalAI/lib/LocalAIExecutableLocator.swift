@@ -8,7 +8,7 @@
 import Foundation
 
 /// 定位 grok / codex / claude / agy / opencode / pi 等 AI CLI 与通用命令行工具。
-enum LocalAIExecutableLocator {
+nonisolated enum LocalAIExecutableLocator {
     /// 缓存用户登录 Shell 的 PATH，避免每次高频探测重复拉起子进程。
     private final class ShellEnvironmentCache: @unchecked Sendable {
         static let shared = ShellEnvironmentCache()
@@ -22,10 +22,19 @@ enum LocalAIExecutableLocator {
                let cachedDirs,
                let lastFetchDate,
                Date().timeIntervalSince(lastFetchDate) < 60 {
+                let hit = cachedDirs
                 lock.unlock()
-                return cachedDirs
+                return hit
             }
+            let stale = cachedDirs
             lock.unlock()
+
+            // `zsh -lc` 可能加载 nvm 等很慢；主线程等待会泵 runloop，SwiftUI
+            // 布局中嵌套 AttributeGraph 更新会 abort。缓存未命中时主线程只用
+            // 已有结果（或空），后台 refresh 再补全。
+            if Thread.isMainThread {
+                return stale ?? []
+            }
 
             let fresh = Self.fetchLoginShellPathDirectories()
 
@@ -214,7 +223,15 @@ enum LocalAIExecutableLocator {
     }
 
     /// 查找 CLI 可执行文件的绝对路径；找不到返回 nil。
-    static func findExecutable(name: String, forceRefresh: Bool = false) -> String? {
+    ///
+    /// - Parameter allowSubprocessFallbacks: 目录扫描失败后是否再跑 `which` /
+    ///   登录 shell `command -v`。批量探测应关，避免每个未安装命令都拉起子进程。
+    ///   主线程上始终跳过子进程回退。
+    static func findExecutable(
+        name: String,
+        forceRefresh: Bool = false,
+        allowSubprocessFallbacks: Bool = true
+    ) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -235,6 +252,8 @@ enum LocalAIExecutableLocator {
                 return candidate
             }
         }
+
+        guard allowSubprocessFallbacks, !Thread.isMainThread else { return nil }
 
         // 3. 回退：通过 /usr/bin/which 在增强 PATH 环境中查找
         if let whichPath = resolveViaWhich(trimmed, dirs: dirs) {

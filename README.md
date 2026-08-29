@@ -174,7 +174,7 @@ RELEASING.md          本机发布流程
 - 上半：Project / Files / CWD / Git / Info；下半：System / Tasks / Note（可收起，分割比例可调）。
 - 顶部面板 Tabs 与 Project 的代码编辑器 / AI 工具打开按钮使用 macOS 27 液态玻璃；Tabs 整组共享玻璃材质，当前项保持清晰的选中填充，并在窄栏中自动收缩标签。
 - 无打开会话时的「新建会话」主操作使用强调色液态玻璃，保留快捷键与原有行为。
-- **Project**：路径、Launchers（终端 / 应用 / Finder / 网页 / Agent CLI）、npm scripts 与 Gradle / Just / Cargo / CMake / Makefile 任务、PACKAGE（版本与常用包管理命令）、进程与端口；包管理器可自动识别。
+- **Project**：路径、Launchers（终端 / 应用 / Finder / 网页 / Agent CLI）、npm scripts 与 Gradle / Just / Cargo / CMake / Makefile 任务、PACKAGE（版本与常用包管理命令）、进程与端口；包管理器可自动识别。打开面板时 AI 工具 / CLI 探测在后台完成，不在 SwiftUI 布局中阻塞主线程（避免偶发崩溃）。
 - **Info**：当前会话 CWD 下的同类信息；跟随 Agent worktree。
 - **Tasks**：项目根目录下的 npm scripts 与 Gradle / Just / Cargo / CMake / Makefile 任务，可在查看 Files / Git 时直接运行。
 - **System**：CPU / 内存 / 磁盘 / 网络 / 代理 / 可达性等（原生 API 为主，降低 CLI 轮询开销）；Note 按项目自动保存。

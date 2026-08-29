@@ -22,7 +22,7 @@ enum AIToolKind: String, Codable, Sendable {
 // MARK: - AITool 模型
 
 /// AI 工具描述符，代表一款检测到的桌面应用或 CLI 工具。
-struct AITool: Identifiable, Equatable {
+struct AITool: Identifiable, Equatable, Sendable {
     /// 工具唯一标识符（桌面应用为 `desktop:<bundleId>`，CLI 工具为 `cli:<command>`）。
     let id: String
     /// 显示名称，如 "Codex", "Claude Code", "Antigravity", "agy"。
@@ -105,7 +105,7 @@ final class AIToolRegistry: nonisolated ObservableObject {
     }
 
     /// 所有已知预置 AI 工具的原型列表。
-    private static let knownPrototypes: [KnownToolPrototype] = [
+    nonisolated private static let knownPrototypes: [KnownToolPrototype] = [
         // ── 桌面 GUI 应用
         KnownToolPrototype(id: "desktop:com.openai.codex",                displayName: "Codex",            kind: .desktop, bundleId: "com.openai.codex",                cliCommand: nil, symbolName: "cpu"),
         KnownToolPrototype(id: "desktop:com.openai.chat",                 displayName: "ChatGPT Desktop",  kind: .desktop, bundleId: "com.openai.chat",                 cliCommand: nil, symbolName: "message"),
@@ -134,11 +134,6 @@ final class AIToolRegistry: nonisolated ObservableObject {
         KnownToolPrototype(id: "cli:fabric",      displayName: "fabric",      kind: .cli, bundleId: nil, cliCommand: "fabric",      symbolName: "terminal"),
     ]
 
-    /// 检查指定 CLI 命令是否在系统 PATH 目录中可用，并返回绝对路径。
-    private nonisolated static func findExecutable(name: String) -> String? {
-        LocalAIExecutableLocator.findExecutable(name: name)
-    }
-
     /// 系统中已检测到且可用的 AI 工具列表。
     @Published private(set) var installedTools: [AITool] = []
 
@@ -148,6 +143,9 @@ final class AIToolRegistry: nonisolated ObservableObject {
             AppSettings.shared.preferredAIToolId = preferredToolId
         }
     }
+
+    /// 丢弃过期的后台探测结果，避免慢扫描覆盖更新的 refresh。
+    private var refreshGeneration = 0
 
     /// 当前选中的首选 AI 工具（未指定或找不到时，回退到第一个已检测到的工具）。
     var preferredTool: AITool? {
@@ -159,76 +157,107 @@ final class AIToolRegistry: nonisolated ObservableObject {
 
     private init() {
         preferredToolId = AppSettings.shared.preferredAIToolId
+        // 桌面应用探测只查 bundle ID，可在主线程同步完成。CLI 探测会拉起
+        // 登录 shell / `which`，绝不能在 SwiftUI body 求值里同步跑。
+        installedTools = Self.probeDesktopTools()
         refresh()
     }
 
     /// 重新探测并刷新已安装的 AI 工具列表。
+    ///
+    /// CLI 路径扫描在后台执行；完成后回到主线程发布。调用方可在主线程
+    /// （含 View body 首次访问 `shared`）安全触发，不会阻塞布局。
     func refresh() {
-        var list: [AITool] = []
-        let ws = NSWorkspace.shared
-
-        for proto in Self.knownPrototypes {
-            switch proto.kind {
-            case .desktop:
-                guard let bundleId = proto.bundleId,
-                      let url = ws.urlForApplication(withBundleIdentifier: bundleId) else { continue }
-                list.append(
-                    AITool(
-                        id: proto.id,
-                        displayName: proto.displayName,
-                        kind: .desktop,
-                        bundleId: bundleId,
-                        cliCommand: nil,
-                        symbolName: proto.symbolName,
-                        appURL: url,
-                        executablePath: nil
-                    )
-                )
-            case .cli:
-                guard let cmd = proto.cliCommand,
-                      let execPath = Self.findExecutable(name: cmd) else { continue }
-                list.append(
-                    AITool(
-                        id: proto.id,
-                        displayName: proto.displayName,
-                        kind: .cli,
-                        bundleId: nil,
-                        cliCommand: cmd,
-                        symbolName: proto.symbolName,
-                        appURL: nil,
-                        executablePath: execPath
-                    )
-                )
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        let customCLITools = AppSettings.shared.customCLITools
+        Task.detached(priority: .utility) {
+            let list = Self.probeInstalledTools(customCLITools: customCLITools)
+            await MainActor.run {
+                guard generation == self.refreshGeneration else { return }
+                self.applyProbedTools(list)
             }
         }
+    }
 
-        // 解析用户在设置面板中填写的自定义 CLI 工具名称
-        for cmd in AppSettings.shared.customCLITools {
-            let trimmed = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            // 避免与已知预设工具重复
-            if !list.contains(where: { $0.cliCommand == trimmed }) {
-                if let execPath = Self.findExecutable(name: trimmed) {
-                    let customTool = AITool(
-                        id: "cli:\(trimmed)",
-                        displayName: trimmed,
-                        kind: .cli,
-                        bundleId: nil,
-                        cliCommand: trimmed,
-                        symbolName: "terminal",
-                        appURL: nil,
-                        executablePath: execPath
-                    )
-                    list.append(customTool)
-                }
-            }
-        }
-
+    private func applyProbedTools(_ list: [AITool]) {
         installedTools = list
         if !preferredToolId.isEmpty,
            !installedTools.contains(where: { $0.id == preferredToolId }) {
             preferredToolId = installedTools.first?.id ?? ""
         }
+    }
+
+    /// 仅探测桌面 GUI 应用（`NSWorkspace` 查 bundle ID，不拉起子进程）。
+    nonisolated private static func probeDesktopTools() -> [AITool] {
+        let ws = NSWorkspace.shared
+        var list: [AITool] = []
+        for proto in knownPrototypes where proto.kind == .desktop {
+            guard let bundleId = proto.bundleId,
+                  let url = ws.urlForApplication(withBundleIdentifier: bundleId)
+            else { continue }
+            list.append(
+                AITool(
+                    id: proto.id,
+                    displayName: proto.displayName,
+                    kind: .desktop,
+                    bundleId: bundleId,
+                    cliCommand: nil,
+                    symbolName: proto.symbolName,
+                    appURL: url,
+                    executablePath: nil
+                )
+            )
+        }
+        return list
+    }
+
+    /// 探测桌面应用 + CLI。目录扫描已包含登录 shell PATH，批量探测不再
+    /// 对每个未安装命令再跑 `which` / `command -v`。
+    nonisolated private static func probeInstalledTools(customCLITools: [String]) -> [AITool] {
+        var list = probeDesktopTools()
+        for proto in knownPrototypes where proto.kind == .cli {
+            guard let cmd = proto.cliCommand,
+                  let execPath = LocalAIExecutableLocator.findExecutable(
+                    name: cmd,
+                    allowSubprocessFallbacks: false
+                  )
+            else { continue }
+            list.append(
+                AITool(
+                    id: proto.id,
+                    displayName: proto.displayName,
+                    kind: .cli,
+                    bundleId: nil,
+                    cliCommand: cmd,
+                    symbolName: proto.symbolName,
+                    appURL: nil,
+                    executablePath: execPath
+                )
+            )
+        }
+        for cmd in customCLITools {
+            let trimmed = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard !list.contains(where: { $0.cliCommand == trimmed }) else { continue }
+            guard let execPath = LocalAIExecutableLocator.findExecutable(
+                name: trimmed,
+                allowSubprocessFallbacks: false
+            ) else { continue }
+            list.append(
+                AITool(
+                    id: "cli:\(trimmed)",
+                    displayName: trimmed,
+                    kind: .cli,
+                    bundleId: nil,
+                    cliCommand: trimmed,
+                    symbolName: "terminal",
+                    appURL: nil,
+                    executablePath: execPath
+                )
+            )
+        }
+        return list
     }
 
     /// 用指定的 AI 工具打开目标路径。
@@ -268,8 +297,10 @@ final class AIToolRegistry: nonisolated ObservableObject {
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
                 process.arguments = ["-a", "Terminal", path]
                 try? process.run()
-                // 等待退出并回收，避免僵尸进程累积（open 自身毫秒级退出）
-                process.waitUntilExit()
+                // 不在主线程 waitUntilExit：NSTask 会泵 runloop，嵌套 SwiftUI 更新会 abort。
+                DispatchQueue.global(qos: .utility).async {
+                    process.waitUntilExit()
+                }
             }
         }
     }

@@ -11,6 +11,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.65]
+
+### Changed
+
+- Detect AI tools and CLIs in the background: desktop apps are resolved synchronously from bundle IDs, while the login-shell PATH scan and executable lookups run off the main thread and publish their results when ready, so opening the Project panel never blocks on slow shells (`zsh -lc` with nvm, per-command `which` fallbacks); stale background scan results are discarded in favor of newer refreshes, and batch scans no longer spawn a `which` process for every not-installed command.
+
+### Fixed
+
+- Fix occasional crashes when opening the Project panel: CLI probing and process waits no longer pump the runloop on the main thread during SwiftUI layout (which aborted on nested AttributeGraph updates) — the shell-PATH cache serves its last-known result on the main thread instead of re-spawning the login shell, and child-process reaping waits on a background thread.
+
 ## [1.1.64]
 
 ### Changed
