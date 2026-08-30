@@ -660,11 +660,14 @@ private struct SidebarProjectRow: View {
         .background {
             if isSelected {
                 // 玻璃放在行内容之外，内容本身不参与材质裁剪；interactive 负责悬停/按下反馈。
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(
+                    cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius,
+                    style: .continuous
+                )
                     .fill(.clear)
                     .glassEffect(
                         .regular.tint(projectGlassTint).interactive(),
-                        in: .rect(cornerRadius: 6)
+                        in: .rect(cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius)
                     )
                     .shadow(
                         color: Color.black.opacity(colorScheme == .dark ? 0.10 : 0.05),
@@ -673,7 +676,10 @@ private struct SidebarProjectRow: View {
                         y: 1
                     )
             } else {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(
+                    cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius,
+                    style: .continuous
+                )
                     .fill(isHovering ? Theme.primaryColor.opacity(0.04) : .clear)
             }
         }
@@ -1029,7 +1035,12 @@ private struct SidebarProjectRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, project.isArchived ? 3 : 6)
-        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .contentShape(
+            RoundedRectangle(
+                cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius,
+                style: .continuous
+            )
+        )
     }
 
     /// 项目列表 Agent 未读指示器（蓝色圆点，不带数字）。

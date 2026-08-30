@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.66]
+
+### Changed
+
+- Increase the corner radii of Liquid Glass surfaces to a unified, larger set (continuous rounding): main content tabs, the selected sidebar project row, the right sidebar's top panel tab bar (and the active-segment fill inside it), the code editor / AI tool open buttons, the empty-state "New Session" button and the tab rename chrome now share one corner-radius palette (10pt items, 12pt bar, 8pt nested fill, 14pt prominent button), so glass buttons and selected items look softer and consistent across the UI.
+
 ## [1.1.65]
 
 ### Changed

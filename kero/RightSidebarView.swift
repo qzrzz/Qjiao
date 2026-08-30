@@ -661,7 +661,7 @@ struct RightSidebarView: View {
                     .frame(maxWidth: .infinity)
                     .glassEffect(
                         .regular.tint(QjiaoLiquidGlassPalette.standardTint(for: colorScheme)).interactive(),
-                        in: .rect(cornerRadius: 8)
+                        in: .rect(cornerRadius: QjiaoLiquidGlassPalette.barCornerRadius)
                     )
                 }
                 .padding(.horizontal, SidebarTabLayout.barHorizontalPadding)
@@ -744,7 +744,10 @@ struct RightSidebarView: View {
         .frame(maxWidth: .infinity)
         .background {
             if isActive {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(
+                    cornerRadius: QjiaoLiquidGlassPalette.nestedItemCornerRadius,
+                    style: .continuous
+                )
                     .fill(Color.primary.opacity(0.09))
                     .matchedGeometryEffect(
                         id: "right-sidebar-top-tab-selection",

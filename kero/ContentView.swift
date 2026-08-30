@@ -246,8 +246,11 @@ private struct EmptyStatePromptView: View {
                             .padding(.horizontal, 18)
                             .padding(.vertical, 10)
                             .background {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color(nsColor: Theme.cursor).opacity(0.88))
+                                RoundedRectangle(
+                                    cornerRadius: QjiaoLiquidGlassPalette.prominentCornerRadius,
+                                    style: .continuous
+                                )
+                                .fill(Color(nsColor: Theme.cursor).opacity(0.88))
                             }
                             .foregroundStyle(Color.white)
                         }
@@ -270,7 +273,7 @@ private struct EmptyStatePromptView: View {
                                 .regular
                                     .tint(Color(nsColor: Theme.cursor))
                                     .interactive(),
-                                in: .rect(cornerRadius: 10)
+                                in: .rect(cornerRadius: QjiaoLiquidGlassPalette.prominentCornerRadius)
                             )
                             .foregroundStyle(Color.white)
                         }
@@ -1865,10 +1868,16 @@ private struct SessionTabsView: View {
                     .background {
                         // TabItemChrome 负责绘制当前 / hover 底色；这里仅补一层独立后板，
                         // 先用材质模糊背景，再用主题色遮罩，避免终端内容从浮层后面透出。
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(
+                            cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius,
+                            style: .continuous
+                        )
                             .fill(.regularMaterial)
                             .overlay {
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                RoundedRectangle(
+                                    cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius,
+                                    style: .continuous
+                                )
                                     .fill(Color(nsColor: Theme.background.withAlphaComponent(0.86)))
                             }
                     }
@@ -2525,7 +2534,13 @@ private struct TabRenameChrome: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, verticalPadding)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Theme.primaryColor.opacity(0.09)))
+        .background(
+            RoundedRectangle(
+                cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius,
+                style: .continuous
+            )
+            .fill(Theme.primaryColor.opacity(0.09))
+        )
         .onAppear { DispatchQueue.main.async { focused = true } }
     }
 
@@ -2915,7 +2930,10 @@ private struct TabItemChrome: View {
             ZStack(alignment: .leading) {
                 // 底色和标题放入同一个固定尺寸的 Button label，避免外层 background
                 // 与内部 Text 在重排 / 选中事务中采用不同的动画路径。
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(
+                    cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius,
+                    style: .continuous
+                )
                     .fill(
                         isSelected
                             ? .clear
@@ -2976,10 +2994,20 @@ private struct TabItemChrome: View {
                 .animation(Self.trailingLayoutAnimation, value: showsCloseButton)
             }
             .frame(maxWidth: .infinity, alignment: iconOnly ? .center : .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(
+                RoundedRectangle(
+                    cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius,
+                    style: .continuous
+                )
+            )
             .animation(Self.selectionAnimation, value: isSelected)
             // 只裁剪 Tab 内容，玻璃层由外层单独绘制，避免 Liquid Glass 被裁掉。
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius,
+                    style: .continuous
+                )
+            )
         }
         .buttonStyle(.plain)
         .frame(width: displayWidth, alignment: .leading)
@@ -3165,12 +3193,29 @@ private struct TabPaneCountBadge: View {
     }
 }
 
-/// 非强调 Liquid Glass 共用的 tint；按明暗模式分别使用黑色或白色 6%。
+/// 非强调 Liquid Glass 共用的 tint 与圆角。
 enum QjiaoLiquidGlassPalette {
     /// 深色模式压低玻璃亮度，明亮模式保持轻微的白色透光感。
     static func standardTint(for colorScheme: ColorScheme) -> Color {
         colorScheme == .dark ? Color.black.opacity(0.06) : Color.white.opacity(0.06)
     }
+
+    /// 打开编辑器 / AI 工具按钮：比选中态玻璃更亮，保证图标与文字更鲜明。
+    static func actionTint(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.white.opacity(0.16) : Color.white.opacity(0.28)
+    }
+
+    /// 主内容 Tab、侧栏项目选中态、编辑器 / AI 打开按钮。
+    static let itemCornerRadius: CGFloat = 8
+
+    /// 右侧栏顶部分段器整组玻璃。
+    static let barCornerRadius: CGFloat = 10
+
+    /// 分段器内选中填充（相对整组玻璃 4pt 内边距，保持同心）。
+    static let nestedItemCornerRadius: CGFloat = 6
+
+    /// 空状态「新建会话」等独立主按钮。
+    static let prominentCornerRadius: CGFloat = 12
 }
 
 /// 主内容 Tab 的 Liquid Glass 选中态；interactive 会提供按下、悬停时的系统动态反馈。
@@ -3178,11 +3223,11 @@ private struct MainTabGlassSurface: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 6)
+        RoundedRectangle(cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius, style: .continuous)
             .fill(.clear)
             .glassEffect(
                 .regular.tint(QjiaoLiquidGlassPalette.standardTint(for: colorScheme)).interactive(),
-                in: .rect(cornerRadius: 6)
+                in: .rect(cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius)
             )
     }
 }

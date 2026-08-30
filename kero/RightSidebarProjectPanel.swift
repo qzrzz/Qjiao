@@ -673,6 +673,8 @@ struct CodeEditorIcon: View {
 
     let editor: CodeEditor
     var size: CGFloat = 16
+    /// 打开按钮等强调入口：保留品牌原色，模板图标用主色而不是 secondary。
+    var usesBrightColors: Bool = false
 
     var body: some View {
         let isDark = colorScheme == .dark
@@ -682,11 +684,13 @@ struct CodeEditorIcon: View {
             let searchNames = [editor.displayName.lowercased(), editor.bundleId.lowercased()]
             if let source = catalog.source(forProcessNames: searchNames) {
                 let template = catalog.isTemplate(source)
-                let recolor = !template && catalog.shouldRecolor(source: source, prefersLight: prefersLight, isDark: isDark)
+                let recolor = !usesBrightColors && !template
+                    && catalog.shouldRecolor(source: source, prefersLight: prefersLight, isDark: isDark)
                 let displayImage = recolor
                     ? (catalog.silhouetteImage(for: source, pointSize: size, prefersLight: prefersLight) ?? icon)
                     : icon
                 let isMask = template || recolor
+                let maskColor: Color = usesBrightColors ? .primary : .secondary
 
                 Image(nsImage: displayImage)
                     .resizable()
@@ -694,7 +698,7 @@ struct CodeEditorIcon: View {
                     .renderingMode(isMask ? .template : .original)
                     .aspectRatio(contentMode: .fit)
                     .frame(width: size, height: size)
-                    .foregroundStyle(isMask ? AnyShapeStyle(Color.secondary) : AnyShapeStyle(Color.primary))
+                    .foregroundStyle(isMask ? AnyShapeStyle(maskColor) : AnyShapeStyle(Color.primary))
             } else {
                 Image(nsImage: icon)
                     .resizable()
@@ -728,14 +732,14 @@ struct CodeEditorOpenButton: View {
                     registry.open(path: path)
                 } label: {
                     HStack(spacing: 4) {
-                        CodeEditorIcon(editor: preferred, size: 16)
+                        CodeEditorIcon(editor: preferred, size: 16, usesBrightColors: true)
                         Text(preferred.displayName)
                             .font(SidebarTypography.caption(.medium))
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
                         Spacer(minLength: 2)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                     .padding(.leading, 6)
                     .padding(.trailing, 2)
                     .padding(.vertical, 5)
@@ -763,14 +767,14 @@ struct CodeEditorOpenButton: View {
                 } else {
                     Image(systemName: "arrow.up.forward")
                         .font(SidebarTypography.micro())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .frame(width: 18, height: 26)
                         .allowsHitTesting(false)
                 }
             }
             .glassEffect(
-                .regular.tint(QjiaoLiquidGlassPalette.standardTint(for: colorScheme)).interactive(),
-                in: .rect(cornerRadius: 6)
+                .regular.tint(QjiaoLiquidGlassPalette.actionTint(for: colorScheme)).interactive(),
+                in: .rect(cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius)
             )
         }
     }
@@ -782,6 +786,8 @@ struct AIToolIcon: View {
 
     let tool: AITool
     var size: CGFloat = 16
+    /// 打开按钮等强调入口：保留品牌原色，模板图标用主色而不是 secondary。
+    var usesBrightColors: Bool = false
 
     var body: some View {
         let isDark = colorScheme == .dark
@@ -793,11 +799,13 @@ struct AIToolIcon: View {
                 ?? (tool.bundleId.flatMap { catalog.source(forProcessName: $0) })
             if let source {
                 let template = catalog.isTemplate(source)
-                let recolor = !template && catalog.shouldRecolor(source: source, prefersLight: prefersLight, isDark: isDark)
+                let recolor = !usesBrightColors && !template
+                    && catalog.shouldRecolor(source: source, prefersLight: prefersLight, isDark: isDark)
                 let displayImage = recolor
                     ? (catalog.silhouetteImage(for: source, pointSize: size, prefersLight: prefersLight) ?? icon)
                     : icon
                 let isMask = template || recolor
+                let maskColor: Color = usesBrightColors ? .primary : .secondary
 
                 Image(nsImage: displayImage)
                     .resizable()
@@ -805,7 +813,7 @@ struct AIToolIcon: View {
                     .renderingMode(isMask ? .template : .original)
                     .aspectRatio(contentMode: .fit)
                     .frame(width: size, height: size)
-                    .foregroundStyle(isMask ? AnyShapeStyle(Color.secondary) : AnyShapeStyle(Color.primary))
+                    .foregroundStyle(isMask ? AnyShapeStyle(maskColor) : AnyShapeStyle(Color.primary))
             } else {
                 Image(nsImage: icon)
                     .resizable()
@@ -837,14 +845,14 @@ struct AIToolOpenButton: View {
                     registry.open(path: path, with: preferred, terminalManager: manager)
                 } label: {
                     HStack(spacing: 4) {
-                        AIToolIcon(tool: preferred, size: 16)
+                        AIToolIcon(tool: preferred, size: 16, usesBrightColors: true)
                         Text(preferred.displayName)
                             .font(SidebarTypography.caption(.medium))
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
                         Spacer(minLength: 2)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                     .padding(.leading, 6)
                     .padding(.trailing, 2)
                     .padding(.vertical, 5)
@@ -872,14 +880,14 @@ struct AIToolOpenButton: View {
                 } else {
                     Image(systemName: "arrow.up.forward")
                         .font(SidebarTypography.micro())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .frame(width: 18, height: 26)
                         .allowsHitTesting(false)
                 }
             }
             .glassEffect(
-                .regular.tint(QjiaoLiquidGlassPalette.standardTint(for: colorScheme)).interactive(),
-                in: .rect(cornerRadius: 6)
+                .regular.tint(QjiaoLiquidGlassPalette.actionTint(for: colorScheme)).interactive(),
+                in: .rect(cornerRadius: QjiaoLiquidGlassPalette.itemCornerRadius)
             )
         }
     }
@@ -896,7 +904,7 @@ struct AIDropdownNSButton: NSViewRepresentable {
         button.bezelStyle = .inline
         button.isBordered = false
         button.imagePosition = .imageOnly
-        button.contentTintColor = .secondaryLabelColor
+        button.contentTintColor = .labelColor
         if let chevron = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil) {
             let cfg = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular)
             button.image = chevron.withSymbolConfiguration(cfg)
@@ -1044,7 +1052,7 @@ struct EditorDropdownNSButton: NSViewRepresentable {
         button.bezelStyle = .inline
         button.isBordered = false
         button.imagePosition = .imageOnly
-        button.contentTintColor = .secondaryLabelColor
+        button.contentTintColor = .labelColor
         // SF Symbol chevron 作为下拉图标。
         if let chevron = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil) {
             let cfg = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular)
