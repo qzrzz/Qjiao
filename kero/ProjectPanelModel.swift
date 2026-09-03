@@ -44,6 +44,9 @@ final class ProjectPanelModel: nonisolated ObservableObject {
     private var processTask: Task<Void, Never>?
     private var manualScriptsPending = false
     private var manualProcessesPending = false
+    private var manualRefreshID: UUID?
+    private var manualRefreshWatchdog: Task<Void, Never>?
+    private var manualRefreshDiagnosticToken: RuntimeDiagnostics.Token?
     private var isFileMonitoringActive = false
     private lazy var fileWatcher = SidebarProjectFileWatcher { [weak self] in
         guard let self else { return }
@@ -89,8 +92,31 @@ final class ProjectPanelModel: nonisolated ObservableObject {
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
+        let refreshID = UUID()
+        manualRefreshID = refreshID
+        manualRefreshDiagnosticToken = RuntimeDiagnostics.shared.begin(
+            category: "project",
+            name: "manual-refresh",
+            warningAfter: 12
+        )
         manualScriptsPending = true
         manualProcessesPending = true
+        manualRefreshWatchdog?.cancel()
+        manualRefreshWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            guard let self, !Task.isCancelled,
+                  self.manualRefreshID == refreshID else { return }
+            // FileManager 在失联网络卷上也可能长期阻塞。后台读取可稍后自行完成，
+            // 但手动刷新按钮必须恢复可用，允许用户再次尝试或切换项目。
+            self.manualScriptsPending = false
+            self.manualProcessesPending = false
+            self.isRefreshing = false
+            self.manualRefreshID = nil
+            if let token = self.manualRefreshDiagnosticToken {
+                RuntimeDiagnostics.shared.end(token, outcome: "watchdog")
+                self.manualRefreshDiagnosticToken = nil
+            }
+        }
         syncPackageScripts(root: rootPath, force: true)
         refreshProcesses(force: true)
     }
@@ -257,6 +283,13 @@ final class ProjectPanelModel: nonisolated ObservableObject {
     private func finishManualRefreshIfNeeded() {
         if !manualScriptsPending && !manualProcessesPending {
             isRefreshing = false
+            manualRefreshID = nil
+            manualRefreshWatchdog?.cancel()
+            manualRefreshWatchdog = nil
+            if let token = manualRefreshDiagnosticToken {
+                RuntimeDiagnostics.shared.end(token, outcome: "completed")
+                manualRefreshDiagnosticToken = nil
+            }
         }
     }
 }

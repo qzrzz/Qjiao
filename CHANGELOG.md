@@ -11,6 +11,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.67]
+
+### Added
+
+- Add a Diagnostics window, opened from Help → Diagnostics…: it shows live metrics (open file descriptors vs. the soft/hard rlimit, active Git / Project / subprocess operations with their elapsed time and warning threshold), a timeline of recorded events, and the past JSON reports, which can be regenerated, copied to the clipboard or revealed in Finder. A low-overhead background monitor samples file descriptors and tracks subprocess lifecycles and Git / Project refresh phases; when the FD count crosses its threshold (300 in Debug, 1500 in release) or keeps growing across samples, a subprocess times out or fails to launch, or a refresh stalls past its warning window, it captures a sanitized JSON snapshot to `~/.config/qjiao/diagnostics` (`qjiao-dev` in Debug), with automatic reports throttled and only the latest 20 kept. The diagnostics path spawns no extra processes and never records command arguments, environment variables or file contents.
+
+### Changed
+
+- Bound every process wait so a wedged repository or volume can no longer stall the UI indefinitely: a subprocess that survives SIGTERM and even SIGKILL on uninterruptible kernel I/O (bad network volumes) is given a finite grace period and reaped by its termination handler instead of an unbounded `waitUntilExit`, and its exit code is only read once the process has truly exited; the `pgrep` helper used to kill process trees is itself time-limited; Git's recovery path no longer re-runs a command that launched successfully but timed out — the `git -C` + fresh-IO fallback only fires when the process failed to launch — and the fsmonitor daemon stop/start repair gets its own short timeout instead of consuming the whole scan budget, with the recovery scan timeout shortened accordingly.
+- The Project panel's manual refresh is guarded by a 15-second watchdog: if reading package scripts or processes blocks (e.g. on an unreachable network volume), the refresh state is reset so the refresh button recovers and the user can retry or switch projects.
+
+### Fixed
+
+- Fix a file-descriptor leak when the LocalAI helper process fails to launch: all stdin/stdout/stderr pipe handles (read and write ends) are now closed on launch failure.
+
 ## [1.1.66]
 
 ### Changed

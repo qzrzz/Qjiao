@@ -151,6 +151,8 @@ RELEASING.md          本机发布流程
 - stage / commit / discard、历史提交编辑（Reword / Amend / Drop 等）、大 Diff 虚拟化渲染；右侧 Git 标签显示变更数角标。
 - 多语言（L10n）完整覆盖 Git 操作完成提示（Commit/Push/Pull/Fetch/Stage/Discard/Stash 等状态与输出消息），支持中文与日文实时切换。
 - 扫描失败可强制刷新并自愈 fsmonitor；子进程统一超时与回收，彻底治理 Process / Pipe 文件描述符 (FD) 泄漏（显式关闭 stdin/stdout/stderr 读写句柄，Diff 视图统一下放 SubprocessRunner），解决长时间运行后因 FD 耗尽引发 `Bad file descriptor` (`NSPOSIXErrorDomain` code 9) 导致子进程创建失败的问题。
+- 子进程超时后的退出等待严格有界，Git 恢复不再对已超时命令重复执行；Project 手动刷新也有状态兜底，避免失效 fsmonitor、不可中断 I/O 或失联卷让刷新按钮永久转圈。
+- 新增长时间运行诊断：应用内存环形记录 FD 趋势、子进程生命周期与 Git / Project 刷新阶段；命中 FD 阈值/持续增长、子进程超时或刷新卡住时，自动在 `~/.config/qjiao/diagnostics`（Debug 为 `qjiao-dev`）生成脱敏 JSON 快照并轮换保留最近 20 份。Help → Diagnostics 可打开独立窗口查看实时指标、事件和历史报告，并支持手动生成、复制及在 Finder 中显示。诊断路径不启动额外子进程，也不记录命令参数、环境变量或项目文件内容。
 - 修复 Ghostty 屏幕导出的目录 fd 泄漏：终端预览 / Agent 读屏改为 `ghostty_surface_read_text` 直接读 surface；FD 巡检监控扩展到 release，rlimit 软上限最多提升至 65536。
 - 将嵌入式 Ghostty 从锁定提交 `35e1a016…` 更新到 [tip](https://github.com/ghostty-org/ghostty/releases/tag/tip) `b69f612`（2026-08-26）。上游已修好 TempDir 导出 fd 泄漏，因此去掉 `0011-fix-tempdir-fd-leak.patch`；剪贴板回调对齐新的 `ghostty_clipboard_complete_s` / `ghostty_surface_deny_clipboard_request` API。
 - Files 树可选 Git 状态装饰（默认关）。

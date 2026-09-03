@@ -95,6 +95,11 @@ private actor LocalAIProcessBox {
             try process.run()
         } catch {
             try? stdin.fileHandleForWriting.close()
+            try? stdin.fileHandleForReading.close()
+            try? stdout.fileHandleForReading.close()
+            try? stdout.fileHandleForWriting.close()
+            try? stderr.fileHandleForReading.close()
+            try? stderr.fileHandleForWriting.close()
             throw LocalAIError.launchFailed(error.localizedDescription)
         }
 

@@ -66,6 +66,14 @@ struct keroApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .defaultSize(width: 696, height: 600)
+
+        Window(L10n.t("Diagnostics"), id: "diagnostics") {
+            DiagnosticsView()
+                .observeLocalization()
+                .environment(\.l10nLanguage, l10n.language)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 920, height: 620)
     }
 }
 
@@ -470,6 +478,12 @@ private struct KeroCommands: Commands {
                     manager?.selectTab(index: index)
                 }
                 .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control)
+            }
+        }
+
+        CommandGroup(after: .help) {
+            Button(L10n.t("Diagnostics…")) {
+                openWindow(id: "diagnostics")
             }
         }
     }

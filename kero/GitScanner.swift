@@ -82,7 +82,9 @@ actor GitScanner {
     /// 标记 `didHitLimit`，UI 提示「仅显示前 N 条」并降低自动刷新频率。
     static let statusEntryLimit = 10_000
     /// Retry 恢复路径用更短超时，尽快失败并给出诊断信息。
-    private static let gitRecoveryTimeout: TimeInterval = 20
+    private static let gitRecoveryTimeout: TimeInterval = 8
+    /// daemon stop/start 只是恢复前的尽力清理，不应占用整次状态扫描的超时。
+    private static let fsmonitorRepairTimeout: TimeInterval = 3
 
     // MARK: Status pipeline
 
@@ -140,7 +142,10 @@ actor GitScanner {
         includeIgnoredPaths: Bool,
         recentCommitLimit: Int = GitStatusModel.defaultRecentCommitPageSize
     ) -> StatusLoadResult {
-        let result = loadStatusOnce(
+        // runGit 已在 Process.run 启动失败时用 `git -C` + 全新 IO 重试；
+        // 整条扫描若已成功 launch 但返回失败，再完整执行一次不会改变结果，
+        // 只会让 Retry 的最坏等待时间翻倍。
+        return loadStatusOnce(
             in: root,
             includeIgnoredPaths: includeIgnoredPaths,
             bypassFsmonitor: true,
@@ -149,21 +154,6 @@ actor GitScanner {
             timeout: gitRecoveryTimeout,
             diagnosticContext: "Retry recovery (fsmonitor bypassed, independent of scan queue)"
         )
-        if case .failed(let message) = result {
-            // 再试一次：不用 currentDirectoryURL，改 git -C，规避 cwd fd 类故障。
-            let second = loadStatusOnce(
-                in: root,
-                includeIgnoredPaths: includeIgnoredPaths,
-                bypassFsmonitor: true,
-                includeDetails: true,
-                recentCommitLimit: recentCommitLimit,
-                timeout: gitRecoveryTimeout,
-                diagnosticContext: "Retry recovery (git -C, no process cwd)",
-                preferGitDashC: true
-            )
-            return annotateRecoveryFailure(second, priorMessage: message, root: root)
-        }
-        return result
     }
 
     /// 即时扫描：不经过 actor 串行队列。用于 stage / unstage / commit 等用户
@@ -584,7 +574,7 @@ actor GitScanner {
     /// 时才 `start`，避免给 hook 路径 / 未启用仓库多起无用进程。
     /// stop / start 失败均忽略。恢复路径用短超时，避免 stop 自身挂死。
     nonisolated static func recoverFilesystemMonitor(in root: String) {
-        let timeout = gitRecoveryTimeout
+        let timeout = fsmonitorRepairTimeout
         // 强制 bypass，避免 stop/rev-parse 再撞上坏 IPC。
         let bypass = ["core.fsmonitor": "false"]
         _ = runGit(
@@ -762,8 +752,9 @@ actor GitScanner {
         if first.launched && first.result.status != -1 {
             return first.result
         }
-        if first.launched && !looksLikeStaleFileDescriptor(first.result.stderr)
-            && !first.result.stderr.localizedCaseInsensitiveContains("timed out") {
+        if first.launched {
+            // 已成功 launch 但执行超时，改用 `git -C` 不会改变子进程内部的
+            // 阻塞原因；再次运行只会把一次刷新等待时间翻倍。
             return first.result
         }
         // 第二次：强制 git -C + 全新 IO，不设 process cwd。

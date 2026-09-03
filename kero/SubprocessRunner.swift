@@ -78,6 +78,12 @@ nonisolated enum SubprocessRunner {
     /// 调用方应确保在后台线程 / actor 执行器上调用（勿在主线程）。
     nonisolated static func run(_ config: Config) -> Result {
         ensureStandardFileDescriptorsOpen()
+        let diagnosticToken = RuntimeDiagnostics.shared.begin(
+            category: "subprocess",
+            name: URL(fileURLWithPath: config.executable).lastPathComponent,
+            warningAfter: max(config.timeout + 4, 5),
+            metadata: ["timeout-seconds": String(format: "%.1f", config.timeout)]
+        )
         let process = Process()
         process.executableURL = URL(fileURLWithPath: config.executable)
         process.arguments = config.arguments
@@ -110,13 +116,22 @@ nonisolated enum SubprocessRunner {
             try? stdout.fileHandleForWriting.close()
             try? stderr.fileHandleForReading.close()
             try? stderr.fileHandleForWriting.close()
+            let launchError = describeLaunchError(error)
+            RuntimeDiagnostics.shared.end(
+                diagnosticToken,
+                outcome: "launch-failed",
+                metadata: [
+                    "error-domain": (error as NSError).domain,
+                    "error-code": "\((error as NSError).code)",
+                ]
+            )
             return Result(
                 launched: false,
                 exitCode: -1,
                 stdout: Data(),
                 stderr: Data(),
                 timedOut: false,
-                launchError: describeLaunchError(error)
+                launchError: launchError
             )
         }
 
@@ -161,14 +176,23 @@ nonisolated enum SubprocessRunner {
         try? errRead.close()
         try? stderr.fileHandleForWriting.close()
 
-        return Result(
+        let result = Result(
             launched: true,
-            exitCode: process.terminationStatus,
+            // 极端情况下进程陷入不可中断的内核 I/O，SIGKILL 后仍不会立刻
+            // reap。此时绝不能再读 terminationStatus（仅退出后有效），更不能
+            // 为了回收而无限阻塞刷新链路。
+            exitCode: process.isRunning ? -1 : process.terminationStatus,
             stdout: outData,
             stderr: errData,
             timedOut: timedOut,
             launchError: nil
         )
+        RuntimeDiagnostics.shared.end(
+            diagnosticToken,
+            outcome: timedOut ? "timed-out" : "completed",
+            metadata: ["exit-code": "\(result.exitCode)"]
+        )
+        return result
     }
 
     // MARK: - 进程树终止
@@ -176,13 +200,10 @@ nonisolated enum SubprocessRunner {
     /// 等待进程退出；超时则 SIGTERM → 递归子孙 → SIGKILL 整个进程树。
     /// 返回是否在超时前正常退出（false = 超时后被终止）。
     private static func waitForExitTree(_ process: Process, timeout: TimeInterval) -> Bool {
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            process.waitUntilExit()
-            group.leave()
-        }
-        if group.wait(timeout: .now() + timeout) == .success {
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+        if !process.isRunning || exited.wait(timeout: .now() + timeout) == .success {
+            process.terminationHandler = nil
             return true
         }
 
@@ -192,29 +213,20 @@ nonisolated enum SubprocessRunner {
             killDescendants(of: pid, signal: SIGTERM)
         }
         // 优雅退出宽限；SIGTERM 后退出同样属于超时终止。
-        if group.wait(timeout: .now() + 1.5) == .success {
+        if exited.wait(timeout: .now() + 1.5) == .success {
+            process.terminationHandler = nil
             return false
         }
         if pid > 0 {
             kill(pid, SIGKILL)
             killDescendants(of: pid, signal: SIGKILL)
         }
-        // 最终回收，避免僵尸进程累积
-        waitUntilExitWithoutPumping(process)
+        // SIGKILL 后也只给有限宽限。D-state / 坏网络卷上的进程可能无法立即
+        // 退出；继续 waitUntilExit 会把 Git / Project 刷新永久卡在 spinner。
+        // Foundation 在真正退出时仍会执行 terminationHandler 并完成回收。
+        _ = exited.wait(timeout: .now() + 2)
+        process.terminationHandler = nil
         return false
-    }
-
-    /// `Process.waitUntilExit()` 会在当前线程泵 CFRunLoop。SwiftUI 正在
-    /// 布局时泵 runloop 会嵌套 AttributeGraph 更新并 abort。后台线程执行
-    /// wait，调用方只 `DispatchGroup.wait`（不泵 runloop）。
-    private static func waitUntilExitWithoutPumping(_ process: Process) {
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            process.waitUntilExit()
-            group.leave()
-        }
-        group.wait()
     }
 
     /// 用 `pgrep -P` 递归查找子孙进程并发信号（尽力而为；失败静默）。
@@ -228,9 +240,16 @@ nonisolated enum SubprocessRunner {
         let errPipe = Pipe()
         task.standardOutput = pipe
         task.standardError = errPipe
+        let exited = DispatchSemaphore(value: 0)
+        task.terminationHandler = { _ in exited.signal() }
         do {
             try task.run()
-            waitUntilExitWithoutPumping(task)
+            // pgrep 只是超时清理的辅助工具，本身也必须有上限，否则会让原命令
+            // 已超时后仍卡在“查找子进程”。
+            if exited.wait(timeout: .now() + 2) == .timedOut, task.isRunning {
+                task.terminate()
+                _ = exited.wait(timeout: .now() + 1)
+            }
         } catch {
             try? pipe.fileHandleForReading.close()
             try? pipe.fileHandleForWriting.close()
@@ -238,6 +257,7 @@ nonisolated enum SubprocessRunner {
             try? errPipe.fileHandleForWriting.close()
             return
         }
+        task.terminationHandler = nil
         let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
         try? pipe.fileHandleForReading.close()
         try? pipe.fileHandleForWriting.close()
@@ -325,26 +345,10 @@ nonisolated enum SubprocessRunner {
         return lines.joined(separator: "\n")
     }
 
-    /// 启动 FD 句柄泄漏巡检任务（每 30s 检查一次）。
-    /// 当打开的 File Descriptors 超过阈值（release 默认 1500；Debug 用 300）时，控制台输出警报。
-    /// 正常应用的基线约数百（字体缓存、watcher、终端管道），持续增长说明存在泄漏。
+    /// 启动运行时健康巡检。除 FD 阈值外，还会检测持续增长与卡住的刷新操作，
+    /// 并在异常时写入脱敏 JSON 报告。
     nonisolated static func startFDMonitor() {
-        #if DEBUG
-        let warningThreshold: Int32 = 300
-        #else
-        let warningThreshold: Int32 = 1500
-        #endif
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 10) {
-            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .background))
-            timer.schedule(deadline: .now(), repeating: .seconds(30))
-            timer.setEventHandler {
-                let count = currentOpenFileDescriptorCount()
-                if count >= warningThreshold {
-                    print("⚠️ [FD Monitor] 句柄预警: 当前进程已打开 \(count) 个 File Descriptors (阈值: \(warningThreshold))")
-                }
-            }
-            timer.resume()
-        }
+        RuntimeDiagnostics.shared.start()
     }
 
     /// 获取当前进程打开的文件描述符数量（仅在统计与巡检时使用）。

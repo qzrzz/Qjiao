@@ -403,6 +403,11 @@ final class GitStatusModel: nonisolated ObservableObject {
         invalidateStatusRefresh()
         let requestID = statusRequestID
         isRefreshing = true
+        let diagnosticToken = RuntimeDiagnostics.shared.begin(
+            category: "git",
+            name: "root-change-refresh",
+            warningAfter: 15
+        )
         let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -413,6 +418,7 @@ final class GitStatusModel: nonisolated ObservableObject {
                     bypassFsmonitor: false
                 )
             }.value
+            RuntimeDiagnostics.shared.end(diagnosticToken, outcome: "completed")
             guard let self else { return }
             guard self.contextGeneration == generation,
                   self.statusRequestID == requestID,
@@ -489,6 +495,12 @@ final class GitStatusModel: nonisolated ObservableObject {
         statusRequestID &+= 1
         let requestID = statusRequestID
         isRefreshing = true
+        let diagnosticToken = RuntimeDiagnostics.shared.begin(
+            category: "git",
+            name: "status-refresh",
+            warningAfter: 15,
+            metadata: ["details": includeDetails ? "included" : "skipped"]
+        )
         // 忽略路径数据只服务于 Files 面板的 Git 装饰（默认关闭）；
         // 关闭时跳过 --ignored=matching，避免大仓库每 2s 全量枚举被忽略文件。
         let includeIgnoredPaths = AppSettings.shared.filesGitDecorations
@@ -504,6 +516,7 @@ final class GitStatusModel: nonisolated ObservableObject {
                     recentCommitLimit: commitLimit
                 )
             }.value
+            RuntimeDiagnostics.shared.end(diagnosticToken, outcome: "completed")
             guard let self else { return }
             guard self.contextGeneration == generation,
                   self.statusRequestID == requestID,
@@ -625,7 +638,8 @@ final class GitStatusModel: nonisolated ObservableObject {
     /// - （节流后）先修复失效的 Git fsmonitor daemon（stop → 删残留 IPC socket
     ///   → 按需 start），再以 `core.fsmonitor=false` 强制全量重扫；
     /// - 扫描走 **actor 外** 的 `loadStatusForRecovery`，不被卡在坏 IPC 上的
-    ///   常规 `loadStatus` 堵住；全程 bypass fsmonitor，失败时再试 `git -C`；
+    ///   常规 `loadStatus` 堵住；全程 bypass fsmonitor，启动失败时由 runGit
+    ///   自动改用 `git -C` + 全新 IO 重试；
     /// - 用户 Git 操作（`runningOperationID != nil`）时拒绝介入，避免与
     ///   stage/commit 交错；`recoveryID` + `isRecovering` 记账 busy，cwd 切换
     ///   时 `clearRepositoryState` 可安全作废。
@@ -638,6 +652,11 @@ final class GitStatusModel: nonisolated ObservableObject {
         invalidateStatusRefresh()
         let id = UUID()
         recoveryID = id
+        let diagnosticToken = RuntimeDiagnostics.shared.begin(
+            category: "git",
+            name: "forced-recovery",
+            warningAfter: 15
+        )
         isRecovering = true
         isBusy = true
         // 立刻清掉旧错误，避免刷新中仍显示上一轮同一句 EBADF，看起来像「点了没反应」。
@@ -662,6 +681,7 @@ final class GitStatusModel: nonisolated ObservableObject {
                 )
                 return loaded
             }.value
+            RuntimeDiagnostics.shared.end(diagnosticToken, outcome: "completed")
             guard let self else { return }
             let stillOurs = self.recoveryID == id
             if stillOurs {
