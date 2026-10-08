@@ -11,6 +11,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.68]
+
+### Added
+
+- Add a WYSIWYG Markdown editor (native TextKit 2, built on a vendored `swift-markdown-engine`): `.md` files open rendered in place — headings, bold/italic, inline code, lists, tasks, tables, blockquotes and fenced code blocks with per-token syntax highlighting — and the editor status bar (or Settings → Editor → "Markdown editor") switches a file between WYSIWYG and the existing source + preview layout, with the default mode configurable. Auto save, dirty state, external-change conflicts, the per-editor light/dark theme, scroll position and local images resolved from the Markdown file's own directory all carry over (paste / drag still writes to a sibling `assets/`).
+- Keep every Markdown syntax marker visible in the WYSIWYG editor (`##`, `**`, backticks, `[..](..)`, `>`, code fences, list bullets, `---`, `![](...)`), so the source stays directly editable: front matter is highlighted as YAML/JSON instead of breaking into headings, images show their source next to the rendered picture, links are edited like plain text and only ⌘ / ⌃-click follows them, and heading sizes are flattened compared to the preview.
+
 ## [1.1.67]
 
 ### Added
