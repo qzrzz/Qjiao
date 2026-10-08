@@ -26,6 +26,7 @@ struct MarkdownFileViewerView: View {
     @AppStorage("markdownPreviewEnabled") private var isPreviewEnabled = false
     @AppStorage("markdownPreviewSplitFraction") private var splitFraction: Double = 0.5
     @AppStorage("markdownWrapLines") private var markdownWrapLines = true
+    @AppStorage("markdownEditorMode") private var mode: MarkdownEditorMode = .wysiwyg
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,38 +37,47 @@ struct MarkdownFileViewerView: View {
                 FileSaveErrorBar(message: error)
             }
 
-            GeometryReader { geometry in
-                let showPreview = isPreviewEnabled
-                let handleWidth: CGFloat = 7
-                let totalWidth = geometry.size.width
-                let availableWidth = showPreview
-                    ? max(10, totalWidth - handleWidth)
-                    : totalWidth
-                let leftWidth = showPreview
-                    ? min(max(availableWidth * splitFraction, 160), availableWidth - 160)
-                    : availableWidth
-                let rightWidth = showPreview ? max(160, availableWidth - leftWidth) : 0
+            if mode == .wysiwyg {
+                MarkdownWysiwygEditor(
+                    file: file,
+                    themeName: themeName,
+                    isFocused: isFocused,
+                    onFocused: onFocused
+                )
+            } else {
+                GeometryReader { geometry in
+                    let showPreview = isPreviewEnabled
+                    let handleWidth: CGFloat = 7
+                    let totalWidth = geometry.size.width
+                    let availableWidth = showPreview
+                        ? max(10, totalWidth - handleWidth)
+                        : totalWidth
+                    let leftWidth = showPreview
+                        ? min(max(availableWidth * splitFraction, 160), availableWidth - 160)
+                        : availableWidth
+                    let rightWidth = showPreview ? max(160, availableWidth - leftWidth) : 0
 
-                HStack(spacing: 0) {
-                    editor
-                        .frame(width: leftWidth, height: geometry.size.height)
+                    HStack(spacing: 0) {
+                        editor
+                            .frame(width: leftWidth, height: geometry.size.height)
 
-                    if showPreview {
-                        HorizontalSplitHandle(
-                            fraction: $splitFraction,
-                            range: 0.2...0.8,
-                            defaultFraction: 0.5,
-                            availableWidth: availableWidth
-                        )
-                        MarkdownPreviewView(
-                            file: file,
-                            palette: previewPalette,
-                            onOpenURL: openPreviewURL
-                        )
-                        .frame(width: rightWidth, height: geometry.size.height)
+                        if showPreview {
+                            HorizontalSplitHandle(
+                                fraction: $splitFraction,
+                                range: 0.2...0.8,
+                                defaultFraction: 0.5,
+                                availableWidth: availableWidth
+                            )
+                            MarkdownPreviewView(
+                                file: file,
+                                palette: previewPalette,
+                                onOpenURL: openPreviewURL
+                            )
+                            .frame(width: rightWidth, height: geometry.size.height)
+                        }
                     }
+                    .frame(width: totalWidth, height: geometry.size.height)
                 }
-                .frame(width: totalWidth, height: geometry.size.height)
             }
 
             if settings.showEditorStatusBar {
@@ -77,8 +87,13 @@ struct MarkdownFileViewerView: View {
         }
         .overlay(alignment: .topTrailing) {
             if !settings.showEditorStatusBar {
-                previewToggleButton
-                    .padding(8)
+                HStack(spacing: 6) {
+                    modeToggleButton
+                    if mode == .source {
+                        previewToggleButton
+                    }
+                }
+                .padding(8)
             }
         }
         .observeLocalization()
@@ -131,6 +146,23 @@ struct MarkdownFileViewerView: View {
             position: .bottom
         )
         .accessibilityLabel(L10n.t("Toggle Markdown Preview"))
+    }
+
+    /// 切换 Markdown 的所见即所得 / 源码编辑模式。
+    private var modeToggleButton: some View {
+        let target = mode.other
+        return Button {
+            mode = target
+        } label: {
+            Image(systemName: target.systemImage)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 26, height: 22)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .macTooltip(target.switchToTooltip, position: .bottom)
+        .accessibilityLabel(target.switchToTooltip)
     }
 
     private func openPreviewURL(_ url: URL) {

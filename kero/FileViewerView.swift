@@ -1143,6 +1143,7 @@ struct EditorStatusBar: View {
     @ObservedObject private var scriptRunner = ScriptRunner.shared
     @AppStorage("markdownPreviewEnabled") private var isMarkdownPreviewEnabled = false
     @AppStorage("markdownWrapLines") private var markdownWrapLines = true
+    @AppStorage("markdownEditorMode") private var markdownEditorMode: MarkdownEditorMode = .wysiwyg
     @State private var formatters: [EditorFormatter] = []
     @State private var formattingID: String?
     @State private var formatterError: String?
@@ -1159,21 +1160,35 @@ struct EditorStatusBar: View {
                     .monospacedDigit()
                     .macTooltip(L10n.t("Selection Summary"), position: .top)
             }
-            Button {
-                if file.isMarkdownFile {
-                    markdownWrapLines.toggle()
-                } else {
-                    settings.wrapLines.toggle()
+            if !file.isMarkdownFile || markdownEditorMode == .source {
+                Button {
+                    if file.isMarkdownFile {
+                        markdownWrapLines.toggle()
+                    } else {
+                        settings.wrapLines.toggle()
+                    }
+                } label: {
+                    Image(systemName: "text.line.3.summary")
                 }
-            } label: {
-                Image(systemName: "text.line.3.summary")
+                .buttonStyle(.plain)
+                .foregroundStyle(isWrapEnabled ? Color(nsColor: Theme.accent) : .secondary)
+                .macTooltip(isWrapEnabled ? L10n.t("Disable Line Wrapping") : L10n.t("Enable Line Wrapping"), shortcut: "⌥Z", position: .top)
+                .accessibilityLabel(L10n.t("Toggle line wrapping"))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(isWrapEnabled ? Color(nsColor: Theme.accent) : .secondary)
-            .macTooltip(isWrapEnabled ? L10n.t("Disable Line Wrapping") : L10n.t("Enable Line Wrapping"), shortcut: "⌥Z", position: .top)
-            .accessibilityLabel(L10n.t("Toggle line wrapping"))
 
             if file.isMarkdownFile {
+                Button {
+                    markdownEditorMode = markdownEditorMode.other
+                } label: {
+                    Image(systemName: markdownEditorMode.other.systemImage)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .macTooltip(markdownEditorMode.other.switchToTooltip, position: .top)
+                .accessibilityLabel(markdownEditorMode.other.switchToTooltip)
+            }
+
+            if file.isMarkdownFile, markdownEditorMode == .source {
                 Button {
                     isMarkdownPreviewEnabled.toggle()
                 } label: {

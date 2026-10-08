@@ -62,7 +62,7 @@ Qjiao.xcodeproj/      Xcode 工程
 scripts/              bun 脚本：dev / debug / release / changelog
 web/                  QPage 官网源（i18n、资源、下载清单）
 docs/                 官网构建产物
-Vendor/               libghostty、STTextView、TreeSitter
+Vendor/               libghostty、STTextView、TreeSitter、swift-markdown-engine（含本地补丁）
 icon/                 App 图标
 CHANGELOG.md          应用内更新说明的源
 RELEASING.md          本机发布流程
@@ -76,7 +76,7 @@ RELEASING.md          本机发布流程
 | --- | --- |
 | UI | SwiftUI + AppKit，递归分屏与项目侧栏 |
 | 终端 | Ghostty（`Vendor/libghostty-spm`），`TERM_PROGRAM=ghostty` |
-| 编辑器 | STTextView + Tree-sitter 语法高亮 |
+| 编辑器 | STTextView + Tree-sitter 语法高亮；Markdown 所见即所得（`Vendor/swift-markdown-engine`，含 `revealMarkers` 补丁） |
 | 浏览器 / Diff | WKWebView、Pierre Diffs |
 | 图片 | 内置 `oxipng` / `cwebp` / `cjxl` 等，Image Build 导出 |
 | 脚本 | bun + TypeScript 6（`scripts/`） |
@@ -163,6 +163,7 @@ RELEASING.md          本机发布流程
 - 全局文本搜索（内置 ripgrep，可降级 Swift 扫描）：大小写 / 全字 / 正则、包含排除、替换。
 - 源码编辑器：语法高亮、查找、底部状态栏与 oxfmt/prettier 格式化；编辑器可独立 Light/Dark 主题；复制/粘贴强制纯文本，语法高亮只叠加渲染色不污染文本存储，避免异常样式影响输入与复制。修复刚打开文件时语法高亮不显示（颜色已写入渲染属性但未触发视口重绘；query 异步编译期间不再把首屏标成已高亮）；打开文件时预编译 tree-sitter 查询，视口就绪后再铺色。
 - 文件自动保存（对齐 VS Code `files.autoSave`）：关闭 / 延迟后 / 编辑器失焦时 / 窗口失焦时；延迟默认 1000ms。设置 → 编辑器、文件菜单「Auto Save」，或编辑器底栏保存状态按钮（立即保存 / 勾选自动保存）。开启自动保存且已落盘时底栏显示「已自动保存」。
+- Markdown 所见即所得编辑器：基于 [swift-markdown-engine](https://github.com/nodes-app/swift-markdown-engine) 的原生 TextKit 2 编辑器；`.md` 默认进入所见即所得模式，标题、加粗、列表、任务、表格、引用、代码块（逐 token 语法高亮）就地渲染，可在底部状态栏一键切回「源码 + 预览」。**始终显示 Markdown 语法标记**（`##`、`` ` ``、`**`、`[..](..)`、`>`、```` ``` ````、列表符号、`---`、图片 `![](...)` 等），便于直接编辑源码——该行为通过对引擎打 `revealMarkers` 补丁实现（见 `Vendor/swift-markdown-engine/QJIAO_PATCHES.md`）。图片始终同时显示源码与图片本身。链接与普通文本一样点击即编辑，仅 ⌘/⌃ + 点击才跳转。标题字号经过压缩，与正文的落差更小。文件头 **Front Matter**（`---` … `---`）按 YAML / JSON 代码块高亮显示，不再被误判为标题与段落。复用自动保存、脏标记、外部变更冲突与滚动位置；本地图片按 Markdown 目录内联渲染，粘贴 / 拖入图片仍写入同级 `assets/`。默认模式可在 设置 → 编辑器 → Markdown editor 切换。
 - Markdown 预览：`.md` / `.markdown` 等文件可在底部状态栏切换左右分栏（源码 | 实时预览），分割比例可拖；预览跟随编辑器主题，支持标题、列表、任务、表格、代码块、图片与链接。左右滚动按源码块对齐（标题/段落/列表等），而不是跟像素位置硬同步。外部工具改写 Markdown 后编辑器与预览一并刷新。Markdown 默认自动换行（与其它源码的全局换行开关分开）。
 - Markdown 插图：⌘V 粘贴图片或把图片文件拖进编辑器，写入 Markdown 同级 `assets/` 并插入 `![](assets/…)`；来源已在 `./assets` 内则直接复用，不复制。
 - 二进制 Hex 编辑器：Hex/ASCII 编辑、通配查找替换、跳转偏移、外部变更冲突处理。

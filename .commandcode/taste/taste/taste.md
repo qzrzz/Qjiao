@@ -1,0 +1,9 @@
+# Taste
+- Writes requests in Simplified Chinese and expects responses, plans, and UI copy discussions in Chinese. Confidence: 0.7
+- Prefers Markdown source syntax to always remain visible in the WYSIWYG editor rather than being hidden when the caret is outside a node — `##` headings, inline-code backticks, link/quote syntax, list bullets, fences, and `---` should never collapse. Explicitly wants markers "永远都显示" so the source stays directly editable. Favors editing convenience over a clean rendered-only look. Confidence: 0.8
+- Wants image syntax (`![alt](url)` and `![[…]]`) to keep its source text visible rather than being replaced by the rendered image — source and image shown together, source not hidden. Confidence: 0.65
+- Prefers links in the editor to behave like ordinary editable text: a plain click places the caret and reveals/edits the link source, and only ⌘/⌃ + click follows the link (explicitly requested for the Markdown WYSIWYG editor). Confidence: 0.7
+- Prefers generous horizontal page margins in the editor (asked for 20pt, up from 10pt). Confidence: 0.5
+- Prefers a compact typographic hierarchy in the Markdown editor: wants heading font sizes dialed down so the size gap between headings and body text is small (e.g. H1 roughly 1.5× body and decreasing by level, rather than upstream's steeper 2×/1.5×/1.17× ladder). Confidence: 0.6
+- Wants YAML/JSON front matter (`---` … `---` at the top of a Markdown file) rendered as a syntax-highlighted code block — monospace font, code background, per-token colors, language chosen yaml vs json — rather than being misparsed as headings/paragraphs. Confidence: 0.65
+- Comfortable vendoring/forking a third-party package locally (following the repo's existing `Vendor/` fork pattern, as with STTextView) and documenting the patch, rather than settling for a lesser behavior when upstream has no configuration seam. Confidence: 0.5

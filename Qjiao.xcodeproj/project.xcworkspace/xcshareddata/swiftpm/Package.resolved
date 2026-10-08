@@ -1,5 +1,5 @@
 {
-  "originHash" : "e4412e6fdfe7dd89ae0c1b0898c67386e9df92d2576bef5d7b327ca371c0b697",
+  "originHash" : "ed5aeb4a8e163fa1fa465269443758bdd33eaa92de02c1d12741462677c953ec",
   "pins" : [
     {
       "identity" : "coretextswift",
@@ -17,6 +17,15 @@
       "state" : {
         "revision" : "ea09aa7faa3c1832716d1ccdb81dcb83bea89774",
         "version" : "1.4.0"
+      }
+    },
+    {
+      "identity" : "highlighterswift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/smittytone/HighlighterSwift",
+      "state" : {
+        "revision" : "fe7aae9c9b31d3b296fd3d2dd575e1a207bb29e0",
+        "version" : "3.1.0"
       }
     },
     {
@@ -79,6 +88,15 @@
       "location" : "https://github.com/krzyzanowskim/STTextView-Plugin-Neon",
       "state" : {
         "revision" : "5a30db4ce7908a5414e7b499e2379bdc49991cd1"
+      }
+    },
+    {
+      "identity" : "swiftmath",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mgriebling/SwiftMath",
+      "state" : {
+        "revision" : "fa8244ed032f4a1ade4cb0571bf87d2f1a9fd2d7",
+        "version" : "1.7.3"
       }
     },
     {

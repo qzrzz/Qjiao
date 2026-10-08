@@ -112,6 +112,8 @@
 				AA20000000000000000000A1 /* STTextView-Plugin-Neon */,
 				AA30000000000000000000A1 /* TreeSitterTSX */,
 				AA60000000000000000000A1 /* FuzzyMatch */,
+				AA70000000000000000000A1 /* MarkdownEngine */,
+				AA70000000000000000000A2 /* MarkdownEngineCodeBlocks */,
 			);
 			productName = kero;
 			productReference = FF3FDD73300B6A7400112486 /* Qjiao.app */;
@@ -149,6 +151,7 @@
 				AA10000000000000000000E0 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				AA20000000000000000000A0 /* XCRemoteSwiftPackageReference "STTextView-Plugin-Neon" */,
 				AA60000000000000000000A0 /* XCRemoteSwiftPackageReference "FuzzyMatch" */,
+				AA70000000000000000000A0 /* XCLocalSwiftPackageReference "Vendor/swift-markdown-engine" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FF3FDD74300B6A7400112486 /* Products */;
@@ -404,6 +407,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Vendor/TreeSitterTSX;
 		};
+		AA70000000000000000000A0 /* XCLocalSwiftPackageReference "Vendor/swift-markdown-engine" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/swift-markdown-engine;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -477,6 +484,14 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA60000000000000000000A0 /* XCRemoteSwiftPackageReference "FuzzyMatch" */;
 			productName = FuzzyMatch;
+		};
+		AA70000000000000000000A1 /* MarkdownEngine */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownEngine;
+		};
+		AA70000000000000000000A2 /* MarkdownEngineCodeBlocks */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownEngineCodeBlocks;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

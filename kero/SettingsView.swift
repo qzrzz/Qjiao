@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var selectedSection: SettingsSection = .general
     @State private var isHoveringVersion = false
     @State private var isHoveringWebsite = false
+    @AppStorage("markdownEditorMode") private var markdownEditorMode: MarkdownEditorMode = .wysiwyg
 
     /// Installed fixed-pitch families (bundled default first).
     private let families = TerminalFont.selectableFamilies()
@@ -673,6 +674,18 @@ struct SettingsView: View {
                 Group {
                 Toggle(L10n.t("Wrap lines to editor width"), isOn: $settings.wrapLines)
                 Toggle(L10n.t("Show editor status bar"), isOn: $settings.showEditorStatusBar)
+                settingWithDescription(
+                    L10n.t("Markdown editor"),
+                    L10n.t("Default editing mode for Markdown files.")
+                ) {
+                    Picker("", selection: $markdownEditorMode) {
+                        ForEach(MarkdownEditorMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
                 settingWithDescription(
                     L10n.t("Auto Save"),
                     L10n.t("Automatically save files with unsaved changes.")
