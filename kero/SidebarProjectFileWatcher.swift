@@ -16,6 +16,7 @@ import Foundation
 final class SidebarProjectFileWatcher {
     private static let rootFileNames = [
         "package.json",
+        "mygo.json",
         "build.gradle",
         "build.gradle.kts",
         "settings.gradle",

@@ -718,6 +718,7 @@ extension L10n {
         "Open Link in New Browser Pane": "Open Link in New Browser Pane",
         "Open Link in New Browser Tab": "Open Link in New Browser Tab",
         "Open Link in New Window": "Open Link in New Window",
+        "Open mygo.json": "mygo.json を開く",
         "Open package.json": "Open package.json",
         "Open Terminal": "Open Terminal",
         "Open to the Side": "横に開く",

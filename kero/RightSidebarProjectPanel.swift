@@ -232,7 +232,6 @@ struct ProjectPanel: View {
                                     rootPath: model.rootPath,
                                     manager: manager,
                                     isCollapsed: $packageInfoCollapsed,
-                                    openPackageJSON: openPackageJSON,
                                     onVersionUpdated: {
                                         model.refresh()
                                     }

@@ -754,6 +754,7 @@ extension L10n {
         "Open Link in New Browser Pane": "在新浏览器窗格中打开链接",
         "Open Link in New Browser Tab": "在新浏览器标签页中打开链接",
         "Open Link in New Window": "在新窗口中打开链接",
+        "Open mygo.json": "打开 mygo.json",
         "Open package.json": "打开 package.json",
         "Open Terminal": "打开终端",
         "Open to the Side": "在侧边打开",

@@ -8,6 +8,7 @@ import Foundation
 /** Project / Info 共用的脚本配置文件状态快照。 */
 struct SidebarScriptFileState: Equatable {
     let package: SidebarProbe.PackageFileState
+    let mygo: SidebarProbe.PackageFileState
     let gradle: GradleFileState
     let just: JustFileState
     let cargo: CargoFileState
@@ -16,6 +17,7 @@ struct SidebarScriptFileState: Equatable {
 
     var hasAnyProjectFile: Bool {
         package.exists
+            || mygo.exists
             || gradle.isGradleProject
             || just.hasJustfile
             || cargo.isCargoProject
@@ -41,6 +43,10 @@ enum SidebarPanelDataLoader {
     static func fileState(directory: String) -> SidebarScriptFileState {
         SidebarScriptFileState(
             package: SidebarProbe.packageFileState(directory: directory),
+            mygo: SidebarProbe.fileState(
+                directory: directory,
+                fileName: SidebarProbe.PackageManifest.mygoJSON.fileName
+            ),
             gradle: GradleScriptProvider.gradleFileState(directory: directory),
             just: JustScriptProvider.justFileState(directory: directory),
             cargo: CargoScriptProvider.cargoFileState(directory: directory),

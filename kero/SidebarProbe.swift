@@ -18,11 +18,20 @@ enum SidebarProbe {
         var id: String { name }
     }
 
-    /// `package.json` 中的包元数据信息（名称、版本、仓库地址）。
+    /// 项目根目录下的包清单文件。
+    enum PackageManifest: String, Equatable {
+        case packageJSON = "package.json"
+        case mygoJSON = "mygo.json"
+
+        nonisolated var fileName: String { rawValue }
+    }
+
+    /// 包清单中的元数据信息（名称、版本、仓库地址）。
     struct PackageInfo: Equatable {
         let name: String?
         let version: String?
         let repositoryUrl: String?
+        let manifest: PackageManifest
 
         /// 是否包含至少一项有效数据。
         nonisolated var hasContent: Bool {
@@ -129,10 +138,15 @@ enum SidebarProbe {
         Darwin.kill(pid, force ? SIGKILL : SIGTERM)
     }
 
-    // MARK: - package.json
+    // MARK: - Package manifests
 
     nonisolated static func packageFileState(directory: String) -> PackageFileState {
-        let url = URL(fileURLWithPath: directory).appendingPathComponent("package.json")
+        fileState(directory: directory, fileName: PackageManifest.packageJSON.fileName)
+    }
+
+    /// 读取指定清单文件的状态，用于判断是否需要重新解析。
+    nonisolated static func fileState(directory: String, fileName: String) -> PackageFileState {
+        let url = URL(fileURLWithPath: directory).appendingPathComponent(fileName)
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
             return PackageFileState(exists: false, modificationDate: nil, size: nil)
         }
@@ -262,11 +276,22 @@ enum SidebarProbe {
         return orderedKeys
     }
 
-    /// 读取 `<directory>/package.json` 的 `name`、`version` 与 `repository` 信息。
+    /// 读取项目根目录的包元信息。
+    /// `mygo.json` 是 MyGo 应用的名称与版本来源，存在有效内容时优先于 `package.json`。
     /// - Parameter directory: 目标目录路径
     /// - Returns: 解析到的 PackageInfo 结构体；若文件不存在或全空则返回 nil
     nonisolated static func loadPackageInfo(directory: String) -> PackageInfo? {
-        let url = URL(fileURLWithPath: directory).appendingPathComponent("package.json")
+        if let mygo = loadManifestInfo(directory: directory, manifest: .mygoJSON) {
+            return mygo
+        }
+        return loadManifestInfo(directory: directory, manifest: .packageJSON)
+    }
+
+    private nonisolated static func loadManifestInfo(
+        directory: String,
+        manifest: PackageManifest
+    ) -> PackageInfo? {
+        let url = URL(fileURLWithPath: directory).appendingPathComponent(manifest.fileName)
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data),
               let package = object as? [String: Any]
@@ -276,17 +301,20 @@ enum SidebarProbe {
         let version = package["version"] as? String
 
         var repoUrlString: String? = nil
-        if let repoString = package["repository"] as? String {
-            repoUrlString = sanitizeRepositoryUrl(repoString)
-        } else if let repoDict = package["repository"] as? [String: Any],
-                  let urlString = repoDict["url"] as? String {
-            repoUrlString = sanitizeRepositoryUrl(urlString)
+        if manifest == .packageJSON {
+            if let repoString = package["repository"] as? String {
+                repoUrlString = sanitizeRepositoryUrl(repoString)
+            } else if let repoDict = package["repository"] as? [String: Any],
+                      let urlString = repoDict["url"] as? String {
+                repoUrlString = sanitizeRepositoryUrl(urlString)
+            }
         }
 
         let info = PackageInfo(
             name: name?.trimmingCharacters(in: .whitespacesAndNewlines),
             version: version?.trimmingCharacters(in: .whitespacesAndNewlines),
-            repositoryUrl: repoUrlString?.trimmingCharacters(in: .whitespacesAndNewlines)
+            repositoryUrl: repoUrlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+            manifest: manifest
         )
         return info.hasContent ? info : nil
     }
@@ -469,14 +497,19 @@ enum SidebarProbe {
         return SemVerComponents(raw: versionString, prefix: prefix, numbers: parts)
     }
 
-    /// 修改指定目录 package.json 中的 version 字段，保留原 JSON 的排版与缩进
+    /// 修改指定目录包清单中的 version 字段，保留原 JSON 的排版与缩进
     /// - Parameters:
     ///   - directory: 项目根目录
+    ///   - manifest: 要写入的清单文件（package.json / mygo.json）
     ///   - newVersion: 目标新版本号
     /// - Returns: 是否更新成功
     @discardableResult
-    nonisolated static func updatePackageVersion(directory: String, newVersion: String) -> Bool {
-        let url = URL(fileURLWithPath: directory).appendingPathComponent("package.json")
+    nonisolated static func updatePackageVersion(
+        directory: String,
+        manifest: PackageManifest = .packageJSON,
+        newVersion: String
+    ) -> Bool {
+        let url = URL(fileURLWithPath: directory).appendingPathComponent(manifest.fileName)
         guard let data = try? Data(contentsOf: url),
               var content = String(data: data, encoding: .utf8) else { return false }
 

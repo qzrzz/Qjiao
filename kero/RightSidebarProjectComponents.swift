@@ -275,13 +275,12 @@ private final class MenuActionTarget: NSObject {
     }
 }
 
-/// package.json 信息展示分组（包含 name、version、repository 链接与 SemVer 快速递增/Git Tag）
+/// 包清单信息展示分组（package.json / mygo.json 的 name、version、repository 链接与 SemVer 快速递增/Git Tag）
 struct PackageInfoSection: View {
     let info: SidebarProbe.PackageInfo
     let rootPath: String
     @ObservedObject var manager: TerminalManager
     @Binding var isCollapsed: Bool
-    let openPackageJSON: () -> Void
     let onVersionUpdated: () -> Void
 
     @State private var isHoveringCopyName = false
@@ -296,6 +295,11 @@ struct PackageInfoSection: View {
     @State private var versionBaseline: String = ""
     @State private var isVersionDirty: Bool = false
     @State private var isUpdatingVersion: Bool = false
+
+    private func openManifest() {
+        guard !rootPath.isEmpty else { return }
+        manager.openFile((rootPath as NSString).appendingPathComponent(info.manifest.fileName))
+    }
 
     private var currentDisplayVersion: String {
         if !versionDraft.isEmpty {
@@ -325,7 +329,11 @@ struct PackageInfoSection: View {
         let cleanNew = (newVersion.hasPrefix("v") || newVersion.hasPrefix("V")) ? String(newVersion.dropFirst()) : newVersion
         isUpdatingVersion = true
         versionDraft = cleanNew
-        if SidebarProbe.updatePackageVersion(directory: rootPath, newVersion: cleanNew) {
+        if SidebarProbe.updatePackageVersion(
+            directory: rootPath,
+            manifest: info.manifest,
+            newVersion: cleanNew
+        ) {
             versionBaseline = cleanNew
             isVersionDirty = false
             onVersionUpdated()
@@ -369,37 +377,56 @@ struct PackageInfoSection: View {
         AnyView(
             Button {
                 let menu = NSMenu()
+                var targets: [MenuActionTarget] = []
 
-                let itemOpen = NSMenuItem(title: L10n.t("Open package.json"), action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
-                let tOpen = MenuActionTarget { openPackageJSON() }
+                let openTitle = info.manifest == .mygoJSON
+                    ? L10n.t("Open mygo.json")
+                    : L10n.t("Open package.json")
+                let itemOpen = NSMenuItem(title: openTitle, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                let tOpen = MenuActionTarget { openManifest() }
                 itemOpen.target = tOpen
                 menu.addItem(itemOpen)
+                targets.append(tOpen)
 
                 menu.addItem(NSMenuItem.separator())
 
-                let itemInstall = NSMenuItem(title: pmInfo.installCommand, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
-                let tInstall = MenuActionTarget { manager.runRawCommand(pmInfo.installCommand, title: pmInfo.installCommand, directory: rootPath) }
-                itemInstall.target = tInstall
-                menu.addItem(itemInstall)
+                if info.manifest == .mygoJSON {
+                    for command in ["go tool mygo dev", "go tool mygo build", "go tool mygo doctor"] {
+                        let item = NSMenuItem(title: command, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                        let target = MenuActionTarget {
+                            manager.runRawCommand(command, title: command, directory: rootPath)
+                        }
+                        item.target = target
+                        menu.addItem(item)
+                        targets.append(target)
+                    }
+                } else {
+                    let itemInstall = NSMenuItem(title: pmInfo.installCommand, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                    let tInstall = MenuActionTarget { manager.runRawCommand(pmInfo.installCommand, title: pmInfo.installCommand, directory: rootPath) }
+                    itemInstall.target = tInstall
+                    menu.addItem(itemInstall)
 
-                let itemPublish = NSMenuItem(title: pmInfo.publishCommand, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
-                let tPublish = MenuActionTarget { manager.runRawCommand(pmInfo.publishCommand, title: pmInfo.publishCommand, directory: rootPath) }
-                itemPublish.target = tPublish
-                menu.addItem(itemPublish)
+                    let itemPublish = NSMenuItem(title: pmInfo.publishCommand, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                    let tPublish = MenuActionTarget { manager.runRawCommand(pmInfo.publishCommand, title: pmInfo.publishCommand, directory: rootPath) }
+                    itemPublish.target = tPublish
+                    menu.addItem(itemPublish)
 
-                let itemUpdate = NSMenuItem(title: pmInfo.updateCommand, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
-                let tUpdate = MenuActionTarget { manager.runRawCommand(pmInfo.updateCommand, title: pmInfo.updateCommand, directory: rootPath) }
-                itemUpdate.target = tUpdate
-                menu.addItem(itemUpdate)
+                    let itemUpdate = NSMenuItem(title: pmInfo.updateCommand, action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                    let tUpdate = MenuActionTarget { manager.runRawCommand(pmInfo.updateCommand, title: pmInfo.updateCommand, directory: rootPath) }
+                    itemUpdate.target = tUpdate
+                    menu.addItem(itemUpdate)
 
-                menu.addItem(NSMenuItem.separator())
+                    menu.addItem(NSMenuItem.separator())
 
-                let itemTaze = NSMenuItem(title: L10n.t("Update  Deps (npx taze)"), action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
-                let tTaze = MenuActionTarget { manager.runRawCommand("npx taze", title: L10n.t("npx taze"), directory: rootPath) }
-                itemTaze.target = tTaze
-                menu.addItem(itemTaze)
+                    let itemTaze = NSMenuItem(title: L10n.t("Update  Deps (npx taze)"), action: #selector(MenuActionTarget.performAction), keyEquivalent: "")
+                    let tTaze = MenuActionTarget { manager.runRawCommand("npx taze", title: L10n.t("npx taze"), directory: rootPath) }
+                    itemTaze.target = tTaze
+                    menu.addItem(itemTaze)
 
-                objc_setAssociatedObject(menu, "targets", [tOpen, tInstall, tPublish, tUpdate, tTaze], .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                    targets.append(contentsOf: [tInstall, tPublish, tUpdate, tTaze])
+                }
+
+                objc_setAssociatedObject(menu, "targets", targets, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
                 if let event = NSApp.currentEvent, let window = event.window, let contentView = window.contentView {
                     NSMenu.popUpContextMenu(menu, with: event, for: contentView)
@@ -427,7 +454,13 @@ struct PackageInfoSection: View {
         if !isCollapsed {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 4) {
-                    if let source = TerminalAppIconCatalog.shared.source(forProcessNames: [pmInfo.name, "npm"]) {
+                    if info.manifest == .mygoJSON {
+                        if let source = TerminalAppIconCatalog.shared.source(forProcessNames: ["go", "mygo"]) {
+                            TerminalAppIconView(source: source, size: 14, isSelected: false)
+                        } else {
+                            ProjectPresetIconImage(preset: .bundled("bxl-go-lang.svg"), size: 14)
+                        }
+                    } else if let source = TerminalAppIconCatalog.shared.source(forProcessNames: [pmInfo.name, "npm"]) {
                         TerminalAppIconView(source: source, size: 14, isSelected: false)
                     } else {
                         ProjectPresetIconImage(preset: .bundled("bxl-npm.svg"), size: 14)
@@ -458,7 +491,7 @@ struct PackageInfoSection: View {
                         .onHover { isHoveringCopyName = $0 }
                         .help("Copy package name (\(name))")
                     } else {
-                        Text(L10n.t("package.json"))
+                        Text(info.manifest.fileName)
                             .font(SidebarTypography.secondary(.regular))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
