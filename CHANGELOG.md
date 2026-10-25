@@ -11,6 +11,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.73]
+
+### Changed
+
+- Cut the remaining Time Profiler hot spots: the terminal and file-tree font pickers cache their family lists until the system font set changes (the Settings scene content is rebuilt on every app body pass), the theme menu's light/dark lists are computed once and Ghostty themes are looked up through a name index (vendored `libghostty-spm` patch), sidebar context-menu theme previews are cached per palette, the file tree caches its context-menu clipboard check by pasteboard change count, and display-cycle hit testing uses plain counters on the main thread.
+- The Markdown WYSIWYG editor only restyles the document and re-highlights its code blocks when light/dark actually changes (vendored `swift-markdown-engine` patch), so moving the view into a window on a tab or project switch no longer blocks the main thread.
+
+### Fixed
+
+- Fix Qjiao getting slower the longer it runs: the window root no longer builds its `TerminalManager` through a `@StateObject` initializer that SwiftUI re-evaluated repeatedly — each evaluation restored every project and rewrote its config, and the extra managers were retained forever and included in every auto save; a lightweight holder now creates it once when the window actually appears.
+
 ## [1.1.72]
 
 ### Added
