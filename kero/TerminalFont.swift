@@ -112,6 +112,10 @@ enum TerminalFont {
     /// Fixed-pitch families available for the font picker, bundled default
     /// first. The symbols-only fallback font is not a usable primary font.
     static func selectableFamilies() -> [String] {
+        FontFamilyListCache.value(for: "terminal") { computeSelectableFamilies() }
+    }
+
+    private static func computeSelectableFamilies() -> [String] {
         let families = NSFontManager.shared.availableFontFamilies
             .filter { family in
                 guard !family.hasPrefix("Symbols Nerd Font"),
@@ -122,5 +126,34 @@ enum TerminalFont {
             }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         return [bundledFamily] + families
+    }
+}
+
+/// 字体族列表缓存。逐族创建 NSFont 判断等宽要十几毫秒，而 `SettingsView`
+/// 作为 Scene 内容会在每次 App body 重算时被重新构造（即使设置窗未打开），
+/// 因此缓存到系统字体集变化（安装 / 卸载字体）为止。
+enum FontFamilyListCache {
+    private static var lists: [String: [String]] = [:]
+    private static var fontSetObserver: NSObjectProtocol?
+
+    static func value(for key: String, compute: () -> [String]) -> [String] {
+        if let cached = lists[key] { return cached }
+        observeFontSetChangesIfNeeded()
+        let list = compute()
+        lists[key] = list
+        return list
+    }
+
+    private static func observeFontSetChangesIfNeeded() {
+        guard fontSetObserver == nil else { return }
+        fontSetObserver = NotificationCenter.default.addObserver(
+            forName: NSFont.fontSetChangedNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                lists.removeAll()
+            }
+        }
     }
 }

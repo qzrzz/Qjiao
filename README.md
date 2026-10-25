@@ -40,7 +40,7 @@
 ```sh
 bun install
 bun run dev      # Debug 编译并在前台运行
-bun run debug    # Debug 单窗口（可加 --record / --gui / --heap）
+bun run debug    # Debug 性能录制（可加 --gui / --heap）
 bun run web:dev  # 官网本地预览
 ```
 
@@ -49,7 +49,7 @@ bun run web:dev  # 官网本地预览
 | 脚本 | 作用 |
 | --- | --- |
 | `bun run dev` | 编译 Debug 并前台跑二进制，输出日志与崩溃栈 |
-| `bun run debug` | 单进程、单窗口测试；`--record` Time Profiler，`--gui` Instruments，`--heap` 堆分析 |
+| `bun run debug` | 默认使用 Time Profiler 录制；`--gui` Instruments，`--heap` 堆分析 |
 | `bun run version+` | 升版本号，并由 AI 写入 `CHANGELOG.md` |
 | `bun run release` | 签名、公证、打包、发布 |
 | `bun run web:build` | 用 QPage 生成静态官网到 `docs/` |
@@ -119,6 +119,8 @@ RELEASING.md          本机发布流程
 - 长时间运行后界面卡顿：display cycle 防护不再每次窗口布局都符号化调用栈，并把同一轮刷帧的布局请求按窗口合并；文件树拖拽结束的全局鼠标监听只注册一次。
 - 切换项目与日常操作提速：项目切换只在配色覆盖真正变化时广播主题刷新，并且只重配当前可见终端，后台终端回到前台时再按外观代次补齐；终端标题去重并节流（Agent 转圈动画不再让整窗重算），工作目录 / 任务状态未变不发布，浏览器加载进度不再冒泡到整窗；自动保存跳过未变化的项目配置，会话快照与终端历史内容不变不写，写盘移到后台队列，退出时等待落盘。
 - 切换项目进一步提速：`libghostty-spm` 本地补丁——终端隐藏时不再立即同步绘制 3 帧压缩交换链，改为隐藏 5s 后逐个错开压缩，短时间内切回直接复用全尺寸交换链、不再同步重绘；停车区只对新停入的终端调用遮挡接口；shell PID 与「是否嵌在 PTY 代理下」的进程探测结果按 1s 复用（Tab 图标每 0.3s 轮询不再每次沿父进程链读可执行路径）；右侧栏在切项目时连带触发的多次同步合并为内容区切换后的一次。
+- 修复「越用越卡」：窗口根视图原用 `@StateObject var manager = TerminalManager()`，实测 SwiftUI 在运行期间反复求值该初始值，每次都完整构造并恢复全部项目、写配置，且被注册表永久持有、参与每次自动保存；改为轻量 holder，在窗口真正上屏（onAppear）时才创建 manager。
+- 按 Time Profiler 实测热点优化：设置窗作为 Scene 内容会随 App body 重算被反复构造，终端 / 文件树字体族枚举改为缓存（系统字体集变化时失效）；侧栏右键菜单的主题预览图按配色缓存、主题目录亮暗名单只算一次、Ghostty 主题按名字典索引（`libghostty-spm` 本地补丁）；Markdown 所见即所得编辑器（`swift-markdown-engine` 本地补丁）仅在亮暗真正变化时才整篇重排并重新高亮代码块，切换标签 / 项目时挂入窗口不再触发；文件树行菜单读剪贴板按 changeCount 缓存；display cycle 防护的 hitTest 计数在主线程改用普通计数器。`bun run debug --record` 改为直接启动 Debug 二进制再附加录制，避免 LaunchServices 按 bundle id 打开已安装的正式版。
 - 内容 Tabs 拖拽排序采用 Chrome 风格水平浮动预览：源 Tab 仅跟随鼠标横向移动，周围 Tab 以短响应弹簧动画让位，按相邻 Tab 中线触发换序，拖拽时屏蔽其他 Tab 的 hover 状态，标题、图标与选中底色保持同步；关闭按钮仅在当前 Tab hover 时显示，分栏标识在 Tab 右侧水平排列、垂直居中并保留 2pt 右边距，关闭按钮出现时快速过渡；拖拽期间锁定每个 Tab 的宽度，结束后再按最终顺序重算，避免宽度变化导致抖动；浮层带材质模糊底板，避免内容透底。非当前 Tab 拖过 Tabs 底部 20pt 后进入分屏拖拽模式，浮层改为二维跟随鼠标。
 - 终端默认点击移动光标、OSC 133 语义提示符；闲时标签标题可配置；可开关 Option-as-Alt、Vim 帮助条、字体加粗。
 - 主内容区当前 Tab 使用 macOS 27 Liquid Glass 选中态，并带有点击/悬停动态反馈与更大圆角；非当前 Tab 保持轻量平面样式。
@@ -213,7 +215,7 @@ RELEASING.md          本机发布流程
 - 产品官网 `web/` 使用 QPage 生成静态着陆页，支持简体中文、English、日本語、한국어、Tiếng Việt、Português、Español、Deutsch、Français、Русский；移动端通过 `web/style.css` 收回桌面固定标题/页宽/视频尺寸，避免窄屏撑破。
 - `version+` 脚本由 `scripts/update-changelog.ts` 调用 pi AI 生成版本更新记录并写入 CHANGELOG.md（与 pbxproj 中的 MARKETING_VERSION 严格一致）。
 - 安装包清单由 QRls 写入 R2 的 `download.json`（版本、构建号、DMG/ZIP 直链、大小与 SHA-256）；官网通过 `downloadBase` 读取，不再由发布脚本写回仓库。
-- `debug` 本机测试构建（`npm run debug` / `bun run debug`）：编译 Debug 版并以单进程、单窗口启动；`--record` 用 xctrace Time Profiler 追踪（启动 `.app`，避免内部二进制与 Launch Services 双开），`--gui` 打开匹配版本的 Instruments，`--heap` 启用 `MallocStackLogging` 做堆内存/泄漏分析。
+- `debug` 本机测试构建（`npm run debug` / `bun run debug`）：编译 Debug 版并默认用 xctrace Time Profiler 录制，按 Ctrl-C 结束并保存 `.trace`（启动 `.app`，避免内部二进制与 Launch Services 双开）；`--gui` 打开匹配版本的 Instruments，`--heap` 启用 `MallocStackLogging` 做堆内存/泄漏分析。
 
 ## 上游移植记录
 

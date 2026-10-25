@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
-    "debug": "bun run scripts/debug.ts",
+    "debug": "bun run scripts/debug.ts --record",
     "version+": "bun run scripts/bump-version.ts && bun run scripts/update-changelog.ts",
     "release": "bun run scripts/release.ts",
     "appcast": "bun run scripts/generate-appcast.ts",

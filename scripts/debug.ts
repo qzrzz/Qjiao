@@ -4,8 +4,8 @@
  * @description 使用 Xcode 工具链编译 Debug 版本 Qjiao，默认单窗口启动供测试；可选 Time Profiler、Instruments GUI 及堆内存分析
  *
  * 使用方式：
- *   bun run debug              # 默认：编译并以前台单进程启动 Debug 版（一个窗口）
- *   bun run debug -- --record  # 使用 xctrace 录制 Time Profiler（启动 .app，Ctrl-C 结束并保存 .trace）
+ *   bun run debug              # 默认：编译并使用 Time Profiler 录制 Debug 版
+ *   bun run debug -- --record  # 启动 Debug 二进制并用 xctrace 附加录制 Time Profiler（Ctrl-C 结束并保存 .trace）
  *   bun run debug -- --gui     # 打开匹配版本的 Instruments，可手动选择分析模板
  *   bun run debug -- --heap    # 启用 MallocStackLogging 启动应用，支持使用 heap / leaks / malloc_history 分析内存
  */
@@ -304,24 +304,41 @@ async function launchForTesting(binaryPath: string): Promise<void> {
 
 /**
  * 使用 xctrace 录制 Time Profiler 跟踪数据
- * 必须启动 .app 而不是内部 Mach-O，否则 Launch Services 会再开一份同 bundle id 的实例
- * @param {string} appPath Qjiao.app 绝对路径
+ * 不用 `xctrace --launch -- Qjiao.app`：它经 LaunchServices 按 bundle id 打开应用，
+ * Debug 与 /Applications 里的正式版共用 bundle id，实际被录制的会是已安装的正式版。
+ * 这里直接启动 Debug 二进制，再按 PID 附加录制，确保剖析的就是刚编译的版本。
+ * @param {string} binaryPath Debug 可执行文件绝对路径
  * @returns {Promise<void>}
  */
-async function recordTimeProfiler(appPath: string): Promise<void> {
-  console.log(chalk.bold.cyan("▸ 启动 xctrace Time Profiler 录制…"));
+async function recordTimeProfiler(binaryPath: string): Promise<void> {
+  console.log(chalk.bold.cyan("▸ 启动 Debug 应用并附加 xctrace Time Profiler 录制…"));
   console.log(chalk.dim("  在 App 中操作复现性能场景后，按 Ctrl-C 结束录制，结果将自动生成 .trace 文件。"));
-  console.log(chalk.dim(`  App 包路径: ${appPath}`));
-  await runCommand([
-    "xcrun",
-    "xctrace",
-    "record",
-    "--template",
-    "Time Profiler",
-    "--launch",
-    "--",
-    appPath,
-  ]);
+  console.log(chalk.dim(`  可执行文件: ${binaryPath}`));
+  const app = Bun.spawn([binaryPath], {
+    cwd: ROOT_DIR,
+    env: process.env,
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  console.log(chalk.bold.green(`  PID: ${app.pid}`));
+  // Ctrl-C 由 xctrace 负责停止并保存；脚本自身忽略，等它写完 .trace 再退出。
+  process.on("SIGINT", () => {});
+  try {
+    await runCommand([
+      "xcrun",
+      "xctrace",
+      "record",
+      "--template",
+      "Time Profiler",
+      "--attach",
+      String(app.pid),
+    ]);
+  } finally {
+    if (app.exitCode === null) {
+      app.kill();
+    }
+  }
 }
 
 /**
@@ -395,7 +412,7 @@ async function main(): Promise<void> {
 
   if (recordMode) {
     await terminateExistingDebugApp(binaryPath);
-    await recordTimeProfiler(appPath);
+    await recordTimeProfiler(binaryPath);
     return;
   }
 

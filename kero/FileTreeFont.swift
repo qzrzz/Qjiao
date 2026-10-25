@@ -19,6 +19,10 @@ enum FileTreeFont {
 
     /// 设置页可选的字体族：内置 Inter 置顶，其余为系统已安装族。
     static func selectableFamilies() -> [String] {
+        FontFamilyListCache.value(for: "files") { computeSelectableFamilies() }
+    }
+
+    private static func computeSelectableFamilies() -> [String] {
         let installed = NSFontManager.shared.availableFontFamilies
             .filter { family in
                 !family.hasPrefix(".")

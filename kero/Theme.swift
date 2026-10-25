@@ -681,11 +681,15 @@ enum ThemeMenuCatalog {
         dark ? darkWarm : lightWarm
     }
 
+    /// 内置目录固定不变，亮 / 暗两份名单只需按背景亮度筛一次。
+    private static let allDark = [Theme.defaultDarkThemeName]
+        + GhosttyThemeCatalog.allThemes.filter(\.isDark).map(\.name)
+    private static let allLight = [Theme.defaultLightThemeName]
+        + GhosttyThemeCatalog.allThemes.filter { !$0.isDark }.map(\.name)
+
     /// Ghostty 内置 + Default；不含自定义（自定义单独成组）。
     static func all(dark: Bool) -> [String] {
-        let defaultName = dark ? Theme.defaultDarkThemeName : Theme.defaultLightThemeName
-        return [defaultName]
-            + GhosttyThemeCatalog.allThemes.filter { $0.isDark == dark }.map(\.name)
+        dark ? allDark : allLight
     }
 
     /// 完整列表（自定义在前），用于「全部…」子菜单。
@@ -733,9 +737,28 @@ nonisolated extension GhosttyThemeDefinition {
 
 @MainActor
 enum ThemePreviewImageRenderer {
+    private struct CacheKey: Hashable {
+        let themes: [GhosttyThemeDefinition]
+        let scale: CGFloat
+    }
+
+    /// 侧栏每行的右键菜单会随行视图重算整体重建（每侧数百个主题项），
+    /// 预览图按配色缓存，避免每次都重新位图绘制。
+    private static var cache: [CacheKey: NSImage] = [:]
+    private static let cacheLimit = 2048
+
     static func image(for themes: [GhosttyThemeDefinition]) -> NSImage {
-        let imageSize = NSSize(width: 32, height: 18)
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let key = CacheKey(themes: themes, scale: scale)
+        if let cached = cache[key] { return cached }
+        let image = renderImage(for: themes, scale: scale)
+        if cache.count >= cacheLimit { cache.removeAll(keepingCapacity: true) }
+        cache[key] = image
+        return image
+    }
+
+    private static func renderImage(for themes: [GhosttyThemeDefinition], scale: CGFloat) -> NSImage {
+        let imageSize = NSSize(width: 32, height: 18)
         let pixelSize = NSSize(width: imageSize.width * scale, height: imageSize.height * scale)
 
         guard let bitmapRep = NSBitmapImageRep(

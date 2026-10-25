@@ -76,8 +76,23 @@ final class NativeTextView: NSTextView {
     /// Persisted horizontal scroll offset per wide table; survives restyles.
     var tableHorizontalScrollOffsets: [Int: CGFloat] = [:]
 
+    /// Light/dark last forwarded to the highlighter. Moving the view into a
+    /// window (tab / project switch) also fires `viewDidChangeEffectiveAppearance`;
+    /// restyling the whole document and re-highlighting every code block when
+    /// light/dark did not actually change blocks the main thread.
+    private var forwardedAppearanceIsDark: Bool?
+
+    private static func isDark(_ appearance: NSAppearance) -> Bool {
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        let isDark = Self.isDark(effectiveAppearance)
+        // Initial styling happens before the view joins a window, i.e. under the app appearance.
+        let previous = forwardedAppearanceIsDark ?? Self.isDark(NSApp.effectiveAppearance)
+        forwardedAppearanceIsDark = isDark
+        guard isDark != previous else { return }
         // Forward appearance changes to the embedder's highlighter via its registered notification.
         if let name = configuration.services.syntaxHighlighter.appearanceDidChangeNotification {
             NotificationCenter.default.post(name: name, object: self)

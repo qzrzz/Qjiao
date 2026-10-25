@@ -97,12 +97,19 @@ private enum DisplayCycleProbe {
         )
     }()
 
+    /// hitTest 沿视图树逐层递归，每层都会 push/pop 一次；鼠标移动时整棵树都要走一遍。
+    /// 主线程（绝大多数情况）用普通计数器，免去每层两次 threadDictionary 读写与装箱。
+    nonisolated(unsafe) private static var mainHitTestDepth = 0
+    nonisolated(unsafe) private static var mainDisplayDepth = 0
+
     static var isInsideHitTest: Bool {
-        (Thread.current.threadDictionary[hitTestDepthKey] as? Int ?? 0) > 0
+        if pthread_main_np() != 0 { return mainHitTestDepth > 0 }
+        return (Thread.current.threadDictionary[hitTestDepthKey] as? Int ?? 0) > 0
     }
 
     static var isInsideDisplayIfNeeded: Bool {
-        (Thread.current.threadDictionary[displayDepthKey] as? Int ?? 0) > 0
+        if pthread_main_np() != 0 { return mainDisplayDepth > 0 }
+        return (Thread.current.threadDictionary[displayDepthKey] as? Int ?? 0) > 0
     }
 
     /// AppKit 正在冲刷当前 display cycle（约束 / 布局 / 绘制观察者未清空）。
@@ -134,18 +141,22 @@ private enum DisplayCycleProbe {
     }
 
     static func pushHitTest() {
+        if pthread_main_np() != 0 { mainHitTestDepth += 1; return }
         adjustDepth(key: hitTestDepthKey, delta: 1)
     }
 
     static func popHitTest() {
+        if pthread_main_np() != 0 { mainHitTestDepth = max(0, mainHitTestDepth - 1); return }
         adjustDepth(key: hitTestDepthKey, delta: -1)
     }
 
     static func pushDisplayIfNeeded() {
+        if pthread_main_np() != 0 { mainDisplayDepth += 1; return }
         adjustDepth(key: displayDepthKey, delta: 1)
     }
 
     static func popDisplayIfNeeded() {
+        if pthread_main_np() != 0 { mainDisplayDepth = max(0, mainDisplayDepth - 1); return }
         adjustDepth(key: displayDepthKey, delta: -1)
     }
 

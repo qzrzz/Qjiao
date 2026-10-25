@@ -902,9 +902,19 @@ final class FileTreeModel: nonisolated ObservableObject {
     }
 
     /// 剪贴板是否含可粘贴的文件/目录 URL（含从 Finder 复制的项）。
+    /// 文件树每一行的右键菜单都会在行视图重算时读取它；读剪贴板要跨进程访问
+    /// pasteboard 服务，按 `changeCount` 缓存，剪贴板内容不变时不再重复读取。
     static var canPasteFromPasteboard: Bool {
-        !readFileURLsFromPasteboard().isEmpty
+        let changeCount = NSPasteboard.general.changeCount
+        if let cached = pasteboardFileCheck, cached.changeCount == changeCount {
+            return cached.hasFiles
+        }
+        let hasFiles = !readFileURLsFromPasteboard().isEmpty
+        pasteboardFileCheck = (changeCount, hasFiles)
+        return hasFiles
     }
+
+    private static var pasteboardFileCheck: (changeCount: Int, hasFiles: Bool)?
 
     /// 将选中路径写入系统剪贴板（`fileURL`，与 Finder 互通）。
     func copyToPasteboard(paths: [String]) {

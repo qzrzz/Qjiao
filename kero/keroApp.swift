@@ -97,7 +97,42 @@ private struct SettingsCommands: Commands {
 /// claims the next unclaimed window snapshot; the first window to appear
 /// reopens windows for any snapshots left over.
 private struct WindowRootView: View {
-    @StateObject private var manager = TerminalManager()
+    @StateObject private var holder = WindowManagerHolder()
+
+    var body: some View {
+        if let manager = holder.manager {
+            WindowContentView(manager: manager)
+        } else {
+            // 只有真正上屏的窗口才会走到 onAppear；SwiftUI 额外求值出来的临时视图图
+            // 不会创建 TerminalManager（见 WindowManagerHolder）。
+            Color(nsColor: .windowBackgroundColor)
+                .ignoresSafeArea()
+                .onAppear { holder.createManagerIfNeeded() }
+        }
+    }
+}
+
+/// 每个窗口的 TerminalManager 持有者。
+///
+/// 以前用 `@StateObject private var manager = TerminalManager()`：Time Profiler 显示
+/// SwiftUI 会在整个运行期间反复求值这个初始值闭包（不止一次上屏），每次都完整构造
+/// TerminalManager——恢复全部项目、逐个写配置——并把它追加进 `TerminalManager.registry`
+/// 永久强引用，之后每次自动保存都要为这些从未上屏的 manager 做快照。
+/// holder 本身构造无成本，manager 推迟到窗口真正出现时才创建。
+@MainActor
+private final class WindowManagerHolder: ObservableObject {
+    @Published private(set) var manager: TerminalManager?
+
+    func createManagerIfNeeded() {
+        guard manager == nil else { return }
+        manager = TerminalManager()
+    }
+}
+
+private struct WindowContentView: View {
+    /// 只转交给 ContentView（它自己观察 manager）；这里不观察，manager 每次变化
+    /// 不必连带重算窗口根部的修饰器。
+    let manager: TerminalManager
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.openWindow) private var openWindow
