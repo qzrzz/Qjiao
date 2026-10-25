@@ -302,19 +302,30 @@ enum Theme {
     /// - Parameters:
     ///   - projectTheme: 项目配置；`nil` 或 `followsGlobal` 时清空覆盖。
     ///   - projectName: 用于设置页提示的项目显示名。
+    /// - Returns: 覆盖选择或提示名是否真的变化；未变化时不广播 `changes`，
+    ///   避免同主题项目间切换也让所有观察主题的视图整体重算。
     @MainActor
+    @discardableResult
     static func reloadProjectSelection(
         _ projectTheme: ProjectTheme?,
         projectName: String? = nil
-    ) {
+    ) -> Bool {
         let theme = projectTheme ?? .global
+        let overrideName = theme.followsGlobal ? nil : projectName
+        let previous = projectSelection.withLock { $0 }
+        let previousName = projectOverrideName.withLock { $0 }
+        guard previous.light != theme.light
+            || previous.dark != theme.dark
+            || previousName != overrideName
+        else { return false }
         projectSelection.withLock {
             $0 = (light: theme.light, dark: theme.dark)
         }
         projectOverrideName.withLock {
-            $0 = theme.followsGlobal ? nil : projectName
+            $0 = overrideName
         }
         changes.objectWillChange.send()
+        return true
     }
 
     /// 当前是否存在项目级配色覆盖（供设置页提示）。

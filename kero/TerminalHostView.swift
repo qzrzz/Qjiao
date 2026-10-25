@@ -80,6 +80,8 @@ struct TerminalHostView: NSViewRepresentable {
         let terminal = session.terminalView
         // 从后台停车区回到前台时恢复 GPU surface 合成。
         terminal.setSurfaceVisible(true)
+        // 后台期间错过的主题 / 字体变化在回到前台时补齐。
+        session.applyThemeIfStale()
         terminal.onBecomeFirstResponder = onFocused
         terminal.splitTarget.onSplit = onSplit
         terminal.splitTarget.onNewBrowserTab = onNewBrowserTab
@@ -158,9 +160,11 @@ final class TerminalParkingContainerView: NSView {
 
         for session in activeSessions {
             let terminal = session.terminalView
+            // 已停在这里的终端早已隐藏；ContentView 每次刷新都会走到这里，
+            // 不再对每个后台终端重复调用 Ghostty 的遮挡接口。
+            guard terminal.superview !== self else { continue }
             // 后台会话仍保持挂载和事件处理，但不再持有持续合成的可见 surface。
             terminal.setSurfaceVisible(false)
-            guard terminal.superview !== self else { continue }
             let parkedSize = terminal.frame.size
             if terminal.window?.firstResponder === terminal {
                 terminal.window?.makeFirstResponder(nil)

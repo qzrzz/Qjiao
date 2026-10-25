@@ -53,6 +53,9 @@ enum ProjectConfigStore {
             .appendingPathComponent("projects", isDirectory: true)
     }
 
+    /// 本进程最近一次写入各项目 config.json 的内容，用于跳过未变化的保存。
+    private static var lastWrittenConfigs: [UUID: Data] = [:]
+
     /// 旧版扁平图标目录（仅迁移 / 清理用）。
     static var legacyIconsDirectoryURL: URL {
         projectsRootURL.appendingPathComponent("icons", isDirectory: true)
@@ -121,14 +124,17 @@ enum ProjectConfigStore {
     /// 将项目配置原子写入 `projects/{id}/config.json`。
     static func save(_ config: ProjectConfig, for id: UUID) {
         do {
+            let data = try JSONEncoder().encode(config)
+            // 自动保存每次都会为全部项目调用；内容未变时跳过目录创建、迁移检查与写盘。
+            guard lastWrittenConfigs[id] != data else { return }
             let dir = projectDirectoryURL(for: id)
             try FileManager.default.createDirectory(
                 at: dir, withIntermediateDirectories: true
             )
             // 若仍有旧布局数据，先迁入本目录再写，避免丢旁路文件。
             migrateIfNeeded(for: id)
-            let data = try JSONEncoder().encode(config)
             try data.write(to: configFileURL(for: id), options: .atomic)
+            lastWrittenConfigs[id] = data
             // 旧扁平 JSON 已迁出后删除，避免双份。
             removeLegacyFlatConfig(for: id)
         } catch {
@@ -138,6 +144,7 @@ enum ProjectConfigStore {
 
     /// 删除整个项目数据目录（配置 / 图标 / 笔记），并清理旧路径残留。
     static func removeAllData(for id: UUID) {
+        lastWrittenConfigs[id] = nil
         let fm = FileManager.default
         let dir = projectDirectoryURL(for: id)
         if fm.fileExists(atPath: dir.path) {
@@ -614,15 +621,10 @@ enum SessionStore {
     /// - Parameter windows: 待保存的窗口快照数组
     static func save(_ windows: [SessionSnapshot]) {
         guard let data = try? JSONEncoder().encode(AppSnapshot(windows: windows)) else { return }
-        let url = sessionFileURL
-        do {
-            let dir = url.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try data.write(to: url, options: .atomic)
+        let legacyKey = key
+        PersistenceWriter.write(data, to: sessionFileURL) {
             // 首次成功保存到 session.json 后，清理旧 UserDefaults 遗留键
-            UserDefaults.standard.removeObject(forKey: key)
-        } catch {
-            NSLog("qjiao: failed to save session.json \(url.path): \(error)")
+            UserDefaults.standard.removeObject(forKey: legacyKey)
         }
     }
 
@@ -648,5 +650,45 @@ enum SessionStore {
             return [single]
         }
         return []
+    }
+}
+
+/// 会话快照与终端历史的写盘串行队列：编码在调用方完成，写盘放到后台，
+/// 与上次写入内容相同的数据直接跳过。退出前用 `flush()` 等待全部落盘。
+nonisolated enum PersistenceWriter {
+    private static let queue = DispatchQueue(label: "com.qzrzz.qjiao.persistence", qos: .utility)
+    /// 每个文件最近一次成功写入的内容；只在 `queue` 上读写。
+    nonisolated(unsafe) private static var lastWritten: [URL: Data] = [:]
+
+    static func write(
+        _ data: Data,
+        to url: URL,
+        onSuccess: (@Sendable () -> Void)? = nil
+    ) {
+        queue.async {
+            guard lastWritten[url] != data else { return }
+            do {
+                try FileManager.default.createDirectory(
+                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+                )
+                try data.write(to: url, options: .atomic)
+                lastWritten[url] = data
+                onSuccess?()
+            } catch {
+                NSLog("qjiao: failed to write \(url.path): \(error)")
+            }
+        }
+    }
+
+    static func remove(_ url: URL) {
+        queue.async {
+            lastWritten[url] = nil
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// 阻塞直到已排队的写入全部完成（应用退出时调用）。
+    static func flush() {
+        queue.sync {}
     }
 }

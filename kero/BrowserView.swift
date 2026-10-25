@@ -173,6 +173,22 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable,
     /// 使用序号而非 Bool，确保连续按下 ⌘L 不会被合并。
     @Published private(set) var focusAddressRequest: UInt = 0
 
+    /// 需要冒泡到 Project / TerminalManager 的变化。加载进度只由直接观察本对象的
+    /// `BrowserView` 使用，若也转发，页面加载期间每个进度刻度都会让整窗视图重算。
+    var projectRelevantChanges: AnyPublisher<Void, Never> {
+        Publishers.MergeMany(
+            $title.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $urlString.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $canGoBack.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $canGoForward.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isLoading.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $errorMessage.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $favicon.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $focusAddressRequest.dropFirst().map { _ in () }.eraseToAnyPublisher()
+        )
+        .eraseToAnyPublisher()
+    }
+
     let webView: BrowserWebView
 
     private var pageTitle: String?

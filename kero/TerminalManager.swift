@@ -265,6 +265,8 @@ final class TerminalManager: nonisolated ObservableObject {
                         project.terminateAllImmediately()
                     }
                 }
+                // 快照写盘在后台队列；进程退出前等待全部落盘。
+                PersistenceWriter.flush()
             }
     }
 
@@ -892,7 +894,8 @@ final class TerminalManager: nonisolated ObservableObject {
                 continue
             }
 
-            if let tab = project.tabs.first(where: { $0.sessions.contains(where: { $0.id == session.id }) }) {
+            if let tab = project.tabs.first(where: { $0.sessions.contains(where: { $0.id == session.id }) }),
+               tab.taskHasError != session.taskHasError {
                 tab.taskHasError = session.taskHasError
             }
 
@@ -919,7 +922,8 @@ final class TerminalManager: nonisolated ObservableObject {
                 continue
             }
 
-            if let tab = project.tabs.first(where: { $0.sessions.contains(where: { $0.id == session.id }) }) {
+            if let tab = project.tabs.first(where: { $0.sessions.contains(where: { $0.id == session.id }) }),
+               tab.taskHasError != session.taskHasError {
                 tab.taskHasError = session.taskHasError
             }
 
@@ -1651,19 +1655,22 @@ final class TerminalManager: nonisolated ObservableObject {
     }
 
     /// Re-themes every session after a light/dark appearance change.
+    /// 只立即重配当前可见的终端；后台 / 停车会话按外观代次过期，
+    /// 由 `TerminalHostView` 挂回前台时补齐，避免一次切换重配全部 Ghostty surface。
     func refreshAppearance() {
-        for project in projects {
-            for session in project.sessions {
-                session.applyTheme()
-            }
+        TerminalSession.invalidateAppearance()
+        for session in selectedProject?.selectedTab?.sessions ?? [] {
+            session.applyTheme()
         }
     }
 
     /// 套用当前选中项目的 Light/Dark 配色覆盖后重绘终端与原生色。
     /// `followsGlobal` 的项目会清空覆盖，回到全局 theme-light / theme-dark。
-    func reloadActiveProjectTheme() {
+    /// - Parameter force: 主题内容变了但选择名未变（自定义主题编辑 / 重命名）时强制重绘。
+    func reloadActiveProjectTheme(force: Bool = false) {
         let project = selectedProject
-        Theme.reloadProjectSelection(project?.theme, projectName: project?.name)
+        let changed = Theme.reloadProjectSelection(project?.theme, projectName: project?.name)
+        guard changed || force else { return }
         refreshAppearance()
     }
 
@@ -1686,14 +1693,14 @@ final class TerminalManager: nonisolated ObservableObject {
                     project.theme = theme
                 }
             }
-            manager.reloadActiveProjectTheme()
+            manager.reloadActiveProjectTheme(force: true)
         }
     }
 
     /// 自定义主题配色变更后重绘全部窗口的终端（选择名未变时 settings 观察者不会触发）。
     static func refreshAllAppearances() {
         for manager in registry {
-            manager.reloadActiveProjectTheme()
+            manager.reloadActiveProjectTheme(force: true)
         }
     }
 
@@ -1856,7 +1863,9 @@ final class TerminalManager: nonisolated ObservableObject {
                 guard let history = session.serializedHistory(
                     captureLive: captureTerminalHistory
                 ), !history.isEmpty else { return nil }
-                let key = UUID().uuidString
+                // 以会话 ID 为键（单进程内唯一且稳定），内容未变时快照与历史文件都保持
+                // 字节一致，写盘队列即可跳过重复写入。
+                let key = session.id.uuidString
                 histories[key] = history
                 return LayoutSnapshotBuild(
                     snapshot: .pane(ProjectSnapshot.PaneSnapshot(

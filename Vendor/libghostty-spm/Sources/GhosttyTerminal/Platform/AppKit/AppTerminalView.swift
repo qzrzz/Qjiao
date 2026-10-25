@@ -20,6 +20,8 @@
         var pendingSelectionMenuPoint: CGPoint?
         var onFocusChange: ((Bool) -> Void)?
         var rendererTargetsCompacted = false
+        /// 递增即作废尚未执行的延迟压缩（终端在压缩前又回到前台）。
+        var rendererCompactionGeneration = 0
 
         /// Pointer shape ghostty last asked for. Seeded with `.text` because
         /// that is what the grid resolves to, and ghostty only emits the action
@@ -108,7 +110,7 @@
                 self?.applyMouseShape(shape)
             }
             core.onRenderSuspended = { [weak self] in
-                self?.compactRendererTargets()
+                self?.scheduleRendererTargetCompaction()
             }
             core.onRenderResuming = { [weak self] in
                 self?.restoreRendererTargets()

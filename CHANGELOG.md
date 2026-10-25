@@ -11,6 +11,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.72]
+
+### Added
+
+- Support `mygo.json` package manifests in the Project panel: the name and version are read from it (taking priority over `package.json` when both exist), the version stays editable in place with SemVer bumps and Git tags written back to that same file, the section shows the Go icon, its menu offers "Open mygo.json" and the `go tool mygo dev` / `build` / `doctor` commands instead of the npm ones, and the panel refreshes when the file changes on disk.
+
+### Changed
+
+- Make switching projects faster: project-level color overrides only broadcast a theme refresh when the selection actually changes, only the sessions of the selected tab are re-themed immediately while background terminals catch up by appearance generation when they return to the foreground, and the right sidebar's session / working-directory / project changes are coalesced into a single sync after the content area has switched instead of three syncs in one pass.
+- Stop high-frequency updates from recomputing the whole window: terminal titles are deduplicated and throttled to 0.25s (Agent spinners still animate, but no longer redraw everything on each tick), an unchanged working directory or task error state is no longer published, and browser loading progress stays local to the browser pane.
+- Cut redundant disk I/O: auto save skips project configs whose encoded content is unchanged, session snapshots and terminal history are not rewritten when their content matches the last write, and both are written on a background queue that is flushed before the app quits.
+- Patch the vendored terminal engine (`libghostty-spm`): a hidden terminal's swap chain is compacted 5s after it goes offscreen (staggered between terminals) instead of synchronously at hide time, so switching back within that window reuses the full-size chain without a synchronous three-frame redraw; the parking container only drives the occlusion API for newly parked terminals, and shell PID / PTY-proxy nesting probes are cached for 1s so tab icons polling every 0.3s no longer walk the process tree each time.
+
 ## [1.1.68]
 
 ### Added

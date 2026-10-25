@@ -899,8 +899,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             initialURL: initialURL,
             initialFocus: initialFocus
         )
-        browserObservations[browser.id] = browser.objectWillChange.sink {
-            [weak self] _ in
+        browserObservations[browser.id] = browser.projectRelevantChanges.sink {
+            [weak self] in
             self?.objectWillChange.send()
         }
         return browser

@@ -85,6 +85,9 @@ struct RightSidebarView: View {
     /// 使过期的延迟面板切换失效，避免外部切换被旧点击覆盖。
     @State private var topPanelSelectionGeneration = 0
     @Namespace private var topTabSelectionNamespace
+    /// 切项目会在同一轮连带触发 selectedProjectID / selectedSession / cwd 三个 onChange，
+    /// 每次 syncModels 都要探测前台进程与 Git 根；合并成一次并推迟到内容区切换之后。
+    @State private var syncCoalescer = MainActorCoalescer()
 
     private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
     /// 脚本/命令新建 session 的 shell pid 就绪通知（类型预绑定，减轻 body 类型检查开销）。
@@ -218,14 +221,14 @@ struct RightSidebarView: View {
         .onChange(of: manager.panelTab) {
             syncModels(reloadActivePanel: true)
         }
-        .onChange(of: manager.selectedSession?.id) { syncModels() }
+        .onChange(of: manager.selectedSession?.id) { scheduleSyncModels() }
         // A `cd` in the terminal publishes the new cwd immediately (OSC 7 →
         // session.workingDirectory); resync at once instead of waiting for the
         // next refreshTimer tick, which is what made the panel lag the change.
-        .onChange(of: manager.selectedSession?.workingDirectory) { syncModels() }
+        .onChange(of: manager.selectedSession?.workingDirectory) { scheduleSyncModels() }
         .onChange(of: commandCompletionSequences) { refreshGitForExternalEvent() }
         .onChange(of: manager.selectedProjectID) {
-            syncModels()
+            scheduleSyncModels()
             syncNoteBinding()
         }
         // 后台 ps/lsof 完成后立即把端口绑定到脚本行，不再等待下一轮 2s Timer。
@@ -789,6 +792,10 @@ struct RightSidebarView: View {
         }
     }
 
+    private func scheduleSyncModels() {
+        syncCoalescer.schedule { syncModels() }
+    }
+
     private func syncModels(
         reloadActivePanel: Bool = false,
         refreshGit: Bool = true,
@@ -899,5 +906,19 @@ struct RightSidebarView: View {
 
     private func normalizedPath(_ path: String) -> String {
         URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+}
+
+/// 把同一轮主线程里的多次请求合并为下一拍执行一次。
+final class MainActorCoalescer {
+    private var isScheduled = false
+
+    func schedule(_ work: @escaping @MainActor () -> Void) {
+        guard !isScheduled else { return }
+        isScheduled = true
+        Task { @MainActor in
+            self.isScheduled = false
+            work()
+        }
     }
 }

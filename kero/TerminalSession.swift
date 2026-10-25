@@ -45,6 +45,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// 待运行命令（zsh 集成执行路径）；哨兵到达时用于判断 eval 是否已接管。
     private var pendingCommand: String?
     private var pendingCommandWritten = false
+    /// 终端上报标题的节流状态，见 `applyTerminalTitle`。
+    private static let titleUpdateInterval: TimeInterval = 0.25
+    private var lastTitleUpdateAt = Date.distantPast
+    private var pendingTitle: String?
 
     /// 项目拖拽回调缓存，延迟装载时应用给新建的 terminalView。
     var pendingOnOpenProjectDirectory: ((URL) -> Bool)? {
@@ -93,6 +97,11 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private let shellPidFileURL: URL?
     private let zshIntegrationDirectoryURL: URL?
     private var cachedShellPid: pid_t?
+    private var cachedShellPidVerifiedAt: ContinuousClock.Instant?
+    /// 进程身份（shell 是否被 exec 成代理 / 是否嵌在代理下）的复核间隔。
+    private static let processIdentityRecheckInterval: Duration = .seconds(1)
+    /// `isNestedUnderPtyProxy` 要沿父进程链逐级读可执行路径；同一 shell 的祖先基本不变，短时缓存。
+    private var ptyProxyNesting: (pid: pid_t, isNested: Bool, at: ContinuousClock.Instant)?
     private var lastScrollbar: TerminalScrollbar?
     private var lastHistorySnapshot: String?
     private(set) var isTerminating = false
@@ -238,11 +247,27 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         }
     }
 
+    /// 全局外观代次：字体 / 主题 / 亮暗任一变化时递增。会话记录自己应用到的代次，
+    /// 后台会话不立即重配，挂回前台时比对代次再补齐。
+    private static var appearanceGeneration: UInt64 = 0
+    private var appliedAppearanceGeneration: UInt64?
+
+    static func invalidateAppearance() {
+        appearanceGeneration &+= 1
+    }
+
+    /// 外观代次过期时才重配（挂载到可见容器时调用）。
+    func applyThemeIfStale() {
+        guard appliedAppearanceGeneration != Self.appearanceGeneration else { return }
+        applyTheme()
+    }
+
     /// Reconfigures libghostty in place when either appearance or terminal
     /// font settings change. Ghostty also uses these values for OSC 10/11
     /// queries, so reported defaults always match the visible theme.
     func applyTheme() {
         guard isInitialized, let controller = _controller, let terminalView = _terminalView else { return }
+        appliedAppearanceGeneration = Self.appearanceGeneration
         _ = controller.setTerminalConfiguration(
             Self.terminalConfiguration(command: launchCommand)
         )
@@ -359,7 +384,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// PTY 代理（ghost-complete）下 Ghostty 的 tcgetpgrp 不可用，改为取 shell 子孙。
     var foregroundDirectoryPath: String? {
         guard let shellPid else { return nil }
-        if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
+        if isShellNestedUnderPtyProxy(shellPid) {
             guard let job = TerminalProcessIdentity.firstNonShellDescendant(of: shellPid) else {
                 return nil
             }
@@ -382,7 +407,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         let fallback = directoryName.isEmpty
             ? (shellPath as NSString).lastPathComponent
             : directoryName
-        title = style.formatTitle(for: currentDirectoryPath) ?? fallback
+        let newTitle = style.formatTitle(for: currentDirectoryPath) ?? fallback
+        if title != newTitle {
+            title = newTitle
+        }
     }
 
 
@@ -495,7 +523,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         // 空闲提示符：无 PTY 代理时比较 tcgetpgrp；代理下改用「无非 shell 子孙」。
         let rootShellIsForeground: Bool = {
             guard let shellPid else { return false }
-            if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
+            if isShellNestedUnderPtyProxy(shellPid) {
                 return !TerminalProcessIdentity.hasNonShellDescendants(of: shellPid)
             }
             return terminalView.foregroundPid == shellPid
@@ -529,9 +557,19 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// 真实 zsh 是其子进程。集成脚本会把 `shell.pid` 回写为内层 shell；在回写
     /// 前这里也会从 proxy 解析到登录 shell，避免侧栏 / Agent 一直盯着 proxy。
     var shellPid: pid_t? {
-        if let cachedShellPid, cachedShellPid > 0,
-           !TerminalProcessIdentity.isPtyProxyProcess(cachedShellPid) {
-            return cachedShellPid
+        if let cachedShellPid, cachedShellPid > 0 {
+            // Tab 图标 / 侧栏每 0.3s 就会读一次 shellPid；「是否已 exec 成 PTY 代理」
+            // 需要 proc_pidpath，按 1s 复核即可，不必每次读取都查内核。
+            let now = ContinuousClock.now
+            if let verifiedAt = cachedShellPidVerifiedAt,
+               now - verifiedAt < Self.processIdentityRecheckInterval {
+                return cachedShellPid
+            }
+            if !TerminalProcessIdentity.isPtyProxyProcess(cachedShellPid) {
+                cachedShellPidVerifiedAt = now
+                return cachedShellPid
+            }
+            cachedShellPidVerifiedAt = nil
         }
         guard !hasExited, let shellPidFileURL,
               let text = try? String(contentsOf: shellPidFileURL, encoding: .utf8),
@@ -555,7 +593,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     var isForegroundCommandRunning: Bool {
         guard isInitialized, !hasExited, let shellPid else { return false }
 
-        if TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid) {
+        if isShellNestedUnderPtyProxy(shellPid) {
             return TerminalProcessIdentity.hasNonShellDescendants(of: shellPid)
         }
 
@@ -569,6 +607,17 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         return foregroundPid > 0 && foregroundPid != idleProcessGroup
     }
 
+    private func isShellNestedUnderPtyProxy(_ pid: pid_t) -> Bool {
+        let now = ContinuousClock.now
+        if let cached = ptyProxyNesting, cached.pid == pid,
+           now - cached.at < Self.processIdentityRecheckInterval {
+            return cached.isNested
+        }
+        let isNested = TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: pid)
+        ptyProxyNesting = (pid, isNested, now)
+        return isNested
+    }
+
     /// 前台作业的可执行名（含 argv 脚本名）。兼容 PTY 代理：代理场景下改扫 shell 子孙。
     var foregroundJobExecutableNames: [String] {
         foregroundJobDebugSnapshot()?.aggregatedNames ?? []
@@ -577,7 +626,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// 前台作业调试快照（进程组 / PTY 代理子孙 + 每 PID argv）。
     func foregroundJobDebugSnapshot() -> TerminalProcessIdentity.DebugForegroundJobSnapshot? {
         guard let shellPid else { return nil }
-        let nested = TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid)
+        let nested = isShellNestedUnderPtyProxy(shellPid)
         if nested {
             return TerminalProcessIdentity.debugForegroundJobSnapshot(
                 shellPid: shellPid,
@@ -727,7 +776,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         }
 
         // 缓存键：优先 Ghostty 前台 pgid；PTY 代理下 pgid 无意义，改用 shell pid。
-        let nestedProxy = TerminalProcessIdentity.isNestedUnderPtyProxy(shellPid: shellPid)
+        let nestedProxy = isShellNestedUnderPtyProxy(shellPid)
         let ghosttyFg = terminalView.foregroundPid
         let cacheKey: pid_t = {
             if nestedProxy { return shellPid }
@@ -1239,7 +1288,35 @@ extension TerminalSession: TerminalSurfaceTitleDelegate {
             }
             return
         }
-        self.title = title
+        applyTerminalTitle(title)
+    }
+
+    /// Agent CLI 的转圈动画会以 ~10Hz 改标题；每次 `title` 变化都会经
+    /// Project → TerminalManager 让整窗视图重算。相同标题直接丢弃，
+    /// 高频变化按 `titleUpdateInterval` 节流（首个立即生效，末尾补最新值）。
+    private func applyTerminalTitle(_ newTitle: String) {
+        guard newTitle != title else {
+            pendingTitle = nil
+            return
+        }
+        let elapsed = Date().timeIntervalSince(lastTitleUpdateAt)
+        if pendingTitle == nil, elapsed >= Self.titleUpdateInterval {
+            lastTitleUpdateAt = Date()
+            title = newTitle
+            return
+        }
+        let isScheduled = pendingTitle != nil
+        pendingTitle = newTitle
+        guard !isScheduled else { return }
+        let delay = max(0, Self.titleUpdateInterval - elapsed)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, let pending = self.pendingTitle else { return }
+            self.pendingTitle = nil
+            self.lastTitleUpdateAt = Date()
+            if self.title != pending {
+                self.title = pending
+            }
+        }
     }
 }
 
@@ -1341,7 +1418,7 @@ extension TerminalSession: TerminalSurfaceCommandFinishedDelegate {
     /// zsh 集成输出 OSC 133;D 后由 Ghostty 回调；递增序号可保留连续相同结果的事件。
     func terminalDidFinishCommand(exitCode: Int?, durationNanos: UInt64) {
         commandCompletionSequence &+= 1
-        if let exitCode {
+        if let exitCode, taskHasError != (exitCode != 0) {
             taskHasError = (exitCode != 0)
         }
     }
@@ -1434,8 +1511,12 @@ extension TerminalSession: TerminalSurfaceHoverLinkDelegate {
 extension TerminalSession: TerminalSurfacePwdDelegate {
     func terminalDidChangeWorkingDirectory(_ path: String) {
         guard !path.isEmpty else { return }
-        workingDirectory = path.hasPrefix("/")
+        // zsh 每个提示符都会重报 OSC 7；目录未变时不发布，避免整窗重算与侧栏重同步。
+        let directory = path.hasPrefix("/")
             ? URL(fileURLWithPath: path).absoluteString : path
+        if workingDirectory != directory {
+            workingDirectory = directory
+        }
         updateIdleTitleStyle(AppSettings.shared.zshIdleTitleStyle)
     }
 }

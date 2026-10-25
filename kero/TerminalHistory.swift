@@ -378,21 +378,21 @@ enum TerminalHistoryStore {
             .appendingPathComponent("terminal-history.json")
     }()
 
+    /// 最近一次交给写盘队列的内容；普通自动保存不抓取实时历史，大多与上次相同，
+    /// 相同则连 JSON 编码都跳过。
+    private static var lastSavedHistories: [String: String]?
+
     static func save(_ histories: [String: String]) {
+        guard histories != lastSavedHistories else { return }
+        lastSavedHistories = histories
         // Nothing to persist: remove the file so a later restore finds nothing
         // rather than replaying stale output.
         guard !histories.isEmpty else {
-            try? FileManager.default.removeItem(at: fileURL)
+            PersistenceWriter.remove(fileURL)
             return
         }
         guard let data = try? JSONEncoder().encode(histories) else { return }
-        do {
-            try FileManager.default.createDirectory(
-                at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: fileURL, options: .atomic)
-        } catch {
-            NSLog("kero: failed to write \(fileURL.path): \(error)")
-        }
+        PersistenceWriter.write(data, to: fileURL)
     }
 
     static func load() -> [String: String] {
