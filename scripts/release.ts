@@ -262,8 +262,7 @@ if (
 
     allowExistingArtifactAdoption = false;
     say("Exporting Developer ID app…");
-    rmSync(EXPORT_DIR, { recursive: true, force: true });
-    await $`xcodebuild -exportArchive -archivePath ${ARCHIVE_PATH} -exportOptionsPlist ${EXPORT_OPTIONS} -exportPath ${EXPORT_DIR}`;
+    await exportWithTimestampRetry();
     if (!(await validateExportedApp(app, identity))) {
       die("the exported App failed version or signature checks");
     }
@@ -557,6 +556,40 @@ async function archiveWithCodeSignRetry(signingArgs: string[]): Promise<void> {
     say(
       `Xcode archive hit a transient CodeSign failure; retrying ` +
         `incrementally in ${delay / 1_000}s (${attempt}/${ARCHIVE_RETRIES})…`,
+    );
+    await Bun.sleep(delay);
+  }
+}
+
+/** 仅对导出时的时间戳服务故障重试，保留已验证的 Xcode archive。 */
+async function exportWithTimestampRetry(): Promise<void> {
+  for (let attempt = 1; attempt <= TIMESTAMP_RETRIES; attempt += 1) {
+    // Xcode 可能留下不完整导出；每次从原 archive 重新导出。
+    rmSync(EXPORT_DIR, { recursive: true, force: true });
+    const result =
+      await $`xcodebuild -exportArchive -archivePath ${ARCHIVE_PATH} -exportOptionsPlist ${EXPORT_OPTIONS} -exportPath ${EXPORT_DIR}`.nothrow();
+    if (result.exitCode === 0) return;
+
+    const output = `${result.stdout.toString()}\n${result.stderr.toString()}`;
+    const isTimestampFailure =
+      /\bthe timestamp service is not available\b|\ba timestamp was expected but was not found\b/i.test(
+        output,
+      );
+    if (!isTimestampFailure) {
+      die("Xcode Developer ID export failed; see the Xcode error above");
+    }
+    if (attempt === TIMESTAMP_RETRIES) {
+      die(
+        `Xcode export timestamp signing failed after ${TIMESTAMP_RETRIES} attempts; ` +
+          "check access to timestamp.apple.com, then rerun bun run release " +
+          "to resume from the existing archive",
+      );
+    }
+
+    const delay = Math.min(attempt * 3_000, 10_000);
+    say(
+      `Xcode export timestamp service unavailable; retrying in ${delay / 1_000}s ` +
+        `(${attempt}/${TIMESTAMP_RETRIES})…`,
     );
     await Bun.sleep(delay);
   }

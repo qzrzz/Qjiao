@@ -207,6 +207,7 @@ RELEASING.md          本机发布流程
 
 ### 工程与发布
 
+- Developer ID 导出遇到 Apple 时间戳服务故障时自动有限重试，保留成功的归档；失败后重新执行发布命令可从归档继续。
 - 开发构建脚本固定使用 `Package.resolved`、Apple Silicon destination，并默认收起 Xcode 的 target 图与资源处理日志；`bun run dev` 在 app 已覆盖全部工程输入时直接启动，`QJIAO_FORCE_BUILD=1 bun run dev` 可强制重建。依赖更新后可手动执行 `xcodebuild -resolvePackageDependencies -project Qjiao.xcodeproj -scheme Qjiao -derivedDataPath build/DerivedData` 刷新缓存。
 - 独立产品标识与 Sparkle 自动更新；本机 Developer ID 签名、公证、DMG/ZIP、delta，经 QRls 发布到 Cloudflare R2（订阅 `https://download.qzrzz.com/qjiao/appcast.xml`），并镜像同一份 appcast 到 GitHub 供旧版升级。
 - 产品官网 `web/` 使用 QPage 生成静态着陆页，支持简体中文、English、日本語、한국어、Tiếng Việt、Português、Español、Deutsch、Français、Русский；移动端通过 `web/style.css` 收回桌面固定标题/页宽/视频尺寸，避免窄屏撑破。

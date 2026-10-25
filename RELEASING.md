@@ -280,6 +280,12 @@ bun run release
 验证并复用该 DMG，然后重新请求 secure timestamp，不会重新创建
 磁盘映像。单次执行默认会对 Xcode 归档中的瞬时 CodeSign 失败和 DMG
 timestamp 签名各重试 3 次；归档重试会保留 DerivedData，复用已经完成的编译。
+Developer ID 导出遇到 `The timestamp service is not available` 等时间戳
+服务错误时，也按 `TIMESTAMP_RETRIES`（默认 3 次）重试，每次清理失败的
+导出目录并复用 archive；其他导出错误立即停止。重试耗尽时，检查本机
+网络、代理或防火墙是否允许访问 `timestamp.apple.com`，再运行
+`bun run release`，即可从成功的 archive 继续，无需 `RESET_RELEASE=1`。
+安全时间戳是 Apple 公证的必要条件，不要用 `--timestamp=none` 绕过。
 QRls 会并行上传 R2（以及默认的 GitHub 镜像）。上传完成后，脚本会
 拉取 R2 上的 appcast，确认当前版本和 ZIP 地址已就绪，再写入发布断点。
 
@@ -349,7 +355,7 @@ RESET_RELEASE=1 bun run release
 | `REUSE_BUILD=1`               | —                          | 复用已导出的 Qjiao.app |
 | `RESET_RELEASE=1`             | —                          | 清除断点并完整重建     |
 | `ARCHIVE_RETRIES`             | `3`                        | 归档签名失败尝试次数   |
-| `TIMESTAMP_RETRIES`           | `3`                        | 时间戳签名尝试次数     |
+| `TIMESTAMP_RETRIES`           | `3`                        | 导出时间戳错误 / DMG 签名尝试次数 |
 
 默认允许用当前提交重复发布相同版本：
 
