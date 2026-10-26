@@ -541,9 +541,11 @@ async function archiveWithCodeSignRetry(signingArgs: string[]): Promise<void> {
     if (result.exitCode === 0) return;
 
     const output = `${result.stdout.toString()}\n${result.stderr.toString()}`;
-    const isCodeSignFailure = /Command CodeSign failed|^\s*CodeSign\s+/im.test(
-      output,
-    );
+    const summaryStart = output.lastIndexOf("The following build commands failed:");
+    const failureSummary = summaryStart >= 0 ? output.slice(summaryStart) : "";
+    // 正常构建日志也会包含成功的 CodeSign 步骤，只检查明确失败或失败汇总。
+    const isCodeSignFailure = /Command CodeSign failed/i.test(output) ||
+      /^\s*CodeSign\s+/m.test(failureSummary);
     const failure = isCodeSignFailure ? codeSignFailureDetails(output) : undefined;
     if (failure) {
       // xcodebuild 的输出很长，真正的 codesign 报错容易被截断；单独列出来。
