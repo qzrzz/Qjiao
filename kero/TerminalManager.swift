@@ -135,10 +135,6 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Each new manager claims the next; extras beyond the saved count
     /// start fresh.
     private static var pendingRestores: [SessionSnapshot] = []
-    /// Terminal scrollback loaded from the sidecar store, keyed by the
-    /// `historyKey` each restoring session pane carries. Shared across windows
-    /// (keys are unique per pane), so restores read from it without consuming.
-    private static var pendingHistories: [String: String] = [:]
     private static var hasLoadedStore = false
     /// Set on app termination so window teardown can't re-save a partial
     /// snapshot over the final full one.
@@ -149,18 +145,8 @@ final class TerminalManager: nonisolated ObservableObject {
         if !Self.hasLoadedStore {
             Self.hasLoadedStore = true
             Self.pendingRestores = SessionStore.load()
-            Self.pendingHistories = TerminalHistoryStore.load()
-
-            // 统计恢复时加载的项目总数与终端 Session 总数
-            let sessionCount = Self.pendingRestores.reduce(0) { winSum, win in
-                winSum + win.projects.reduce(0) { projSum, proj in
-                    projSum + proj.tabs.reduce(0) { tabSum, tab in
-                        tabSum + Self.countSessions(in: tab.layout)
-                    }
-                }
-            }
-            let projectCount = Self.pendingRestores.flatMap(\.projects).count
-            NSLog("🚀 [Qjiao Startup] 恢复窗口数: %d, 恢复项目数: %d, 恢复终端 Session 总数: %d", Self.pendingRestores.count, projectCount, sessionCount)
+            // 不再恢复终端滚屏，同时清理旧版本留下的历史旁路文件。
+            TerminalHistoryStore.save([:])
         }
         let previousManagers = Self.registry
         Self.registry.append(self)
@@ -170,12 +156,6 @@ final class TerminalManager: nonisolated ObservableObject {
         } else {
             // 当会话快照为空时，以 config/projects 目录为来源扫描并恢复已有项目
             restored = restore(from: SessionSnapshot(projects: [], selectedProjectIndex: 0))
-        }
-        // Only a window still claiming a snapshot reads the scrollback blobs,
-        // so once the last one is claimed they are dead weight — several
-        // hundred lines per restored session, held for the life of the process.
-        if Self.pendingRestores.isEmpty, !Self.pendingHistories.isEmpty {
-            Self.pendingHistories = [:]
         }
         let queuedDirectories = Self.takePendingDirectories()
         if !restored, queuedDirectories.isEmpty {
@@ -243,21 +223,20 @@ final class TerminalManager: nonisolated ObservableObject {
                 self?.objectWillChange.send()
             }
         // Every project/tab/selection change re-publishes through the manager,
-        // so a debounced sink snapshots layout after mutations settle without
-        // reading live terminal contents.
+        // so a debounced sink saves project order and window preferences.
         autosaveObservation = objectWillChange
             .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
             .sink { _ in
-                TerminalManager.saveAll(captureTerminalHistory: false)
+                TerminalManager.saveAll()
             }
         // The debounce can swallow changes made just before quitting;
-        // capture a final snapshot while the shells are still alive.
+        // save final project order and window preferences before quitting.
         terminationObservation = NotificationCenter.default
             .publisher(for: NSApplication.willTerminateNotification)
             .sink { _ in
                 guard !TerminalManager.isQuitting else { return }
                 TerminalManager.isQuitting = true
-                TerminalManager.saveAll(captureTerminalHistory: true)
+                TerminalManager.saveAll()
                 // `windowClosed()` 在退出状态会跳过普通清理；这里必须同步
                 // 杀掉全部 PTY 进程组，不能依赖 120ms 后才执行的 Task。
                 for manager in TerminalManager.registry {
@@ -1721,23 +1700,18 @@ final class TerminalManager: nonisolated ObservableObject {
 
     /// Called when this manager's window closes: drop it from the
     /// persisted set — except for the last window, whose snapshot is kept
-    /// saved and queued so reopening (or relaunching) restores it — and
+    /// saved and queued so reopening restores its project list — and
     /// kill its shells.
     func windowClosed() {
         guard !Self.isQuitting else { return }
         Self.registry.removeAll { $0 === self }
         if Self.registry.isEmpty {
-            // These shells are about to be destroyed, so this is their final
-            // capture even though the macOS app may remain open with no window.
-            let window = makeWindowSnapshot(captureTerminalHistory: true)
-            // Last window: keep its snapshot and scrollback saved and queued so
-            // reopening (or relaunching) restores them.
-            SessionStore.save([window.snapshot])
-            TerminalHistoryStore.save(window.histories)
-            Self.pendingRestores = [window.snapshot]
-            Self.pendingHistories = window.histories
+            // 只保存项目顺序与窗口偏好，重新打开时项目内容区为空。
+            let snapshot = makeWindowSnapshot()
+            SessionStore.save([snapshot])
+            Self.pendingRestores = [snapshot]
         } else {
-            Self.saveAll(captureTerminalHistory: false)
+            Self.saveAll()
         }
         for project in projects {
             project.terminateAll()
@@ -1746,66 +1720,16 @@ final class TerminalManager: nonisolated ObservableObject {
 
     // MARK: - Persistence
 
-    private static func saveAll(captureTerminalHistory: Bool) {
+    private static func saveAll() {
         guard !registry.isEmpty else { return }
-        var snapshots: [SessionSnapshot] = []
-        var histories: [String: String] = [:]
-        for manager in registry {
-            let window = manager.makeWindowSnapshot(
-                captureTerminalHistory: captureTerminalHistory
-            )
-            snapshots.append(window.snapshot)
-            histories.merge(window.histories) { _, new in new }
-        }
-        SessionStore.save(snapshots)
-        TerminalHistoryStore.save(histories)
+        SessionStore.save(registry.map { $0.makeWindowSnapshot() })
     }
 
-    /// Builds this window's layout snapshot and, alongside it, the scrollback
-    /// to persist for its sessions. Each captured session gets a fresh
-    /// `historyKey` stored on both sides so restore can pair them. Unused
-    /// terminals and sessions with no replayable history are omitted — restoring
-    /// them would only yield an empty shell.
-    private func makeWindowSnapshot(
-        captureTerminalHistory: Bool
-    ) -> (snapshot: SessionSnapshot, histories: [String: String]) {
+    /// 仅记录项目顺序、当前项目和窗口偏好，不记录 Tab、Pane 或终端历史。
+    private func makeWindowSnapshot() -> SessionSnapshot {
         typealias ProjectSnapshot = SessionSnapshot.ProjectSnapshot
-        var histories: [String: String] = [:]
-        let snapshot = SessionSnapshot(
+        return SessionSnapshot(
             projects: projects.map { project in
-                var savedTabs: [(
-                    tab: PaneTab,
-                    layout: ProjectSnapshot.LayoutSnapshot,
-                    paneIDs: [UUID],
-                    sessionIDs: [UUID]
-                )] = []
-                for tab in project.tabs {
-                    guard let built = Self.layoutSnapshot(
-                        tab.layout,
-                        captureTerminalHistory: captureTerminalHistory,
-                        histories: &histories
-                    ) else { continue }
-                    savedTabs.append((
-                        tab: tab,
-                        layout: built.snapshot,
-                        paneIDs: built.paneIDs,
-                        sessionIDs: built.sessionIDs
-                    ))
-                }
-                let savedSessionIDs = savedTabs.flatMap(\.sessionIDs)
-                let tabs = savedTabs.map { item in
-                    let focusedPaneIndex = item.paneIDs.firstIndex {
-                        $0 == item.tab.focusedPaneID
-                    } ?? 0
-                    return ProjectSnapshot.TabSnapshot(
-                        layout: item.layout,
-                        focusedPaneIndex: focusedPaneIndex,
-                        customName: item.tab.customName,
-                        contextSessionIndex: item.tab.contextSession.flatMap { context in
-                            savedSessionIDs.firstIndex { $0 == context.id }
-                        }
-                    )
-                }
                 ProjectConfigStore.save(
                     ProjectConfig(
                         customName: project.customName,
@@ -1831,8 +1755,8 @@ final class TerminalManager: nonisolated ObservableObject {
                     theme: project.theme,
                     projectDirectory: nil,
                     isArchived: project.isArchived,
-                    tabs: tabs,
-                    selectedTabIndex: savedTabs.firstIndex { $0.tab.id == project.selectedTabID }
+                    tabs: [],
+                    selectedTabIndex: nil
                 )
             },
             selectedProjectIndex: projects.firstIndex { $0.id == selectedProjectID },
@@ -1840,133 +1764,9 @@ final class TerminalManager: nonisolated ObservableObject {
             isRightPanelVisible: isPanelVisible,
             rightPanelTab: panelTab
         )
-        return (snapshot, histories)
     }
 
-    private struct LayoutSnapshotBuild {
-        var snapshot: SessionSnapshot.ProjectSnapshot.LayoutSnapshot
-        var paneIDs: [UUID]
-        var sessionIDs: [UUID]
-    }
-
-    /// 空终端（从未用过、或没有可回放历史）不写入快照，恢复出来也只是空白 shell。
-    private static func layoutSnapshot(
-        _ layout: PaneNode,
-        captureTerminalHistory: Bool,
-        histories: inout [String: String]
-    ) -> LayoutSnapshotBuild? {
-        typealias ProjectSnapshot = SessionSnapshot.ProjectSnapshot
-        switch layout {
-        case .pane(let pane):
-            if case .session(let session) = pane.content {
-                if session.appearsUnused { return nil }
-                guard let history = session.serializedHistory(
-                    captureLive: captureTerminalHistory
-                ), !history.isEmpty else { return nil }
-                // 以会话 ID 为键（单进程内唯一且稳定），内容未变时快照与历史文件都保持
-                // 字节一致，写盘队列即可跳过重复写入。
-                let key = session.id.uuidString
-                histories[key] = history
-                return LayoutSnapshotBuild(
-                    snapshot: .pane(ProjectSnapshot.PaneSnapshot(
-                        content: contentSnapshot(pane.content),
-                        weight: 1,
-                        historyKey: key
-                    )),
-                    paneIDs: [pane.id],
-                    sessionIDs: [session.id]
-                )
-            }
-            return LayoutSnapshotBuild(
-                snapshot: .pane(ProjectSnapshot.PaneSnapshot(
-                    content: contentSnapshot(pane.content),
-                    weight: 1,
-                    historyKey: nil
-                )),
-                paneIDs: [pane.id],
-                sessionIDs: []
-            )
-        case .split(let split):
-            let first = layoutSnapshot(
-                split.first,
-                captureTerminalHistory: captureTerminalHistory,
-                histories: &histories
-            )
-            let second = layoutSnapshot(
-                split.second,
-                captureTerminalHistory: captureTerminalHistory,
-                histories: &histories
-            )
-            switch (first, second) {
-            case (let first?, let second?):
-                return LayoutSnapshotBuild(
-                    snapshot: .split(
-                        axis: split.axis,
-                        fraction: Double(split.fraction),
-                        first: first.snapshot,
-                        second: second.snapshot
-                    ),
-                    paneIDs: first.paneIDs + second.paneIDs,
-                    sessionIDs: first.sessionIDs + second.sessionIDs
-                )
-            case (let first?, nil):
-                return first
-            case (nil, let second?):
-                return second
-            case (nil, nil):
-                return nil
-            }
-        }
-    }
-
-    /// 统计递归布局快照中终端 Session 的数量（用于启动日志）。
-    private static func countSessions(
-        in layout: SessionSnapshot.ProjectSnapshot.LayoutSnapshot
-    ) -> Int {
-        switch layout {
-        case .pane(let pane):
-            if case .session = pane.content { return 1 }
-            return 0
-        case .split(_, _, let first, let second):
-            return countSessions(in: first) + countSessions(in: second)
-        }
-    }
-
-    private static func contentSnapshot(
-        _ content: PaneContent
-    ) -> SessionSnapshot.ProjectSnapshot.PaneContentSnapshot {
-        switch content {
-        case .session(let session):
-            return .session(workingDirectory: session.currentDirectoryPath)
-        case .file(let file):
-            if file.isHexMode {
-                return .fileHex(path: file.path, editorState: file.editorState)
-            }
-            return .file(path: file.path, editorState: file.editorState)
-        case .browser(let browser):
-            return .browser(url: browser.snapshotURL)
-        case .diff(let diff):
-            if let commitHash = diff.commitHash {
-                return .commitDiff(
-                    repoRoot: diff.repoRoot,
-                    path: diff.path,
-                    commitHash: commitHash,
-                    parentHash: diff.commitParentHash,
-                    status: diff.commitStatus.map(String.init) ?? "M",
-                    origPath: diff.origPath
-                )
-            }
-            return .diff(
-                repoRoot: diff.repoRoot, path: diff.path, staged: diff.staged,
-                untracked: diff.untracked, origPath: diff.origPath
-            )
-        }
-    }
-
-    /// 从磁盘 `config/projects` 存储与会话快照重新构建项目和标签页列表。
-    ///
-    /// `config/projects` 目录作为项目列表的权威来源 (Source of truth)，扫描磁盘上所有项目配置文件；
-    /// 快照 `session.json` 则提供各个项目内部 Tab/Pane 的会话布局恢复与渲染顺位。
+    /// 从独立项目配置与快照恢复项目列表、顺序和窗口偏好；忽略旧快照的标签页。
     private func restore(from snapshot: SessionSnapshot) -> Bool {
         if let visible = snapshot.isLeftSidebarVisible {
             isLeftSidebarVisible = visible
@@ -1983,10 +1783,9 @@ final class TerminalManager: nonisolated ObservableObject {
         let diskIDSet = Set(diskProjectIDs)
 
         var loadedProjectIDs = Set<UUID>()
-        let targetProjectIndex = snapshot.selectedProjectIndex ?? 0
 
-        // 2. 优先按快照中的顺序恢复存活在 config/projects 中的项目及其 Tab/Pane 布局
-        for (projectIndex, saved) in snapshot.projects.enumerated() {
+        // 2. 按快照顺序恢复项目，旧 Tab/Pane 布局不再使用。
+        for saved in snapshot.projects {
             guard let savedID = saved.id, diskIDSet.contains(savedID) else {
                 // 若快照记录的项目已被从 config/projects 中彻底删除，则跳过
                 continue
@@ -2007,49 +1806,7 @@ final class TerminalManager: nonisolated ObservableObject {
             project.aiWritingLanguage = config?.aiWritingLanguage
                 .flatMap(AIWritingLanguage.init(rawValue:))
             project.customGitPath = config?.customGitPath
-            let targetTabIndex = saved.selectedTabIndex ?? 0
-            var restoredContexts: [(tab: PaneTab, sessionIndex: Int)] = []
-            for (tabIndex, tab) in saved.tabs.enumerated() {
-                let isSelectedActiveTab = (projectIndex == targetProjectIndex && tabIndex == targetTabIndex)
-                guard let restoredTab = project.restoreTab(
-                    from: tab,
-                    histories: Self.pendingHistories,
-                    sessionDirectory: project.projectDirectory.isEmpty
-                        ? nil
-                        : project.projectDirectory,
-                    isLazy: !isSelectedActiveTab
-                ) else { continue }
-                if let sessionIndex = tab.contextSessionIndex {
-                    restoredContexts.append((restoredTab, sessionIndex))
-                }
-            }
-            let restoredSessions = project.sessions
-            for context in restoredContexts
-            where restoredSessions.indices.contains(context.sessionIndex) {
-                let session = restoredSessions[context.sessionIndex]
-                guard !session.restoreShouldDiscard else { continue }
-                context.tab.contextSession = session
-            }
-            let intendedSelectedTabID: UUID? = {
-                if let index = saved.selectedTabIndex, project.tabs.indices.contains(index) {
-                    return project.tabs[index].id
-                }
-                return project.selectedTabID
-            }()
-            // 目录没了，或恢复出来只会是空 shell：关掉，不要占着标签。
-            project.closeUnrestorableRestoredSessions()
-            if project.projectDirectory.isEmpty {
-                project.projectDirectory = project.sessions.first?.currentDirectoryPath ?? ""
-            }
-            // 确保项目配置在磁盘上最新
             project.saveConfig()
-
-            if let intendedSelectedTabID,
-               project.tabs.contains(where: { $0.id == intendedSelectedTabID }) {
-                project.selectedTabID = intendedSelectedTabID
-            } else {
-                project.selectedTabID = project.tabs.first?.id
-            }
             project.resetRecency()
             projects.append(project)
         }
@@ -2073,8 +1830,6 @@ final class TerminalManager: nonisolated ObservableObject {
                 .flatMap(AIWritingLanguage.init(rawValue:))
             project.customGitPath = config.customGitPath
 
-            // 为补全的项目分配默认终端会话
-            project.newSession(directory: project.projectDirectory.isEmpty ? nil : project.projectDirectory)
             project.resetRecency()
             projects.append(project)
         }

@@ -11,6 +11,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 set in the Xcode project.
 
 
+## [1.1.74]
+
+### Changed
+
+- Stop restoring tabs on relaunch: the session snapshot now only keeps the project list and its order, the selected project and window preferences (left sidebar visibility and right panel tab), so every project opens with an empty content area instead of reopening its terminals, files, browsers, diff views and splits — terminal scrollback is no longer captured, and an upgrade discards the tab records and scrollback cache left behind by older versions.
+
+### Removed
+
+- Remove the "Restore session history on relaunch" setting, which no longer applies now that terminals are not restored.
+
 ## [1.1.73]
 
 ### Changed

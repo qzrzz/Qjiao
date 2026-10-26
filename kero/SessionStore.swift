@@ -391,12 +391,8 @@ private extension String {
     }
 }
 
-/// Snapshot of open projects and tabs, saved so a relaunch restores the
-/// previous layout. Terminal sessions restore as fresh shells started in
-/// their last known working directory — with their previous scrollback
-/// replayed above the prompt when the "Restore session history" setting is on
-/// (see `historyKey` and `TerminalHistoryStore`); file and diff panes reload
-/// from disk.
+/// 窗口项目列表、顺序与侧栏偏好。Tab/Pane 类型保留用于解码旧快照，
+/// 新保存的项目 tabs 为空，启动时不会恢复终端、文件、浏览器或 Diff。
 struct SessionSnapshot: Codable {
     struct ProjectSnapshot: Codable {
         /// 一个 Pane 的终端、文件、浏览器或 Diff 内容；旧 case 形状保持不变以兼容历史快照。
@@ -643,13 +639,29 @@ enum SessionStore {
 
         guard let data else { return [] }
         if let app = try? JSONDecoder().decode(AppSnapshot.self, from: data) {
-            return app.windows
+            return discardSavedTabs(app.windows)
         }
         // Pre-multi-window format: the snapshot of a single window.
         if let single = try? JSONDecoder().decode(SessionSnapshot.self, from: data) {
-            return [single]
+            return discardSavedTabs([single])
         }
         return []
+    }
+
+    /// 升级时立即覆盖旧标签页记录，保留项目顺序与窗口偏好。
+    private static func discardSavedTabs(_ windows: [SessionSnapshot]) -> [SessionSnapshot] {
+        let sanitized = windows.map { window in
+            var window = window
+            window.projects = window.projects.map { project in
+                var project = project
+                project.tabs = []
+                project.selectedTabIndex = nil
+                return project
+            }
+            return window
+        }
+        save(sanitized)
+        return sanitized
     }
 }
 

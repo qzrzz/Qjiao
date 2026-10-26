@@ -643,18 +643,6 @@ struct SettingsView: View {
                 .settingsRowPadding()
             }
 
-            Section {
-                Group {
-                    settingWithDescription(
-                        L10n.t("Restore session history on relaunch"),
-                        L10n.t("Reopened terminals show their previous scrollback above a fresh shell.")
-                    ) {
-                        Toggle("", isOn: $settings.restoreTerminalHistory)
-                            .labelsHidden()
-                    }
-                }
-                .settingsRowPadding()
-            }
             }
 
             if selectedSection == .editor {
