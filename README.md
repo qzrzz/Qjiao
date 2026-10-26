@@ -209,6 +209,7 @@ RELEASING.md          本机发布流程
 
 ### 工程与发布
 
+- 发布断点恢复逐一检查内置 Mach-O 的 hardened runtime 签名标志；缺失时自动重新准备并补签 App、使后续 DMG 断点失效，避免复用签名完整但无法通过 Apple 公证的旧产物。
 - 修复窗口 manager holder 缺少 Combine 显式导入导致的归档编译失败；发布脚本仅对明确的签名失败重试，避免将编译错误误报为 CodeSign 失败。
 - Developer ID 导出遇到 Apple 时间戳服务故障时自动有限重试，保留成功的归档；失败后重新执行发布命令可从归档继续。
 - 开发构建脚本固定使用 `Package.resolved`、Apple Silicon destination，并默认收起 Xcode 的 target 图与资源处理日志；`bun run dev` 在 app 已覆盖全部工程输入时直接启动，`QJIAO_FORCE_BUILD=1 bun run dev` 可强制重建。依赖更新后可手动执行 `xcodebuild -resolvePackageDependencies -project Qjiao.xcodeproj -scheme Qjiao -derivedDataPath build/DerivedData` 刷新缓存。

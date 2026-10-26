@@ -1245,7 +1245,7 @@ async function validateExportedApp(
   return validateAppIdentityAndSignature(appPath, identity);
 }
 
-/** 验证 App 版本、Sparkle 公钥、arm64 架构和完整代码签名。 */
+/** 验证 App 版本、Sparkle 公钥、arm64 架构、完整签名及 hardened runtime。 */
 async function validatePreparedApp(
   appPath: string,
   identity: IReleaseIdentity,
@@ -1256,6 +1256,10 @@ async function validatePreparedApp(
   for (const path of await listMachOBinaries(appPath)) {
     const architectures = await readArchitectures(path);
     if (architectures.length !== 1 || architectures[0] !== "arm64") {
+      return false;
+    }
+    if (!(await hasHardenedRuntime(path))) {
+      say(`Embedded code needs hardened runtime signing: ${path}`);
       return false;
     }
   }
@@ -1610,6 +1614,15 @@ async function listMachOBinaries(appPath: string): Promise<string[]> {
 /** 读取 Mach-O 文件包含的架构列表。 */
 async function readArchitectures(path: string): Promise<string[]> {
   return (await $`lipo -archs ${path}`.text()).trim().split(/\s+/);
+}
+
+/** 检查代码签名的 runtime 标志；签名有效本身并不代表开启 hardened runtime。 */
+async function hasHardenedRuntime(path: string): Promise<boolean> {
+  const result = await $`codesign --display --verbose=4 ${path}`.quiet().nothrow();
+  if (result.exitCode !== 0) return false;
+  const output = `${result.stdout.toString()}\n${result.stderr.toString()}`;
+  const flags = output.match(/\bflags=0x([0-9a-f]+)\b/i)?.[1];
+  return flags !== undefined && (Number.parseInt(flags, 16) & 0x10000) !== 0;
 }
 
 /** 删除 Mach-O 中除 arm64 外的架构切片。 */
