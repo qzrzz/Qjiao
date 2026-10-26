@@ -544,6 +544,12 @@ async function archiveWithCodeSignRetry(signingArgs: string[]): Promise<void> {
     const isCodeSignFailure = /Command CodeSign failed|^\s*CodeSign\s+/im.test(
       output,
     );
+    const failure = isCodeSignFailure ? codeSignFailureDetails(output) : undefined;
+    if (failure) {
+      // xcodebuild 的输出很长，真正的 codesign 报错容易被截断；单独列出来。
+      say(`CodeSign failed for: ${failure.bundles.join(", ") || "(unknown)"}`);
+      for (const line of failure.errors) say(`  ${line}`);
+    }
     if (!isCodeSignFailure || attempt === ARCHIVE_RETRIES) {
       die(
         isCodeSignFailure
@@ -552,12 +558,62 @@ async function archiveWithCodeSignRetry(signingArgs: string[]): Promise<void> {
       );
     }
 
+    // 原样重试对「资源带扩展属性」和「上次留下半签名 bundle」都无效：
+    // 清掉包源码与失败 bundle 的扩展属性，并删除半签名产物让 Xcode 重新拷贝、签名。
+    if (failure) await cleanUpFailedCodeSign(failure.bundles);
+
     const delay = Math.min(attempt * 3_000, 10_000);
     say(
-      `Xcode archive hit a transient CodeSign failure; retrying ` +
+      `Xcode archive hit a CodeSign failure; retrying ` +
         `incrementally in ${delay / 1_000}s (${attempt}/${ARCHIVE_RETRIES})…`,
     );
     await Bun.sleep(delay);
+  }
+}
+
+/** 从 xcodebuild 输出中取出签名失败的产物路径（失败汇总段）与 codesign 报错行。 */
+function codeSignFailureDetails(output: string): { bundles: string[]; errors: string[] } {
+  const summaryStart = output.lastIndexOf("The following build commands failed:");
+  const summary = summaryStart >= 0 ? output.slice(summaryStart) : output;
+  const bundles = [
+    ...new Set(
+      [...summary.matchAll(/^\s*CodeSign\s+(.+?)\s+\(in target /gm)].map((match) =>
+        match[1].replace(/\\ /g, " "),
+      ),
+    ),
+  ];
+  const errors = [
+    ...new Set(
+      output
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) =>
+          /errSec\w+|detritus|resource fork|unsealed contents|code object is not signed|bundle format|is already signed|: error:|^error:/i.test(
+            line,
+          ),
+        ),
+    ),
+  ].slice(0, 20);
+  return { bundles, errors };
+}
+
+/** 重试前清理：失败 bundle 删除重建，SwiftPM 包源码去掉 Finder / quarantine / provenance 扩展属性。 */
+async function cleanUpFailedCodeSign(bundles: string[]): Promise<void> {
+  const checkoutRoots = new Set<string>();
+  for (const bundle of bundles) {
+    const derivedDataRoot = bundle.split("/Build/Intermediates.noindex/")[0];
+    if (derivedDataRoot && derivedDataRoot !== bundle) {
+      checkoutRoots.add(join(derivedDataRoot, "SourcePackages", "checkouts"));
+    }
+    // 只删除 DerivedData 中间产物，下一次增量归档会重新拷贝并签名。
+    if (bundle.includes("/Build/Intermediates.noindex/")) {
+      await $`rm -rf ${bundle}`.nothrow().quiet();
+    }
+  }
+  for (const root of checkoutRoots) {
+    if (existsSync(root)) {
+      await $`xattr -cr ${root}`.nothrow().quiet();
+    }
   }
 }
 
